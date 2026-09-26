@@ -209,9 +209,11 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 		}
 		// Search chooses IDs from lexical and optional dense lanes. Observe the
 		// final payload and its version together before composing native context.
+		ranked := make(map[int64]Record, len(active))
 		ids := make([]int64, len(active))
 		for i := range active {
 			ids[i] = active[i].ID
+			ranked[active[i].ID] = active[i]
 		}
 		active, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
 FROM `+s.recallSource()+` WHERE lifecycle_state='active' AND id=ANY($1::text::bigint[])
@@ -219,7 +221,20 @@ ORDER BY array_position($1::text::bigint[],id)`, memoryIDsParameter(ids))
 		if err != nil {
 			return nil, err
 		}
+		for i := range active {
+			old := ranked[active[i].ID]
+			version := old.Version
+			if version == nil {
+				version = old.observedVersion
+			}
+			if version != nil && active[i].Version != nil && *version == *active[i].Version {
+				active[i].rankingSteps = old.rankingSteps
+				active[i].retrievalScore = old.retrievalScore
+				captureRankingCandidate(ctx, active[i], "selected")
+			}
+		}
 	}
+
 	if s.placement == PlacementKB && query != "" {
 		lexical := active
 		active, err = s.fuseMemoryGraph(ctx, DataRequest{Query: query, IncludeAll: true, Limit: activeCap}, false, active)

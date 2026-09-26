@@ -35,3 +35,32 @@ func TestHealthFamilyUsesCanonicalExactVersionEvidence(t *testing.T) {
 		t.Fatal("shared family attributed by private owner")
 	}
 }
+
+func TestHealthSharedAndMultipleFamiliesRequireExactCanonicalSnapshot(t *testing.T) {
+	source := &typedSourceVersion{Kind: "memory_record", Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: "owner", RecordID: "7", RecordRevision: "9"}}
+	a, b := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
+	payload := map[string]any{"status": "ok", "owner_id": "owner", "record_id": "7", "lineage_state": "complete", "unknown_origin_count": 0, "origin_families": []string{b, a, a}, "evidence": []map[string]string{{"record_id": "7", "record_revision": "9"}}}
+	raw, _ := json.Marshal(payload)
+	families := healthFamiliesFromEvidence(raw, source)
+	if len(families) != 2 || families[0] != a || families[1] != b {
+		t.Fatal(families)
+	}
+	record := healthRecord{RecordID: healthSourceIdentity(source), VersionID: "9", Kind: "fact"}
+	metadata, _ := json.Marshal([]healthRecord{{RecordID: record.RecordID, VersionID: "9", Families: families}})
+	result := mergeNativeHealthFamilies([]healthRecord{record}, metadata)
+	if len(result[0].Families) != 2 || result[0].Family != "" {
+		t.Fatal("multiple origins collapsed", result)
+	}
+	record.VersionID = "10"
+	if result := mergeNativeHealthFamilies([]healthRecord{record}, metadata); len(result[0].Families) != 0 {
+		t.Fatal("stale family metadata reused")
+	}
+	payload["unknown_origin_count"] = 1
+	raw, _ = json.Marshal(payload)
+	if healthFamiliesFromEvidence(raw, source) != nil {
+		t.Fatal("partial ancestry certified")
+	}
+	if validHealthFamilies([]string{a, "copied-parent"}) != nil {
+		t.Fatal("parent mistaken for canonical family")
+	}
+}

@@ -214,6 +214,10 @@ func nativeRecallEnvelope(raw []byte, args commandArgs) ([]byte, error) {
 	projection.SourceDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(envelope["recall"]))
 	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && len(raw) < 64<<10 {
 		projection.HealthRecords = nativeHealthRecords(b, projection.Sources)
+		projection.HealthRecords = mergeNativeHealthFamilies(projection.HealthRecords, envelope["health_families"])
+		var rankingStore string
+		_ = json.Unmarshal(envelope["health_ranking_store"], &rankingStore)
+		projection.HealthRecords = healthNativeRanking(projection.HealthRecords, envelope["health_ranking"], rankingStore)
 		projection.HealthRecords = nativeHealthPositions(projection.HealthRecords, projection)
 	}
 	if token := args.stringOr("_health_query_token", ""); os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && releaseTokenValid(token) && len(raw) < 64<<10 {

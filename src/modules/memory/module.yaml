@@ -212,6 +212,9 @@
     "server-go/modules/memory/retrieval_health_execution.go",
     "server-go/modules/memory/retrieval_health_selection.go",
     "server-go/modules/memory/retrieval_health_families.go",
+    "server-go/modules/memory/retrieval_health_turns.go",
+    "server-go/modules/memory/retrieval_health_native.go",
+    "server-go/modules/memory/retrieval_health_release.go",
     "server-go/modules/memory/retrieval_health_typed.go",
     "server-go/modules/memory/retrieval_health_positions.go"
   ],
@@ -384,6 +387,9 @@
     "server-go/modules/memory/retrieval_health_capture_test.go",
     "server-go/modules/memory/retrieval_health_execution_test.go",
     "server-go/modules/memory/retrieval_health_families_test.go",
+    "server-go/modules/memory/retrieval_health_turns_test.go",
+    "server-go/modules/memory/retrieval_health_native_test.go",
+    "server-go/modules/memory/retrieval_health_release_test.go",
     "server-go/modules/memory/retrieval_health_typed_test.go",
     "server-go/modules/memory/retrieval_health_positions_test.go"
   ],

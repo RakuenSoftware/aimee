@@ -52,6 +52,7 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		Records   []healthRecord          `json:"health_records"`
 		Labels    *healthLabelsEnvelope   `json:"health_labels"`
 		Execution *healthExecutionContext `json:"health_execution"`
+		Release   *healthReleaseCheck     `json:"health_release"`
 	}
 	if json.Unmarshal(r.Assembly, &metadata) == nil && metadata.Context != nil {
 		capture := metadata.Context
@@ -76,7 +77,12 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		}
 		// A host-owned task/turn identity does not establish adjacency across
 		// requests or branches. Repeats remain unknown without an owned link.
-		e.MetadataGaps = append(gaps, "previous_eligible_turn")
+		if execution.PreviousTurn != "" {
+			e.PreviousTurn = execution.PreviousTurn
+			e.MetadataGaps = gaps
+		} else {
+			e.MetadataGaps = append(gaps, "previous_eligible_turn")
+		}
 	}
 	var refs []typedProjectionRef
 	if json.Unmarshal(b.Sources, &refs) != nil {
@@ -110,13 +116,23 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		known[healthVersionKey(record)] = record
 	}
 	knownKinds, knownTrust, knownFamilies := len(e.Records) > 0, len(e.Records) > 0, len(e.Records) > 0
+	knownRelease := len(e.Records) > 0 && healthReleaseValid(metadata.Release, *b, r.Prepared.BindingDigest, at)
+	if knownRelease {
+		e.ReleaseVerifier = metadata.Release.Verifier
+	}
 	knownPositions := len(e.Records) > 0
 	knownArms := len(e.Records) > 0
 	for i, record := range e.Records {
 		if observed, ok := known[healthVersionKey(record)]; ok && healthLabelName(observed.Kind) {
 			record.Kind, record.LowTrust, record.Family = observed.Kind, observed.LowTrust, observed.Family
+			record.Families = validHealthFamilies(observed.Families)
+			if validHealthProvenance(observed.Provenance) {
+				record.Provenance = observed.Provenance
+			}
 			record.Positions = mergeHealthPositions(nil, observed.Positions, false)
 			record.Arms = validatedHealthArms(observed.Arms)
+			record.RankingSteps = validatedHealthRanking(observed.RankingSteps)
+			record.SelectionPaths = validatedHealthSelectionPaths(observed.SelectionPaths)
 			if healthLabelName(observed.State) {
 				record.State = observed.State
 			}
@@ -128,15 +144,20 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 			}
 			e.Records[i] = record
 		}
+		if knownRelease && !record.Historical {
+			eligible := false
+			record.LifecycleViolation = &eligible
+			e.Records[i] = record
+		}
 		knownKinds = knownKinds && record.Kind != "unknown"
 		knownTrust = knownTrust && record.LowTrust != nil
-		knownFamilies = knownFamilies && record.Family != ""
+		knownFamilies = knownFamilies && len(healthRecordFamilies(record)) > 0
 		knownPositions = knownPositions && len(record.Positions) > 0
-		knownArms = knownArms && len(record.Arms) > 0
+		knownArms = knownArms && healthRecordArmsKnown(record)
 	}
 	gaps := e.MetadataGaps[:0]
 	for _, gap := range e.MetadataGaps {
-		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust || gap == "family" && knownFamilies || gap == "final_rank" && knownPositions || gap == "arm_contributions" && knownArms) {
+		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust || gap == "family" && knownFamilies || gap == "final_rank" && knownPositions || gap == "arm_contributions" && knownArms || gap == "release_labels" && knownRelease) {
 			gaps = append(gaps, gap)
 		}
 	}

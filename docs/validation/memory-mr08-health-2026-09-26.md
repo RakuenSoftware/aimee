@@ -361,3 +361,40 @@ checks, capture summaries, health output, image identities and harness snapshots
 Both isolated applications are healthy on this candidate. Optional collection
 is restored off. The earlier measured serving-overhead comparison applies to
 `71208d807`, not this new slice; no new latency result is claimed.
+
+## Remaining serving-evidence producers
+
+Native turn adjacency now belongs to the receipt owner. A host worker closes its
+outer turn with an opaque, request-bound handle. Only a completed turn with
+durably acknowledged provider input can become the next turn's predecessor.
+Retries keep the same link. Overlap, uncertain/unconfirmed delivery, expiry,
+restart, foreign finish calls and capacity exhaustion cannot invent adjacency.
+The optional cache is bounded to 64 tasks and 16 turns per task, with a 15-minute
+expiry; durable receipts retain links already issued. Missing links stay unknown.
+
+Native ranking metadata travels outside the budgeted recall body and joins only
+the exact placement, owner, record and revision. It preserves ordered score
+stages and actual contributions without adding scores from different stages.
+Unranked identity/preference/commitment selectors are identified separately.
+
+Canonical family capture now supports shared roots and multiple established
+origins. Separate bounded owner reads follow the required serving transaction,
+so optional lookup failure cannot abort that transaction. Capture checks exact
+revisions and retains no partial family list when ancestry is incomplete.
+Historical lineage unsupported by the canonical owner remains unknown.
+
+The lifecycle verifier uses successful v2 source-owner guard admission, bound
+to the prepared receipt and exact source check/digest, within five seconds of
+that check. Reports name `source_owner_guard_v2` and its source-admission-only
+scope. This does not label truth, usefulness, arm contamination or fusion
+recovery. Those semantic metrics still require explicit selection-verifier
+labels; absence is unmeasured, not a negative label.
+
+Other typed record kinds preserve their observed kind/state/provenance. Only
+explicit untrusted-data or existing owner authorship classifications supply
+trust labels; neither confidence nor derivation alone establishes trust.
+
+The full PostgreSQL memory race suite passed in 417.589s, followed by the
+exported-owner build check in 7.009s. Final focused placement/provenance tests
+passed in 10.083s. The native ingress fixture and all 77 lint checks also passed.
+Deployed and final overhead validation remain before closing MR-08.

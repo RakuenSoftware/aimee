@@ -56,12 +56,37 @@ func typedHealthRecords(projection *typedContextResult) []healthRecord {
 			continue
 		}
 		for _, item := range c.selected {
-			if item.source == nil || item.source.Kind != "semantic_assertion" {
+			if item.source == nil {
 				continue
 			}
 			raw, err := json.Marshal(item.value)
 			ref := typedProjectionRef{Channel: channel, ID: item.id, Source: item.source}
 			if err != nil || !validTypedSourceItem(ref, raw) {
+				continue
+			}
+			if item.source.Kind != "semantic_assertion" {
+				record := healthRecord{RecordID: healthSourceIdentity(item.source), VersionID: item.source.Version.RecordRevision, Kind: item.source.Kind}
+				var value struct {
+					State     string `json:"state"`
+					Trust     string `json:"trust"`
+					Authority string `json:"authority"`
+				}
+				if json.Unmarshal(raw, &value) != nil {
+					continue
+				}
+				if healthLabelName(value.State) {
+					record.State = value.State
+				}
+				if validHealthProvenance(value.Trust) {
+					record.Provenance = value.Trust
+				} else if validHealthProvenance(value.Authority) {
+					record.Provenance = value.Authority
+				}
+				if record.Provenance == "untrusted_data" {
+					lowTrust := true
+					record.LowTrust = &lowTrust
+				}
+				records = append(records, record)
 				continue
 			}
 			var hit assertionHit
@@ -93,4 +118,12 @@ func typedHealthRecords(projection *typedContextResult) []healthRecord {
 
 func validHealthConfidenceClass(value string) bool {
 	return value == "A" || value == "B" || value == "C"
+}
+
+func validHealthProvenance(value string) bool {
+	switch value {
+	case "user_stated", "agent_message", "untrusted_data", "derived_read_only", "derived_noncanonical":
+		return true
+	}
+	return false
 }

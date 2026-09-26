@@ -52,6 +52,14 @@ func healthReportText(r healthWindow) string {
 		}
 		b.WriteByte('\n')
 	}
+	verifiers := make([]string, 0, len(r.Metrics.ReleaseVerifiers))
+	for verifier := range r.Metrics.ReleaseVerifiers {
+		verifiers = append(verifiers, verifier)
+	}
+	sort.Strings(verifiers)
+	for _, verifier := range verifiers {
+		fmt.Fprintf(&b, "Lifecycle verifier %s: %d invocations (source admission only)\n", verifier, r.Metrics.ReleaseVerifiers[verifier])
+	}
 	histogram("Families per invocation", r.Metrics.FamilyCounts)
 	histogram("Distinct tasks per inferred/low-trust record", r.Metrics.LowTrustFanout)
 	histogram("Distinct tasks per inferred/low-trust family", r.Metrics.LowTrustFamilyFanout)

@@ -2918,6 +2918,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 		switch request.Operation {
 		case "recall-bundle":
+			if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" {
+				ctx = withRankingTrace(ctx)
+			}
 			if activated, ok := retrieval.(interface {
 				RecallBundleWithActivation(context.Context, string, int, bool, json.RawMessage) (json.RawMessage, error)
 			}); ok {
@@ -2927,6 +2930,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 					return nil, bus.ModuleStatusCapabilityAbsent
 				}
 				response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
+			}
+			if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && err == nil {
+				response.RankingTrace = finishRankingCapture(ctx, nil)
 			}
 		case "briefing-bundle":
 			response.Payload, err = retrieval.BriefingBundle(ctx, request.LimitTokens)

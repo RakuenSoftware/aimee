@@ -24,6 +24,7 @@ const sourceReleaseHealthMaxBytes = 1 << 20
 // C host. Losing the process or expiring an entry refuses release. These are
 // neither durable prepared receipts nor acknowledgements of provider dispatch.
 type sourceReleaseState struct {
+	healthTasks     map[string]*healthTaskTurns
 	healthQueries   map[string]healthPendingQuery
 	healthBytes     int
 	mu              sync.Mutex
@@ -42,6 +43,8 @@ type sourceReleasePart struct {
 }
 
 type sourceReleaseEntry struct {
+	guardedAdmission                             string
+	guardedAdmissionAt                           time.Time
 	assemblyParts                                []sourceReleasePart
 	assemblyDigest                               string
 	assemblyMetadata                             json.RawMessage
@@ -289,6 +292,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		}
 		return commandResult(map[string]any{"status": "ok", "generation_only": true, "memory_owner": s.receiptProducer})
 	}
+	if operation == "health-turn-finish" {
+		return s.healthTurnFinish(args)
+	}
 	if operation == "provider-receipt-started" {
 		return s.receiptStarted(args)
 	}
@@ -322,6 +328,8 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	}
 	if operation == "source-release-plan" {
 		entry.admitted = ""
+		entry.guardedAdmission = ""
+		entry.guardedAdmissionAt = time.Time{}
 		// Reaching the fence confirms host integrity acceptance. The cumulative
 		// source set supersedes its earlier handles; a rejected candidate never does.
 		s.drop(entry.previous, entry.binding, true)
@@ -380,6 +388,8 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		return commandResult(result)
 	}
 	entry.admitted = ""
+	entry.guardedAdmission = ""
+	entry.guardedAdmissionAt = time.Time{}
 	check := entry.pending
 	guarded := entry.pendingGuard
 	entry.pendingGuard = false
@@ -412,6 +422,10 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	}
 
 	entry.admitted = check
+	if guarded {
+		entry.guardedAdmission = check
+		entry.guardedAdmissionAt = time.Now()
+	}
 	return commandResult(map[string]any{"status": "ok", "admitted": true, "boundary": "source_revalidation"})
 }
 

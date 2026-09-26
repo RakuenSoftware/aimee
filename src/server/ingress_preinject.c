@@ -64,9 +64,13 @@ static __thread char g_turn_id[40] = "";
  * replace globally unique retrieval-event IDs. Go binds this optional identity
  * to the exact request, task and prepared receipt. */
 static __thread char g_health_turn_id[64] = "";
+static __thread char g_health_turn_handle[33] = "";
+static void ingress_finish_health_turn(void);
 
 void ingress_preinject_set_health_turn_id(const char *turn_id)
 {
+   if (g_health_turn_handle[0])
+      ingress_finish_health_turn();
    g_health_turn_id[0] = '\0';
    if (turn_id && strlen(turn_id) < sizeof(g_health_turn_id))
       snprintf(g_health_turn_id, sizeof(g_health_turn_id), "%s", turn_id);
@@ -373,6 +377,20 @@ static int ingress_append_receipt(const char *attempt, const char *stage, const 
                                        "record", detail, &sequence);
 }
 
+static void ingress_finish_health_turn(void)
+{
+   const request_context_t *context = request_context_get();
+   if (context && g_health_turn_handle[0])
+   {
+      cJSON *request = cJSON_CreateObject();
+      ingress_release_context(request, context);
+      cJSON_AddStringToObject(request, "operation", "health-turn-finish");
+      cJSON_AddStringToObject(request, "health_turn_handle", g_health_turn_handle);
+      cJSON_Delete(ingress_command(request, 0));
+   }
+   g_health_turn_handle[0] = '\0';
+}
+
 int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
                                       const char *provider, const char *model, char attempt[33])
 {
@@ -431,6 +449,10 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
    cJSON_AddStringToObject(request, "caller_limits_sha256", caller_digest);
    cJSON_AddStringToObject(request, "operator_limits_sha256", operator_digest);
    cJSON *plan = ingress_command(request, 1);
+   const char *health_turn_handle =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "health_turn_handle"));
+   if (g_health_turn_id[0] && health_turn_handle && strlen(health_turn_handle) == 32)
+      snprintf(g_health_turn_handle, sizeof(g_health_turn_handle), "%s", health_turn_handle);
    const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "attempt_id"));
    const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "at"));
    const char *prepared =

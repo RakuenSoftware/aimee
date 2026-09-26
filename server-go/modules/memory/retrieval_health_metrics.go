@@ -15,6 +15,10 @@ import (
 // from recall callers. The owner authenticates and filters the population before
 // aggregation; reports intentionally contain no record, family or task IDs.
 type healthRecord struct {
+	Provenance      string           `json:"provenance_class,omitempty"`
+	Families        []string         `json:"families,omitempty"`
+	SelectionPaths  []string         `json:"selection_paths,omitempty"`
+	RankingSteps    []rankingStep    `json:"ranking_steps,omitempty"`
 	Arms            []healthArm      `json:"arm_contributions,omitempty"`
 	State           string           `json:"lifecycle_state,omitempty"`
 	ConfidenceClass string           `json:"confidence_class,omitempty"`
@@ -32,26 +36,27 @@ type healthRecord struct {
 }
 
 type healthInvocation struct {
-	Request       string                 `json:"request_id,omitempty"`
-	Labels        *healthSelectionLabels `json:"selection_labels,omitempty"`
-	MetadataGaps  []string               `json:"metadata_gaps,omitempty"`
-	Attempt       string                 `json:"attempt"`
-	Binding       string                 `json:"binding"`
-	At            time.Time              `json:"at"`
-	Namespace     string                 `json:"namespace"`
-	Principal     string                 `json:"principal"`
-	Project       string                 `json:"project"`
-	Workspace     string                 `json:"workspace"`
-	Purpose       string                 `json:"purpose"`
-	QueryClass    string                 `json:"query_class"`
-	Fingerprint   string                 `json:"query_fingerprint"`
-	Task          string                 `json:"task"`
-	Turn          string                 `json:"turn"`
-	PreviousTurn  string                 `json:"previous_turn"`
-	Stage         string                 `json:"stage"`
-	SamplePPM     int                    `json:"sampling_probability_ppm"`
-	SamplingEpoch string                 `json:"sampling_epoch"`
-	Records       []healthRecord         `json:"records"`
+	ReleaseVerifier string                 `json:"release_verifier,omitempty"`
+	Request         string                 `json:"request_id,omitempty"`
+	Labels          *healthSelectionLabels `json:"selection_labels,omitempty"`
+	MetadataGaps    []string               `json:"metadata_gaps,omitempty"`
+	Attempt         string                 `json:"attempt"`
+	Binding         string                 `json:"binding"`
+	At              time.Time              `json:"at"`
+	Namespace       string                 `json:"namespace"`
+	Principal       string                 `json:"principal"`
+	Project         string                 `json:"project"`
+	Workspace       string                 `json:"workspace"`
+	Purpose         string                 `json:"purpose"`
+	QueryClass      string                 `json:"query_class"`
+	Fingerprint     string                 `json:"query_fingerprint"`
+	Task            string                 `json:"task"`
+	Turn            string                 `json:"turn"`
+	PreviousTurn    string                 `json:"previous_turn"`
+	Stage           string                 `json:"stage"`
+	SamplePPM       int                    `json:"sampling_probability_ppm"`
+	SamplingEpoch   string                 `json:"sampling_epoch"`
+	Records         []healthRecord         `json:"records"`
 }
 
 type healthPopulation struct {
@@ -145,6 +150,7 @@ type healthRuns struct {
 }
 
 type healthMetrics struct {
+	ReleaseVerifiers        map[string]int                 `json:"lifecycle_label_verifiers,omitempty"`
 	ByKind                  map[string]healthConcentration `json:"record_concentration_by_kind"`
 	Labels                  healthLabelMetrics             `json:"labelled_selection"`
 	LowTrustFamilyFanout    map[int]int                    `json:"low_trust_tasks_per_family"`
@@ -265,6 +271,12 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 			return r, err
 		}
 		r.Invocations++
+		if e.ReleaseVerifier != "" {
+			if r.ReleaseVerifiers == nil {
+				r.ReleaseVerifiers = map[string]int{}
+			}
+			r.ReleaseVerifiers[e.ReleaseVerifier]++
+		}
 		r.Sampled = r.Sampled || e.SamplePPM != 1000000
 		seen, seenVersions, families := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for _, record := range e.Records {
@@ -286,10 +298,13 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 				kindRecords[kind] = map[string]int{}
 			}
 			kindRecords[kind][record.RecordID]++
-			if record.Family == "" {
+			recordFamilies := healthRecordFamilies(record)
+			if len(recordFamilies) == 0 {
 				r.UnknownOrigins++
 			} else {
-				families[record.Family] = true
+				for _, family := range recordFamilies {
+					families[family] = true
+				}
 			}
 			if record.LowTrust == nil {
 				r.UnknownTrust++
@@ -300,11 +315,11 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 					taskRecords[record.RecordID] = map[string]bool{}
 				}
 				taskRecords[record.RecordID][e.Task] = true
-				if record.Family != "" {
-					if taskFamilies[record.Family] == nil {
-						taskFamilies[record.Family] = map[string]bool{}
+				for _, family := range recordFamilies {
+					if taskFamilies[family] == nil {
+						taskFamilies[family] = map[string]bool{}
 					}
-					taskFamilies[record.Family][e.Task] = true
+					taskFamilies[family][e.Task] = true
 				}
 			}
 			if !record.Historical {

@@ -2091,7 +2091,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ef074995344199b5c804ba6e6c090f1673c6e27c90f913f1636becb745f95592"
+      "sha256": "c61073b2e29e10f5174448fbb05173528b609b811bcdd3ec4e8836e5b6a194dc"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",

@@ -64,6 +64,7 @@ type providerReceiptEvent struct {
 }
 
 type providerReceiptEntry struct {
+	healthTurnHandle         string
 	binding, digest, attempt string
 	prepared, admitted       string
 	at                       string
@@ -187,6 +188,11 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	s.receiptBytes += len(prepared) + len(admitted)
 	prelude := []map[string]string{}
 	metadata := receiptMetadataWithExecution(entry, args, binding, bindingDigest)
+	metadata = receiptMetadataWithRelease(metadata, entry, binding, bindingDigest, now)
+	entry.guardedAdmission = ""
+	entry.guardedAdmissionAt = time.Time{}
+	metadata, healthTurnHandle := s.healthExecutionTurn(metadata, args, bindingDigest, now)
+	s.receipts[attempt].healthTurnHandle = healthTurnHandle
 	if len(metadata) > 0 {
 		for _, stage := range []string{"retrieved", "assembled"} {
 			detail, ok := receiptEventJSON(providerReceiptEvent{SchemaVersion: 1, Stage: stage, AttemptID: attempt, At: at, BindingDigest: bindingDigest, Projection: metadata, Reason: "assembly_observed_before_preparation"})
@@ -207,8 +213,9 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 		}
 	}
 	return commandResult(map[string]any{"status": "ok", "durable": false, "requires_durable_acceptance": true,
-		"exploration_offer": offer,
-		"attempt_id":        attempt, "at": at, "assembly_events": prelude, "prepared_detail": prepared, "admitted_detail": admitted, "replay_store": binding.Retention == "replayable"})
+		"exploration_offer":  offer,
+		"health_turn_handle": healthTurnHandle,
+		"attempt_id":         attempt, "at": at, "assembly_events": prelude, "prepared_detail": prepared, "admitted_detail": admitted, "replay_store": binding.Retention == "replayable"})
 }
 
 // Host observations remain distinct from intent. A transport error, including a
@@ -290,6 +297,10 @@ func (s *sourceReleaseState) receiptStored(args commandArgs) ([]byte, bus.Module
 	}
 	if entry.persistedAt.IsZero() {
 		entry.persistedAt = time.Now()
+		var observation providerReceiptEvent
+		if json.Unmarshal([]byte(entry.observation), &observation) == nil {
+			s.healthTurnObserved(entry.healthTurnHandle, observation.Stage == "acknowledged")
+		}
 	}
 	return commandResult(map[string]any{"status": "ok", "cache_reclaimable": true, "durability_evidence": "trusted_host_append_confirmation"})
 }

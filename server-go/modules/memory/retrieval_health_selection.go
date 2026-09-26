@@ -19,7 +19,7 @@ func healthVersionKey(record healthRecord) string {
 // common parent IDs never become invented independent source families.
 func nativeHealthRecords(bundle recallBundle, selected []typedProjectionRef) []healthRecord {
 	observed := map[string]healthRecord{}
-	for _, rows := range [][]RecallRecord{bundle.Identity, bundle.Preferences, bundle.ActiveContext, bundle.OpenCommitments} {
+	for section, rows := range [][]RecallRecord{bundle.Identity, bundle.Preferences, bundle.ActiveContext, bundle.OpenCommitments} {
 		for _, row := range rows {
 			if row.Version == nil || row.Kind == "" {
 				continue
@@ -35,6 +35,9 @@ func nativeHealthRecords(bundle recallBundle, selected []typedProjectionRef) []h
 			source := &typedSourceVersion{Kind: kind, Version: *row.Version}
 			record := healthRecord{RecordID: healthSourceIdentity(source), VersionID: row.Version.RecordRevision, Kind: row.Kind, Historical: row.Historical}
 			if row.Authorship != nil {
+				if validHealthProvenance(row.Authorship.Category) {
+					record.Provenance = row.Authorship.Category
+				}
 				switch row.Authorship.Category {
 				case "agent_message":
 					value := true
@@ -44,6 +47,7 @@ func nativeHealthRecords(bundle recallBundle, selected []typedProjectionRef) []h
 					record.LowTrust = &value
 				}
 			}
+			record.SelectionPaths = append(observed[healthVersionKey(record)].SelectionPaths, []string{"native_identity", "native_preferences", "native_active_context", "native_open_commitments"}[section])
 			observed[healthVersionKey(record)] = record
 		}
 	}

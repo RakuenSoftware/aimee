@@ -442,6 +442,20 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(response.Payload)
 	}
 	result := map[string]any{"status": "ok", "recall": response.Payload}
+	if records := captureSharedRecallFamilies(options, invocation, request, response.Payload); len(records) > 0 {
+		if raw, err := json.Marshal(records); err == nil && len(raw) <= 12000 {
+			result["health_families"] = json.RawMessage(raw)
+		}
+	}
+	if response.RankingTrace != nil {
+		if raw, err := json.Marshal(response.RankingTrace); err == nil && len(raw) <= 12000 {
+			result["health_ranking"] = json.RawMessage(raw)
+			result["health_ranking_store"] = "kb"
+			if options.placement == PlacementServer {
+				result["health_ranking_store"] = "user"
+			}
+		}
+	}
 	if options.placement == PlacementServer {
 		result["store"] = "user"
 	}

@@ -130,3 +130,39 @@ func TestHealthTypedReceiptImportsArmsWithoutSafetyLabels(t *testing.T) {
 		t.Fatal(gaps)
 	}
 }
+
+func TestHealthTypedOtherKindsRetainOnlyObservedProvenance(t *testing.T) {
+	owner := "00000000-0000-4000-8000-000000000001"
+	for _, test := range []struct {
+		kind, channel, id, body, provenance, state string
+		parents                                    bool
+	}{
+		{"memory_episode", "episodes", "7", `{"stable_id":"7","excerpt":"private excerpt","trust":"untrusted_data"}`, "untrusted_data", "", true},
+		{"learning_observation", "observations", "observation-key", `{"observation_id":"observation-key","summary":"private excerpt","authority":"derived_read_only"}`, "derived_read_only", "", false},
+		{"learning_procedure", "approved_procedures", "7", `{"proposal_id":7,"procedure":{"content":"private excerpt"},"state":"committed"}`, "", "committed", false},
+		{"memory_relation", "summaries", "entity", `{"entity":"entity","summary":"private excerpt","authority":"derived_noncanonical"}`, "derived_noncanonical", "", true},
+	} {
+		t.Run(test.kind, func(t *testing.T) {
+			source := &typedSourceVersion{Kind: test.kind, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: "7", RecordRevision: "2"}, MemoryParentState: "observed"}
+			if test.parents {
+				source.MemoryParents = []MemoryRecordVersion{{SchemaVersion: 1, OwnerID: owner, RecordID: "8", RecordRevision: "1"}}
+			}
+			r := &typedContextResult{Channels: map[string]*typedChannel{test.channel: {selected: []typedItem{{id: test.id, source: source, value: json.RawMessage(test.body)}}}}}
+			records := typedHealthRecords(r)
+			if len(records) != 1 || records[0].Kind != test.kind || records[0].Provenance != test.provenance || records[0].State != test.state {
+				t.Fatal(records)
+			}
+			if test.provenance == "untrusted_data" {
+				if records[0].LowTrust == nil || !*records[0].LowTrust {
+					t.Fatal("explicit untrusted label lost")
+				}
+			} else if records[0].LowTrust != nil {
+				t.Fatal("trust inferred from derivation")
+			}
+			raw, _ := json.Marshal(records)
+			if strings.Contains(string(raw), "private excerpt") {
+				t.Fatal("source content escaped telemetry")
+			}
+		})
+	}
+}
