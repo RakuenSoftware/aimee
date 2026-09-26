@@ -35,6 +35,23 @@
 
 /* --- recursive git discovery --- */
 
+static worktree_git_network_runner_fn g_worktree_git_network_runner;
+
+void worktree_register_git_network_runner(worktree_git_network_runner_fn runner)
+{
+   g_worktree_git_network_runner = runner;
+}
+
+static int worktree_git_network(const char *cwd, const char *const *args)
+{
+   /* The daemon seals and removes credential environment variables at startup.
+    * Its fetch must use the same vault policy as webchat's other Git operations.
+    * Keep that server dependency out of CLI/workspace-only builds. */
+   if (g_worktree_git_network_runner)
+      return g_worktree_git_network_runner(cwd, args, NULL, 0);
+   return git_net_exec(cwd, args, NULL, 0);
+}
+
 /* Directories to skip during discovery */
 static int is_skip_dir(const char *name)
 {
@@ -1460,8 +1477,8 @@ static int wt_session_bases(const char *git_root, char *selected, size_t selecte
    {
       const char *fetch_all[] = {"fetch", "--quiet", "--prune", "origin", NULL};
       const char *fetch_head[] = {"fetch", "--quiet", "origin", "HEAD", NULL};
-      if (git_net_exec(git_root, fetch_all, NULL, 0) != 0 ||
-          git_net_exec(git_root, fetch_head, NULL, 0) != 0 ||
+      if (worktree_git_network(git_root, fetch_all) != 0 ||
+          worktree_git_network(git_root, fetch_head) != 0 ||
           wt_ref_oid(git_root, "FETCH_HEAD", default_oid, default_len) != 0)
       {
          fprintf(stderr,
