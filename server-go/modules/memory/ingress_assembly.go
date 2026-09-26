@@ -446,6 +446,9 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			"context_accounting":   typed.Accounting,
 			"context_sufficiency":  typed.Sufficiency,
 		}
+		if typed.SelectionPolicy != nil {
+			result["typed_projection"].(map[string]any)["selection_policy"] = typed.SelectionPolicy
+		}
 		if typed.Recovery != nil {
 			result["typed_projection"].(map[string]any)["evidence_recovery"] = typed.Recovery
 		}

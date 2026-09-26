@@ -45,6 +45,11 @@ func TestSelectionRequiredSurvivesThirtyCopies(t *testing.T) {
 	if err = imported.fitProjectionBytes(1500); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range imported.SelectionPolicy.UnsatisfiedFloors {
+		if name == "episodes" || name == "historical_assertions" {
+			t.Fatal("outer packing invented a floor for a disabled channel", name)
+		}
+	}
 	if !strings.Contains(imported.Rendered, "required") {
 		t.Fatal("outer packing lost required reservation")
 	}

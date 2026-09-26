@@ -515,7 +515,8 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 		Accounting      ContextAccounting       `json:"context_accounting"`
 		Retained        []typedProjectionRef    `json:"retained_items"`
 		Channels        map[string]struct {
-			Items []json.RawMessage `json:"items"`
+			Items   []json.RawMessage `json:"items"`
+			Enabled *bool             `json:"enabled"`
 		} `json:"channels"`
 	}
 	invalid := func() (*typedContextResult, error) {
@@ -543,6 +544,9 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 	cfg.Budgets["total"] = input.Budget
 	for _, name := range typedChannelOrder {
 		cfg.Flags[name] = true
+		if input.Channels[name].Enabled != nil {
+			cfg.Flags[name] = *input.Channels[name].Enabled
+		}
 	}
 	r := newTypedContext(DataRequest{TypedContext: cfg})
 	r.selectionCollect = false

@@ -67,6 +67,26 @@ eligibility, fair pools, source versions and truthful diagnostics.
   input reporting and rejection of forged imported health proofs.
 - Repository lint: all 77 checks passed.
 
-Database-backed selector replay, exported/native owner checks, isolated deployment
-and held-out routing/exposure evaluation are still being collected. MR-09 is not
-closed by this checkpoint. CT100 production remains outside the candidate rollout.
+The final full PostgreSQL memory race suite passed in 343.113 seconds, including
+the actual owner selector retaining the required rank-31 hit in 1,507 rendered
+bytes behind thirty copies. Dense unavailability correctly keeps coverage unknown;
+the test does not reinterpret retained lexical evidence as a complete hybrid read.
+The exported memory owner build passed in 5.574 seconds and native ingress passed.
+Outer-repacking regression checks pass with protected selection commitments and
+only the originally enabled channels contributing desired floors.
+
+The frozen controlled code-navigation pilot used six fit tasks and six separate
+held-out tasks from commit `60022abc1`. All 12 real model calls were valid, both
+arms answered 6/6 held-out tasks correctly, and fitting selected all arms with
+zero exposure penalty. Estimated cost was $0.011953 per arm under the explicitly
+hypothetical $1/$1 per-million input/output token model (cached input charged at
+the same rate); this is not actual billing or a vendor price claim. p95 was
+8.024 seconds baseline and 7.846 seconds fitted; with six observations it is the
+sample maximum. Arm/rank/serving-count features were controlled, not native
+observations. The pilot found no strict fit improvement and is explicitly
+**ineligible for promotion**. It does not establish production quality or permit
+learned routing/exposure. See [raw pilot results](memory-mr09-evidence-2026-09-26/routing-pilot.json).
+
+Isolated deployment and its functional/overhead checks are still being collected.
+MR-09 is not closed by this checkpoint. CT100 production remains outside the
+candidate rollout.
