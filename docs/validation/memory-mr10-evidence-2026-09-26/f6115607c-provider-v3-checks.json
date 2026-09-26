@@ -1,0 +1,206 @@
+[
+  {
+    "name": "authenticated user task_state creation",
+    "passed": true
+  },
+  {
+    "name": "user task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user constraint creation",
+    "passed": true
+  },
+  {
+    "name": "user constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb task_state creation",
+    "passed": true
+  },
+  {
+    "name": "kb task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb constraint creation",
+    "passed": true
+  },
+  {
+    "name": "kb constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb fact creation",
+    "passed": true
+  },
+  {
+    "name": "kb fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb fact creation",
+    "passed": true
+  },
+  {
+    "name": "kb fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "settled user task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-durable_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-durable_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-transient_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-transient_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-durable_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-durable_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-transient_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-transient_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow provider fixture session created",
+    "passed": true
+  },
+  {
+    "name": "shadow provider fixture route selected",
+    "passed": true
+  },
+  {
+    "name": "shadow shadow positive control delivers transient identity context",
+    "passed": false
+  },
+  {
+    "name": "rollback user-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-durable_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-transient_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-durable_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-transient_probe restores horizon eligibility",
+    "passed": true
+  }
+]

@@ -1,0 +1,15 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+check_memory_c_boundary: ok
+memory-ownership: all original files/APIs and external findings classified; C bus retained
+schema-sync: ok (252 shared tables, 112 DB1-only tables)
+check-schema-duplicates: ok (108 tables across 39 files)
+check-db1-client-contract: ok (473 call sites, 1 with computed arities, 19 kinds)
+check-module-descriptor-sources: EXEMPT while true -- db2 (11 files): descriptor declares no Go sources at all; mid-move under the ruling. Enforced automatically once it declares any
+check-module-descriptor-sources: EXEMPT while true -- mcp (4 files): no descriptor exists, so no principal ref and no event kinds; claiming it is an architectural decision
+check-module-descriptor-sources: ok (459 files claimed, 471 walked, 2 tree(s) currently exempt)
+check-log-prefix-ownership: ok (471 files, 35 module names)
+check-validation-record: ok (1 of 232 record(s) assert a check count and match their script; 230 assert none, 1 marked historical)
+check-lint-targets-reachable: ok (97 check targets; 27 documented as manual)
+check-cited-paths-exist: ok (106 citations resolve)
+check-declared-result-codes: ok (416 operations compared)
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

@@ -1,0 +1,438 @@
+[
+  {
+    "name": "authenticated user task_state creation",
+    "passed": true
+  },
+  {
+    "name": "user task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user constraint creation",
+    "passed": true
+  },
+  {
+    "name": "user constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb task_state creation",
+    "passed": true
+  },
+  {
+    "name": "kb task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb constraint creation",
+    "passed": true
+  },
+  {
+    "name": "kb constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb fact creation",
+    "passed": true
+  },
+  {
+    "name": "kb fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb fact creation",
+    "passed": true
+  },
+  {
+    "name": "kb fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "settled user task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb fact remains readable",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-durable_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-durable_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-transient_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-transient_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-durable_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-durable_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-transient_probe remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-transient_probe decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow read bounded recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "shadow set bounded recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "shadow read bounded recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "shadow set bounded recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "shadow provider fixture session created",
+    "passed": true
+  },
+  {
+    "name": "shadow provider fixture route selected",
+    "passed": true
+  },
+  {
+    "name": "shadow shadow positive control delivers transient identity context",
+    "passed": true
+  },
+  {
+    "name": "shadow exact provider bytes have a committed preparation receipt",
+    "passed": true
+  },
+  {
+    "name": "shadow dispatch preparation binds effective horizon policy on collections",
+    "passed": true
+  },
+  {
+    "name": "shadow native turn completes through the actual provider boundary",
+    "passed": true
+  },
+  {
+    "name": "shadow provider dispatch has a durable started receipt",
+    "passed": true
+  },
+  {
+    "name": "shadow restore recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "shadow restore recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "shadow provider fixture exits successfully",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized user-task_state history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce user-durable_probe actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-durable_probe exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce user-durable_probe lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce user-transient_probe actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-transient_probe distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce user-transient_probe exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized user-transient_probe history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce user-transient_probe lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized kb-task_state history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-durable_probe actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-durable_probe exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-durable_probe lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-transient_probe actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-transient_probe distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-transient_probe exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized kb-transient_probe history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-transient_probe lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce read bounded recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "enforce set bounded recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "enforce read bounded recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "enforce set bounded recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "enforce provider fixture session created",
+    "passed": true
+  },
+  {
+    "name": "enforce provider fixture route selected",
+    "passed": true
+  },
+  {
+    "name": "enforce provider payload excludes all elapsed transient records",
+    "passed": true
+  },
+  {
+    "name": "enforce provider payload retains eligible durable fixture context",
+    "passed": true
+  },
+  {
+    "name": "enforce exact provider bytes have a committed preparation receipt",
+    "passed": true
+  },
+  {
+    "name": "enforce dispatch preparation binds effective horizon policy on collections",
+    "passed": true
+  },
+  {
+    "name": "enforce native turn completes through the actual provider boundary",
+    "passed": true
+  },
+  {
+    "name": "enforce provider dispatch has a durable started receipt",
+    "passed": true
+  },
+  {
+    "name": "enforce restore recall fixture config memory_recall_limit_tokens_session",
+    "passed": true
+  },
+  {
+    "name": "enforce restore recall fixture config memory_recall_limit_tokens_turn",
+    "passed": true
+  },
+  {
+    "name": "enforce provider fixture exits successfully",
+    "passed": true
+  },
+  {
+    "name": "rollback user-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-durable_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-transient_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-durable_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-transient_probe restores horizon eligibility",
+    "passed": true
+  }
+]

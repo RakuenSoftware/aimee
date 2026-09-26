@@ -1,0 +1,178 @@
+[
+  {
+    "name": "authenticated user task_state creation",
+    "passed": true
+  },
+  {
+    "name": "user task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user constraint creation",
+    "passed": true
+  },
+  {
+    "name": "user constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb task_state creation",
+    "passed": true
+  },
+  {
+    "name": "kb task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb constraint creation",
+    "passed": true
+  },
+  {
+    "name": "kb constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "settled user task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled user constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb task_state remains readable",
+    "passed": true
+  },
+  {
+    "name": "settled kb constraint remains readable",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow user-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-task_state decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint remains eligible",
+    "passed": true
+  },
+  {
+    "name": "shadow kb-constraint decision matches classification",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized user-task_state history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce user-task_state lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce user-constraint lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state distinct exclusion reason",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state exact current get",
+    "passed": true
+  },
+  {
+    "name": "authorized kb-task_state history survives",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-task_state lexical search",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint actual eligibility",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint exact current get",
+    "passed": true
+  },
+  {
+    "name": "enforce kb-constraint lexical search",
+    "passed": true
+  },
+  {
+    "name": "provider fixture session created",
+    "passed": true
+  },
+  {
+    "name": "provider fixture route selected",
+    "passed": true
+  },
+  {
+    "name": "provider payload excludes both elapsed transient records",
+    "passed": true
+  },
+  {
+    "name": "provider payload retains eligible durable fixture context",
+    "passed": false
+  },
+  {
+    "name": "rollback user-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback kb-constraint restores horizon eligibility",
+    "passed": true
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "name": "provider fixture session created",
+      "passed": true
+    },
+    {
+      "name": "provider fixture route selected",
+      "passed": true
+    },
+    {
+      "name": "provider payload excludes both elapsed transient records",
+      "passed": true
+    },
+    {
+      "name": "provider payload retains eligible durable fixture context",
+      "passed": false
+    },
+    {
+      "name": "native turn completes through the actual provider boundary",
+      "passed": false
+    }
+  ],
+  "captures": [],
+  "measurement": "synthetic functional provider; not a quality or billing measurement"
+}

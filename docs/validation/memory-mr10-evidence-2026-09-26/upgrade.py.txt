@@ -1,0 +1,53 @@
+import http.client,socket,json,sys,time,re,hashlib
+from pathlib import Path
+head=sys.argv[1];assert re.fullmatch('[a-f0-9]{9}',head)
+names=json.loads(Path('/opt/pr2990-evidence/mr07-managed-be46915db/names.json').read_text())
+out=Path('/opt/pr2990-evidence/mr08-final-upgrade-'+head);out.mkdir(exist_ok=True,parents=True)
+class Docker(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(90);self.sock.connect('/var/run/docker.sock')
+def api(method,path,body=None):
+ c=Docker('localhost');c.request(method,path,None if body is None else json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+ if r.status>=400:raise RuntimeError('Docker '+method+' '+path.split('?')[0]+' status '+str(r.status))
+ return json.loads(raw) if raw else None
+def recipe(info,image):
+ config=dict(info['Config']);config['Image']=image
+ if image=='aimee-pr2990:'+head:
+  manifest=dict(schema_version=1,kind='functional_process_experiment',candidate=head,promotion=False,phases=['scope','coverage','activated','revoked'],limits=dict(enabled=True,raw_scans=0,starvation_turns=2),provider='synthetic; this is not a quality measurement')
+  digest=hashlib.sha256(json.dumps(manifest,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+  config['Env']=[('AIMEE_EXPLORATION_EXPERIMENT='+digest if v.startswith('AIMEE_EXPLORATION_EXPERIMENT=') else v) for v in config['Env']]
+ if image=='aimee-pr2990:'+head:
+  config['Env']=[v for v in config['Env'] if not v.startswith('AIMEE_MEMORY_HEALTH_ENABLED=')]+['AIMEE_MEMORY_HEALTH_ENABLED=1']
+  config['Env']=[v for v in config['Env'] if not v.startswith(('AIMEE_MEMORY_SELECTION_POLICY=','AIMEE_MEMORY_UTILITY_HORIZON_POLICY='))]
+ config['HostConfig']=info['HostConfig']
+ config['NetworkingConfig']={'EndpointsConfig':{k:{'Aliases':v.get('Aliases',[]),'IPAMConfig':v.get('IPAMConfig'),'DriverOpts':v.get('DriverOpts')} for k,v in info['NetworkSettings']['Networks'].items()}}
+ return config
+prior={key:api('GET','/containers/'+names[key]+'/json') for key in ['server','kb']}
+for info in prior.values():
+ assert info['Config']['Labels']['com.docker.compose.project'] in [names['project'],names['kb_project']]
+ assert info['Config']['Image']=='aimee-pr2990:052d7520f'
+ assert not info['HostConfig'].get('PortBindings')
+# Keep both private PostgreSQL stores, workspaces, Vaults and enrolled identities.
+for key in ['server','kb']:api('POST','/containers/'+names[key]+'/stop?t=30')
+for key in ['server','kb']:api('DELETE','/containers/'+names[key])
+try:
+ for key in ['kb','server']:
+  api('POST','/containers/create?name='+names[key],recipe(prior[key],'aimee-pr2990:'+head));api('POST','/containers/'+names[key]+'/start')
+  deadline=time.monotonic()+180
+  while time.monotonic()<deadline:
+   current=api('GET','/containers/'+names[key]+'/json')
+   if current['State'].get('Health',{}).get('Status')=='healthy':break
+   time.sleep(2)
+  else:raise RuntimeError(key+' candidate health timeout')
+  print(key,'upgraded and healthy',flush=True)
+except Exception:
+ for key in ['server','kb']:
+  try:api('DELETE','/containers/'+names[key]+'?force=1')
+  except RuntimeError:pass
+ for key in ['kb','server']:
+  api('POST','/containers/create?name='+names[key],recipe(prior[key],prior[key]['Config']['Image']));api('POST','/containers/'+names[key]+'/start')
+ print('owned topology rolled back',flush=True);raise
+safe=[]
+for key in ['server','kb']:
+ current=api('GET','/containers/'+names[key]+'/json');safe.append(dict(role=key,previous_image=prior[key]['Image'],image=current['Image'],configured_image=current['Config']['Image'],healthy=current['State']['Health']['Status']=='healthy'))
+(out/'image-identities.json').write_text(json.dumps(safe,indent=2)+'\n');(out/'names.json').write_text(json.dumps(names)+'\n')

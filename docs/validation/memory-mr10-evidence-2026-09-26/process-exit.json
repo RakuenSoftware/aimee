@@ -1,0 +1,15 @@
+{
+  "final_candidate": "f6115607c",
+  "final_run": "f6115607c-provider-v4",
+  "build_exit": 0,
+  "upgrade_exit": 0,
+  "live_exit": 0,
+  "final_audit_exit": 0,
+  "live_checks": 109,
+  "local_paired_status_exit": 0,
+  "production_images_healthy": [
+    "aimee-native-core:0.4.5-bridge.2",
+    "aimee-embedder-a25m:0.4.5",
+    "aimee-postgres:0.4.5"
+  ]
+}

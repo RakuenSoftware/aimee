@@ -1,0 +1,54 @@
+[
+  {
+    "name": "authenticated user task_state creation",
+    "passed": true
+  },
+  {
+    "name": "user task_state canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user constraint creation",
+    "passed": true
+  },
+  {
+    "name": "user constraint canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated user fact creation",
+    "passed": true
+  },
+  {
+    "name": "user fact canonical classification",
+    "passed": true
+  },
+  {
+    "name": "authenticated kb task_state creation",
+    "passed": false
+  },
+  {
+    "name": "rollback user-task_state restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-constraint restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-durable_probe restores horizon eligibility",
+    "passed": true
+  },
+  {
+    "name": "rollback user-transient_probe restores horizon eligibility",
+    "passed": true
+  }
+]
