@@ -1627,6 +1627,12 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
  * Rows are matched first-to-last; matches are mutually exclusive across
  * (verb, path, suffix), so order is not significant for correctness. */
 const http_route_t g_v1_routes[] = {
+    /* Streaming private delivery runs in handle_conn after the same auth gate.
+     * The separate service enforces current recipient release policy. */
+    {"GET", "/v1/native/bootstrap", NULL, RM_EXACT, NULL, CAP_MEMORY_READ, NULL},
+    {"POST", "/v1/native/select", NULL, RM_EXACT, NULL, CAP_MEMORY_READ, NULL},
+    {"GET", "/v1/native/leases/", NULL, RM_PREFIX, NULL, CAP_MEMORY_READ, NULL},
+    {"POST", "/v1/native/leases/", "/approve", RM_PREFIX, NULL, CAP_MEMORY_READ, NULL},
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
     {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},

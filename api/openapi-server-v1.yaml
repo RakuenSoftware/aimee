@@ -328,6 +328,53 @@ components:
                   Present and true when POSTing returns a run handle to poll at
                   GET /v1/runs/{id} instead of a final response.
 paths:
+  /native/bootstrap:
+    get:
+      summary: Resolve the enrolled caller's native-memory profile
+      description: Requires an explicitly configured private native-delivery service and a current recipient release; search permission alone does not grant export.
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Bound recipient and certified model profile}
+        '403': {description: No current release for this caller}
+        '503': {description: Private delivery unavailable}
+  /native/select:
+    post:
+      summary: Select and prepare the complete permitted native-memory working set
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [query]
+              properties:
+                query: {type: string, minLength: 1, maxLength: 65536}
+      responses:
+        '200': {description: Short-lived lease and complete record/revision references}
+        '403': {description: Release denied or changed}
+        '429': {description: Preparation or lease capacity exhausted}
+        '503': {description: Preparation unavailable}
+  /native/leases/{lease}/{artifact}:
+    get:
+      summary: Download an immutable native artifact under current authority
+      security: [{bearerAuth: []}]
+      parameters:
+        - {in: path, name: lease, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+        - {in: path, name: artifact, required: true, schema: {type: string, enum: [index.json, compact.pack]}}
+      responses:
+        '200': {description: Prepared artifact bytes}
+        '403': {description: Lease expired or current authority denied}
+  /native/leases/{lease}/approve:
+    post:
+      summary: Revalidate the complete working set after download and activation
+      security: [{bearerAuth: []}]
+      parameters:
+        - {in: path, name: lease, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      responses:
+        '200': {description: Current release approved}
+        '403': {description: Expired lease or changed authority/records}
   /health:
     get:
       summary: Liveness probe
