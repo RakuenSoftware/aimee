@@ -93,5 +93,5 @@ new adaptive restrictions while preserving operator limits and usage. Repeating
 an already admitted attempt retains its original accounting decision.
 
 Implementation status: activation parsing and native freshness checks are
-implemented; no measured passing workload has been collected. Native requirement
-forwarding and hook freshness parity are still required before MR-07 completion.
+implemented; no measured passing workload has been collected. Native requirement forwarding is implemented. Hook freshness parity and the
+measured workload acceptance are still required before MR-07 completion.

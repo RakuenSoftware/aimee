@@ -343,12 +343,27 @@ char *kb_client_memory_assemble_typed_context(const char *query)
 
 char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
 {
+   return kb_client_memory_assemble_typed_context_requirements_json(query, context_limits, NULL);
+}
+
+char *kb_client_memory_assemble_typed_context_requirements_json(
+    const char *query, const cJSON *context_limits, const char *evidence_requirements_json)
+{
    if (!query || !query[0])
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
+   /* Task obligations are untrusted input, not a coverage attestation. Preserve
+    * their representation for the Go owner's strict schema/duplicate checks. */
+   if (evidence_requirements_json &&
+       (strlen(evidence_requirements_json) > 16384 ||
+        !cJSON_AddRawToObject(req, "evidence_requirements", evidence_requirements_json)))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
    cJSON *limits = context_limits ? cJSON_Duplicate(context_limits, 1) : NULL;
    if (context_limits && (!limits || !cJSON_AddItemToObject(req, "context_limits", limits)))
    {

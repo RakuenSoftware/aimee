@@ -50,7 +50,12 @@ The targeted and full non-PG memory/policy/family race suites and native
 policy/index-client/ingress tests pass. Artifact parsing tests use explicitly
 synthetic numbers and confer no release calibration.
 
-Remaining acceptance: native task requirement forwarding, hook freshness parity,
+Native task requirements now reach the existing Go coverage evaluator through
+both primary adapters. Native transport tests cover exact string revisions,
+duplicate/null/oversized input and turn isolation; the direct adapter and worker
+objects compile. All 77 lint checks pass.
+
+Remaining acceptance: hook freshness parity,
 generic external-client issuance, fresh process acceptance of the later changes,
 and measured calibration with the predeclared MR-18 paired quality/efficiency gates. Unit and storage fixtures are not evidence
 of task-quality noninferiority. MR-08 and MR-09 have not started.

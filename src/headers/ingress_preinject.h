@@ -108,6 +108,9 @@ const char *ingress_preinject_turn_id(void);
  * so a reused worker thread never leaks one turn's session onto the next. "" when
  * the request carries no aimee-session token (a non-primary / unidentified turn). */
 void ingress_preinject_set_session_id(const char *session_id);
+/* Host native-turn adapter forwards task obligations from the user request.
+ * Bounded copy; NULL clears. Validation and coverage remain Go-owned. */
+void ingress_preinject_set_task_requirements(const cJSON *request);
 const char *ingress_preinject_session_id(void);
 
 /* Resolve the current request's thread-local working directory to the same

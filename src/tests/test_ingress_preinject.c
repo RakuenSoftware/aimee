@@ -279,8 +279,13 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
 }
-char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
+static const char *g_expected_task_requirements;
+char *kb_client_memory_assemble_typed_context_requirements_json(
+    const char *query, const cJSON *context_limits, const char *evidence_requirements_json)
 {
+   assert((!g_expected_task_requirements && !evidence_requirements_json) ||
+          (g_expected_task_requirements && evidence_requirements_json &&
+           strcmp(g_expected_task_requirements, evidence_requirements_json) == 0));
    assert(cJSON_IsObject(context_limits));
    assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);
    assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(context_limits, "max_context_bytes")));
@@ -869,6 +874,46 @@ static void test_default_temporal_context_injection(void)
    g_context_mode = "observe";
    g_temporal_enabled = 0;
    printf("default_temporal_context_injection OK\n");
+}
+
+static void test_native_task_requirements_transport_and_turn_isolation(void)
+{
+   g_temporal_enabled = 1;
+   g_context_mode = "observe";
+   const char *values[] = {"{\"schema_version\":1,\"task_revision\":\"9007199254740993\",\"query_"
+                           "mode\":\"current_state\","
+                           "\"obligations\":[{\"subject\":\"deployment\",\"relation\":\"uses\"}]}",
+                           "{\"schema_version\":1,\"schema_version\":2}", "null", "true"};
+   for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i)
+   {
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddItemToObject(request, "evidence_requirements", cJSON_Parse(values[i]));
+      ingress_preinject_set_task_requirements(request);
+      cJSON_Delete(request); /* setter owns a bounded copy, not the request */
+      g_expected_task_requirements = values[i];
+      free(ingress_preinject_build("recover deployment", 0));
+      ingress_preinject_set_session_id("next-turn");
+      g_expected_task_requirements = NULL;
+      free(ingress_preinject_build("recover deployment", 0));
+   }
+   cJSON *duplicate = cJSON_Parse("{\"evidence_requirements\":{},\"evidence_requirements\":{}}");
+   ingress_preinject_set_task_requirements(duplicate);
+   cJSON_Delete(duplicate);
+   g_expected_task_requirements = "null";
+   free(ingress_preinject_build("recover deployment", 0));
+   cJSON *large = cJSON_CreateObject();
+   char text[17000];
+   memset(text, 'x', sizeof(text) - 1);
+   text[sizeof(text) - 1] = '\0';
+   cJSON_AddStringToObject(large, "evidence_requirements", text);
+   ingress_preinject_set_task_requirements(large);
+   cJSON_Delete(large);
+   free(ingress_preinject_build("recover deployment", 0));
+   ingress_preinject_set_task_requirements(NULL);
+   g_expected_task_requirements = NULL;
+   free(ingress_preinject_build("recover deployment", 0));
+   ingress_preinject_set_session_id("");
+   g_temporal_enabled = 0;
 }
 
 /* Auditable-correctness P1: the per-turn retrieval-event id seam. */
@@ -1691,6 +1736,7 @@ int main(void)
    test_append();
    test_budgeted_build_uses_memory_previews();
    test_default_temporal_context_injection();
+   test_native_task_requirements_transport_and_turn_isolation();
    test_turn_id_mint_and_thread_local();
    test_compress_code_fold();
    printf("all tests passed\n");

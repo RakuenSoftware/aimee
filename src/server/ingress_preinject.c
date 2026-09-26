@@ -91,6 +91,7 @@ const char *ingress_preinject_turn_id(void)
 }
 
 static __thread char g_session_id[64] = "";
+static __thread char g_task_requirements[16385] = "";
 
 /* Host transport only. The supplied request is consumed; all ingress policy
  * and state live in the shared Go owner. */
@@ -650,10 +651,32 @@ void ingress_preinject_finish_sources(void)
 
 void ingress_preinject_set_session_id(const char *session_id)
 {
+   g_task_requirements[0] = '\0';
    if (session_id && session_id[0])
       snprintf(g_session_id, sizeof(g_session_id), "%s", session_id);
    else
       g_session_id[0] = '\0';
+}
+
+void ingress_preinject_set_task_requirements(const cJSON *request)
+{
+   g_task_requirements[0] = '\0';
+   const cJSON *requirements = NULL;
+   const cJSON *field = NULL;
+   int count = 0;
+   cJSON_ArrayForEach(field, request)
+   {
+      if (field->string && strcmp(field->string, "evidence_requirements") == 0)
+      {
+         requirements = field;
+         count++;
+      }
+   }
+   if (!count)
+      return;
+   if (count != 1 || !cJSON_PrintPreallocated((cJSON *)requirements, g_task_requirements,
+                                              sizeof(g_task_requirements), 0))
+      snprintf(g_task_requirements, sizeof(g_task_requirements), "%s", "null");
 }
 
 const char *ingress_preinject_session_id(void)
@@ -1012,8 +1035,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON_AddItemToObject(assembly, "facts_response", response ? response : cJSON_CreateNull());
    }
    char *temporal = temporal_on
-                        ? kb_client_memory_assemble_typed_context_json(
-                              query, cJSON_GetObjectItemCaseSensitive(assembly, "context_limits"))
+                        ? kb_client_memory_assemble_typed_context_requirements_json(
+                              query, cJSON_GetObjectItemCaseSensitive(assembly, "context_limits"),
+                              g_task_requirements[0] ? g_task_requirements : NULL)
                         : NULL;
    cJSON_AddStringToObject(assembly, "typed_context_json", temporal ? temporal : "");
    free(temporal);

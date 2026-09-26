@@ -21,6 +21,8 @@ extern "C"
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
+      /* Borrowed native user request, for bounded Go-owned task obligations. */
+      const struct cJSON *task_request;
       int max_tokens;
       double temperature;
    } primary_session_request_t;

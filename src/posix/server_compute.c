@@ -843,6 +843,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * router (gw_stage_router, invoked synchronously on THIS thread by the agent
     * below) can create + bind an enforced work-item. Cleared with the override. */
    ingress_preinject_set_session_id(aimee_sid && aimee_sid[0] ? aimee_sid : "");
+   ingress_preinject_set_task_requirements(cctx->req);
 
    stream_event(cctx, "turn_start", NULL, NULL);
    /* Surface mirror drift (client head vs server mirror) before the turn acts —
@@ -1046,6 +1047,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.cwd = use_cwd;
    preq.system_prompt = system_prompt ? system_prompt : "";
    preq.user_prompt = message;
+   preq.task_request = cctx->req;
    preq.max_tokens = AGENT_DEFAULT_MAX_TOKENS;
    preq.temperature = 0.3;
 

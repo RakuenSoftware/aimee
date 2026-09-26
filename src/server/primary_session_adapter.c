@@ -261,6 +261,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
     * an enforced work-item for this turn (agent_execute below runs the provider on
     * THIS thread). Cleared alongside the override after the turn. */
    ingress_preinject_set_session_id(effective_aimee_session_id);
+   ingress_preinject_set_task_requirements(req->task_request);
 
    cJSON *updated_messages = NULL;
    int max_tokens = req->max_tokens > 0 ? req->max_tokens : AGENT_DEFAULT_MAX_TOKENS;

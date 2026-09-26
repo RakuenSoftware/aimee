@@ -251,6 +251,7 @@ static int explicit_scope_post_handler(const char *url, const char *auth_header,
 }
 
 static int typed_context_expect_limits;
+static const char *typed_context_expect_requirements;
 
 static int typed_context_post_handler(const char *url, const char *auth_header, const char *body,
                                       char **response_buf, int timeout_ms,
@@ -274,6 +275,10 @@ static int typed_context_post_handler(const char *url, const char *auth_header, 
    }
    else
       assert(!limits);
+   if (typed_context_expect_requirements)
+      assert(strstr(body, typed_context_expect_requirements));
+   else
+      assert(!cJSON_GetObjectItemCaseSensitive(request, "evidence_requirements"));
    cJSON_Delete(request);
    if (response_buf)
       *response_buf = strdup("{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_tokens\":"
@@ -517,6 +522,31 @@ static void test_typed_context_uses_server_defaults(void)
    assert(context && strcmp(context, "{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_"
                                      "tokens\":4,\"rendered_context\":\"temporal\"}") == 0);
    free(context);
+   typed_context_expect_requirements =
+       "{\"schema_version\":1,\"task_revision\":\"9007199254740993\","
+       "\"query_mode\":\"current_state\",\"obligations\":[{\"subject\":\"deployment\",\"relation\":"
+       "\"uses\"}]}";
+   context = kb_client_memory_assemble_typed_context_requirements_json(
+       "recover deployment", limits, typed_context_expect_requirements);
+   assert(context);
+   free(context);
+   /* Duplicate fields and null must reach the owner's strict decoder intact. */
+   typed_context_expect_requirements = "{\"schema_version\":1,\"schema_version\":2}";
+   context = kb_client_memory_assemble_typed_context_requirements_json(
+       "recover deployment", limits, typed_context_expect_requirements);
+   assert(context);
+   free(context);
+   typed_context_expect_requirements = "null";
+   context = kb_client_memory_assemble_typed_context_requirements_json(
+       "recover deployment", limits, typed_context_expect_requirements);
+   assert(context);
+   free(context);
+   char oversized[16386];
+   memset(oversized, ' ', sizeof(oversized) - 1);
+   oversized[sizeof(oversized) - 1] = '\0';
+   assert(!kb_client_memory_assemble_typed_context_requirements_json("recover deployment", limits,
+                                                                     oversized));
+   typed_context_expect_requirements = NULL;
    cJSON_Delete(limits);
    typed_context_expect_limits = 0;
    mock_agent_http_reset();

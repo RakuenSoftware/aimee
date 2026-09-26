@@ -155,7 +155,17 @@ artifact preserves observe mode and baseline operator policy. See the
 
 MR-07 is still in progress. Both disposable process topologies passed at
 `6008b3835`; the later receipt/freshness/activation changes need fresh process
-acceptance. Native task requirement forwarding, hook freshness parity, generic
-external issuance and measured paired workload gates remain open. No reviewed
+acceptance. Hook freshness parity, generic external issuance and measured paired workload
+gates remain open. No reviewed
 calibration artifact is installed or shipped. MR-08 and MR-09 have not started.
 Component tests are not evidence of task-quality noninferiority.
+
+Native `chat.send_stream`/`/v1/chat/stream` callers may supply the existing MR-05
+`evidence_requirements` object alongside their task message. Both native worker
+paths forward a bounded copy to the scoped Go typed-context request. The host
+does not accept a coverage/confidence verdict: Go validates obligations and
+computes retained coverage. Duplicate outer fields and oversized values become
+invalid input; duplicate inner fields, null and scalars reach the strict Go
+decoder intact. Starting or ending a session turn clears the prior obligations.
+Absent requirements continue to produce uncalibrated coverage, not complete
+coverage inferred from similarity.

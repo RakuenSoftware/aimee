@@ -1927,6 +1927,7 @@
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_audit_hook_fn",
         "kb_client_memory_audit_note",
@@ -1950,7 +1951,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "588069497286b6685e5db952a722a8f4136541dee23cbc1b6183f6220cf5333f"
+      "sha256": "33994ba1764ec74cf4c557235a4fda6b23cbd94af7e84cdbb73dc3c7ac2a8abd"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
@@ -1977,6 +1978,7 @@
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_compact_windows",
@@ -1992,7 +1994,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "381d5be6b3b29084a89541d4ad214edaae4a2b214fc37833f2dbccb27d8c78fc"
+      "sha256": "347b02e45daab7f75ac5e8f3ede3a5a22383f2e3349a71ed97444bcc6820903b"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2082,12 +2084,12 @@
       "disposition": "host-context",
       "symbols": [
         "AIMEE_MEMORY_RECEIPT_RETENTION",
-        "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "531263d66e61d3d7864cf9ae00eccf707ae2cae7dc14cfa7a23b3c55c6cb2255"
+      "sha256": "d6928977a35742701d04aba4ad165b6ffcc9a8d0459c57f22abed4e6e68d71df"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2342,12 +2344,12 @@
       "disposition": "host-fixture",
       "symbols": [
         "AIMEE_MEMORY_RECEIPT_RETENTION",
-        "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "d1f2c5767b3d1aa663b648a0678fc97bc699eb098dcf52fabe23e940a9f3a869"
+      "sha256": "7920ea59e6cf91e6c48dcfb0f747e151be90947bba0ec9cf9536d0aeafba9f5b"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
@@ -2372,6 +2374,7 @@
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_find_id_by_key_kind",
@@ -2386,7 +2389,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "38f761fd0d653d0ba2ced825caad33b6059948dc41f4e82e105869eb24f94aa8"
+      "sha256": "4692f352e7a0f239fb5bc3221d0a8522f363fc006b765a2334dd1b86078aaa3c"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",
