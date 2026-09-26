@@ -45,7 +45,7 @@ func TestMemoryUtilityHorizonCanonicalPostgres(t *testing.T) {
 	}
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
 	var id int64
-	if err := tx.QueryRow(ctx, `INSERT INTO memories(key,content,tier,kind,scope_type,scope_value) VALUES('horizon-test','horizonneedle','L2','task_state','project','horizon-test') RETURNING id`).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,activation_sticky_turns) VALUES('horizon-test','horizonneedle','L2','task_state','project','horizon-test',5) RETURNING id`).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	data, err := NewPostgresDataStore(evalQueryer{tx}, PlacementKB)
@@ -76,6 +76,10 @@ func TestMemoryUtilityHorizonCanonicalPostgres(t *testing.T) {
 	hits, err := s.Search(ctx, r.Scope, "horizonneedle", "", "", 1)
 	if err != nil || len(hits) != 1 || hits[0].ID != durable {
 		t.Fatal("lexical prelimit", hits, err)
+	}
+	activated, _, _, err := s.recallActivated(ctx, &ActivationSnapshot{CurrentTurn: 2, Rows: []ActivationRow{{MemoryID: id, LastTurn: 1}}}, "m.content LIKE '%horizonneedle%'", 1, true, false)
+	if err != nil || len(activated) != 1 || activated[0].ID != durable {
+		t.Fatal("activation bypassed horizon", activated, err)
 	}
 	var dimension int
 	if err := tx.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid='memory_embeddings'::regclass AND attname='embedding'`).Scan(&dimension); err != nil {
@@ -198,6 +202,21 @@ func TestMemoryUtilityHorizonCanonicalPostgres(t *testing.T) {
 	if _, err = s.Get(ctx, r.Scope, id); !errors.Is(err, ErrMemoryNotFound) {
 		t.Fatal("forged confirmation admitted", err)
 	}
+	exec(`UPDATE memories SET lifecycle_state='pending' WHERE id=$1`, id)
+	pendingVersion := *current.Version
+	if err := tx.QueryRow(ctx, `SELECT record_revision::text FROM memories WHERE id=$1`, id).Scan(&pendingVersion.RecordRevision); err != nil {
+		t.Fatal(err)
+	}
+	check.Sources[0].Channel = "native_open_commitments"
+	check.Sources[0].Source.Version = pendingVersion
+	if allowed, err := s.revalidateSources(ctx, check, r.Scope); err != nil || allowed {
+		t.Fatal("pending release bypassed horizon", allowed, err)
+	}
+	t.Setenv("AIMEE_MEMORY_UTILITY_HORIZON_POLICY", "")
+	if allowed, err := s.revalidateSources(ctx, check, r.Scope); err != nil || !allowed {
+		t.Fatal("baseline pending commitment lost", allowed, err)
+	}
+	installTestHorizon(t, c)
 	exec(`UPDATE memories SET lifecycle_state='revoked' WHERE id=$1`, id)
 	if _, err = s.getAtVersioned(ctx, r.Scope, id, true, "", true); !errors.Is(err, ErrMemoryNotFound) {
 		t.Fatal("history bypassed revocation", err)
