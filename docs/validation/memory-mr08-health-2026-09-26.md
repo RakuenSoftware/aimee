@@ -247,3 +247,38 @@ The focused health/native/source-release race suite passed in 2.95 seconds,
 including four new position regressions and the existing serving-content
 invariance check. Deployed validation of this addition remains pending; the
 ongoing serving-overhead experiment uses the earlier `be46915db` image.
+
+## Native serving observations on `be46915db`
+
+A counterbalanced off/on/on/off run completed 32 measured requests per arm,
+with three excluded warm-ups per block and zero measured request failures.
+Each request used a fresh session, settled index, the same complete typed
+requirement and a fixed single-response synthetic provider. The manifest and
+harness hashes were frozen before collection. All four blocks independently
+confirmed the expected presence or absence of optional receipt metadata. The
+controller exited zero and restored the original disabled environment; the
+Server remained healthy.
+
+| Collection | Mean | p50 | p95 |
+|---|---:|---:|---:|
+| Off | 3.093 s | 3.075 s | 3.236 s |
+| On | 3.079 s | 3.072 s | 3.245 s |
+
+The observed p95 ratio was 1.00258 (+0.26%). This small synthetic workload does
+not establish a production latency distribution or a speedup. Other validation
+activity overlapped part of collection, so it does not isolate CPU cost. It
+also predates the new final-position metadata. The explicit provider ceiling
+was 65,536 bytes. [Manifest](memory-mr08-serving-overhead-evidence-2026-09-26/be46915db-manifest.json),
+[all observations](memory-mr08-serving-overhead-evidence-2026-09-26/be46915db-progress.json),
+[summary](memory-mr08-serving-overhead-evidence-2026-09-26/be46915db-summary.json)
+and [capture checks](memory-mr08-serving-overhead-evidence-2026-09-26/be46915db-capture-checks.json)
+are retained with the exact harness sources.
+
+The on-block health imports reported no failed requests or truncation. The
+namespace retained 144,634 bytes, including earlier fixture receipts; this is
+not incremental bytes per measured request. Earlier network-uncertain evidence
+remained classified separately. The first strict overhead attempt aborted on
+an incomplete native request and restored the environment; it is not a passing
+comparison. A four-request enabled diagnostic then passed. The subsequent
+frozen comparison retained every measurement and would have made any measured
+failure ineligible, without silently retrying or dropping it.
