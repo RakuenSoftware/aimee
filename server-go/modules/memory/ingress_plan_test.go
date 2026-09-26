@@ -68,6 +68,33 @@ func TestIngressPlanBudgetDoesNotConsumeTaskClaim(t *testing.T) {
 	}
 }
 
+func TestIngressRequirementsRefreshIndexForEveryAssembly(t *testing.T) {
+	state := &gatewayState{}
+	r := ingressBeginRequest{Query: "fix local resolver", Session: "s", Project: "p",
+		ActiveScope: true, PreviewEnabled: true, Mode: "on", Budget: 1200}
+	if ingressBegin(state, r)["task"] != true || ingressBegin(state, r)["task"] != false {
+		t.Fatal("ordinary related turns must retain first-task suppression")
+	}
+	r.TaskRequirements = true
+	for i := 0; i < 3; i++ {
+		if ingressBegin(state, r)["task"] != true {
+			t.Fatal("explicit obligations reused another assembly's index observation")
+		}
+	}
+	r.Mode = "off"
+	if ingressBegin(state, r)["task"] != false {
+		t.Fatal("explicit obligations bypassed code-context opt-out")
+	}
+	r.Mode, r.Disabled = "on", true
+	if ingressBegin(state, r)["active"] != false {
+		t.Fatal("explicit obligations bypassed request opt-out")
+	}
+	r.Disabled, r.Budget = false, 384
+	if ingressBegin(state, r)["active"] != false {
+		t.Fatal("explicit obligations bypassed the usable-budget check")
+	}
+}
+
 func TestIngressVersionedBudgetBeforeTaskClaim(t *testing.T) {
 	state := &gatewayState{}
 	zero := 0

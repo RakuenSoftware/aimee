@@ -914,6 +914,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddBoolToObject(request, "active_scope", active_scope);
    cJSON_AddBoolToObject(request, "disabled", request_disabled || g_request_disabled);
    cJSON_AddBoolToObject(request, "preview_enabled", config_ingress_preinject_enabled());
+   cJSON_AddBoolToObject(request, "task_requirements", g_task_requirements[0] != '\0');
    cJSON_AddStringToObject(request, "mode", mode ? mode : "");
    cJSON_AddNumberToObject(request, "budget", config_ingress_preinject_assembly_budget());
    cJSON_AddBoolToObject(request, "compress", config_ingress_compress_enabled());

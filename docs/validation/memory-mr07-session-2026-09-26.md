@@ -137,3 +137,34 @@ system content with the current assembly while preserving conversation history.
 The ingress unit suite passes requirement forwarding and turn isolation through
 the new native entrypoint; the native runtime compiles. Deployed activation and
 the measured paired workload remain pending.
+
+## Registered service scope during the native activation fixture
+
+Candidate `c152612ad` fixes a real failure exposed after provisioning the test
+Server's enrolled certificate, service/user memberships and attributed code
+project. The TLS adapter queried the tenant-protected Server registry before
+installing the verified service identity. Under the restricted migration owner,
+the definer lookup returned false despite an exact active enrollment. The same
+lookup returned true in the verified service's transaction-local tenant scope.
+The adapter now enters that existing scope for the lookup and rolls it back
+before resolving the separate content caller. It does not change RLS, runtime
+roles, certificate checks or team-membership policy.
+
+The candidate passed the TLS unit suite and all 77 lint checks. Both retained
+CT109 applications upgraded from `2efe810ff` to `c152612ad` with existing
+PostgreSQL volumes, Vaults, workspaces and enrolled identities preserved; both
+became healthy. The live regression
+`tests/e2e/memory-exploration-service-scope-e2e.py` passed seven checks: authorized
+reads, denial without service membership, recovery after restoring membership,
+denial with a mismatched registered certificate, and recovery after restoring
+the actual certificate. [Checks](memory-mr07-service-scope-evidence-2026-09-26/c152612ad-service-scope.json)
+and [image identities](memory-mr07-service-scope-evidence-2026-09-26/c152612ad-image-identities.json)
+are retained. The test provisions tenancy; it does not bypass authorization.
+
+A separate planner regression fixes repeated explicit contracts: the first-task
+query cache previously omitted a fresh code packet on related turns, leaving no
+current index generation for activation. Explicit obligations now request an
+index observation for each assembly. Ordinary first-task suppression, request
+opt-out, code-context opt-out and the minimum usable budget remain in force.
+Focused Go race tests, native ingress tests and all 77 lint checks passed.
+Deployed activation and the paired quality/cost experiment remain open.

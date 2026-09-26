@@ -16,6 +16,7 @@ type ingressBeginRequest struct {
 	ActiveScope      bool           `json:"active_scope"`
 	Disabled         bool           `json:"disabled"`
 	PreviewEnabled   bool           `json:"preview_enabled"`
+	TaskRequirements bool           `json:"task_requirements"`
 	Mode             string         `json:"mode"`
 	Budget           int            `json:"budget"`
 	Compress         bool           `json:"compress"`
@@ -65,7 +66,10 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	result["active"], result["mode"] = true, mode
 	result["legacy_preview"] = request.PreviewEnabled && mode != "on"
 	result["facts"], result["temporal"] = facts, request.PreviewEnabled
-	result["task"] = request.PreviewEnabled && mode != "off" && state.tasks.claim(request.Session, request.Project, request.Query)
+	// Explicit obligations describe this turn's evidence contract. A prior
+	// related query cannot attest the index generation for the new assembly.
+	result["task"] = request.PreviewEnabled && mode != "off" &&
+		(request.TaskRequirements || state.tasks.claim(request.Session, request.Project, request.Query))
 	result["assembly"] = map[string]any{"operation": "ingress-assemble", "budget": budget,
 		"context_limits": ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
 		"compress":       request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
