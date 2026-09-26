@@ -229,9 +229,10 @@ func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]b
 			return commandResult(commandError("invalid_projection", "native source contract unavailable"))
 		}
 	}
-	ticket, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": p.Sources}, "append_native_sources": p.AppendSources})
+	assembly := map[string]any{"native_projection": map[string]any{"retained_items": p.Sources, "digest": p.Digest}, "append_native_sources": p.AppendSources}
+	ticket, err := state.prepare(args, assembly)
 	if err != nil {
 		return commandResult(commandError("unavailable", "native source release unavailable"))
 	}
-	return commandResult(map[string]any{"status": "ok", "source_release_ticket": ticket})
+	return commandResult(map[string]any{"status": "ok", "source_release_ticket": ticket, "exploration_offer": state.explorationOffer(ticket, assembly)})
 }

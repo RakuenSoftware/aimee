@@ -1,6 +1,6 @@
 # MR-07: Task-bound exploration contracts with starvation recovery
 
-- **State:** Proposed
+- **State:** In progress; durable observe contracts and native recovery implemented
 - **Priority:** P1: enable enforcement only after context correctness gates
 - **Owner:** Task runtime, attention guard and execution policy
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate under [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
@@ -67,3 +67,8 @@ The [incomplete-command repair](../../validation/memory-discovery-policy-2026-09
 prevents bare search-tool names from panicking the Go execution-policy handler.
 Baseline prohibitions still apply; the race suite passes. Task-contract issuance,
 budget sharing and authenticated fallback remain unimplemented by this repair.
+
+The [session integration report](../../validation/memory-mr07-session-2026-09-26.md)
+records migration 38, shared PostgreSQL accounting, native/hook admission and
+native indexed recovery. Activation and paired workload acceptance remain open;
+the shipping default remains observe.

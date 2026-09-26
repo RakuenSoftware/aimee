@@ -458,6 +458,7 @@ func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, bus.M
 			return commandResult(commandError("unavailable", "source release preparation unavailable"))
 		}
 		result["source_release_ticket"] = ticket
+		result["exploration_offer"] = state.releases.explorationOffer(ticket, result)
 	}
 	return commandResult(result)
 }

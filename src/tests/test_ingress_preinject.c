@@ -1694,3 +1694,16 @@ int main(void)
    printf("all tests passed\n");
    return 0;
 }
+
+/* The session owner is exercised by its PostgreSQL suite; this fixture tests
+ * the memory envelope and receipt host without an authenticated task session. */
+int policy_prepare_exploration(const cJSON *offer, const char *session, const char *workspace,
+                               const char *project)
+{
+   if (cJSON_IsObject(offer))
+   {
+      assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(offer, "memory_owner")));
+      assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(offer, "source_versions_digest")));
+   }
+   return -1;
+}

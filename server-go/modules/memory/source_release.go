@@ -320,3 +320,32 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	entry.admitted = check
 	return commandResult(map[string]any{"status": "ok", "admitted": true, "boundary": "source_revalidation"})
 }
+
+// Exploration metadata is derived from the accepted final assembly, never from
+// a hook-authored confidence value. It is an observation, not an access grant.
+func (s *sourceReleaseState) explorationOffer(ticket string, assembly map[string]any) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entries[ticket]
+	if e == nil {
+		return nil
+	}
+	if s.receiptProducer == "" {
+		owner, err := releaseToken()
+		if err != nil {
+			return nil
+		}
+		s.receiptProducer = owner
+	}
+	complete := false
+	class := "unclassified"
+	requirement := "unavailable"
+	if projection, ok := assembly["typed_projection"].(map[string]any); ok {
+		if coverage, ok := projection["evidence_coverage"].(*evidenceCoverage); ok && coverage != nil {
+			complete = coverage.Status == "complete"
+			requirement = coverage.RequirementDigest
+			class = "typed_requirements"
+		}
+	}
+	return map[string]any{"memory_owner": s.receiptProducer, "plan_digest": e.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(e.sources)), "query_class": class, "coverage_complete": complete, "confidence_provenance": "uncalibrated:" + requirement, "index_generation": "unavailable", "expires": e.expires}
+}

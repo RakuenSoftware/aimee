@@ -24,6 +24,10 @@ extern "C"
     * atomically in a single transaction. Returns 0 on success. */
    int db1_session_state_save(const char *sid, const session_state_t *in);
 
+   /* Private host-only operation; the state owner verifies session ownership. */
+   int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
+                                     char *reply, size_t reply_len);
+
    /* Delete all rows for sid across scalar + child tables (CASCADE).
     * Returns 0 on success. */
    int db1_session_state_delete(const char *sid);

@@ -62,6 +62,8 @@ typedef struct
    /* Host-observed accepted memory context, including unversioned native views.
     * Never populated from caller headers. Does not imply source validation. */
    int memory_receipt_required;
+   /* Host-issued task binding; never parsed from transport headers. */
+   char exploration_binding[4096];
    int aimee_tool_calls; /* cumulative calls observed in this API transcript */
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];
@@ -84,6 +86,7 @@ const request_context_t *request_context_get(void);
 int request_context_refuse_assembly(const char *kind);
 int request_context_set_source_release(const char *ticket);
 int request_context_require_memory_receipt(void);
+int request_context_set_exploration_binding(const char *binding);
 
 /* Clear the current thread's request context. */
 void request_context_clear(void);

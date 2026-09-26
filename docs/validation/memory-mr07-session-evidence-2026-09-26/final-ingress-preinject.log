@@ -1,0 +1,54 @@
+2026-09-26T05:52:20Z WARN  integrity: automatic retrieval parked (reject): IDENTITY_OVERRIDE
+2026-09-26T05:52:20Z WARN  memory: Go ingress plan failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress plan failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress plan failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  integrity: automatic retrieval parked (reject): IDENTITY_OVERRIDE
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  integrity: automatic retrieval parked (reject): IDENTITY_OVERRIDE
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z WARN  integrity: automatic retrieval parked (reject): IDENTITY_OVERRIDE
+2026-09-26T05:52:20Z WARN  memory: Go ingress assembly failed
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=on project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=1
+2026-09-26T05:52:20Z WARN  integrity: automatic retrieval parked (reject): IDENTITY_OVERRIDE
+2026-09-26T05:52:20Z WARN  memory: Go ingress plan failed
+2026-09-26T05:52:20Z WARN  memory: Go ingress plan failed
+2026-09-26T05:52:20Z WARN  ingress-memory: typed-fact recall unavailable or invalid; continuing without facts
+2026-09-26T05:52:20Z WARN  ingress-memory: typed-fact recall unavailable or invalid; continuing without facts
+2026-09-26T05:52:20Z WARN  ingress-memory: typed-fact recall unavailable or invalid; continuing without facts
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=on project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=1
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=on project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=1
+2026-09-26T05:52:20Z INFO  ingress-context: mode=observe effective=observe project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=0
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=observe project=active-project status=503 latency_ms=0 decision=suppressed items=0 visible=0
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=on project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=1
+2026-09-26T05:52:20Z WARN  ingress-memory: memory recall UNAVAILABLE (not empty): the knowledge service did not answer; this turn's envelope carries no memory previews. project=active-project total=1
+2026-09-26T05:52:20Z INFO  ingress-context: mode=on effective=on project=active-project status=200 latency_ms=0 decision=answerable items=1 visible=1
+send completion retries unresolved owners and requires explicit release acknowledgement
+native private sources remain local and stale owner answers refuse dispatch
+encrypted replay roundtrip, principal isolation and payload removal preserve receipt inclusion
+provider preparations and admissions survive reopen; timeout and append failure remain distinct
+unversioned host inputs receive durable body receipts with an explicit source gap
+source changes and owner failures refuse final provider bytes across all routes
+preview summary versions survive C transport and fence every provider route
+required assembly failure reaches provider fence and clears on new request
+fact_evidence_after_integrity_and_packing OK
+typed_evidence_after_integrity_and_packing OK
+evidence_matches_accepted_envelope OK
+small_budget_does_not_retrieve_or_claim OK
+scope_cleanup_on_failed_event_id OK
+go_assembly_full_ids_and_integrity OK
+go_owner_unavailable OK
+ingress_preinject: task_context_mode_and_first_turn_gate OK
+unavailable_task_context_retries_after_recovery OK
+  ok    memory recall: outage counted apart from an empty result
+query_from_messages OK
+apply OK
+append OK
+budgeted_build_uses_memory_previews OK
+default_temporal_context_injection OK
+turn_id_mint_and_thread_local OK
+compress_code_fold OK
+all tests passed

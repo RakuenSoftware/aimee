@@ -45,9 +45,11 @@ type toolRule struct {
 }
 
 type operatorPolicy struct {
-	ForbiddenCommands []string          `json:"forbidden_commands"`
-	ToolRules         []toolRule        `json:"tool_rules"`
-	ApprovalLevels    map[string]string `json:"approval_levels"`
+	AdaptiveExploration explorationLimits `json:"adaptive_exploration"`
+	Exploration         explorationLimits `json:"exploration"`
+	ForbiddenCommands   []string          `json:"forbidden_commands"`
+	ToolRules           []toolRule        `json:"tool_rules"`
+	ApprovalLevels      map[string]string `json:"approval_levels"`
 }
 
 type policyLoader func() (*operatorPolicy, error)
@@ -249,13 +251,28 @@ func shellTool(tool string) bool {
 	return false
 }
 
+func discoveryTool(req request, arguments map[string]any) bool {
+	if shellTool(req.Tool) {
+		return sourceDiscovery(textField(arguments, "command", "cmd"))
+	}
+	switch strings.ToLower(req.Tool) {
+	case "grep", "glob":
+		return !tokenLooksSpecificFilePath(textField(arguments, "path", "file_path"))
+	}
+	return false
+}
+
 func evaluate(req request, policy *operatorPolicy) response {
 	decision := evaluateBaseline(req, policy)
 	var arguments map[string]any
-	if json.Unmarshal(req.Arguments, &arguments) == nil && shellTool(req.Tool) && sourceDiscovery(textField(arguments, "command", "cmd")) {
+	if json.Unmarshal(req.Arguments, &arguments) == nil && discoveryTool(req, arguments) {
 		// No authenticated final-plan contract is available on this legacy seam.
 		// Never manufacture enforcement eligibility from a tool argument.
 		decision.Exploration = &explorationDecision{Mode: "observe", Reason: "authenticated_contract_unavailable", Alternatives: explorationAlternatives()}
+		if policy != nil {
+			l := policy.Exploration
+			decision.Exploration.AccountingRequired = l.RawScans != nil || l.Files != nil || l.Graph != nil || l.Bytes != nil || l.Tokens != nil
+		}
 	}
 	return decision
 }

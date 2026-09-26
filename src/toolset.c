@@ -21,7 +21,8 @@ static const builtin_toolset_t BUILTINS[] = {
      * handler shared with external MCP clients. */
     {"core",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "context_contract_expand",
+      "search_memory",
       /* aimee condenses long tool output and leaves a '[... ref "tc-..."]' pointer.
        * The tool that expands it was advertised to every agent (TSURF_ALL) and named
        * by no toolset, so agent_tools_filter_for_role stripped it from every role
@@ -61,12 +62,13 @@ static const builtin_toolset_t BUILTINS[] = {
      * never gains write_file/edit_file/bash: a reviewer must not edit what it judges. */
     {"review_indexed",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
-      "search_docs", "record_attempt", NULL}},
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "context_contract_expand",
+      "search_memory", "search_docs", "record_attempt", NULL}},
     {"script_rpc",
      {NULL},
      {"read_file", "list_files", "grep", "git_status", "git_log", "git_diff", "code_search",
-      "find_symbol", "search_memory", "search_docs", "request_input", NULL}},
+      "find_symbol", "context_contract_expand", "search_memory", "search_docs", "request_input",
+      NULL}},
     {"full_stack", {"code", "review", "git", NULL}, {NULL}},
     {NULL, {NULL}, {NULL}},
 };
@@ -108,6 +110,7 @@ static const char *const KNOWN_TOOLS[] = {
     "list_background_processes",
     "search_docs",
     "find_symbol",
+    "context_contract_expand",
     "read_symbol",
     "edit_symbol",
     "run_tests",

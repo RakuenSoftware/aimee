@@ -6,6 +6,7 @@
 
 #include "agent_exec.h"
 #include "computer_use.h"
+#include "request_context.h"
 #include <aimee/core/event_bus/module_protocol.h>
 #include "headers/module_json_call.h"
 
@@ -49,6 +50,42 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
    return g_reply ? cJSON_Parse(g_reply) : NULL;
 }
 
+static request_context_t test_context;
+static int context_active;
+static int owner_calls;
+static const char *owner_reply = "{\"status\":\"ok\"}";
+const request_context_t *request_context_get(void)
+{
+   return context_active ? &test_context : NULL;
+}
+int request_context_set_exploration_binding(const char *binding)
+{
+   snprintf(test_context.exploration_binding, sizeof(test_context.exploration_binding), "%s",
+            binding);
+   return 0;
+}
+int agent_get_durable_job_id(void)
+{
+   return 7;
+}
+size_t agent_tool_output_cap(void)
+{
+   return 4096;
+}
+int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
+                                  char *reply, size_t reply_len)
+{
+   assert(strcmp(principal, "alice") == 0 && strcmp(sid, "session") == 0);
+   cJSON *body = cJSON_Parse(request);
+   assert(cJSON_IsObject(body));
+   cJSON_Delete(body);
+   owner_calls++;
+   if (!owner_reply)
+      return -1;
+   snprintf(reply, reply_len, "%s", owner_reply);
+   return 0;
+}
+
 int main(void)
 {
    char reason[256];
@@ -79,6 +116,33 @@ int main(void)
    assert(policy_check_tool("read_file", "none", "{}", reason, sizeof reason) == -1);
    assert(strstr(reason, "invalid decision"));
 
+   context_active = 1;
+   snprintf(test_context.principal, sizeof(test_context.principal), "alice");
+   snprintf(test_context.request_id, sizeof(test_context.request_id), "request");
+   cJSON *offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
+   assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
+   cJSON_Delete(offer);
+   assert(owner_calls == 1 && test_context.exploration_binding[0]);
+   g_reply = "{\"allowed\":false,\"reason\":\"baseline denies\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{}", "a", reason, sizeof reason) == -1);
+   assert(owner_calls == 1);
+   g_reply = "{\"allowed\":true,\"reason\":\"baseline "
+             "allows\",\"exploration\":{\"mode\":\"observe\",\"accounting_required\":true}}";
+   owner_reply = "{\"allowed\":false,\"reason\":\"operator_exploration_budget_exhausted\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "a", reason,
+                                    sizeof reason) == -1);
+   assert(owner_calls == 2 && strstr(reason, "budget_exhausted"));
+   owner_reply = "{\"allowed\":true,\"reason\":\"observed\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "b", reason,
+                                    sizeof reason) == 0);
+   owner_reply = NULL;
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "c", reason,
+                                    sizeof reason) == -1);
+   /* Adaptive issuer failure falls back to baseline only without operator ceilings. */
+   g_reply =
+       "{\"allowed\":true,\"reason\":\"baseline allows\",\"exploration\":{\"mode\":\"observe\"}}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "d", reason,
+                                    sizeof reason) == 0);
    puts("test_execution_policy_bus: OK");
    return 0;
 }

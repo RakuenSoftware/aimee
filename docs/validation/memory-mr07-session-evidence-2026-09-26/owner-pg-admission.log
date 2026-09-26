@@ -1,0 +1,4 @@
+=== RUN   TestSessionExplorationLiveAtomicOwner
+--- PASS: TestSessionExplorationLiveAtomicOwner (0.40s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/families	1.413s

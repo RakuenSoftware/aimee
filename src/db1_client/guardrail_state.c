@@ -982,3 +982,17 @@ int db1_session_state_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS
 }
 
 /* clang-format on */
+
+int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
+                                  char *reply, size_t reply_len)
+{
+   if (!principal || !principal[0] || !sid || !sid[0] || !request || !reply || reply_len < 2 ||
+       reply_len > 65536)
+      return -1;
+   const char *fields[] = {principal, sid, request};
+   char *values[] = {reply};
+   size_t caps[] = {reply_len};
+   reply[0] = '\0';
+   return write_result(
+       call_stage(AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY, fields, 3, values, caps, 1, NULL));
+}

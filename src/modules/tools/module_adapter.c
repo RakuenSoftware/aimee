@@ -19,8 +19,9 @@ static aimee_tool_class_t classify(const char *name)
        "rules_propose", "learning_propose", "git_commit",  "git_push",
        "git_branch",    "git_pr",           NULL};
    static const char *const control[] = {
-       "request_input",    "clarify_start",        "clarify_answer",    "diagnose_start",
-       "diagnose_observe", "diagnose_hypothesize", "diagnose_evidence", NULL};
+       "request_input",        "context_contract_expand", "clarify_start",
+       "clarify_answer",       "diagnose_start",          "diagnose_observe",
+       "diagnose_hypothesize", "diagnose_evidence",       NULL};
    static const char *const read[] = {
        "read_file",   "list_files",    "grep",        "code_search", "find_symbol",
        "read_symbol", "search_memory", "search_docs", "list_notes",  "search_notes",

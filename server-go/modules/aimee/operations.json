@@ -9998,11 +9998,23 @@
       "scope": "global",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok", "invalid", "failed"],
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
       "request": {
         "fields": [
-          {"name": "principal", "type": "text", "required": true},
-          {"name": "max", "type": "int", "required": true}
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "max",
+            "type": "int",
+            "required": true
+          }
         ]
       },
       "reply": {
@@ -10010,9 +10022,17 @@
           "out": "out_ids",
           "bound": "max",
           "max_rows": 4096,
-          "column": {"kind": "text", "width": "DB1_SS_ID_LEN"}
+          "column": {
+            "kind": "text",
+            "width": "DB1_SS_ID_LEN"
+          }
         },
-        "fields": [{"name": "session_id", "type": "text"}],
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text"
+          }
+        ],
         "max_bytes": 1048576
       }
     },
@@ -10021,21 +10041,41 @@
       "id": 26,
       "name": "server_session_erase_subject",
       "c_name": "db1_server_session_erase_subject",
-      "c_params": ["request_id", "principal"],
+      "c_params": [
+        "request_id",
+        "principal"
+      ],
       "c_returns": "int64",
       "wire_format": "db1-fields-v2",
       "scope": "global",
       "transaction": "single",
       "idempotency": "safe",
-      "results": ["ok", "invalid", "failed"],
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
       "request": {
         "fields": [
-          {"name": "request_id", "type": "text", "required": true},
-          {"name": "principal", "type": "text", "required": true}
+          {
+            "name": "request_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          }
         ]
       },
       "reply": {
-        "fields": [{"name": "deleted", "type": "int"}],
+        "fields": [
+          {
+            "name": "deleted",
+            "type": "int"
+          }
+        ],
         "max_bytes": 32
       }
     },
@@ -16526,6 +16566,7 @@
       "idempotency": "safe",
       "results": [
         "ok",
+        "missing",
         "invalid",
         "failed"
       ],
@@ -27571,6 +27612,58 @@
           }
         ],
         "max_bytes": 262144
+      }
+    },
+    {
+      "family": "guardrail_state",
+      "id": 8,
+      "name": "session_exploration_apply",
+      "c_name": "db1_session_exploration_apply",
+      "c_params": [
+        "principal",
+        "sid",
+        "request",
+        "reply",
+        "reply_len"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "single",
+      "idempotency": "keyed",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "sid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "reply",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
       }
     }
   ]

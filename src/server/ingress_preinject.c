@@ -12,6 +12,7 @@
 #include "dstr.h"
 #include "log.h"
 #include "request_context.h"
+#include "agent_exec.h"
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
 #include "integrity.h"
@@ -137,6 +138,15 @@ int ingress_preinject_accept_native_projection(const cJSON *projection)
    const char *ticket =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
    int rc = ticket ? request_context_set_source_release(ticket) : -1;
+   if (rc == 0)
+   {
+      char workspace[512] = "", project[512] = "";
+      if (ingress_preinject_resolve_active_scope(workspace, sizeof(workspace), project,
+                                                 sizeof(project)) == 0)
+         (void)policy_prepare_exploration(
+             cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"), g_session_id,
+             workspace, project);
+   }
    cJSON_Delete(response);
    if (rc != 0)
       (void)request_context_refuse_assembly("unavailable");
@@ -1044,6 +1054,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          result = NULL;
       }
    }
+   if (result)
+      (void)policy_prepare_exploration(
+          cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"), g_session_id,
+          active_workspace, active_project);
    if (!result && rctx)
    {
       const char *ticket =

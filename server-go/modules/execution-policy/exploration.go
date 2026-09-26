@@ -34,13 +34,16 @@ func (l explorationLimits) valid() bool {
 }
 
 type explorationBinding struct {
-	Principal          string `json:"principal"`
-	Session            string `json:"session"`
-	Task               string `json:"task"`
-	Project            string `json:"project"`
-	WorktreeGeneration string `json:"worktree_generation"`
-	IndexGeneration    string `json:"index_generation"`
-	MemoryOwner        string `json:"memory_owner"`
+	PlanDigest           string `json:"plan_digest,omitempty"`
+	SourceVersionsDigest string `json:"source_versions_digest,omitempty"`
+	Workspace            string `json:"workspace,omitempty"`
+	Principal            string `json:"principal"`
+	Session              string `json:"session"`
+	Task                 string `json:"task"`
+	Project              string `json:"project"`
+	WorktreeGeneration   string `json:"worktree_generation"`
+	IndexGeneration      string `json:"index_generation"`
+	MemoryOwner          string `json:"memory_owner"`
 }
 
 func (b explorationBinding) valid() bool {
@@ -65,6 +68,9 @@ type explorationContract struct {
 }
 
 func (c explorationContract) valid(now time.Time) bool {
+	if (c.Binding.PlanDigest != "" && c.Binding.PlanDigest != c.PlanDigest) || (c.Binding.SourceVersionsDigest != "" && c.Binding.SourceVersionsDigest != c.SourceVersionsDigest) {
+		return false
+	}
 	if c.ID == "" || c.Revision == 0 || !c.Binding.valid() || c.PlanDigest == "" || c.SourceVersionsDigest == "" || c.QueryClass == "" || c.ConfidenceProvenance == "" || !c.Limits.valid() || c.Created.After(now) || !c.Expires.After(now) || !c.Expires.After(c.Created) {
 		return false
 	}
@@ -83,11 +89,12 @@ func (c explorationContract) valid(now time.Time) bool {
 }
 
 type explorationDecision struct {
-	Mode          string   `json:"mode"`
-	Reason        string   `json:"reason"`
-	WouldRestrict bool     `json:"would_restrict"`
-	Restricted    bool     `json:"restricted"`
-	Alternatives  []string `json:"alternatives,omitempty"`
+	AccountingRequired bool     `json:"accounting_required,omitempty"`
+	Mode               string   `json:"mode"`
+	Reason             string   `json:"reason"`
+	WouldRestrict      bool     `json:"would_restrict"`
+	Restricted         bool     `json:"restricted"`
+	Alternatives       []string `json:"alternatives,omitempty"`
 }
 
 func explorationAlternatives() []string {
@@ -105,30 +112,35 @@ type explorationUsage struct {
 // Costs are upper bounds reserved before dispatch. Uncertain dispatches keep the
 // reservation; only a host-observed pre-dispatch cancellation can refund it.
 type explorationAttempt struct {
-	Path    string             `json:"canonical_path"`
-	ID      string             `json:"id"`
-	Binding explorationBinding `json:"binding"`
-	Class   string             `json:"class"`
-	File    string             `json:"file,omitempty"`
-	Bytes   int64              `json:"bytes"`
-	Tokens  int64              `json:"tokens"`
+	ActionDigest string             `json:"action_digest"`
+	Path         string             `json:"canonical_path"`
+	ID           string             `json:"id"`
+	Binding      explorationBinding `json:"binding"`
+	Class        string             `json:"class"`
+	File         string             `json:"file,omitempty"`
+	Bytes        int64              `json:"bytes"`
+	Tokens       int64              `json:"tokens"`
 }
 type explorationReservation struct {
-	Attempt  explorationAttempt  `json:"attempt"`
-	Decision explorationDecision `json:"decision"`
-	Charged  bool                `json:"charged"`
-	Started  bool                `json:"started"`
-	Refunded bool                `json:"refunded"`
+	ReservedAt time.Time           `json:"reserved_at"`
+	Attempt    explorationAttempt  `json:"attempt"`
+	Decision   explorationDecision `json:"decision"`
+	Charged    bool                `json:"charged"`
+	Started    bool                `json:"started"`
+	Refunded   bool                `json:"refunded"`
 }
 type explorationSnapshot struct {
-	Outcomes     map[string]explorationIndexedOutcome `json:"indexed_outcomes"`
-	Fallbacks    []explorationFallback                `json:"fallbacks"`
-	Revisions    []explorationContract                `json:"revisions"`
-	TaskUsage    explorationUsage                     `json:"task_usage"`
-	SessionUsage explorationUsage                     `json:"session_usage"`
-	Attempts     map[string]explorationReservation    `json:"attempts"`
-	LastTurn     uint64                               `json:"last_turn"`
-	StarvedTurns uint64                               `json:"starved_turns"`
+	CompletedTurns map[string]bool                      `json:"completed_turns"`
+	CompletedAt    time.Time                            `json:"completed_at"`
+	UnresolvedGap  bool                                 `json:"unresolved_gap"`
+	Outcomes       map[string]explorationIndexedOutcome `json:"indexed_outcomes"`
+	Fallbacks      []explorationFallback                `json:"fallbacks"`
+	Revisions      []explorationContract                `json:"revisions"`
+	TaskUsage      explorationUsage                     `json:"task_usage"`
+	SessionUsage   explorationUsage                     `json:"session_usage"`
+	Attempts       map[string]explorationReservation    `json:"attempts"`
+	LastTurn       uint64                               `json:"last_turn"`
+	StarvedTurns   uint64                               `json:"starved_turns"`
 }
 
 // The task owner supplies transactional durable storage. Commit must persist
@@ -153,6 +165,11 @@ func cloneUsage(u explorationUsage) explorationUsage {
 }
 func (s explorationSnapshot) clone() explorationSnapshot {
 	s.Revisions = append([]explorationContract(nil), s.Revisions...)
+	turns := make(map[string]bool, len(s.CompletedTurns))
+	for k, v := range s.CompletedTurns {
+		turns[k] = v
+	}
+	s.CompletedTurns = turns
 	s.Fallbacks = append([]explorationFallback(nil), s.Fallbacks...)
 	outcomes := make(map[string]explorationIndexedOutcome, len(s.Outcomes))
 	for k, v := range s.Outcomes {
@@ -190,7 +207,7 @@ func (l *explorationLedger) issue(c explorationContract, now time.Time) error {
 	}
 	if len(s.Revisions) > 0 {
 		old := s.Revisions[len(s.Revisions)-1]
-		if c.ID != old.ID || c.Revision != old.Revision+1 || c.Binding.Principal != old.Binding.Principal || c.Binding.Session != old.Binding.Session || c.Binding.Task != old.Binding.Task || c.Binding.Project != old.Binding.Project {
+		if c.ID != old.ID || c.Revision != old.Revision+1 || c.Binding.Principal != old.Binding.Principal || c.Binding.Session != old.Binding.Session || c.Binding.Task != old.Binding.Task {
 			return errors.New("contract revision cannot transfer task or session")
 		}
 	}
@@ -313,7 +330,7 @@ func (l *explorationLedger) reserve(a explorationAttempt, operator explorationLi
 		s.TaskUsage = tu
 		s.SessionUsage = su
 	}
-	s.Attempts[a.ID] = explorationReservation{Attempt: a, Decision: d, Charged: charged}
+	s.Attempts[a.ID] = explorationReservation{Attempt: a, Decision: d, Charged: charged, ReservedAt: now}
 	if err = l.save(s); err != nil {
 		return explorationDecision{Mode: "observe", Reason: "contract_storage_unavailable"}, err
 	}

@@ -247,7 +247,18 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
 int agent_estimate_confidence(const char *response_text);
 int policy_check_tool(const char *tool_name, const char *side_effect, const char *args_json,
                       char *reason_out, size_t reason_len);
+int policy_check_tool_attempt(const char *tool_name, const char *side_effect, const char *args_json,
+                              const char *attempt_id, char *reason_out, size_t reason_len);
+int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
+                              const char *attempt, char *reason, size_t reason_len);
+char *policy_observe_indexed(const char *tool, const char *arguments, const char *attempt,
+                             const char *result);
+char *policy_expand_exploration(const char *reason, const char *gap, const char *outcome);
+void policy_complete_exploration_turn(int turn);
 int policy_load(void);
+struct cJSON;
+int policy_prepare_exploration(const struct cJSON *offer, const char *session,
+                               const char *workspace, const char *project);
 
 /* Metrics, introspection, manifests, contract */
 void agent_write_metrics(void);

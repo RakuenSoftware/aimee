@@ -161,3 +161,11 @@ void request_context_capture_budget_header(request_context_t *ctx, const char *r
       line = end + 2;
    }
 }
+
+int request_context_set_exploration_binding(const char *binding)
+{
+   if (!g_req_ctx_set || !binding || strlen(binding) >= sizeof(g_req_ctx.exploration_binding))
+      return -1;
+   snprintf(g_req_ctx.exploration_binding, sizeof(g_req_ctx.exploration_binding), "%s", binding);
+   return 0;
+}

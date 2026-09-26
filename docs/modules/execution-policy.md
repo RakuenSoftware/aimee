@@ -99,11 +99,26 @@ contract revision and one-minute expiry; operator limits still apply. Two
 completed constrained turns can lower the adaptive tier without changing
 confidence provenance. These APIs are not exposed through model tool JSON.
 
-This is an MR-07 implementation checkpoint, not completion. The state machine
-still needs the authenticated task/session storage adapter, session-wide
-accounting across separate tasks/processes, final-memory-plan issuance, and the
-shared live decision path for the attention guard and execution-policy caller.
-The commit callback and restored snapshots in unit tests do not establish
-production durability or host authentication. Enforcement activation additionally
-requires the predeclared paired-workload calibration and noninferiority gate;
-no production workload is enabled by this checkpoint. MR-08 remains pending.
+The session owner now commits the bounded state into `session_state` using
+migration 38. Its private operation checks the session directory's principal,
+locks the session row, and applies the same accounting across tasks and
+processes. Hard directives run before admission, which atomically marks a call
+as possibly dispatched; uncertain outcomes cannot refund a charge. Optional
+adaptive storage failure falls back to baseline, while configured operator
+ceilings still require durable accounting. Final memory assembly provides plan/source commitments and coverage;
+C forwards them without deciding memory sufficiency. Native dispatch and the
+authenticated `hooks.pre` route consume the Go accounting decision. Literal
+operator ceilings live under `exploration` in the operator policy; optional
+observe-only ceilings live under `adaptive_exploration`.
+
+`context_contract_expand` is registered as a native control tool. It consumes a
+reason and references from a host-observed `code_search`/`find_symbol` failure or
+empty result. Completed native turns derive starvation from recorded lookup
+gaps and budget observations; model declarations and trivial writes cannot
+reset it. External hook result bodies are not accepted as proof of a lookup.
+
+MR-07 is still in progress. Worktree/index generations are explicitly unavailable
+on this offer, so production issuance remains observe-only. Calibrated activation,
+fresh deployment acceptance, and the external-client recovery journey remain to
+be finished. MR-08 and MR-09 have not started. Tests of the storage and native
+host integration are evidence for those components, not a proposal closeout.

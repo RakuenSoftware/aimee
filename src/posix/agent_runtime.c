@@ -1832,51 +1832,6 @@ native_provider_http:
             continue;
          }
 
-         /* Check policy */
-         char policy_reason[256] = {0};
-         const char *se = tool_side_effect(parsed.calls[i].name);
-         if (policy_check_tool(parsed.calls[i].name, se, parsed.calls[i].arguments, policy_reason,
-                               sizeof(policy_reason)) != 0)
-         {
-            char *err_result = malloc(512);
-            if (!err_result)
-            {
-               total_calls++;
-               continue;
-            }
-            snprintf(err_result, 512, "error: blocked by policy: %s", policy_reason);
-            consecutive_errors++;
-            if (anthropic)
-            {
-               cJSON *tr = cJSON_CreateObject();
-               cJSON_AddStringToObject(tr, "type", "tool_result");
-               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tr, "content", err_result);
-               cJSON_AddItemToArray(anth_results, tr);
-            }
-            else if (!chatgpt)
-            {
-               cJSON *tool_msg = cJSON_CreateObject();
-               cJSON_AddStringToObject(tool_msg, "role", "tool");
-               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tool_msg, "content", err_result);
-               cJSON_AddItemToArray(messages, tool_msg);
-            }
-            else
-            {
-               cJSON *out_item = cJSON_CreateObject();
-               cJSON_AddStringToObject(out_item, "type", "function_call_output");
-               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(out_item, "output", err_result);
-               cJSON_AddItemToArray(messages, out_item);
-            }
-            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
-            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
-            free(err_result);
-            total_calls++;
-            continue;
-         }
-
          /* Check hard directives */
          char directive_reason[256] = {0};
          if (directive_check_tool(parsed.calls[i].name, parsed.calls[i].arguments, directive_reason,
@@ -1921,6 +1876,52 @@ native_provider_http:
             continue;
          }
 
+         /* Check policy */
+         char policy_reason[256] = {0};
+         const char *se = tool_side_effect(parsed.calls[i].name);
+         if (policy_check_tool_attempt(parsed.calls[i].name, se, parsed.calls[i].arguments,
+                                       parsed.calls[i].id, policy_reason,
+                                       sizeof(policy_reason)) != 0)
+         {
+            char *err_result = malloc(512);
+            if (!err_result)
+            {
+               total_calls++;
+               continue;
+            }
+            snprintf(err_result, 512, "error: blocked by policy: %s", policy_reason);
+            consecutive_errors++;
+            if (anthropic)
+            {
+               cJSON *tr = cJSON_CreateObject();
+               cJSON_AddStringToObject(tr, "type", "tool_result");
+               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(tr, "content", err_result);
+               cJSON_AddItemToArray(anth_results, tr);
+            }
+            else if (!chatgpt)
+            {
+               cJSON *tool_msg = cJSON_CreateObject();
+               cJSON_AddStringToObject(tool_msg, "role", "tool");
+               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(tool_msg, "content", err_result);
+               cJSON_AddItemToArray(messages, tool_msg);
+            }
+            else
+            {
+               cJSON *out_item = cJSON_CreateObject();
+               cJSON_AddStringToObject(out_item, "type", "function_call_output");
+               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(out_item, "output", err_result);
+               cJSON_AddItemToArray(messages, out_item);
+            }
+            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
+            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            free(err_result);
+            total_calls++;
+            continue;
+         }
+
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
@@ -1930,6 +1931,26 @@ native_provider_http:
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
          agent_tools_set_effect_authorized(0);
+         char *exploration_outcome = policy_observe_indexed(
+             parsed.calls[i].name, parsed.calls[i].arguments, parsed.calls[i].id, result_str);
+         if (exploration_outcome)
+         {
+            cJSON *observation = cJSON_Parse(exploration_outcome);
+            if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observation, "expansion_available")))
+            {
+               size_t n = (result_str ? strlen(result_str) : 0) + strlen(exploration_outcome) + 32;
+               char *with_gap = malloc(n);
+               if (with_gap)
+               {
+                  snprintf(with_gap, n, "%s\nExploration recovery: %s",
+                           result_str ? result_str : "", exploration_outcome);
+                  free(result_str);
+                  result_str = with_gap;
+               }
+            }
+            cJSON_Delete(observation);
+            free(exploration_outcome);
+         }
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
@@ -2024,6 +2045,9 @@ native_provider_http:
             cJSON_Delete(anth_results);
          }
       }
+
+      if (!out->error[0])
+         policy_complete_exploration_turn(turn);
 
       if (progress_action == LIVENESS_PROGRESS_ABORT)
       {

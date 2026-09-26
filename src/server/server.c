@@ -958,6 +958,16 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    session_state_save(&state, sid);
 
+   if (rc != 2 && hook_identity == 1)
+   {
+      const char *attempt =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool_use_id"));
+      if (!attempt || !attempt[0])
+         attempt = request_id;
+      if (policy_check_session_tool(sid, tool_name, tool_input, attempt, msg, sizeof(msg)) != 0)
+         rc = 2;
+   }
+
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent
     * (rc==2); if aimee has usable delegates, auto-launch a delegate from the call

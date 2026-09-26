@@ -1299,6 +1299,21 @@ static char *td_code_search(cJSON *args, const char *name, const char *dispatch_
    return result;
 }
 
+/* Standalone tools providers have no authenticated host task context. */
+__attribute__((weak)) char *policy_expand_exploration(const char *reason, const char *gap,
+                                                      const char *outcome)
+{
+   return safe_strdup("error: authenticated host exploration context unavailable");
+}
+
+static char *td_context_contract_expand(cJSON *args)
+{
+   return policy_expand_exploration(
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "reason")),
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "gap_ref")),
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "outcome_id")));
+}
+
 static char *td_find_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
                             const char *dispatch_sid, int timeout_ms)
 {
@@ -2321,6 +2336,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_request_input(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "code_search") == 0)
       result = td_code_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "context_contract_expand") == 0)
+      result = td_context_contract_expand(args);
    else if (strcmp(name, "find_symbol") == 0)
       result = td_find_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "read_symbol") == 0)
