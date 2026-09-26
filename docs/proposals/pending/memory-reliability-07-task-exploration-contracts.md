@@ -1,6 +1,6 @@
 # MR-07: Task-bound exploration contracts with starvation recovery
 
-- **State:** In progress; durable observe contracts and native recovery implemented
+- **State:** Observe-mode implementation complete; enforcement promotion explicitly deferred
 - **Priority:** P1: enable enforcement only after context correctness gates
 - **Owner:** Task runtime, attention guard and execution policy
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate under [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
@@ -74,3 +74,18 @@ native indexed recovery. Authenticated activation, bounded expansion and
 same-query revocation passed on `be46915db`. Real-provider collection also passed
 a source-answer smoke test. Paired workload acceptance remains open; the
 shipping default remains observe.
+
+## Observe-mode handoff (2026-09-26)
+
+The operator selected completion in observe mode and continuation to MR-08.
+Durable contracts, native recovery, functional activation/revocation and the
+real-provider collector are implemented and validated as described in the
+[session report](../../validation/memory-mr07-session-2026-09-26.md).
+This closes the observe implementation, not the enforcement release gate.
+Production enforcement remains off; no calibration or promotion is claimed.
+
+The deferred paired gate will use independent code-navigation tasks frozen from
+the Aimee repository. Cost will use a documented token-rate model and be reported
+as **estimated cost**, never actual billing. Corpus, source revision, rates,
+model and all other required evaluation pins must be frozen before collection.
+No paired corpus or release result has yet been frozen or collected.

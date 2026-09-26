@@ -230,3 +230,13 @@ enforcement and stderr backpressure. The paired endpoint reports no billing
 cost. This single smoke test has no frozen independent-task corpus or treatment
 comparison and cannot establish scan reduction, noninferiority, p95 or cost
 parity. Those gates remain open.
+
+## Operator-approved observe completion
+
+On 2026-09-26 the operator explicitly chose to finish the implementation in
+observe mode, defer promotion, and proceed to MR-08. The functional and smoke
+results above support that handoff; they do not pass the paired release gate.
+The operator also selected independent Aimee repository code-navigation tasks
+and a documented token-rate model reported as estimated cost for that deferred
+evaluation. These decisions resolve the outstanding corpus and cost-basis
+questions. No rates, corpus manifest or promotion artifact are claimed here.
