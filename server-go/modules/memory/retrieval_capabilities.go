@@ -9,13 +9,16 @@ import (
 // index, complete coverage, or a successful execution. Mixed nested calls retain
 // separate observations instead of letting the last call hide a fallback.
 type retrievalArmObservation struct {
-	State          string `json:"state"`
-	Reason         string `json:"reason"`
-	Candidates     int    `json:"candidates"`
-	Quota          int    `json:"candidate_quota"`
-	IndexReadiness string `json:"index_readiness"`
-	IndexVersion   string `json:"index_version,omitempty"`
-	Calls          int    `json:"calls"`
+	State              string `json:"state"`
+	Reason             string `json:"reason"`
+	Candidates         int    `json:"candidates"`
+	Quota              int    `json:"candidate_quota"`
+	IndexReadiness     string `json:"index_readiness"`
+	IndexVersion       string `json:"index_version,omitempty"`
+	IdentityState      string `json:"identity_state,omitempty"`
+	CurrentWatermark   string `json:"current_watermark,omitempty"`
+	ValidatedWatermark string `json:"validated_watermark,omitempty"`
+	Calls              int    `json:"calls"`
 }
 type retrievalCapabilities struct {
 	mu            sync.Mutex

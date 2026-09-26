@@ -32,7 +32,7 @@ Completion of all MR-01–18 implementation and acceptance work is the active go
 Execution is sequential by proposal, as requested on 2026-09-24: complete MR-01,
 then MR-02, continuing numerically through MR-18. MR-01–10 functional implementation has now been addressed, with MR-07 in
 observe mode and MR-09/MR-10 optional policies disabled pending promotion
-evidence. MR-11 is next. Previously implemented work for later proposals is retained, but new
+evidence. MR-11 generation implementation is under canary validation; MR-12 follows its closeout. Previously implemented work for later proposals is retained, but new
 work on those proposals waits for the preceding proposal's closeout. Integration
 work required to satisfy the active proposal and its validation remains in scope.
 The [MR-01 closeout checklist](memory-reliability-01-closeout.md) maps its seven

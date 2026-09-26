@@ -60,6 +60,9 @@ type assertionEgressFixture struct {
 }
 
 func (e *assertionEgressFixture) Do(_ context.Context, _ uint64, r egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if strings.HasSuffix(r.TargetURL, "/health") {
+		return egress.HTTPResponse{Status: 200, Body: []byte(`{"serving_id":"assertion-fixture-v1"}`)}, nil
+	}
 	e.seen = append(e.seen, string(r.Body))
 	dim := e.dim
 	if e.wrong {
@@ -91,11 +94,11 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true);
  INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status) VALUES('assertion-search-fixture','assert','test','system',100,'open')`)
 	exec(`INSERT INTO entity_edges(id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,valid_from,valid_until,asserted_at,superseded_at,commit_id) VALUES
- ($1,'AssertionAtlas','deployment_state','old','semantic','world_fact','persistent','A',.9,80,'2026-01-01T00:00:00Z','2026-03-01T00:00:00Z','2026-01-02T00:00:00Z','2026-03-02T00:00:00Z','assertion-search-fixture'),
+ ($1,'AssertionAtlas','deployment_state','old','semantic','world_fact','superseded','A',.9,80,'2026-01-01T00:00:00Z','2026-03-01T00:00:00Z','2026-01-02T00:00:00Z','2026-03-02T00:00:00Z','assertion-search-fixture'),
  ($1+1,'AssertionAtlas','deployment_state','LinkNode','semantic','world_fact','persistent','A',.95,80,'2026-03-01T00:00:00Z','','2026-03-02T00:00:00Z','','assertion-search-fixture'),
  ($1+2,'LinkNode','owner','Casey','semantic','world_fact','persistent','A',.8,80,'','','','','assertion-search-fixture'),
  ($1+3,'VectorOnly','owner','Different','semantic','world_fact','persistent','A',.8,80,'','','','','assertion-search-fixture')`, old)
-	exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version) SELECT 'assertion-search-fixture',id,'assert',0,1,'persistent',confidence,80,1 FROM entity_edges WHERE commit_id='assertion-search-fixture'`)
+	exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version) SELECT 'assertion-search-fixture',id,'assert',0,1,lifecycle_state,confidence,80,1 FROM entity_edges WHERE commit_id='assertion-search-fixture'`)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,source_span,evidence_hash,observed_at,stance) VALUES($1,'episode','event:41','bytes:4-19','assertion-search-fixture','2026-01-02T00:00:00Z','supports')`, old)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
@@ -320,9 +323,67 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 		t.Fatal(err)
 	}
 	executor := &assertionEgressFixture{dim: dim}
+
+	primeAssertions := func() {
+		t.Helper()
+		exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
+		if err := bound.prepareReembed(ctx, "assertion-replay-generation", "http://assertion-fixture"); err != nil {
+			t.Fatal(err)
+		}
+		ids, err := bound.assertionReembedNext(ctx, "assertion-replay-generation", 0, 256)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			response, err := bound.assertionReembedPoint(ctx, 0, executor, "assertion-replay-generation", id)
+			if err != nil || !response.Embedded {
+				t.Fatal("explicit assertion backfill", id, response, err)
+			}
+		}
+		exec(`INSERT INTO memory_active_embedder(id,version) VALUES(1,'assertion-replay-generation') ON CONFLICT(id) DO UPDATE SET version=EXCLUDED.version`)
+		exec(`SELECT set_config('aimee.memory_scope_all','0',true)`)
+	}
+	primeAssertions()
+	t.Run("retained semantic generations preserve explicit history", func(t *testing.T) {
+		vector := make([]float32, dim)
+		vector[0] = 1
+		literal, _ := vectorLiteral(vector)
+		for _, tc := range []struct {
+			at   string
+			want int64
+		}{{"2026-02-01T00:00:00Z", old}, {"2026-04-01T00:00:00Z", current}} {
+			req := DataRequest{Query: "semantic question", Limit: 64, Assertions: &assertionSearchRequest{ValidAt: tc.at, BelievedAt: tc.at}}
+			candidates, err := bound.assertionCandidates(ctx, req, Scope{}, req.Query, 64, literal, "assertion-replay-generation")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, h := range candidates {
+				if h.ID == tc.want {
+					found = true
+				}
+				if h.Subject == "AssertionAtlas" && h.ID != tc.want {
+					t.Fatal("wrong temporal version", h.ID, tc.at)
+				}
+			}
+			if !found {
+				t.Fatal("retained semantic version missing", tc.want)
+			}
+		}
+		req := DataRequest{Query: "semantic question", Limit: 64, Assertions: &assertionSearchRequest{}}
+		candidates, err := bound.assertionCandidates(ctx, req, Scope{}, req.Query, 64, literal, "assertion-replay-generation")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range candidates {
+			if h.ID == old {
+				t.Fatal("historical vector entered ordinary current recall")
+			}
+		}
+	})
 	handler = NewHandler(executor, WithDataStore(PlacementKB, &bound))
 	got = call()
-	if got["mode"] != "hybrid_shadow" || got["indexed_assertions"].(float64) < 2 {
+	if got["mode"] != "hybrid_shadow" || got["indexed_assertions"] != float64(0) {
 		t.Fatal(got)
 	}
 	vectorFound := false
@@ -379,6 +440,7 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version)
  SELECT 'assertion-fair-pools',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version FROM entity_edges WHERE commit_id='assertion-fair-pools'`)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	primeAssertions()
 	savedArgs := args
 	args = map[string]any{"operation": "assertion-search", "query": "FairPool", "project": "assertion-local", "limit": 2}
 	fair := call()
@@ -428,7 +490,7 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	}
 	executor.wrong = false
 	// Optional SQL failure rolls back to the savepoint and retains lexical evidence.
-	exec(`SAVEPOINT assertion_vector_denied; RESET ROLE; REVOKE SELECT ON memory_embeddings FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
+	exec(`SAVEPOINT assertion_vector_denied; RESET ROLE; REVOKE SELECT ON memory_assertion_embedding_versions FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	got = call()
 	if got["mode"] != "lexical_degraded" || len(hits(got)) != 1 || got["indexed_assertions"] != float64(0) {
 		t.Fatal("vector SQL failure lost lexical evidence", got)

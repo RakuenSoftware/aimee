@@ -22,8 +22,15 @@ func (d vectorEvalStore) CurrentSchemaVersion(context.Context, string) (int64, s
 	return 0, "", nil
 }
 func (d vectorEvalStore) Migrate(ctx context.Context, m store.MigrationRequest) error {
+	var persistence string
+	if err := d.QueryRow(ctx, `SELECT COALESCE((SELECT relpersistence::text FROM pg_class WHERE oid=to_regclass('user_memories')),'t')`).Scan(&persistence); err != nil {
+		return err
+	}
 	for _, sql := range m.Statements {
-		if _, err := d.Exec(ctx, strings.Replace(sql, "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE IF NOT EXISTS", 1)); err != nil {
+		if persistence == "t" {
+			sql = strings.Replace(sql, "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE IF NOT EXISTS", 1)
+		}
+		if _, err := d.Exec(ctx, sql); err != nil {
 			return err
 		}
 	}
@@ -104,11 +111,19 @@ func TestPersonalVectorPrivacyAndMutationRegression(t *testing.T) {
 	}
 	schema := string(raw)
 	a, b := strings.Index(schema, "CREATE TABLE IF NOT EXISTS user_memories ("), strings.Index(schema, "CREATE INDEX IF NOT EXISTS user_memories_recall")
-	if _, err = tx.Exec(ctx, strings.Replace(schema[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)+`
-ALTER TABLE user_memories ADD COLUMN record_revision bigint NOT NULL DEFAULT 1;
-CREATE TEMP TABLE user_memory_collection_generation(id int,owner_id uuid,generation bigint DEFAULT 0);
-INSERT INTO user_memory_collection_generation(id,owner_id) VALUES(1,'00000000-0000-4000-8000-000000000001');
-CREATE TEMP TABLE memories(id bigint,content text);
+	if _, err = tx.Exec(ctx, `CREATE SCHEMA personal_vectors_fixture; SET LOCAL search_path=personal_vectors_fixture,public`+";"+schema[a:b]); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_send_guards.sql", "schema_personal_memory_send_guard_completion.sql", "schema_personal_embedding_cutover.sql"} {
+		sql, err := os.ReadFile("../aimee/families/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(ctx, string(sql)); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if _, err = tx.Exec(ctx, `CREATE TEMP TABLE memories(id bigint,content text);
 INSERT INTO memories VALUES(42,'shared secret must never be embedded by the personal owner');
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep my bicycle in the garden shed'),(43,'unrelated','unrelated astronomy');`); err != nil {
 		t.Fatal(err)
@@ -177,8 +192,8 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep m
 	}
 	executor.serving = "different-model"
 	records, err = p.search(ctx, "where is my bike", "", "", 5)
-	if err != nil || len(records) != 0 {
-		t.Fatal("vector spaces mixed")
+	if err == nil || len(records) != 0 {
+		t.Fatal("vector spaces mixed or identity mismatch unreported")
 	}
 	executor.stall = true
 	bounded, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -220,14 +235,86 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep m
 	// consume the already available lexical result.
 	executor.fail = false
 	s.db = evalQueryer{tx}
-	if _, err := tx.Exec(ctx, "ALTER TABLE user_memory_vectors RENAME TO unavailable_vectors"); err != nil {
+	executor.serving = "fixture-revision-1"
+	if _, err := tx.Exec(ctx, "ALTER TABLE user_memory_embedding_versions RENAME TO unavailable_vectors"); err != nil {
 		t.Fatal(err)
 	}
 	records, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, "astronomy", "", "", 5)
 	if err != nil || len(records) != 1 || records[0].ID != 43 {
 		t.Fatal("vector SQL failure poisoned lexical recall", records, err)
 	}
-	if _, err := tx.Exec(ctx, "ALTER TABLE unavailable_vectors RENAME TO user_memory_vectors"); err != nil {
+	if _, err := tx.Exec(ctx, "ALTER TABLE unavailable_vectors RENAME TO user_memory_embedding_versions"); err != nil {
 		t.Fatal(err)
 	}
+	// Retained source versions survive ordinary expiry and generation rebuilds.
+	var retained int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id=42`).Scan(&retained); err != nil || retained < 3 {
+		t.Fatal("retained private versions overwritten", retained, err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO user_memories(id,key,content) SELECT n,'generation-probe-'||n,'rollback fixture content' FROM generate_series(100,120) n`); err != nil {
+		t.Fatal(err)
+	}
+	originalGeneration := personalGenerationID("memory", "fixture-revision-1")
+	activeGeneration := func() string {
+		t.Helper()
+		var value string
+		if err := tx.QueryRow(ctx, `SELECT generation FROM user_embedding_active WHERE record_class='memory'`).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	executor.serving = "same-dimension-new-space"
+	if err := p.indexBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if activeGeneration() != originalGeneration {
+		t.Fatal("partial private generation activated")
+	}
+	// Restart loses every process-local flag; committed staging rows remain and
+	// the next bounded batch resumes rather than regenerating completed vectors.
+	resumed := &personalVectors{db: db, executor: executor, endpoint: p.endpoint}
+	calls := len(executor.seen)
+	for n := 0; n < 3 && activeGeneration() == originalGeneration; n++ {
+		if err := resumed.indexBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if activeGeneration() != personalGenerationID("memory", executor.serving) || len(executor.seen)-calls >= 16 {
+		t.Fatal("restart did not reuse bounded completed work", len(executor.seen)-calls)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id=42 AND generation=$1`, activeGeneration()).Scan(&retained); err != nil || retained < 4 {
+		t.Fatal("historical private coverage lost during cutover", retained, err)
+	}
+	// Revocation removes all generation copies at reconciliation. Switching the
+	// provider back cannot resurrect the revoked record from a retained space.
+	if _, err := tx.Exec(ctx, `UPDATE user_memories SET lifecycle_state='revoked' WHERE id=100`); err != nil {
+		t.Fatal(err)
+	}
+	executor.fail = true
+	if err := resumed.indexBatch(ctx); err == nil {
+		t.Fatal("offline provider unexpectedly available")
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id=100`).Scan(&retained); err != nil || retained != 0 {
+		t.Fatal("provider outage delayed revocation cleanup", retained, err)
+	}
+	executor.fail = false
+	executor.serving = "fixture-revision-1"
+	for n := 0; n < 3; n++ {
+		if err := resumed.indexBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if activeGeneration() != originalGeneration {
+		t.Fatal("compatible rollback did not activate")
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id=100`).Scan(&retained); err != nil || retained != 0 {
+		t.Fatal("rollback retained revoked vector", retained, err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM user_memories WHERE id=42`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id=42`).Scan(&retained); err != nil || retained != 0 {
+		t.Fatal("private erasure left generation vectors", retained, err)
+	}
+
 }

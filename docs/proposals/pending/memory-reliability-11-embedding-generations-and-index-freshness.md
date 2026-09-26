@@ -1,6 +1,6 @@
 # MR-11: Versioned embedding generations and bounded index freshness
 
-- **State:** Proposed
+- **State:** In progress — generation implementation candidate; deployed acceptance pending
 - **Priority:** P1: retrieval integrity and operations
 - **Owner:** Go memory indexing, with DB2/PostgreSQL generation and storage adapters
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md); trace integration with [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)
@@ -68,3 +68,5 @@ Expose queue age, pending count, retry/failure rate, watermark lag, generation c
 Migrate one record class/store at a time and measure temporary disk, queue and model load. Preserve old readers until generation-aware readers are deployed. Binary rollback requires a compatible active generation or an explicit lexical-only mode; it must not disable identity validation.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+[Implementation and validation record](../../validation/memory-mr11-generations-2026-09-27.md)

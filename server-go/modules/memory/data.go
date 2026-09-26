@@ -857,10 +857,7 @@ ORDER BY (lower(key)=lower($7)) DESC,
 				return nil, releaseErr
 			}
 		}
-		if err != nil {
-			recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "bounded_local_vector_fallback", Quota: limit})
-		} else {
-			recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "local_versioned_candidates", Candidates: len(semantic), Quota: limit, IndexReadiness: "coverage_not_proven"})
+		if err == nil {
 			lanes.add(semantic, laneSemantic)
 			records = fuseRanked(ctx, records, semantic, len(records)+len(semantic), "lexical", "semantic")
 		}

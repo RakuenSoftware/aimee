@@ -52,7 +52,7 @@ func (s *postgresDataStore) unitSemanticCandidates(ctx context.Context, req Data
  +i.unit_weight*0.03+COALESCE(($12::jsonb->'types'->>i.unit_type)::double precision,0)
  +COALESCE(($12::jsonb->'kinds'->>COALESCE(NULLIF(i.unit_kind,''),'episodic'))::double precision,($12::jsonb->>'other_kind')::double precision) AS similarity,
  COALESCE(($12::jsonb->'floors'->>i.unit_type)::double precision,0.52)*$13 AS floor
- FROM inputs i JOIN memory_embedding_versions v ON v.version=$9 AND v.point_id=i.point_id AND v.input_hash=i.input_hash
+ FROM inputs i JOIN memory_embedding_versions v ON v.version=$9 AND v.point_id=i.point_id AND v.input_hash=i.input_hash AND v.source_revision=i.record_revision
  JOIN memories m ON m.id=i.memory_id
  WHERE i.record_type='unit' AND `+currentMemorySQL("m.")+`
  AND CASE WHEN $1 THEN m.scope_type=$2 AND m.scope_value=$3

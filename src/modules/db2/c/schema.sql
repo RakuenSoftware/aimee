@@ -17952,6 +17952,23 @@ CREATE POLICY memory_embedding_versions_parent ON memory_embedding_versions
  WITH CHECK(EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
 
 
+CREATE TABLE IF NOT EXISTS memory_assertion_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version),
+ assertion_id BIGINT NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE,
+ assertion_revision BIGINT NOT NULL CHECK(assertion_revision>0),
+ input_hash TEXT NOT NULL, embedding vector, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT pg_now_text(),
+ PRIMARY KEY(version,assertion_id)
+);
+ALTER TABLE memory_assertion_embedding_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_assertion_embedding_parents ON memory_assertion_embedding_versions;
+CREATE POLICY memory_assertion_embedding_parents ON memory_assertion_embedding_versions
+ USING(NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m ON f.source_id='memory:'||m.id::text
+ WHERE f.assertion_id=memory_assertion_embedding_versions.assertion_id AND f.source_kind='memory'
+ AND f.invalidated_at='' AND m.id IS NULL))
+ WITH CHECK(COALESCE(current_setting('aimee.memory_scope_all',true),'')='1');
+
+
 -- BEGIN memory change journal
 -- Durable storage guards for the Go memory owner. No content is copied here.
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
@@ -18813,6 +18830,20 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION memory_compact_source_children(BIGINT) FROM PUBLIC;
 
+
+-- A narrow storage lock, without granting the index owner canonical write
+-- privileges. NOWAIT avoids lock-order deadlocks with mutation/index workers.
+CREATE OR REPLACE FUNCTION memory_index_cutover_lock() RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+ IF COALESCE(current_setting('aimee.memory_scope_all',true),'')<>'1' THEN
+  RAISE EXCEPTION 'embedding cutover requires all-scope owner' USING ERRCODE='42501';
+ END IF;
+ PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE NOWAIT;
+ IF NOT FOUND THEN RAISE EXCEPTION 'embedding cutover barrier unavailable'; END IF;
+END $$;
+REVOKE ALL ON FUNCTION memory_index_cutover_lock() FROM PUBLIC;
+
 DO $memory_store_grants$
 DECLARE
   relation_name TEXT;
@@ -18827,7 +18858,7 @@ BEGIN
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
     'memory_aliases','memory_chunks','memory_coref_audit','memory_event_frames','memory_temporal_refs',
-    'memory_embedder_versions','memory_embedding_versions','memory_active_embedder','memory_reembed_progress',
+    'memory_embedder_versions','memory_embedding_versions','memory_assertion_embedding_versions','memory_active_embedder','memory_reembed_progress',
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
@@ -18847,6 +18878,7 @@ BEGIN
     END LOOP;
   END LOOP;
   GRANT EXECUTE ON FUNCTION memory_compact_source_children(BIGINT) TO aimee_store_runtime;
+  GRANT EXECUTE ON FUNCTION memory_index_cutover_lock() TO aimee_store_runtime;
   -- Dependency freshness checks run as the caller. They need identity/version
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation,project_id) ON files TO aimee_store_runtime;
@@ -19360,3 +19392,79 @@ INSERT INTO kb_meta (key, value) VALUES ('schema_version', '43')
 CREATE INDEX IF NOT EXISTS memory_invalidation_anchor
  ON memory_invalidation_outbox(memory_id,operation,record_revision,generation)
  INCLUDE(recorded_at,scope_type,scope_value);
+
+-- MR-11: Go-owned embedding generation metadata and durable assertion work.
+-- Old serving IDs remain explicit legacy identities; migration never certifies
+-- an unknown vector space or marks its retained temporal coverage complete.
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS generation_state TEXT NOT NULL DEFAULT 'created'
+ CHECK(generation_state IN ('created','backfilling','catching_up','validating','active','retired','failed','cancelled'));
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS identity_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+ CHECK(identity_state IN ('legacy_unknown','verified'));
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS generation_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS embedding_identity JSONB;
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS snapshot_watermark JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS validated_watermark JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS coverage JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedding_versions ADD COLUMN IF NOT EXISTS source_revision BIGINT NOT NULL DEFAULT 0 CHECK(source_revision>=0);
+UPDATE memory_embedder_versions v SET generation_state='active'
+ WHERE generation_state='created' AND EXISTS(SELECT 1 FROM memory_active_embedder a WHERE a.version=v.version);
+
+CREATE OR REPLACE FUNCTION memory_assertion_index_enqueue() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE target BIGINT;
+BEGIN
+ target:=CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END;
+ DELETE FROM memory_assertion_embedding_versions WHERE assertion_id=target;
+ INSERT INTO public.kb_async_jobs(kind,document_id,project,status,generation)
+ VALUES('memory_assertion_index',target,'memory','pending',1)
+ ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+ generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END $$;
+DROP TRIGGER IF EXISTS memory_assertion_index_enqueue ON entity_edges;
+CREATE TRIGGER memory_assertion_index_enqueue AFTER INSERT OR UPDATE OR DELETE ON entity_edges
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_index_enqueue();
+INSERT INTO kb_async_jobs(kind,document_id,project,status)
+ SELECT 'memory_assertion_index',id,'memory','pending' FROM entity_edges WHERE edge_class='semantic'
+ ON CONFLICT(kind,document_id) DO NOTHING;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT SELECT,INSERT,UPDATE,DELETE ON memory_assertion_embedding_versions TO aimee_store_runtime;
+ END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION memory_assertion_dependency_enqueue() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE before_id BIGINT; after_id BIGINT;
+BEGIN
+ IF TG_TABLE_NAME='memories' THEN
+  IF TG_OP='UPDATE' AND NEW.record_revision=OLD.record_revision THEN RETURN NULL; END IF;
+  before_id:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.id END;
+  after_id:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.id END;
+  -- Invalidate derived vectors in every retained generation in the canonical
+  -- transaction. A rollback generation cannot retain a removed parent's copy.
+  DELETE FROM memory_assertion_embedding_versions v USING fact_evidence f
+   WHERE v.assertion_id=f.assertion_id AND f.source_kind='memory'
+    AND f.source_id IN ('memory:'||before_id::text,'memory:'||after_id::text);
+  INSERT INTO kb_async_jobs(kind,document_id,project,status,generation)
+   SELECT DISTINCT 'memory_assertion_index',f.assertion_id,'memory','pending',1 FROM fact_evidence f
+   WHERE f.source_kind='memory' AND f.source_id IN ('memory:'||before_id::text,'memory:'||after_id::text)
+   ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+    generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ ELSE
+  before_id:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.assertion_id END;
+  after_id:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.assertion_id END;
+  DELETE FROM memory_assertion_embedding_versions WHERE assertion_id IN (before_id,after_id);
+  INSERT INTO kb_async_jobs(kind,document_id,project,status,generation)
+   SELECT DISTINCT 'memory_assertion_index',id,'memory','pending',1 FROM unnest(ARRAY[before_id,after_id]) ids(id) WHERE id IS NOT NULL
+   ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+    generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ END IF;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_assertion_dependency_enqueue ON memories;
+CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DELETE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_dependency_enqueue();
+DROP TRIGGER IF EXISTS memory_assertion_dependency_enqueue ON fact_evidence;
+CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DELETE ON fact_evidence
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_dependency_enqueue();

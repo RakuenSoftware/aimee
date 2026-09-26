@@ -216,6 +216,15 @@ CREATE TABLE IF NOT EXISTS memory_embedder_versions (
  version TEXT PRIMARY KEY, command TEXT NOT NULL, dimension INTEGER NOT NULL,
  serving_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Shape only: SQLite has no vector generation serving implementation.
+CREATE TABLE IF NOT EXISTS memory_assertion_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version),
+ assertion_id INTEGER NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE,
+ assertion_revision INTEGER NOT NULL CHECK(assertion_revision>0),
+ input_hash TEXT NOT NULL, embedding TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+ PRIMARY KEY(version,assertion_id)
+);
 CREATE TABLE IF NOT EXISTS memory_embedding_versions (
  version TEXT NOT NULL REFERENCES memory_embedder_versions(version), point_id INTEGER NOT NULL,
  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE, input_hash TEXT NOT NULL,

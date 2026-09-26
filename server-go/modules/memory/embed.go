@@ -161,18 +161,21 @@ type EmbedRequest struct {
 // as a failure — and it closes an earlier outage, or a half-open breaker would
 // turn the next authorization result back into "unavailable".
 type EmbedResponse struct {
-	Vectors      [][]float32 `json:"vectors,omitempty"`
-	Vector       []float32   `json:"vector,omitempty"`
-	Dim          int         `json:"dim"`
-	Truncated    bool        `json:"truncated,omitempty"`
-	Unavailable  bool        `json:"unavailable,omitempty"`
-	RetryAfterMS int64       `json:"retry_after_ms,omitempty"`
-	Unauthorized bool        `json:"unauthorized,omitempty"`
-	Error        string      `json:"error,omitempty"`
-	ServingID    string      `json:"serving_id,omitempty"`
-	Embedded     bool        `json:"embedded,omitempty"`
-	Repaired     int         `json:"repaired,omitempty"`
-	Failed       int         `json:"failed,omitempty"`
+	Vectors                 [][]float32        `json:"vectors,omitempty"`
+	Vector                  []float32          `json:"vector,omitempty"`
+	Dim                     int                `json:"dim"`
+	Truncated               bool               `json:"truncated,omitempty"`
+	Unavailable             bool               `json:"unavailable,omitempty"`
+	RetryAfterMS            int64              `json:"retry_after_ms,omitempty"`
+	Unauthorized            bool               `json:"unauthorized,omitempty"`
+	Error                   string             `json:"error,omitempty"`
+	ServingID               string             `json:"serving_id,omitempty"`
+	IdentityState           string             `json:"identity_state,omitempty"`
+	EmbeddingIdentity       *EmbeddingIdentity `json:"embedding_identity,omitempty"`
+	EmbeddingIdentityDigest string             `json:"embedding_identity_digest,omitempty"`
+	Embedded                bool               `json:"embedded,omitempty"`
+	Repaired                int                `json:"repaired,omitempty"`
+	Failed                  int                `json:"failed,omitempty"`
 }
 
 // EmbedIsHTTP reports whether a configured embedder command names an HTTP
@@ -320,15 +323,25 @@ func EmbedServingID(ctx context.Context, traceID uint64, executor egress.Executo
 		}
 		body = output
 	}
+	if response, present := embeddingIdentityResponse(body); present {
+		return response
+	}
 	var payload map[string]any
 	if json.Unmarshal(body, &payload) == nil {
 		for _, key := range []string{"serving_id", "model", "version"} {
 			if value, ok := payload[key].(string); ok && value != "" {
-				return EmbedResponse{ServingID: value}
+				if strings.HasPrefix(value, "embedding-v1:") {
+					return EmbedResponse{Error: "embed: reserved identity requires complete commitment", IdentityState: "identity_mismatch"}
+				}
+				return EmbedResponse{ServingID: value, IdentityState: "legacy_unknown"}
 			}
 		}
 	}
-	return EmbedResponse{ServingID: strings.TrimSpace(string(body))}
+	value := strings.TrimSpace(string(body))
+	if strings.HasPrefix(value, "embedding-v1:") {
+		return EmbedResponse{Error: "embed: reserved identity requires complete commitment", IdentityState: "identity_mismatch"}
+	}
+	return EmbedResponse{ServingID: value, IdentityState: "legacy_unknown"}
 }
 
 func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, data DataStore,

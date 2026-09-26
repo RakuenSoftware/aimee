@@ -31,6 +31,9 @@ func StartSharedIndex(ctx context.Context, data DataStore, executor egress.Execu
 				log.Printf("shared relation invalidation pending: %v", err)
 			}
 			err := s.sharedIndexBatch(attempt, executor, 16)
+			if err == nil {
+				err = s.indexAssertionBatch(attempt, executor, 16)
+			}
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				log.Printf("shared memory indexing pending: %v", err)

@@ -107,6 +107,18 @@ func (p *personalVectors) endpointCurrent() (string, error) {
 	return p.endpoint, nil
 }
 func (p *personalVectors) indexBatch(ctx context.Context) error {
+	// Apply tombstones even while the model route is offline. Every retained
+	// generation observes processing revocation before more model work is tried.
+	if err := p.ensureGenerations(ctx); err != nil {
+		return err
+	}
+	if _, err := p.db.Exec(ctx, `DELETE FROM user_memory_embedding_versions v USING user_memories m WHERE m.id=v.memory_id AND m.lifecycle_state NOT IN ('active','retired')`); err != nil {
+		return err
+	}
+	if _, err := p.db.Exec(ctx, `DELETE FROM user_memory_vectors v USING user_memories m WHERE m.id=v.memory_id AND m.lifecycle_state NOT IN ('active','retired')`); err != nil {
+		return err
+	}
+
 	endpoint, err := p.endpointCurrent()
 	if err != nil {
 		return err
@@ -114,33 +126,36 @@ func (p *personalVectors) indexBatch(ctx context.Context) error {
 	if endpoint == "" {
 		return nil
 	}
-	if !p.ready.Load() {
-		statements := []string{personalVectorSchema}
-		if err := p.db.Migrate(ctx, store.MigrationRequest{Owner: "memory-personal", Version: 1, Statements: statements, Checksum: store.StoreChecksum(statements)}); err != nil {
-			return err
-		}
-		p.ready.Store(true)
-	}
 	serving, err := p.serving(ctx, endpoint)
 	if err != nil {
 		return err
 	}
-	rows, err := p.db.Query(ctx, `SELECT m.id,m.key,m.content,md5(m.key||chr(31)||m.content)
-FROM user_memories m LEFT JOIN user_memory_vectors v ON v.memory_id=m.id
-WHERE m.lifecycle_state='active' AND (m.valid_until IS NULL OR m.valid_until>now())
-AND (v.memory_id IS NULL OR v.serving_id<>$1 OR v.content_fingerprint<>md5(m.key||chr(31)||m.content))
-ORDER BY m.updated_at,m.id LIMIT 16`, serving)
+	generation, err := p.prepareGeneration(ctx, "memory", serving)
+	if err != nil {
+		return err
+	}
+	var current bool
+	if err = p.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_embedding_active a JOIN user_embedding_generations g ON g.generation=a.generation WHERE a.record_class='memory' AND a.generation=$1 AND g.validated_watermark=(SELECT generation FROM user_memory_collection_generation WHERE id=1))`, generation).Scan(&current); err != nil {
+		return err
+	}
+	if current {
+		return nil
+	}
+	rows, err := p.db.Query(ctx, personalIndexInputsSQL+`SELECT i.memory_id,i.record_revision,i.input_key,i.input_content,i.input_hash
+ FROM inputs i LEFT JOIN user_memory_embedding_versions v ON v.generation=$1 AND v.memory_id=i.memory_id AND v.record_revision=i.record_revision
+ LEFT JOIN user_memory_embedding_jobs j ON j.generation=$1 AND j.memory_id=i.memory_id AND j.record_revision=i.record_revision AND j.input_hash=i.input_hash
+ WHERE (v.memory_id IS NULL OR v.content_fingerprint<>i.input_hash OR vector_dims(v.embedding)<>(SELECT dimension FROM user_embedding_generations WHERE generation=$1) OR vector_norm(v.embedding)=0) AND (j.memory_id IS NULL OR (j.attempts<8 AND j.next_attempt_at<=clock_timestamp())) ORDER BY i.memory_id,i.record_revision LIMIT 16`, generation)
 	if err != nil {
 		return err
 	}
 	type pending struct {
-		id                        int64
+		id, revision              int64
 		key, content, fingerprint string
 	}
 	var items []pending
 	for rows.Next() {
 		var r pending
-		if err = rows.Scan(&r.id, &r.key, &r.content, &r.fingerprint); err != nil {
+		if err = rows.Scan(&r.id, &r.revision, &r.key, &r.content, &r.fingerprint); err != nil {
 			rows.Close()
 			return err
 		}
@@ -151,37 +166,36 @@ ORDER BY m.updated_at,m.id LIMIT 16`, serving)
 	if err != nil {
 		return err
 	}
+	var workErr error
 	for _, r := range items {
-		if result := p.indexRecord(ctx, endpoint, serving, r.id, r.key, r.content, r.fingerprint); result.Error != "" {
-			return errors.New(result.Error)
+		if result := p.indexRetainedVersion(ctx, endpoint, serving, generation, r.id, r.revision, r.key, r.content, r.fingerprint); result.Error != "" {
+			workErr = errors.Join(workErr, errors.New(result.Error))
 		}
 	}
-	return nil
+	return errors.Join(workErr, p.cutoverMemoryGeneration(ctx, generation))
 }
 
 func (p *personalVectors) indexRecord(ctx context.Context, endpoint, serving string, id int64, key, content, fingerprint string) EmbedResponse {
-	result := Embed(ctx, 0, p.executor, EmbedRequest{BaseURL: endpoint, Text: key + "\n" + content, InputType: "document", MaxDim: 4000})
-	if result.Error != "" || result.Unavailable || result.Unauthorized || result.Truncated {
-		return EmbedResponse{Error: "local embedder could not index the complete record"}
-	}
-	vector, err := vectorLiteral(result.Vector)
+	generation, err := p.prepareGeneration(ctx, "memory", serving)
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}
 	}
-	after, err := p.serving(ctx, endpoint)
-	if err != nil || after != serving {
-		return EmbedResponse{Error: "embedding service changed during indexing"}
+	var revision int64
+	var committed string
+	err = p.db.QueryRow(ctx, personalIndexInputsSQL+`SELECT i.record_revision,i.input_hash FROM inputs i JOIN user_memories m ON m.id=i.memory_id AND m.record_revision=i.record_revision
+ WHERE i.memory_id=$1 AND i.input_key=$2 AND i.input_content=$3 AND md5(m.key||chr(31)||m.content)=$4`, id, key, content, fingerprint).Scan(&revision, &committed)
+	if store.IsNoRows(err) {
+		return EmbedResponse{Error: "personal indexing source changed"}
 	}
-	changed, err := p.db.Exec(ctx, `INSERT INTO user_memory_vectors(memory_id,serving_id,content_fingerprint,embedding)
-SELECT id,$2,$3,$4::vector FROM user_memories
-WHERE id=$1 AND lifecycle_state='active' AND (valid_until IS NULL OR valid_until>now())
-AND md5(key||chr(31)||content)=$3
-ON CONFLICT(memory_id) DO UPDATE SET serving_id=EXCLUDED.serving_id,content_fingerprint=EXCLUDED.content_fingerprint,embedding=EXCLUDED.embedding,updated_at=now()`, id, serving, fingerprint, vector)
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}
 	}
-	result.Embedded = changed.RowsAffected() > 0
-	result.ServingID = serving
+	result := p.indexRetainedVersion(ctx, endpoint, serving, generation, id, revision, key, content, committed)
+	if result.Error == "" && result.Embedded {
+		if err := p.cutoverMemoryGeneration(ctx, generation); err != nil {
+			return EmbedResponse{Error: err.Error()}
+		}
+	}
 	return result
 }
 
@@ -210,6 +224,9 @@ func (p *personalVectors) search(ctx context.Context, query, kind, tier string, 
 
 // Candidate reads share the calling owner transaction and its request clock.
 func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer, query, kind, tier string, limit int) ([]Record, error) {
+	observation := retrievalArmObservation{State: "unavailable", Reason: "bounded_local_vector_fallback", Quota: limit, IndexReadiness: "unavailable"}
+	defer func() { recordRetrievalArm(ctx, "dense", observation) }()
+
 	endpoint, err := p.endpointCurrent()
 	if err != nil {
 		return nil, err
@@ -218,11 +235,30 @@ func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer,
 		return nil, errors.New("no local embedding configured")
 	}
 	if !p.ready.Load() {
+		observation.IndexReadiness = "rebuilding"
 		return nil, errors.New("personal vector index is initializing")
+	}
+	var generation, expected, policy string
+	var current, validated int64
+	if err := db.QueryRow(ctx, `SELECT a.generation,g.serving_id,g.policy,g.validated_watermark,c.generation FROM user_embedding_active a JOIN user_embedding_generations g ON g.generation=a.generation CROSS JOIN user_memory_collection_generation c WHERE a.record_class='memory' AND c.id=1`).Scan(&generation, &expected, &policy, &validated, &current); err != nil {
+		observation.IndexReadiness = "rebuilding"
+		return nil, errors.New("personal generation unavailable")
+	}
+	observation.IndexVersion = generation
+	observation.IdentityState = embeddingIdentityState(expected)
+	observation.CurrentWatermark = fmt.Sprint(current)
+	observation.ValidatedWatermark = fmt.Sprint(validated)
+	if policy != personalGenerationPolicy {
+		observation.IndexReadiness = "identity_mismatch"
+		return nil, errors.New("personal generation policy mismatch")
 	}
 	serving, err := p.serving(ctx, endpoint)
 	if err != nil {
 		return nil, err
+	}
+	if serving != expected {
+		observation.IndexReadiness = "identity_mismatch"
+		return nil, errors.New("personal embedding identity mismatch")
 	}
 	result := Embed(ctx, 0, p.executor, EmbedRequest{BaseURL: endpoint, Text: query, InputType: "query", MaxDim: 4000})
 	if result.Error != "" || result.Unavailable || result.Unauthorized || result.Truncated {
@@ -234,16 +270,17 @@ func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer,
 	}
 	after, err := p.serving(ctx, endpoint)
 	if err != nil || after != serving {
+		observation.IndexReadiness = "identity_mismatch"
 		return nil, errors.New("embedding service changed during recall")
 	}
 	rows, err := db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence,1-(v.embedding <=> $2::vector),(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),m.record_revision::text
-FROM user_memories m JOIN user_memory_vectors v ON v.memory_id=m.id
+FROM user_memories m JOIN user_memory_embedding_versions v ON v.memory_id=m.id AND v.record_revision=m.record_revision
 WHERE `+personalCurrentMemorySQL("m.")+`
-AND v.serving_id=$1 AND v.content_fingerprint=md5(m.key||chr(31)||m.content)
+AND v.generation=$1 AND v.content_fingerprint=encode(sha256(convert_to(jsonb_build_array(m.id,m.record_revision,m.key,m.content)::text,'UTF8')),'hex')
 AND vector_dims(v.embedding)=vector_dims($2::vector)
 AND ($3='' OR m.kind=$3) AND ($4='' OR m.tier=$4)
 AND CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN 1-(v.embedding <=> $2::vector)>0.3 ELSE false END
-ORDER BY CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN v.embedding <=> $2::vector END,m.id LIMIT $5`, serving, vector, kind, tier, limit)
+ORDER BY CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN v.embedding <=> $2::vector END,m.id LIMIT $5`, generation, vector, kind, tier, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +295,15 @@ ORDER BY CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN v.embed
 		r.observedVersion.RecordID = fmt.Sprint(r.ID)
 		recordNativeRank(ctx, &r, "semantic", len(records)+1, similarity, "cosine_similarity")
 		records = append(records, r)
+	}
+	if rows.Err() == nil {
+		observation.State = "available"
+		observation.Reason = "private_current_revision_generation"
+		observation.Candidates = len(records)
+		observation.IndexReadiness = "ready"
+		if current != validated {
+			observation.IndexReadiness = "lagging"
+		}
 	}
 	return records, rows.Err()
 }

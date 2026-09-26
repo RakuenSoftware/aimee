@@ -22,23 +22,25 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "shared_embedder_not_configured"})
 		return base, nil
 	}
-	unavailable := func() ([]Record, error) {
-		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "bounded_embedding_or_index_fallback", Quota: min(req.Limit, 256)})
+	fallback := func(reason, readiness string) ([]Record, error) {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: reason, IndexReadiness: readiness, Quota: min(req.Limit, 256)})
 		if s.requireSemantic {
 			return nil, errors.New("memory: evaluation semantic recall unavailable")
 		}
 		return base, nil
 	}
+	unavailable := func() ([]Record, error) { return fallback("bounded_embedding_or_index_fallback", "unavailable") }
 	// The data owner pins each request to a transaction. Keep version selection,
 	// query embedding and the candidate read under the same rebuild lock.
 	if _, ok := s.db.(store.Tx); !ok {
 		return unavailable()
 	}
-	var present bool
-	if err := s.db.QueryRow(ctx, `WITH locked AS MATERIALIZED (
- SELECT pg_advisory_xact_lock_shared($1)
-) SELECT to_regclass('memory_embedder_versions') IS NOT NULL FROM locked`, vectorRebuildLock).Scan(&present); err != nil {
+	var present, locked bool
+	if err := s.db.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock_shared($1),to_regclass('memory_embedder_versions') IS NOT NULL`, vectorRebuildLock).Scan(&locked, &present); err != nil {
 		return nil, err
+	}
+	if !locked {
+		return fallback("generation_rebuild_in_progress", "rebuilding")
 	}
 	if !present {
 		return unavailable()
@@ -80,8 +82,11 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	embedCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	before, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
-	if err != nil || before != identity {
+	if err != nil {
 		return unavailable()
+	}
+	if before != identity {
+		return fallback("query_embedding_identity_mismatch", "identity_mismatch")
 	}
 	query := Embed(embedCtx, 0, s.recallExecutor, EmbedRequest{BaseURL: command, Text: req.Query, InputType: "query", MaxDim: dimension})
 	if query.Error != "" || query.Unavailable || query.Unauthorized || query.Truncated || len(query.Vector) != dimension {
@@ -92,8 +97,11 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		return unavailable()
 	}
 	after, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
-	if err != nil || after != identity {
+	if err != nil {
 		return unavailable()
+	}
+	if after != identity {
+		return fallback("query_embedding_identity_changed", "identity_mismatch")
 	}
 	// Fingerprints cover text, scope and kind, so moved/edited records need fresh
 	// embeddings. Whole-record and unit channels each get an eligible-parent budget.
@@ -101,7 +109,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
  SELECT i.memory_id, CASE WHEN vector_dims(v.embedding)=vector_dims($10::vector) AND vector_norm(v.embedding)>0
  THEN 1-(v.embedding <=> $10::vector) END AS similarity
  FROM inputs i JOIN memory_embedding_versions v
- ON v.version=$9 AND v.point_id=i.point_id AND v.input_hash=i.input_hash
+ ON v.version=$9 AND v.point_id=i.point_id AND v.input_hash=i.input_hash AND v.source_revision=i.record_revision
  JOIN memories m ON m.id=i.memory_id
  WHERE i.record_type='memory' AND `+currentMemorySQL("m.")+`
  AND CASE WHEN $1 THEN m.scope_type=$2 AND m.scope_value=$3
@@ -159,7 +167,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		}
 		sort.SliceStable(combined, func(i, j int) bool { return scopeRank(combined[i]) < scopeRank(combined[j]) })
 	}
-	recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "active_version_and_serving_identity_verified", Candidates: len(semantic), Quota: min(req.Limit, 256), IndexVersion: version, IndexReadiness: "eligible_versions_only; coverage_not_proven"})
+	recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "active_version_and_serving_identity_verified; coverage_not_proven", Candidates: len(semantic), Quota: min(req.Limit, 256), IndexVersion: version, IdentityState: embeddingIdentityState(identity), IndexReadiness: "lagging"})
 	return combined, nil
 }
 

@@ -2593,8 +2593,8 @@
       "sha256": "921d232c510d9a842cd5dbc103d3230df1003b4d944683407b2444f98b62430f",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "667f948435ace9a2438994f78e90b7cbaab0d20e4604945d1f81511501c37c3e",
-        "src/modules/db2/c/schema_sqlite.sql": "cd4b1b97539e8b6a9a5e59f79b4b5e4da2a3898a51c31953467303fff42cbdef"
+        "src/modules/db2/c/schema.sql": "0cea313e48e161b22ddd2f82f1f04479fa88a5798aa2b43a44cde966fa9c4a20",
+        "src/modules/db2/c/schema_sqlite.sql": "d1f2b0cefd2cdeb8441bd89f54a0318204993ce6c57ba4cb9fe543998392cac8"
       }
     },
     "src/server/openapi_server_data.h": {

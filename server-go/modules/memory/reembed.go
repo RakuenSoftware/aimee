@@ -12,39 +12,42 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
-// Hash every field that affects embedding input or retrieval payload. Confidence,
-// usage counters and timestamps do not invalidate an unchanged vector.
+// Bind each exact canonical revision and rendering. Access counters do not
+// create revisions. Index admission includes retained history and future inputs;
+// serving eligibility is independently applied by each request.
 func embeddingInputs() string {
 	return `WITH sources AS (
  SELECT m.id AS point_id,m.id AS memory_id,'memory'::text AS record_type,m.key AS input_key,
- m.content AS input_content,m.scope_type,m.scope_value,m.kind,''::text AS unit_type,
+ m.content AS input_content,m.scope_type,m.scope_value,m.kind,m.record_revision,''::text AS unit_type,
  ''::text AS unit_kind,0::double precision AS unit_weight,m.content AS source_content
- FROM memories m WHERE m.lifecycle_state='active' AND m.activation_suppressed=0
+ FROM memories m WHERE ` + historicalMemoryInspectionSQL("m.") + `
  UNION ALL
- SELECT 1000000000000+u.id,m.id,'unit',u.unit_key,u.unit_text,m.scope_type,m.scope_value,m.kind,
+ SELECT 1000000000000+u.id,m.id,'unit',u.unit_key,u.unit_text,m.scope_type,m.scope_value,m.kind,m.record_revision,
  u.unit_type,u.memory_kind,u.weight,m.content FROM memory_units u JOIN memories m ON m.id=u.memory_id
- WHERE m.lifecycle_state='active' AND m.activation_suppressed=0 AND ` + currentUnitInputsSQL("u") + `
+ WHERE ` + historicalMemoryInspectionSQL("m.") + ` AND ` + currentUnitInputsSQL("u") + `
 ), inputs AS (SELECT s.*,encode(sha256(convert_to(to_jsonb(s)::text,'UTF8')),'hex') AS input_hash FROM sources s) `
 }
 
 type reembedStatus struct {
-	ActiveVersion string      `json:"active_version"`
-	HasJob        bool        `json:"has_job"`
-	Job           *reembedJob `json:"job,omitempty"`
+	ActiveVersion    string                     `json:"active_version"`
+	ActiveGeneration *embeddingGenerationStatus `json:"active_generation,omitempty"`
+	HasJob           bool                       `json:"has_job"`
+	Job              *reembedJob                `json:"job,omitempty"`
 }
 type reembedJob struct {
-	TargetVersion   string `json:"target_version"`
-	LastID          int64  `json:"last_id"`
-	Total           int64  `json:"total"`
-	Done            int64  `json:"done"`
-	StartedAt       string `json:"started_at"`
-	FinishedAt      string `json:"finished_at"`
-	Ready           bool   `json:"ready"`
-	PendingMetadata int64  `json:"pending_metadata"`
+	TargetVersion   string                     `json:"target_version"`
+	Generation      *embeddingGenerationStatus `json:"generation,omitempty"`
+	LastID          int64                      `json:"last_id"`
+	Total           int64                      `json:"total"`
+	Done            int64                      `json:"done"`
+	StartedAt       string                     `json:"started_at"`
+	FinishedAt      string                     `json:"finished_at"`
+	Ready           bool                       `json:"ready"`
+	PendingMetadata int64                      `json:"pending_metadata"`
 }
 
 type embeddingInput struct {
-	PointID, MemoryID                                                         int64
+	PointID, MemoryID, Revision                                               int64
 	RecordType, Key, Content, ScopeType, ScopeValue, Kind, UnitType, UnitKind string
 	Weight                                                                    float64
 	Hash                                                                      string
@@ -61,8 +64,14 @@ func (in embeddingInput) text() string {
 }
 
 func (s *postgresDataStore) reembedCounts(ctx context.Context, version string) (total, done int64, err error) {
-	err = s.db.QueryRow(ctx, embeddingInputs()+`SELECT count(*),count(v.point_id) FILTER(WHERE v.input_hash=i.input_hash AND v.embedding IS NOT NULL)
+	err = s.db.QueryRow(ctx, embeddingInputs()+`SELECT count(*),count(v.point_id) FILTER(WHERE v.input_hash=i.input_hash AND v.source_revision=i.record_revision AND v.embedding IS NOT NULL AND vector_dims(v.embedding)=(SELECT dimension FROM memory_embedder_versions WHERE version=$1) AND vector_norm(v.embedding)>0)
  FROM inputs i LEFT JOIN memory_embedding_versions v ON v.point_id=i.point_id AND v.version=$1`, version).Scan(&total, &done)
+	if err == nil {
+		var assertionTotal, assertionDone int64
+		assertionTotal, assertionDone, err = s.assertionReembedCounts(ctx, version)
+		total += assertionTotal
+		done += assertionDone
+	}
 	return
 }
 func (s *postgresDataStore) reembedStatus(ctx context.Context) (reembedStatus, error) {
@@ -71,10 +80,26 @@ func (s *postgresDataStore) reembedStatus(ctx context.Context) (reembedStatus, e
 	if err != nil {
 		return result, err
 	}
+	if result.ActiveVersion != "" {
+		result.ActiveGeneration, err = s.embeddingGeneration(ctx, result.ActiveVersion)
+		if err == nil {
+			err = s.generationReadiness(ctx, result.ActiveGeneration)
+		}
+		if err != nil {
+			return result, err
+		}
+	}
 	job := &reembedJob{}
 	err = s.db.QueryRow(ctx, `SELECT target_version,last_id,started_at,COALESCE(finished_at,'') FROM memory_reembed_progress WHERE id=1`).Scan(&job.TargetVersion, &job.LastID, &job.StartedAt, &job.FinishedAt)
 	if store.IsNoRows(err) {
 		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	job.Generation, err = s.embeddingGeneration(ctx, job.TargetVersion)
+	if err == nil {
+		err = s.generationReadiness(ctx, job.Generation)
 	}
 	if err != nil {
 		return result, err
@@ -127,6 +152,23 @@ func (s *postgresDataStore) prepareReembed(ctx context.Context, version, command
 		if oldCommand != command || oldDim != dim {
 			return errors.New("memory: version already identifies a different embedder or dimension")
 		}
+
+		generation, err := bound.embeddingGeneration(ctx, version)
+		if err != nil {
+			return err
+		}
+		if generation.State != "active" {
+			if err := bound.transitionEmbeddingGeneration(ctx, version, "backfilling"); err != nil {
+				return err
+			}
+		}
+		watermark, err := bound.embeddingWatermark(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err = bound.db.Exec(ctx, `UPDATE memory_embedder_versions SET snapshot_watermark=$2::jsonb WHERE version=$1`, version, watermark); err != nil {
+			return err
+		}
 		total, done, err := bound.reembedCounts(ctx, version)
 		if err != nil {
 			return err
@@ -143,7 +185,7 @@ func (s *postgresDataStore) reembedNext(ctx context.Context, version string, aft
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, embeddingInputs()+`SELECT i.point_id FROM inputs i LEFT JOIN memory_embedding_versions v ON v.version=$1 AND v.point_id=i.point_id
- WHERE i.point_id>$2 AND (v.point_id IS NULL OR v.input_hash<>i.input_hash OR v.embedding IS NULL) ORDER BY i.point_id LIMIT $3`, version, after, limit)
+ WHERE i.point_id>$2 AND (v.point_id IS NULL OR v.input_hash<>i.input_hash OR v.source_revision<>i.record_revision OR v.embedding IS NULL OR vector_dims(v.embedding)<>(SELECT dimension FROM memory_embedder_versions WHERE version=$1) OR vector_norm(v.embedding)=0) ORDER BY i.point_id LIMIT $3`, version, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +202,9 @@ func (s *postgresDataStore) reembedNext(ctx context.Context, version string, aft
 }
 func (s *postgresDataStore) embeddingInput(ctx context.Context, point int64) (embeddingInput, error) {
 	var in embeddingInput
-	source := strings.Replace(embeddingInputs(), "FROM memories m WHERE m.lifecycle_state='active'", "FROM memories m WHERE m.id=$1 AND m.lifecycle_state='active'", 1)
+	source := strings.Replace(embeddingInputs(), "FROM memories m WHERE ", "FROM memories m WHERE m.id=$1 AND ", 1)
 	source = strings.Replace(source, "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE ", "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE u.id=$1-1000000000000 AND ", 1)
-	err := s.db.QueryRow(ctx, source+`SELECT point_id,memory_id,record_type,input_key,input_content,scope_type,scope_value,kind,unit_type,unit_kind,unit_weight,input_hash FROM inputs WHERE point_id=$1`, point).Scan(&in.PointID, &in.MemoryID, &in.RecordType, &in.Key, &in.Content, &in.ScopeType, &in.ScopeValue, &in.Kind, &in.UnitType, &in.UnitKind, &in.Weight, &in.Hash)
+	err := s.db.QueryRow(ctx, source+`SELECT point_id,memory_id,record_revision,record_type,input_key,input_content,scope_type,scope_value,kind,unit_type,unit_kind,unit_weight,input_hash FROM inputs WHERE point_id=$1`, point).Scan(&in.PointID, &in.MemoryID, &in.Revision, &in.RecordType, &in.Key, &in.Content, &in.ScopeType, &in.ScopeValue, &in.Kind, &in.UnitType, &in.UnitKind, &in.Weight, &in.Hash)
 	return in, err
 }
 func (s *postgresDataStore) stageEmbedding(ctx context.Context, version string, in embeddingInput, vector []float32, detail string) error {
@@ -174,10 +216,10 @@ func (s *postgresDataStore) stageEmbedding(ctx context.Context, version string, 
 			return err
 		}
 	}
-	_, err := s.db.Exec(ctx, `INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding,attempts,last_error)
- VALUES($1,$2,$3,$4,$5::vector,1,$6) ON CONFLICT(version,point_id) DO UPDATE SET memory_id=EXCLUDED.memory_id,
- input_hash=EXCLUDED.input_hash,embedding=EXCLUDED.embedding,attempts=CASE WHEN memory_embedding_versions.input_hash=EXCLUDED.input_hash THEN memory_embedding_versions.attempts+1 ELSE 1 END,
- last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, version, in.PointID, in.MemoryID, in.Hash, literal, detail)
+	_, err := s.db.Exec(ctx, `INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding,attempts,last_error,source_revision)
+ VALUES($1,$2,$3,$4,$5::vector,1,$6,$7) ON CONFLICT(version,point_id) DO UPDATE SET memory_id=EXCLUDED.memory_id,
+ source_revision=EXCLUDED.source_revision,input_hash=EXCLUDED.input_hash,embedding=EXCLUDED.embedding,attempts=CASE WHEN memory_embedding_versions.input_hash=EXCLUDED.input_hash THEN memory_embedding_versions.attempts+1 ELSE 1 END,
+ last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, version, in.PointID, in.MemoryID, in.Hash, literal, detail, in.Revision)
 	return err
 }
 func (s *postgresDataStore) reembedPoint(ctx context.Context, trace uint64, executor egress.Executor, version string, point int64) (EmbedResponse, error) {
@@ -204,7 +246,7 @@ func (s *postgresDataStore) reembedPoint(ctx context.Context, trace uint64, exec
 			}
 		}
 		var locked int64
-		if err := bound.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, parent).Scan(&locked); err != nil {
+		if err := bound.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND `+historicalMemoryInspectionSQL("")+` FOR UPDATE`, parent).Scan(&locked); err != nil {
 			if store.IsNoRows(err) {
 				return nil
 			}
@@ -218,7 +260,7 @@ func (s *postgresDataStore) reembedPoint(ctx context.Context, trace uint64, exec
 			return err
 		}
 		var exists bool
-		if err = bound.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memory_embedding_versions WHERE version=$1 AND point_id=$2 AND input_hash=$3 AND embedding IS NOT NULL)`, version, point, in.Hash).Scan(&exists); err != nil {
+		if err = bound.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memory_embedding_versions WHERE version=$1 AND point_id=$2 AND input_hash=$3 AND source_revision=$4 AND embedding IS NOT NULL AND vector_dims(embedding)=$5 AND vector_norm(embedding)>0)`, version, point, in.Hash, in.Revision, dim).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
@@ -291,7 +333,7 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
 		if dim != actual {
 			return errors.New("memory: target dimension requires schema-owner maintenance")
 		}
-		if _, err = bound.db.Exec(ctx, `LOCK TABLE memories,memory_units IN SHARE MODE`); err != nil {
+		if _, err = bound.db.Exec(ctx, `SELECT memory_index_cutover_lock()`); err != nil {
 			return err
 		}
 		total, done, err := bound.reembedCounts(ctx, version)
@@ -308,6 +350,33 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
 		if total != done {
 			return fmt.Errorf("memory: version is incomplete or stale (%d/%d current vectors); resume reembed_start", done, total)
 		}
+
+		generation, err := bound.embeddingGeneration(ctx, version)
+		if err != nil {
+			return err
+		}
+		if generation.State != "active" {
+			if generation.State == "created" {
+				if err = bound.transitionEmbeddingGeneration(ctx, version, "backfilling"); err != nil {
+					return err
+				}
+				generation.State = "backfilling"
+			}
+			if generation.State == "backfilling" {
+				if err = bound.transitionEmbeddingGeneration(ctx, version, "catching_up"); err != nil {
+					return err
+				}
+			}
+			if err = bound.transitionEmbeddingGeneration(ctx, version, "validating"); err != nil {
+				return err
+			}
+		}
+		if _, err = bound.db.Exec(ctx, embeddingInputs()+`DELETE FROM memory_embedding_versions v WHERE NOT EXISTS(SELECT 1 FROM inputs i WHERE i.point_id=v.point_id)`); err != nil {
+			return err
+		}
+		if _, err = bound.db.Exec(ctx, `WITH inputs AS (`+assertionIndexInputsSQL()+`) DELETE FROM memory_assertion_embedding_versions v WHERE NOT EXISTS(SELECT 1 FROM inputs i WHERE i.id=v.assertion_id)`); err != nil {
+			return err
+		}
 		if _, err = bound.db.Exec(ctx, `DELETE FROM memory_embeddings WHERE record_type IN ('memory','unit')`); err != nil {
 			return err
 		}
@@ -317,13 +386,30 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
  (jsonb_build_object('record_type',i.record_type,'memory_id',i.memory_id,'kind',i.kind,'key',i.input_key,'primary_scope',i.scope_type,
  'workspace',CASE WHEN i.scope_type='workspace' THEN i.scope_value ELSE '' END,'project',CASE WHEN i.scope_type='project' THEN i.scope_value ELSE '' END,
  'embedder_version',$1::text) || CASE WHEN i.record_type='unit' THEN jsonb_build_object('unit_id',i.point_id-1000000000000,'unit_type',i.unit_type,'unit_key',i.input_key,'memory_kind',i.unit_kind,'weight',i.unit_weight) ELSE '{}'::jsonb END)::text
- FROM inputs i JOIN memory_embedding_versions v ON v.version=$1 AND v.point_id=i.point_id AND v.input_hash=i.input_hash`, version)
+ FROM inputs i JOIN memory_embedding_versions v ON v.version=$1 AND v.point_id=i.point_id AND v.input_hash=i.input_hash AND v.source_revision=i.record_revision`, version)
 		if err != nil {
 			return err
 		}
 		if _, err = bound.db.Exec(ctx, embeddingInputs()+`INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
  SELECT point_id,'memory',memory_id,'ok',0,'',pg_now_text(),pg_now_text() FROM inputs ON CONFLICT(point_id) DO UPDATE SET status='ok',attempts=0,last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`); err != nil {
 			return err
+		}
+
+		watermark, err := bound.embeddingWatermark(ctx)
+		if err != nil {
+			return err
+		}
+		coverage := `{"schema_version":1,"memory":{"temporal_modes":["current"],"retained_versions_indexed":true},"unit":{"temporal_modes":["current"],"retained_versions_indexed":true},"semantic_assertion":{"temporal_modes":["current","historical","valid_at","believed_at"],"retained_versions_indexed":true},"validation":"exact_versions_identity_dimensions_and_tombstones"}`
+		if _, err = bound.db.Exec(ctx, `UPDATE memory_embedder_versions SET validated_watermark=$2::jsonb,coverage=$3::jsonb WHERE version=$1`, version, watermark, coverage); err != nil {
+			return err
+		}
+		if _, err = bound.db.Exec(ctx, `UPDATE memory_embedder_versions SET generation_state='retired' WHERE version<>$1 AND version IN(SELECT version FROM memory_active_embedder WHERE id=1)`, version); err != nil {
+			return err
+		}
+		if generation.State != "active" {
+			if err = bound.transitionEmbeddingGeneration(ctx, version, "active"); err != nil {
+				return err
+			}
 		}
 		if _, err = bound.db.Exec(ctx, `INSERT INTO memory_active_embedder(id,version,updated_at) VALUES(1,$1,pg_now_text()) ON CONFLICT(id) DO UPDATE SET version=EXCLUDED.version,updated_at=EXCLUDED.updated_at`, version); err != nil {
 			return err
@@ -346,13 +432,41 @@ func (s *postgresDataStore) reembedData(ctx context.Context, trace uint64, execu
 	switch req.Operation {
 	case "reembed-prepare":
 		err = s.prepareReembed(ctx, req.Version, req.Command)
+		if err == nil {
+			var identity string
+			identity, err = versionServingIdentity(ctx, trace, executor, req.Command)
+			if err == nil {
+				err = s.checkEmbeddingIdentity(ctx, req.Version, identity)
+			}
+			if err == nil && EmbedIsHTTP(req.Command) {
+				probe := EmbedServingID(ctx, trace, executor, req.Command)
+				if probe.Error != "" || probe.ServingID != identity {
+					err = errors.New("memory: embedding identity changed during preparation")
+				} else if probe.EmbeddingIdentity != nil {
+					material, marshalErr := json.Marshal(probe.EmbeddingIdentity)
+					if marshalErr != nil {
+						err = marshalErr
+					} else {
+						_, err = s.db.Exec(ctx, `UPDATE memory_embedder_versions SET embedding_identity=$2::jsonb WHERE version=$1`, req.Version, string(material))
+					}
+				}
+			}
+		}
 		value = map[string]any{"status": "ok"}
 	case "reembed-next":
 		var ids []int64
-		ids, err = s.reembedNext(ctx, req.Version, req.AfterID, req.Limit)
+		if req.RecordType == "assertion" {
+			ids, err = s.assertionReembedNext(ctx, req.Version, req.AfterID, req.Limit)
+		} else {
+			ids, err = s.reembedNext(ctx, req.Version, req.AfterID, req.Limit)
+		}
 		value = map[string]any{"ids": ids}
 	case "reembed-point":
-		value, err = s.reembedPoint(ctx, trace, executor, req.Version, req.ID)
+		if req.RecordType == "assertion" {
+			value, err = s.assertionReembedPoint(ctx, trace, executor, req.Version, req.ID)
+		} else {
+			value, err = s.reembedPoint(ctx, trace, executor, req.Version, req.ID)
+		}
 	case "reembed-status":
 		value, err = s.reembedStatus(ctx)
 	case "reembed-cutover":
@@ -432,7 +546,7 @@ func (s *postgresDataStore) checkEmbeddingIdentity(ctx context.Context, version,
 			return errors.New("memory: concurrent embedder identity change")
 		}
 	}
-	return nil
+	return s.bindEmbeddingGenerationIdentity(ctx, version, servingID)
 }
 func (s *postgresDataStore) checkActiveEmbeddingIdentity(ctx context.Context, servingID string) error {
 	version, _, _, err := s.activeEmbeddingVersion(ctx)
