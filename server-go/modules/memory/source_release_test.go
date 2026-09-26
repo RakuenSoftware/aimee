@@ -1157,3 +1157,55 @@ func TestExplorationPlanCommitmentCoversRetainedNativeBlocks(t *testing.T) {
 		t.Fatal("refresh mutated accepted prior commitment")
 	}
 }
+
+func TestExplorationCoverageSurvivesNativeRefresh(t *testing.T) {
+	for _, coverageStatus := range []string{"complete", "insufficient"} {
+		t.Run(coverageStatus, func(t *testing.T) {
+			state := &sourceReleaseState{}
+			args := sourceReleaseArgs(map[string]any{"request_id": "coverage", "project": "app"})
+			assembly := map[string]any{"typed_projection": map[string]any{
+				"retained_items":    []typedProjectionRef{releaseTestRef()},
+				"evidence_coverage": &evidenceCoverage{Status: coverageStatus, RequirementDigest: "requirements-v1"},
+			}}
+			first, err := state.prepare(args, assembly)
+			if err != nil {
+				t.Fatal(err)
+			}
+			offer := state.explorationOffer(first)
+			if offer["coverage_complete"] != (coverageStatus == "complete") || offer["query_class"] != "typed_requirements" {
+				t.Fatal(offer)
+			}
+			for _, appendSources := range []bool{true, false} {
+				args["source_release_ticket"], _ = json.Marshal(first)
+				ref := releaseTestRef()
+				ref.Channel = "native_identity"
+				ref.Source.Kind = "memory_record"
+				next, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": []typedProjectionRef{ref}}, "append_native_sources": appendSources})
+				if err != nil {
+					t.Fatal(err)
+				}
+				current := state.explorationOffer(next)
+				for _, key := range []string{"coverage_complete", "query_class", "confidence_provenance"} {
+					if current[key] != offer[key] {
+						t.Fatalf("refresh lost %s: %v", key, current)
+					}
+				}
+				if current["plan_digest"] == offer["plan_digest"] {
+					t.Fatal("new block did not change plan")
+				}
+				first = next
+			}
+			// Appending an unresolved requirement must not inherit a complete verdict.
+			args["source_release_ticket"], _ = json.Marshal(first)
+			assembly["typed_projection"].(map[string]any)["evidence_coverage"] = &evidenceCoverage{Status: "insufficient", RequirementDigest: "requirements-v2"}
+			next, err := state.prepare(args, assembly)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := state.explorationOffer(next)
+			if current["coverage_complete"] != false || current["confidence_provenance"] == offer["confidence_provenance"] {
+				t.Fatal(current)
+			}
+		})
+	}
+}

@@ -30,8 +30,10 @@ type sourceReleaseState struct {
 	receiptProducer string
 }
 type sourceReleasePart struct {
-	Native bool   `json:"native"`
-	Digest string `json:"digest"`
+	Native            bool   `json:"native"`
+	Digest            string `json:"digest"`
+	CoverageStatus    string `json:"coverage_status,omitempty"`
+	RequirementDigest string `json:"requirement_digest,omitempty"`
 }
 
 type sourceReleaseEntry struct {
@@ -165,6 +167,12 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	_, nativePart := assembly["native_projection"]
 	part := sourceReleasePart{Native: nativePart, Digest: releaseDigest(assembly)}
+	if projection, ok := assembly["typed_projection"].(map[string]any); ok {
+		if coverage, ok := projection["evidence_coverage"].(*evidenceCoverage); ok && coverage != nil {
+			part.CoverageStatus = coverage.Status
+			part.RequirementDigest = coverage.RequirementDigest
+		}
+	}
 	if prior != nil && bytes.Equal(raw, prior.sources) && len(prior.assemblyParts) > 0 && prior.assemblyParts[len(prior.assemblyParts)-1] == part {
 		return previous, nil
 	}
@@ -346,7 +354,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 
 // Exploration metadata is derived from the accepted final assembly, never from
 // a hook-authored confidence value. It is an observation, not an access grant.
-func (s *sourceReleaseState) explorationOffer(ticket string, assembly map[string]any) map[string]any {
+func (s *sourceReleaseState) explorationOffer(ticket string) map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entries[ticket]
@@ -360,15 +368,25 @@ func (s *sourceReleaseState) explorationOffer(ticket string, assembly map[string
 		}
 		s.receiptProducer = owner
 	}
-	complete := false
-	class := "unclassified"
-	requirement := "unavailable"
-	if projection, ok := assembly["typed_projection"].(map[string]any); ok {
-		if coverage, ok := projection["evidence_coverage"].(*evidenceCoverage); ok && coverage != nil {
-			complete = coverage.Status == "complete"
-			requirement = coverage.RequirementDigest
-			class = "typed_requirements"
+	// Native recall refresh replaces its own block, not the retained ingress
+	// requirements. Derive coverage from the same immutable parts committed by
+	// the plan digest, rather than the last appended projection alone.
+	complete := true
+	class, requirement := "unclassified", "unavailable"
+	requirements := []string{}
+	for _, part := range e.assemblyParts {
+		if part.CoverageStatus == "" {
+			continue
 		}
+		requirements = append(requirements, part.RequirementDigest)
+		if part.CoverageStatus != "complete" || part.RequirementDigest == "" {
+			complete = false
+		}
+	}
+	if len(requirements) == 0 {
+		complete = false
+	} else {
+		class, requirement = "typed_requirements", releaseDigest(requirements)
 	}
 	return map[string]any{"memory_owner": s.receiptProducer, "plan_digest": e.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(e.sources)), "query_class": class, "coverage_complete": complete, "confidence_provenance": "uncalibrated:" + requirement, "index_generation": "unavailable", "expires": e.expires}
 }

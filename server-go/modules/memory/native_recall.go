@@ -234,5 +234,5 @@ func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]b
 	if err != nil {
 		return commandResult(commandError("unavailable", "native source release unavailable"))
 	}
-	return commandResult(map[string]any{"status": "ok", "source_release_ticket": ticket, "exploration_offer": state.explorationOffer(ticket, assembly)})
+	return commandResult(map[string]any{"status": "ok", "source_release_ticket": ticket, "exploration_offer": state.explorationOffer(ticket)})
 }

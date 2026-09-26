@@ -374,8 +374,21 @@ def inside(output):
         status, pinned = api('/v1/sessions/' + exploration_session + '/primary', dict(agent=prefix))
         check('exploration fixture pins the local synthetic provider', status == 200 and pinned.get('agent') == prefix)
         scenario, scenario_start = 'exploration-recovery', len(captures)
-        status, events = api('/v1/chat/stream', dict(message='Read the native memory fixture ' + prefix,
-            aimee_session_id=exploration_session, cwd=fixture_files.name, model=prefix))
+        # A short, session-specific fixture persona leaves room for recovery
+        # history beneath the unchanged 32 KiB operator ceiling. The complete
+        # production tool catalog and memory assembly remain in use.
+        persona = roster.parent / 'personas' / (prefix + '.md')
+        persona.parent.mkdir(exist_ok=True)
+        try:
+            with persona.open('x') as target:
+                target.write('## Persona\nInspect the disposable recovery fixture.\n'
+                             '## Principles\nUse tools to verify results; report failures.\n')
+            status, _ = api('/v1/sessions/' + exploration_session + '/persona', dict(name=prefix))
+            check('exploration session selects its bounded fixture persona', status == 200)
+            status, events = api('/v1/chat/stream', dict(message='Read the native memory fixture ' + prefix,
+                aimee_session_id=exploration_session, cwd=fixture_files.name, model=prefix))
+        finally:
+            persona.unlink(missing_ok=True)
         check('primary session completes native indexed recovery', status == 200 and not provider_errors and
               len(captures) == scenario_start + 4 and any('NATIVE_MEMORY_OK' in text for text in strings(events)))
         worktrees = subprocess.check_output(['git', '-C', fixture_files.name, 'worktree', 'list', '--porcelain'], text=True)
@@ -584,10 +597,12 @@ def main():
         if not re.fullmatch(r'[a-fA-F0-9-]{36}', sid):
             raise RuntimeError('missing fixture session identity')
         postgres = args.server.removesuffix('-aimee-server-1') + '-aimee-store-db-1'
-        raw = subprocess.check_output(['docker', 'exec', postgres, 'psql', '-U', 'postgres', '-d', 'aimee_store',
-            '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c',
-            "SELECT exploration_state FROM session_state WHERE session_id='" + sid + "'"], text=True).strip()
-        state = json.loads(raw)
+        def session_state():
+            return subprocess.check_output(['docker', 'exec', postgres, 'psql', '-U', 'postgres', '-d', 'aimee_store',
+                '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c',
+                "SELECT exploration_state FROM session_state WHERE session_id='" + sid + "'"], text=True).strip()
+        persisted_session = session_state()
+        state = json.loads(persisted_session)
         tasks = list(state.get('tasks', {}).values())
         integrated = (state.get('session') == sid and len(tasks) == 1 and
             len(tasks[0].get('revisions', [])) >= 3 and len(tasks[0].get('fallbacks', [])) == 2 and
@@ -631,6 +646,8 @@ print(json.dumps(rows))
             if not passed:
                 raise RuntimeError(name)
         record('owned Server recovers after an ungraceful process kill', recovered)
+        record('host crash preserves exploration revisions and shared accounting exactly',
+               session_state() == persisted_session)
         after = committed_rows()
         evidence['post_crash_receipts'] = after
         record('host crash preserves every committed provider stage exactly', bool(before) and before == after)
