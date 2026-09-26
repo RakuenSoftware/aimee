@@ -81,7 +81,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	}
 	embedCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	before, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
+	before, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command, dimension)
 	if err != nil {
 		return unavailable()
 	}
@@ -96,7 +96,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	if err != nil {
 		return unavailable()
 	}
-	after, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
+	after, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command, dimension)
 	if err != nil {
 		return unavailable()
 	}

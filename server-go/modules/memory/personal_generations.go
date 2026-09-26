@@ -118,7 +118,7 @@ func (p *personalVectors) indexRetainedVersion(ctx context.Context, endpoint, se
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}
 	}
-	after, err := p.serving(ctx, endpoint)
+	after, err := p.serving(ctx, endpoint, len(result.Vector))
 	if err != nil || after != serving {
 		return EmbedResponse{Error: "embedding service changed during indexing"}
 	}

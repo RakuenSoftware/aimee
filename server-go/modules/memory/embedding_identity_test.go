@@ -73,6 +73,16 @@ func TestEmbeddingHealthCompleteIdentityAndLegacy(t *testing.T) {
 	if out.Error != "" || out.IdentityState != "verified" || out.ServingID != "embedding-v1:"+digest {
 		t.Fatal(out)
 	}
+	if _, err := versionServingIdentity(context.Background(), 0, allowEgress, endpoint, identity.Dimensions); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := versionServingIdentity(context.Background(), 0, allowEgress, endpoint, 3); err == nil {
+		t.Fatal("shared vectors can disagree with declared identity dimensions")
+	}
+	private := &personalVectors{executor: allowEgress}
+	if _, err := private.serving(context.Background(), endpoint, 3); err == nil {
+		t.Fatal("private/code vectors can disagree with declared identity dimensions")
+	}
 	// A provider cannot advertise one full identity and silently fall back to a
 	// friendly legacy alias when its commitment is absent, malformed or changed.
 	for _, bad := range []string{`{"embedding_identity":null,"serving_id":"legacy-compatible"}`, `{"embedding_identity":{},"serving_id":"legacy-compatible"}`, strings.Replace(string(body), digest, "sha256:"+strings.Repeat("0", 64), 1), `{"serving_id":"embedding-v1:` + digest + `"}`} {

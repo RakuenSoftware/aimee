@@ -9,7 +9,9 @@ memory owner. It does not enable the MR-07, MR-09, or MR-10 optional policies.
 The embedder health protocol publishes a complete, immutable model/tokenizer and
 preprocessing identity alongside its legacy alias. Go verifies the commitment
 and rejects malformed or mismatched complete identities without falling back to
-the alias. A provider that supplies only an alias remains `legacy_unknown`.
+the alias. Actual vector dimensions must also match the full identity at
+indexing and query time; preparation rejects an incompatible storage dimension.
+A provider that supplies only an alias remains `legacy_unknown`.
 Legacy aliases remain available to older provider readers; those readers do not
 gain a full-identity guarantee from this update.
 
@@ -56,6 +58,7 @@ verified by the Go memory adapter.
   restart reuse, deletion before rollback, generation-aware query and SQL fallback.
 - Focused erasure/private cleanup/identity/rebuild checks: passed, 2.146 seconds.
 - Final vector-validation predicate regression: passed, 1.749 seconds.
+- Full-identity dimension regression: passed, 1.786 seconds; exported owner rebuilt.
 - Python identity commitment and Go family migration unit checks passed.
 
 ## Deployment acceptance still required

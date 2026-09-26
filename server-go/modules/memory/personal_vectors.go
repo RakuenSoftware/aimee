@@ -75,10 +75,13 @@ func vectorLiteral(vector []float32) (string, error) {
 	}
 	return "[" + strings.Join(parts, ",") + "]", nil
 }
-func (p *personalVectors) serving(ctx context.Context, endpoint string) (string, error) {
+func (p *personalVectors) serving(ctx context.Context, endpoint string, expectedDimensions ...int) (string, error) {
 	result := EmbedServingID(ctx, 0, p.executor, endpoint)
 	if result.Error != "" || result.ServingID == "" || len(result.ServingID) > 4096 {
 		return "", errors.New("local embedding identity unavailable")
+	}
+	if result.IdentityState == "verified" && len(expectedDimensions) > 0 && expectedDimensions[0] > 0 && result.Dim != expectedDimensions[0] {
+		return "", errors.New("local vector dimensions disagree with embedding identity")
 	}
 	return result.ServingID, nil
 }
@@ -268,7 +271,7 @@ func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer,
 	if err != nil {
 		return nil, err
 	}
-	after, err := p.serving(ctx, endpoint)
+	after, err := p.serving(ctx, endpoint, len(result.Vector))
 	if err != nil || after != serving {
 		observation.IndexReadiness = "identity_mismatch"
 		return nil, errors.New("embedding service changed during recall")

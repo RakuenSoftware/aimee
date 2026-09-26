@@ -443,6 +443,13 @@ func (s *postgresDataStore) reembedData(ctx context.Context, trace uint64, execu
 				if probe.Error != "" || probe.ServingID != identity {
 					err = errors.New("memory: embedding identity changed during preparation")
 				} else if probe.EmbeddingIdentity != nil {
+					var dimension int
+					if e := s.db.QueryRow(ctx, `SELECT dimension FROM memory_embedder_versions WHERE version=$1`, req.Version).Scan(&dimension); e != nil {
+						return nil, e
+					}
+					if probe.Dim != dimension {
+						return nil, errors.New("memory: provider identity requires a different index dimension")
+					}
 					material, marshalErr := json.Marshal(probe.EmbeddingIdentity)
 					if marshalErr != nil {
 						err = marshalErr
@@ -563,7 +570,7 @@ func (s *postgresDataStore) pendingEmbeddingMetadata(ctx context.Context) (int64
 	return n, err
 }
 
-func versionServingIdentity(ctx context.Context, trace uint64, executor egress.Executor, command string) (string, error) {
+func versionServingIdentity(ctx context.Context, trace uint64, executor egress.Executor, command string, expectedDimensions ...int) (string, error) {
 	if !EmbedIsHTTP(command) {
 		// Legacy command embedders need not implement a health endpoint. Their
 		// version binds the exact configured command, as well as its dimension.
@@ -575,11 +582,16 @@ func versionServingIdentity(ctx context.Context, trace uint64, executor egress.E
 	if probe.Error != "" || id == "" || len(id) > 4096 || strings.ContainsAny(id, "\r\n{}[]") {
 		return "", errors.New("memory: embedder serving identity unavailable")
 	}
+	if probe.IdentityState == "verified" && len(expectedDimensions) > 0 && expectedDimensions[0] > 0 && probe.Dim != expectedDimensions[0] {
+		return "", errors.New("memory: vector dimensions disagree with embedding identity")
+	}
 	return id, nil
 }
 
 func (s *postgresDataStore) embedForVersion(ctx context.Context, trace uint64, executor egress.Executor, version string, request EmbedRequest) EmbedResponse {
-	identity := func() (string, error) { return versionServingIdentity(ctx, trace, executor, request.BaseURL) }
+	identity := func() (string, error) {
+		return versionServingIdentity(ctx, trace, executor, request.BaseURL, request.MaxDim)
+	}
 	before, err := identity()
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}
@@ -595,7 +607,7 @@ func (s *postgresDataStore) embedForVersion(ctx context.Context, trace uint64, e
 	if response.Error != "" || response.Unavailable || response.Unauthorized || response.Truncated {
 		return response
 	}
-	after, err := identity()
+	after, err := versionServingIdentity(ctx, trace, executor, request.BaseURL, len(response.Vector))
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}
 	}

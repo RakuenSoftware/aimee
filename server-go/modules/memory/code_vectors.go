@@ -23,7 +23,7 @@ func (p *personalVectors) codeQueryVector(ctx context.Context, query string) (st
 	if err != nil {
 		return "", "", err
 	}
-	after, err := p.serving(ctx, endpoint)
+	after, err := p.serving(ctx, endpoint, len(result.Vector))
 	if err != nil || after != serving {
 		return "", "", errors.New("embedder changed during query")
 	}
@@ -84,7 +84,7 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 			if err != nil {
 				return false, err
 			}
-			after, err := p.serving(ctx, endpoint)
+			after, err := p.serving(ctx, endpoint, len(result.Vector))
 			if err != nil || after != serving {
 				return false, errors.New("code embedding identity changed")
 			}

@@ -333,7 +333,7 @@ func (s *postgresDataStore) assertionVectors(ctx context.Context, trace uint64, 
 	}
 	modelCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	before, err := versionServingIdentity(modelCtx, trace, executor, command)
+	before, err := versionServingIdentity(modelCtx, trace, executor, command, dimension)
 	if err != nil || before != expected {
 		observation.IndexReadiness = "identity_mismatch"
 		return nil, 0, errors.New("assertion embedding identity mismatch")
@@ -346,7 +346,7 @@ func (s *postgresDataStore) assertionVectors(ctx context.Context, trace uint64, 
 	if embedded.Error != "" || embedded.Unavailable || embedded.Unauthorized || embedded.Truncated || len(embedded.Vector) != dimension {
 		return nil, 0, errors.New("assertion query embedding unavailable")
 	}
-	after, err := versionServingIdentity(modelCtx, trace, executor, command)
+	after, err := versionServingIdentity(modelCtx, trace, executor, command, dimension)
 	if err != nil || after != expected {
 		observation.IndexReadiness = "identity_mismatch"
 		return nil, 0, errors.New("assertion embedding identity mismatch")
