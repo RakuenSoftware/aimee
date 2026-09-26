@@ -218,3 +218,85 @@ func TestExternalToolBindingUsesOwnedSessionAndExecutionDirectory(t *testing.T) 
 		t.Fatal("different worktree rebound contract")
 	}
 }
+
+func TestSessionExplorationChildrenShareTaskAllowance(t *testing.T) {
+	t.Setenv("AIMEE_HOME", t.TempDir())
+	now := time.Now()
+	var state []byte
+	apply := func(req sessionExplorationRequest) map[string]any {
+		t.Helper()
+		raw, _ := json.Marshal(req)
+		next, reply, err := SessionExploration("alice", "session", state, raw, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = next
+		var result map[string]any
+		json.Unmarshal(reply, &result)
+		return result
+	}
+	c := testContract(now)
+	c.Limits.Enabled = true
+	c.Limits.RawScans = ceiling(1)
+	for i, task := range []string{"parent", "child-a", "child-b"} {
+		c.ID = task
+		c.Binding.Task = task
+		c.Binding.BudgetTask = "parent"
+		apply(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+		a := attempt(c, task)
+		req := sessionExplorationRequest{Operation: "reserve", Binding: c.Binding, Attempt: &a}
+		result := apply(req)
+		if result["would_restrict"] != (i > 0) || result["restricted"] != false {
+			t.Fatalf("%s: %v", task, result)
+		}
+		apply(req) // Same admitted child attempt never spends twice.
+	}
+	var decoded sessionExplorationState
+	json.Unmarshal(state, &decoded)
+	if decoded.Groups["parent"].RawScans != 3 || decoded.Usage.RawScans != 3 {
+		t.Fatal(decoded)
+	}
+	// Task-specific revisions cannot move their spent allowance to a new root.
+	c.Binding.BudgetTask = "fresh-group"
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	if _, _, err := SessionExploration("alice", "session", state, raw, now); err == nil {
+		t.Fatal("revision transferred its budget group")
+	}
+	// An unrelated task keeps its own allowance, while session work stays global.
+	c.ID = "unrelated"
+	c.Binding.Task = "unrelated"
+	c.Binding.BudgetTask = ""
+	apply(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	a := attempt(c, "unrelated")
+	if apply(sessionExplorationRequest{Operation: "reserve", Binding: c.Binding, Attempt: &a})["would_restrict"] != false {
+		t.Fatal("unrelated task inherited adaptive debt")
+	}
+}
+
+func TestSessionExplorationLegacyTaskUsageSurvivesGroupUpgrade(t *testing.T) {
+	t.Setenv("AIMEE_HOME", t.TempDir())
+	now := time.Now()
+	c := testContract(now)
+	c.Limits.Enabled = true
+	c.Limits.RawScans = ceiling(2)
+	old := sessionExplorationState{Version: 1, Principal: "alice", Session: "session", Usage: explorationUsage{RawScans: 2}, Tasks: map[string]explorationSnapshot{
+		c.Binding.Task: {Revisions: []explorationContract{c}, TaskUsage: explorationUsage{RawScans: 2}},
+	}}
+	state, _ := json.Marshal(old)
+	a := attempt(c, "after-upgrade")
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "reserve", Binding: c.Binding, Attempt: &a})
+	next, reply, err := SessionExploration("alice", "session", state, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	json.Unmarshal(reply, &result)
+	if result["would_restrict"] != true {
+		t.Fatal("upgrade reset legacy task usage", string(reply))
+	}
+	var decoded sessionExplorationState
+	json.Unmarshal(next, &decoded)
+	if decoded.Groups[c.Binding.Task].RawScans != 3 || decoded.Usage.RawScans != 3 {
+		t.Fatal(decoded)
+	}
+}

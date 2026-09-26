@@ -44,6 +44,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		return nil, nil, errors.New("invalid authenticated task binding")
 	}
 	if req.Operation == "prepare" {
+		req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
 		o := req.Offer
 		if o == nil || o.MemoryOwner != req.Binding.MemoryOwner || o.IndexGeneration != req.Binding.IndexGeneration {
 			return nil, nil, errors.New("memory offer binding mismatch")
@@ -65,7 +66,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 	if s.Version == 0 && len(state) == 0 {
 		s = sessionExplorationState{Version: 1, Principal: principal, Session: session, Tasks: map[string]explorationSnapshot{}}
 	}
-	if len(s.Tasks) > 64 || s.Version != 1 || s.Principal != principal || s.Session != session || s.Tasks == nil {
+	if len(s.Groups) > 64 || len(s.Tasks) > 64 || s.Version != 1 || s.Principal != principal || s.Session != session || s.Tasks == nil {
 		return nil, nil, errors.New("exploration state identity mismatch")
 	}
 	snapshot, exists := s.Tasks[req.Binding.Task]
@@ -81,6 +82,19 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 	if exists && req.Operation != "issue" && req.Operation != "check" && req.Operation != "reserve" && snapshot.Revisions[len(snapshot.Revisions)-1].Binding != req.Binding {
 		return nil, nil, errors.New("task binding changed; refresh required")
 	}
+	// Older rows have independent task counters. Upgrade them lazily without
+	// dropping spent allowance; new child jobs share their inherited root key.
+	if s.Groups == nil {
+		s.Groups = make(map[string]explorationUsage, len(s.Tasks))
+		for key, task := range s.Tasks {
+			s.Groups[key] = cloneUsage(task.TaskUsage)
+		}
+	}
+	group := req.Binding.budgetTask()
+	if exists {
+		group = snapshot.Revisions[len(snapshot.Revisions)-1].Binding.budgetTask()
+	}
+	snapshot.TaskUsage = cloneUsage(s.Groups[group])
 	snapshot.SessionUsage = cloneUsage(s.Usage)
 	l := newExplorationLedger(snapshot, func(explorationSnapshot) error { return nil })
 	var result any = map[string]any{"status": "ok"}
@@ -128,6 +142,11 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("invalid arguments")
 		}
 		action, _ := json.Marshal([]any{req.Tool, canonical})
+		// A changed or dirty worktree invalidates only the adaptive binding.
+		// The same durable root/session counters still enforce operator ceilings.
+		if strings.HasPrefix(req.Binding.WorktreeGeneration, "git-clean:") {
+			req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
+		}
 		a := explorationAttempt{ID: req.AttemptID, Binding: req.Binding, Class: "raw_scan", Path: explorationDiscoveryPath(req.Tool, req.Arguments, req.Binding.WorkingDirectory), Bytes: req.Bytes, Tokens: req.Tokens, ActionDigest: fmt.Sprintf("%x", sha256.Sum256(action))}
 		var decision explorationDecision
 		decision, err = l.reserve(a, operator, false, nil, now)
@@ -252,6 +271,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		return nil, nil, err
 	}
 	s.Usage = cloneUsage(l.state.SessionUsage)
+	s.Groups[group] = cloneUsage(l.state.TaskUsage)
 	next := l.state.clone()
 	next.SessionUsage = explorationUsage{}
 	s.Tasks[req.Binding.Task] = next
@@ -264,6 +284,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 }
 
 type sessionExplorationState struct {
+	Groups    map[string]explorationUsage    `json:"budget_groups,omitempty"`
 	Version   int                            `json:"version"`
 	Principal string                         `json:"principal"`
 	Session   string                         `json:"session"`

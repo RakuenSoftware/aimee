@@ -117,8 +117,26 @@ empty result. Completed native turns derive starvation from recorded lookup
 gaps and budget observations; model declarations and trivial writes cannot
 reset it. External hook result bodies are not accepted as proof of a lookup.
 
-MR-07 is still in progress. Worktree/index generations are explicitly unavailable
-on this offer, so production issuance remains observe-only. Calibrated activation,
-fresh deployment acceptance, and the external-client recovery journey remain to
-be finished. MR-08 and MR-09 have not started. Tests of the storage and native
-host integration are evidence for those components, not a proposal closeout.
+Child jobs inherit the host context's `budget_task` root while retaining their
+own task/plan revisions and attempt histories. PostgreSQL stores the root usage
+once alongside global session usage. Unrelated tasks have separate adaptive
+allowances; revisions cannot transfer a task to a fresh root. Existing JSON rows
+upgrade their task counters without resetting spent work.
+
+The retained code-context packet supplies an exact index generation when present;
+dropped, mixed-generation or unprovenanced context cannot claim one. Native
+refresh preserves retained ingress coverage and index observations. This records
+the observed generation; it does not prove that the index/worktree remains current
+at a later admission. The external `tools.execute` route binds the authenticated
+session and observes actual indexed results before exposing expansion references.
+
+The host observes a clean Git worktree at issuance and rechecks it before
+discovery admission. A dirty tree or changed commit invalidates the adaptive
+binding without resetting operator work counters. The bounded read disables
+Git filesystem-monitor commands and treats errors/timeouts as unavailable.
+
+MR-07 is still in progress. Current-index revalidation and calibrated activation
+remain unfinished; production issuance stays observe-only. Live native and external
+recovery pass on the disposable candidate. Fresh full deployment acceptance and
+the paired quality/efficiency gates remain required. MR-08 and MR-09 have not
+started. Component tests are not evidence of task-quality noninferiority.

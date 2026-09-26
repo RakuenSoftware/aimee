@@ -53,6 +53,7 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
 static request_context_t test_context;
 static int context_active;
 static int owner_calls;
+static int test_job = 7;
 static const char *owner_reply = "{\"status\":\"ok\"}";
 const request_context_t *request_context_get(void)
 {
@@ -70,7 +71,7 @@ const char *run_cmd_get_cwd(void)
 }
 int agent_get_durable_job_id(void)
 {
-   return 7;
+   return test_job;
 }
 size_t agent_tool_output_cap(void)
 {
@@ -82,6 +83,23 @@ int db1_session_exploration_apply(const char *principal, const char *sid, const 
    assert(strcmp(principal, "alice") == 0 && strcmp(sid, "session") == 0);
    cJSON *body = cJSON_Parse(request);
    assert(cJSON_IsObject(body));
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "operation"));
+   if (operation && strcmp(operation, "prepare") == 0 && owner_reply)
+   {
+      cJSON *contract = cJSON_CreateObject();
+      cJSON *result = cJSON_CreateObject();
+      cJSON *binding = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(body, "binding"), 1);
+      cJSON_ReplaceItemInObjectCaseSensitive(binding, "worktree_generation",
+                                             cJSON_CreateString("host-observed-generation"));
+      cJSON_AddItemToObject(contract, "binding", binding);
+      cJSON_AddItemToObject(result, "contract", contract);
+      assert(cJSON_PrintPreallocated(result, reply, (int)reply_len, 0));
+      cJSON_Delete(result);
+      cJSON_Delete(body);
+      owner_calls++;
+      return 0;
+   }
    cJSON_Delete(body);
    owner_calls++;
    if (!owner_reply)
@@ -127,6 +145,24 @@ int main(void)
    assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
    cJSON_Delete(offer);
    assert(owner_calls == 1 && test_context.exploration_binding[0]);
+   assert(strstr(test_context.exploration_binding, "host-observed-generation"));
+   cJSON *parent_binding = cJSON_Parse(test_context.exploration_binding);
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "budget_task")),
+              "job:7") == 0);
+   cJSON_Delete(parent_binding);
+   test_job = 8;
+   offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
+   assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
+   cJSON_Delete(offer);
+   parent_binding = cJSON_Parse(test_context.exploration_binding);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "task")),
+                 "job:8") == 0);
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "budget_task")),
+              "job:7") == 0);
+   cJSON_Delete(parent_binding);
+   owner_calls = 1; /* Subsequent admission assertions count from this checkpoint. */
    g_reply = "{\"allowed\":false,\"reason\":\"baseline denies\"}";
    assert(policy_check_tool_attempt("bash", "filesystem", "{}", "a", reason, sizeof reason) == -1);
    assert(owner_calls == 1);

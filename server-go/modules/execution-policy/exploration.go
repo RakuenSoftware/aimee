@@ -38,6 +38,7 @@ func (l explorationLimits) valid() bool {
 }
 
 type explorationBinding struct {
+	BudgetTask           string `json:"budget_task,omitempty"`
 	WorkingDirectory     string `json:"working_directory,omitempty"`
 	PlanDigest           string `json:"plan_digest,omitempty"`
 	SourceVersionsDigest string `json:"source_versions_digest,omitempty"`
@@ -52,7 +53,14 @@ type explorationBinding struct {
 }
 
 func (b explorationBinding) valid() bool {
-	return b.Principal != "" && b.Session != "" && b.Task != "" && b.Project != "" && b.WorktreeGeneration != "" && b.IndexGeneration != "" && b.MemoryOwner != ""
+	return len(b.BudgetTask) <= 128 && b.Principal != "" && b.Session != "" && b.Task != "" && b.Project != "" && b.WorktreeGeneration != "" && b.IndexGeneration != "" && b.MemoryOwner != ""
+}
+
+func (b explorationBinding) budgetTask() string {
+	if b.BudgetTask != "" {
+		return b.BudgetTask
+	}
+	return b.Task
 }
 
 type explorationContract struct {
@@ -212,7 +220,7 @@ func (l *explorationLedger) issue(c explorationContract, now time.Time) error {
 	}
 	if len(s.Revisions) > 0 {
 		old := s.Revisions[len(s.Revisions)-1]
-		if c.ID != old.ID || c.Revision != old.Revision+1 || c.Binding.Principal != old.Binding.Principal || c.Binding.Session != old.Binding.Session || c.Binding.Task != old.Binding.Task {
+		if c.ID != old.ID || c.Revision != old.Revision+1 || c.Binding.Principal != old.Binding.Principal || c.Binding.Session != old.Binding.Session || c.Binding.Task != old.Binding.Task || c.Binding.budgetTask() != old.Binding.budgetTask() {
 			return errors.New("contract revision cannot transfer task or session")
 		}
 	}

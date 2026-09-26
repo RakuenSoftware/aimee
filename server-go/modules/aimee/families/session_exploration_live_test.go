@@ -100,7 +100,7 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	now := time.Now().UTC()
 	bindings := []map[string]any{}
 	for i := 0; i < 2; i++ {
-		b := map[string]any{"principal": "alice", "session": "session", "task": []string{"session-task", "job:1"}[i], "project": "project", "worktree_generation": "w1", "index_generation": "i1", "memory_owner": "m1"}
+		b := map[string]any{"principal": "alice", "session": "session", "budget_task": "session-task", "task": []string{"session-task", "job:1"}[i], "project": "project", "worktree_generation": "w1", "index_generation": "i1", "memory_owner": "m1"}
 		bindings = append(bindings, b)
 		c := map[string]any{"id": fmt.Sprint(i), "revision": 1, "binding": b, "plan_digest": "plan", "source_versions_digest": "versions", "query_class": "symbol", "coverage_complete": true, "confidence_provenance": "uncalibrated", "supported_classes": []string{"raw_scan"}, "created": now.Add(-time.Second), "expires": now.Add(time.Hour), "limits": map[string]any{"enabled": true, "raw_scans": 0}, "tier": "enforce"}
 		reply, status := call("alice", map[string]any{"operation": "issue", "binding": b, "contract": c})
@@ -169,6 +169,9 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	json.Unmarshal([]byte(cells[0]), &snapshot)
 	if snapshot["session_usage"].(map[string]any)["raw_scans"] != float64(3) {
 		t.Fatal("lost committed session allowance")
+	}
+	if snapshot["task_usage"].(map[string]any)["raw_scans"] != float64(3) {
+		t.Fatal("children did not share the parent's durable task allowance")
 	}
 	for i := 0; i < 24; i++ {
 		b := bindings[i%2]

@@ -373,6 +373,8 @@ def inside(output):
         check('exploration fixture creates an authenticated session', status == 200 and bool(exploration_session))
         status, pinned = api('/v1/sessions/' + exploration_session + '/primary', dict(agent=prefix))
         check('exploration fixture pins the local synthetic provider', status == 200 and pinned.get('agent') == prefix)
+        settle_shared_projection('primary native recovery')
+        primary_started = time.monotonic()
         scenario, scenario_start = 'exploration-recovery', len(captures)
         # A short, session-specific fixture persona leaves room for recovery
         # history beneath the unchanged 32 KiB operator ceiling. The complete
@@ -389,6 +391,11 @@ def inside(output):
                 aimee_session_id=exploration_session, cwd=fixture_files.name, model=prefix))
         finally:
             persona.unlink(missing_ok=True)
+        runs.append(dict(name='primary native recovery', status=status,
+            elapsed_seconds=time.monotonic()-primary_started, provider_requests=len(captures)-scenario_start,
+            provider_request_bytes=request_sizes[scenario_start:],
+            refusal_kinds=[kind for kind in ('request_budget_exceeded', 'request_budget_unavailable', 'unavailable', 'stale_context')
+                           if any(kind in text for text in strings(events))]))
         check('primary session completes native indexed recovery', status == 200 and not provider_errors and
               len(captures) == scenario_start + 4 and any('NATIVE_MEMORY_OK' in text for text in strings(events)))
         worktrees = subprocess.check_output(['git', '-C', fixture_files.name, 'worktree', 'list', '--porcelain'], text=True)

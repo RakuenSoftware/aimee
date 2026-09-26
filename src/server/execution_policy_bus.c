@@ -188,8 +188,23 @@ static int policy_baseline(const char *tool_name, const char *side_effect, const
 int policy_prepare_exploration(const cJSON *offer, const char *session, const char *workspace,
                                const char *project)
 {
-   (void)request_context_set_exploration_binding("");
    const request_context_t *ctx = request_context_get();
+   char budget_task[129] = "";
+   cJSON *parent = ctx ? cJSON_Parse(ctx->exploration_binding) : NULL;
+   const char *parent_session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent, "session"));
+   const char *parent_principal =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent, "principal"));
+   const char *parent_task =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent, "budget_task"));
+   if (!parent_task || !parent_task[0])
+      parent_task = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent, "task"));
+   if (ctx && session && parent_session && parent_principal && parent_task &&
+       strcmp(session, parent_session) == 0 && strcmp(ctx->principal, parent_principal) == 0 &&
+       strlen(parent_task) < sizeof(budget_task))
+      snprintf(budget_task, sizeof(budget_task), "%s", parent_task);
+   cJSON_Delete(parent);
+   (void)request_context_set_exploration_binding("");
    if (!ctx || !ctx->principal[0] || !session || !session[0] || !workspace || !workspace[0] ||
        !project || !project[0] || !cJSON_IsObject(offer))
       return -1;
@@ -207,6 +222,7 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    if (job > 0)
       snprintf(task, sizeof(task), "job:%d", job);
    cJSON_AddStringToObject(binding, "task", task);
+   cJSON_AddStringToObject(binding, "budget_task", budget_task[0] ? budget_task : task);
    cJSON_AddStringToObject(binding, "project", project);
    cJSON_AddStringToObject(binding, "workspace", workspace);
    /* Workspace is a namespace URI, never a filesystem path. Bind the actual
@@ -231,12 +247,21 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    cJSON_AddItemToObject(request, "binding", cJSON_Duplicate(binding, 1));
    cJSON_AddItemToObject(request, "offer", cJSON_Duplicate(offer, 1));
    char *wire = cJSON_PrintUnformatted(request);
-   char *serialized = cJSON_PrintUnformatted(binding);
+   char *serialized = NULL;
    char *reply = malloc(65536);
    int rc = -1;
-   if (wire && serialized && reply &&
+   if (wire && reply &&
        db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
-      rc = request_context_set_exploration_binding(serialized);
+   {
+      cJSON *result = cJSON_Parse(reply);
+      const cJSON *contract = cJSON_GetObjectItemCaseSensitive(result, "contract");
+      const cJSON *issued_binding = cJSON_GetObjectItemCaseSensitive(contract, "binding");
+      if (cJSON_IsObject(issued_binding))
+         serialized = cJSON_PrintUnformatted(issued_binding);
+      if (serialized)
+         rc = request_context_set_exploration_binding(serialized);
+      cJSON_Delete(result);
+   }
    free(reply);
    free(serialized);
    free(wire);
