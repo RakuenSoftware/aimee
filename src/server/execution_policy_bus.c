@@ -8,6 +8,9 @@
 #include "headers/module_json_call.h"
 
 #include "request_context.h"
+#include "util.h"
+#include <limits.h>
+#include <unistd.h>
 #include "agent_tasks.h"
 #include "db1_client/session_state.h"
 #include <stdlib.h>
@@ -37,7 +40,7 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    cJSON *binding = ctx ? cJSON_Parse(ctx->exploration_binding) : NULL;
    const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "session"));
    const char *workspace =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "workspace"));
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "working_directory"));
    if (!session || !workspace || !ctx->principal[0] || !attempt || !attempt[0])
    {
       cJSON_Delete(binding);
@@ -206,6 +209,14 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    cJSON_AddStringToObject(binding, "task", task);
    cJSON_AddStringToObject(binding, "project", project);
    cJSON_AddStringToObject(binding, "workspace", workspace);
+   /* Workspace is a namespace URI, never a filesystem path. Bind the actual
+    * host execution directory separately for path-scoped recovery. */
+   char cwd[PATH_MAX], canonical[PATH_MAX];
+   const char *effective_cwd = run_cmd_get_cwd();
+   if ((!effective_cwd || !effective_cwd[0]) && getcwd(cwd, sizeof(cwd)))
+      effective_cwd = cwd;
+   cJSON_AddStringToObject(binding, "working_directory",
+                           effective_cwd && realpath(effective_cwd, canonical) ? canonical : "");
    cJSON_AddStringToObject(binding, "worktree_generation", "unavailable");
    cJSON_AddStringToObject(binding, "index_generation", generation);
    cJSON_AddStringToObject(binding, "memory_owner", owner);

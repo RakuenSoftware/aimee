@@ -51,6 +51,7 @@ def inside(output):
     provider_failure = 'native fixture "quoted"; line\nbreak; path \\ evidence 界'
     scenario, scenario_start = 'single', 0
     previous_recall = None
+    exploration_session = None
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
     for turn in range(1, 6):
         (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
@@ -167,6 +168,25 @@ def inside(output):
                 except Exception as exc:
                     provider_errors.append(type(exc).__name__ + ': ' + str(exc))
                 response = dict(error=dict(message='retryable fixture response after shared insertion'))
+            if scenario == 'exploration-recovery' and ordinal <= 3:
+                if ordinal == 1:
+                    name, arguments = 'find_symbol', dict(identifier=prefix + '_missing_symbol')
+                elif ordinal == 2:
+                    try:
+                        outputs = [m.get('content', '') for m in body.get('messages', []) if m.get('role') == 'tool']
+                        gap = json.loads(outputs[-1].split('Exploration recovery: ', 1)[1])
+                        check('native indexed miss exposes a host-owned recovery reference', gap.get('expansion_available') is True)
+                        name, arguments = 'context_contract_expand', dict(reason='indexed lookup found no definition',
+                            gap_ref=gap['gap_ref'], outcome_id=gap['outcome_id'])
+                    except (KeyError, IndexError, ValueError) as exc:
+                        provider_errors.append('missing host exploration gap: ' + str(exc))
+                        name, arguments = 'context_contract_expand', dict(reason='fixture failure', gap_ref='invalid', outcome_id='invalid')
+                else:
+                    outputs = [m.get('content', '') for m in body.get('messages', []) if m.get('role') == 'tool']
+                    check('native expansion tool accepts the observed gap', json.loads(outputs[-1]).get('status') == 'ok')
+                    name, arguments = 'grep', dict(path='.', pattern=prefix, max_results=1)
+                response['choices'] = [dict(index=0, finish_reason='tool_calls', message=dict(role='assistant', content=None,
+                    tool_calls=[dict(id=f'{prefix}-recovery-{ordinal}', type='function', function=dict(name=name, arguments=json.dumps(arguments)))]))]
             if scenario == 'provider-error':
                 response = dict(error=dict(message=provider_failure))
             data = json.dumps(response, ensure_ascii=False).encode()
@@ -339,6 +359,23 @@ def inside(output):
         check('real provider write has a distinct durable started observation', 'dispatch_started' in own[0]['stages'])
         check('commitment-only receipt does not invent replay or remote effects', own[0].get('replay') == 'unavailable_commitment_only' and
               own[0].get('evidence', {}).get('effect_confirmed') is False and own[0].get('evidence', {}).get('decision_replayed') is False)
+        # A real primary session has authenticated durable ownership and a
+        # concrete worktree. The stateless /v1/runs fixture above has neither.
+        for command in [ ['git', 'init', '-b', 'main', fixture_files.name],
+                         ['git', '-C', fixture_files.name, 'add', '.'],
+                         ['git', '-C', fixture_files.name, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                          'commit', '-m', 'Disposable exploration fixture'] ]:
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        status, session = api('/v1/sessions/create', dict(client_type='native-exploration-fixture'))
+        exploration_session = session.get('session_id')
+        check('exploration fixture creates an authenticated session', status == 200 and bool(exploration_session))
+        status, pinned = api('/v1/sessions/' + exploration_session + '/primary', dict(agent=prefix))
+        check('exploration fixture pins the local synthetic provider', status == 200 and pinned.get('agent') == prefix)
+        scenario, scenario_start = 'exploration-recovery', len(captures)
+        status, events = api('/v1/chat/stream', dict(message='Read the native memory fixture ' + prefix,
+            aimee_session_id=exploration_session, cwd=fixture_files.name, model=prefix))
+        check('primary session completes native indexed recovery', status == 200 and not provider_errors and
+              len(captures) == scenario_start + 4 and any('NATIVE_MEMORY_OK' in text for text in strings(events)))
         before = len(captures)
         result, events = run('inherited zero byte cap', dict(schema_version=1, max_request_bytes=0))
         check('worker preserves inherited byte refusal', result.get('status') == 'failed' and
@@ -495,6 +532,7 @@ def inside(output):
             provider.server_close()
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
                 unresolved_attempts=sorted(expected_unresolved)), indent=2) + '\n')
@@ -524,6 +562,27 @@ def main():
         if run_result.returncode:
             return run_result.returncode
         evidence = json.loads(Path(args.output).read_text())
+        # Read only this fixture's row from its owned Compose PostgreSQL.
+        import re
+        sid = evidence.get('exploration_session', '')
+        if not re.fullmatch(r'[a-fA-F0-9-]{36}', sid):
+            raise RuntimeError('missing fixture session identity')
+        postgres = args.server.removesuffix('-aimee-server-1') + '-aimee-store-db-1'
+        raw = subprocess.check_output(['docker', 'exec', postgres, 'psql', '-U', 'postgres', '-d', 'aimee_store',
+            '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c',
+            "SELECT exploration_state FROM session_state WHERE session_id='" + sid + "'"], text=True).strip()
+        state = json.loads(raw)
+        tasks = list(state.get('tasks', {}).values())
+        integrated = (state.get('session') == sid and len(tasks) == 1 and
+            len(tasks[0].get('revisions', [])) >= 2 and len(tasks[0].get('fallbacks', [])) == 1 and
+            len(tasks[0].get('indexed_outcomes', {})) == 1 and state.get('usage', {}).get('raw_scans') == 1 and
+            len(tasks[0].get('completed_turns', {})) == 3 and
+            all(r.get('tier') == 'observe' for r in tasks[0]['revisions']) and
+            all(a.get('started') for a in tasks[0].get('attempts', {}).values()))
+        evidence['checks'].append(dict(name='real primary session persists observed recovery and single dispatch charge', passed=integrated))
+        Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')
+        if not integrated:
+            raise RuntimeError('native exploration session state did not match actual dispatches')
         # The fixture owns this entire container, confirmed by its Compose label
         # above. SIGKILL tests host-process loss, not a graceful SQLite close.
         def committed_rows():

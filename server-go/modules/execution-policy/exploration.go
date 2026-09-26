@@ -34,6 +34,7 @@ func (l explorationLimits) valid() bool {
 }
 
 type explorationBinding struct {
+	WorkingDirectory     string `json:"working_directory,omitempty"`
 	PlanDigest           string `json:"plan_digest,omitempty"`
 	SourceVersionsDigest string `json:"source_versions_digest,omitempty"`
 	Workspace            string `json:"workspace,omitempty"`

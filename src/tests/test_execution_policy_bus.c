@@ -64,6 +64,10 @@ int request_context_set_exploration_binding(const char *binding)
             binding);
    return 0;
 }
+const char *run_cmd_get_cwd(void)
+{
+   return "/tmp";
+}
 int agent_get_durable_job_id(void)
 {
    return 7;

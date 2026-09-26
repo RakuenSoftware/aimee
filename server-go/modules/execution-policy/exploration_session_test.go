@@ -63,7 +63,8 @@ func TestSessionExplorationSharesOperatorAcrossTasks(t *testing.T) {
 func TestSessionRecoveryRequiresObservedIndexedGap(t *testing.T) {
 	now := time.Now()
 	c := testContract(now)
-	c.Binding.Workspace = "/project"
+	c.Binding.Workspace = "local:project"
+	c.Binding.WorkingDirectory = "/project"
 	c.Limits.RawScans = ceiling(0)
 	var state []byte
 	apply := func(req sessionExplorationRequest) (map[string]any, error) {
@@ -137,7 +138,8 @@ func TestSessionAdmissionIsNotRefundableAndIndexedFormatsAreExact(t *testing.T) 
 	t.Setenv("AIMEE_HOME", t.TempDir())
 	now := time.Now()
 	c := testContract(now)
-	c.Binding.Workspace = "/project"
+	c.Binding.Workspace = "local:project"
+	c.Binding.WorkingDirectory = "/project"
 	var state []byte
 	apply := func(req sessionExplorationRequest) (map[string]any, error) {
 		t.Helper()

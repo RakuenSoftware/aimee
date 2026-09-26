@@ -183,7 +183,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		c := snapshot.Revisions[len(snapshot.Revisions)-1]
 		digest := sha256.Sum256(append([]byte(req.Tool+":"), req.Arguments...))
 		gap := fmt.Sprintf("indexed:%x", digest[:16])
-		outcome := explorationIndexedOutcome{ID: req.AttemptID, Binding: req.Binding, ContractID: c.ID, Revision: c.Revision, Gap: gap, Class: "raw_scan", Path: req.Binding.Workspace, Status: status, Completed: now}
+		outcome := explorationIndexedOutcome{ID: req.AttemptID, Binding: req.Binding, ContractID: c.ID, Revision: c.Revision, Gap: gap, Class: "raw_scan", Path: req.Binding.WorkingDirectory, Status: status, Completed: now}
 		if previous, ok := snapshot.Outcomes[req.AttemptID]; ok {
 			if previous.Binding != outcome.Binding || previous.Gap != outcome.Gap || previous.Status != outcome.Status {
 				return nil, nil, errors.New("indexed observation identity changed")
