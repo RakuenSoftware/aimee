@@ -2066,6 +2066,7 @@ curator-sidecar-parse-check:
 git-cred-centralized-check:
 	@python3 ../scripts/check-git-cred-centralized.py --plant-test
 	@python3 ../scripts/check-git-cred-centralized.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_workspace_git_credentials.py
 
 # Regenerate the day-one client SDKs (api/sdks/<lang>/) from the OpenAPI spec.
 # Self-bootstrapping (portable JRE + openapi-generator); output is gitignored and

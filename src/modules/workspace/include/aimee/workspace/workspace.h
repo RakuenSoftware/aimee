@@ -3,6 +3,10 @@
 
 #include "aimee.h"
 
+/* Bind the existing model Git-tool runner at server startup. Workspace-only
+ * clients keep their bounded ambient Git path without linking server tooling. */
+void worktree_register_git_runner(char *(*runner)(const char *cmd, int *exit_code));
+
 #define MAX_DISCOVERED_PROJECTS 256
 #define MAX_WORKSPACE_DEPTH     10
 
