@@ -119,3 +119,34 @@ func TestSelectionNearRankDiversity(t *testing.T) {
 		t.Fatal("near-equivalent distinct candidate did not compete", got)
 	}
 }
+
+func TestSelectionPolicyReceiptSurvivesNativeRefresh(t *testing.T) {
+	state := &sourceReleaseState{}
+	args := sourceReleaseArgs(map[string]any{"request_id": "selection-policy", "project": "app"})
+	policy := &typedSelectionReport{Version: typedSelectionPolicyVersion, ArtifactDigest: rankingArtifactDigest(true), Exposure: "disabled", UnsatisfiedFloors: []string{"episodes"}}
+	assembly := map[string]any{"typed_projection": map[string]any{"retained_items": []typedProjectionRef{releaseTestRef()}, "selection_policy": policy}}
+	ticket, err := state.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, replace := range []bool{false, true} {
+		args["source_release_ticket"], _ = json.Marshal(ticket)
+		ref := releaseTestRef()
+		ref.Channel = "native_identity"
+		ref.Source.Kind = "memory_record"
+		ticket, err = state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": []typedProjectionRef{ref}}, "append_native_sources": !replace})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var metadata struct {
+			Parts []sourceReleasePart `json:"projection_parts"`
+		}
+		if json.Unmarshal(state.entries[ticket].assemblyMetadata, &metadata) != nil || len(metadata.Parts) != 2 {
+			t.Fatal("receipt lost original selection", string(state.entries[ticket].assemblyMetadata))
+		}
+		part := metadata.Parts[0]
+		if part.SelectionPolicy != typedSelectionPolicyVersion || part.SelectionPolicyDigest != rankingArtifactDigest(true) || part.UnsatisfiedTypes != "episodes" {
+			t.Fatal("native refresh lost selection artifact or floors", part)
+		}
+	}
+}

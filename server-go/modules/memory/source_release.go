@@ -35,11 +35,14 @@ type sourceReleaseState struct {
 	receiptProducer string
 }
 type sourceReleasePart struct {
-	IndexGeneration   string `json:"index_generation,omitempty"`
-	Native            bool   `json:"native"`
-	Digest            string `json:"digest"`
-	CoverageStatus    string `json:"coverage_status,omitempty"`
-	RequirementDigest string `json:"requirement_digest,omitempty"`
+	SelectionPolicy       string `json:"selection_policy,omitempty"`
+	SelectionPolicyDigest string `json:"selection_policy_digest,omitempty"`
+	UnsatisfiedTypes      string `json:"unsatisfied_types,omitempty"`
+	IndexGeneration       string `json:"index_generation,omitempty"`
+	Native                bool   `json:"native"`
+	Digest                string `json:"digest"`
+	CoverageStatus        string `json:"coverage_status,omitempty"`
+	RequirementDigest     string `json:"requirement_digest,omitempty"`
 }
 
 type sourceReleaseEntry struct {
@@ -182,6 +185,19 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 		part.IndexGeneration, _ = context["generation"].(string)
 	}
 	if projection, ok := assembly["typed_projection"].(map[string]any); ok {
+		if policy, ok := projection["selection_policy"].(*typedSelectionReport); ok && policy != nil && policy.Version == typedSelectionPolicyVersion && policy.ArtifactDigest == rankingArtifactDigest(true) {
+			part.SelectionPolicy, part.SelectionPolicyDigest = policy.Version, policy.ArtifactDigest
+			missing := []string{}
+			for _, name := range typedChannelOrder {
+				for _, floor := range policy.UnsatisfiedFloors {
+					if floor == name {
+						missing = append(missing, name)
+						break
+					}
+				}
+			}
+			part.UnsatisfiedTypes = strings.Join(missing, ",")
+		}
 		if coverage, ok := projection["evidence_coverage"].(*evidenceCoverage); ok && coverage != nil {
 			part.CoverageStatus = coverage.Status
 			part.RequirementDigest = coverage.RequirementDigest
