@@ -30,6 +30,11 @@ type assertionEvidence struct {
 	ObservedAt string `json:"observed_at"`
 	Stance     string `json:"stance"`
 }
+
+func assertionRRFContribution(rank int) float64 {
+	return 1 / float64(60+max(1, rank))
+}
+
 type assertionTrace struct {
 	Channel string  `json:"channel"`
 	Raw     float64 `json:"raw_score"`
@@ -462,7 +467,7 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 	for i := range hits {
 		lexical, vector := false, false
 		for _, r := range hits[i].Retrieval {
-			hits[i].fused += 1 / float64(60+max(1, r.Rank))
+			hits[i].fused += assertionRRFContribution(r.Rank)
 			lexical = lexical || r.Channel == "lexical"
 			vector = vector || r.Channel == "vector"
 		}

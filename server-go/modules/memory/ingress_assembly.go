@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -431,6 +432,11 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			})
 		}
 		result["retained_typed_refs"] = refs
+		if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" {
+			if records := typedHealthRecords(typed); len(records) > 0 {
+				result["health_records"] = records
+			}
+		}
 		result["typed_projection"] = map[string]any{
 			"schema_version": 1, "boundary": "ingress_envelope", "source_projection_digest": sourceDigest,
 			"projection_digest": typed.ProjectionDigest, "rendered_bytes": typed.RenderedBytes,

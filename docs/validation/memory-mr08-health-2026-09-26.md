@@ -329,3 +329,25 @@ exited zero, restored collection to off, and left the upgraded Server healthy.
 MR-08 remains open for the other metadata producers, including owned predecessor
 links and the incomplete arm, release/verifier and provenance metadata paths.
 These observations do not supply MR-07's independent paired quality/cost gate.
+
+## Typed assertion metadata producer
+
+After final ingress repacking, optional health capture now copies the retained
+assertion's kind, lifecycle state, confidence class and validity interval from
+the version-checked owner projection. It records each actual lexical, vector
+or semantic-graph arm rank, raw score and reciprocal-rank contribution, with
+`assertion_rrf_k60_v1` provenance. The whole-candidate fused score remains a
+separate field. Ranking and telemetry share the existing contribution formula;
+this refactor does not change its value or ranking behavior.
+
+The importer validates bounded, unique arms and checks contributions against
+the fused total. Missing or malformed evidence retains the arm-contribution gap.
+High confidence does not become a trust or release-safety label. Raw assertion
+text, evidence spans and parent identities are excluded from this capture.
+Historical/current classification still comes from the retained read policy.
+
+Four new regressions cover final version matching, budget omission, serving
+commitment parity, metadata privacy, malformed arm contributions and receipt
+import without invented safety labels. Focused Go race tests passed in 2.715s;
+PostgreSQL-backed health/ingress/assertion/native/source-release checks passed
+in 4.273s. All 77 lint checks passed. Deployed validation for this slice is pending.
