@@ -647,6 +647,24 @@ static void test_every_mcp_tool_has_cli_dispatch(void)
    printf("  every MCP tool has CLI dispatch; ast-grep has a first-class alias\n");
 }
 
+static void test_memory_health_arguments(void)
+{
+   char *args[] = {"--window", "2h", "--project=p", "--workspace", "w", "--stage=network_uncertain",
+                   "--json"};
+   cJSON *request = marshal_memory_health(7, args);
+   assert(request);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "window")), "2h"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "project")), "p"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "workspace")), "w"));
+   cJSON_Delete(request);
+   char *bad[] = {"--principal=another"};
+   assert(!marshal_memory_health(1, bad));
+   char *duplicate[] = {"--window=1h", "--window=2h"};
+   assert(!marshal_memory_health(2, duplicate));
+   char *missing[] = {"--window", "--json"};
+   assert(!marshal_memory_health(2, missing));
+}
+
 int main(void)
 {
    test_every_mcp_tool_has_cli_dispatch();
@@ -654,6 +672,7 @@ int main(void)
    test_memory_store_keeps_unquoted_content();
    test_memory_get_as_of_is_wired();
    test_memory_recall_query_feeds_the_hint();
+   test_memory_health_arguments();
    test_memory_validity_arguments();
    test_memory_hygiene_explicit_scope();
    test_kb_status_warns_about_undrainable_queue();

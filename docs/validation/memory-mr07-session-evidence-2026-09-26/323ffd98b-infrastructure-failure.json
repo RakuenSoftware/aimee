@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "candidate": "323ffd98b",
+  "image": "sha256:346eef3bc440ca3aa219170331371caa9d7d9cfed777917ac1769400c85350a7",
+  "driver_exit": 1,
+  "reported_topology_exits": {
+    "T2": 1,
+    "T3": 120
+  },
+  "classification": "invalid_infrastructure_run",
+  "reason": "CT109 filesystem exhausted; native fixture report absent, T3 topology and image capture incomplete",
+  "driver_log_sha256": "6d057107e7480eccabeca5e2baee36d4c1ce63fcdd61049618b54e094d982c0a",
+  "successful_process_acceptance": false,
+  "cleanup": "Owned failed-run stacks removed; obsolete task source archives and build cache removed; dedicated test PostgreSQL retained"
+}

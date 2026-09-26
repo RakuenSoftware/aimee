@@ -1,5 +1,6 @@
 /* audit_worm.c: per-service WORM audit store (SQLite). S0 = store + hash-chain +
  * triggers; S1 = dedicated chain key + MAC checkpoints + verify. See audit_worm.h. */
+#include <limits.h>
 #include <fcntl.h>
 #include <linux/fs.h> /* FS_IOC_GETFLAGS/SETFLAGS, FS_IMMUTABLE_FL */
 #include <pthread.h>
@@ -1006,9 +1007,9 @@ done:
 /* Exact principal + request binding, including every recorded stage for the
  * matching attempts. Fail on truncation: an omitted admission cannot imply an
  * unsent attempt. Raw detail interpretation belongs to the producer's Go owner. */
-cJSON *audit_worm_read_request(const char *principal, const char *request_id)
+cJSON *audit_worm_read_request_through(const char *principal, const char *request_id, long head)
 {
-   if (!principal || !*principal || !request_id || !*request_id || strlen(request_id) > 256)
+   if (!principal || !*principal || !request_id || !*request_id || strlen(request_id) > 256 || head <= 0)
       return NULL;
    cJSON *out = cJSON_CreateArray();
    sqlite3_stmt *q = NULL;
@@ -1020,7 +1021,7 @@ cJSON *audit_worm_read_request(const char *principal, const char *request_id)
       goto fail;
    const char *sql =
        "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
-       "WHERE actor_role='host' AND actor_principal=?1 AND action LIKE 'memory.provider.%' "
+       "WHERE seq<=?3 AND actor_role='host' AND actor_principal=?1 AND action LIKE 'memory.provider.%' "
        "AND subject IN (SELECT subject FROM audit_event WHERE actor_role='host' AND "
        "actor_principal=?1 "
        "AND action='memory.provider.prepared' AND json_valid(detail) "
@@ -1029,6 +1030,7 @@ cJSON *audit_worm_read_request(const char *principal, const char *request_id)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(q, 2, request_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(q, 3, head);
    while ((rc = sqlite3_step(q)) == SQLITE_ROW)
    {
       bytes += (size_t)sqlite3_column_bytes(q, 4);
@@ -1047,6 +1049,61 @@ cJSON *audit_worm_read_request(const char *principal, const char *request_id)
       cJSON_AddItemToArray(out, row);
    }
    if (rc != SQLITE_DONE)
+      goto fail;
+   sqlite3_finalize(q);
+   pthread_mutex_unlock(&g_worm_mu);
+   return out;
+fail:
+   sqlite3_finalize(q);
+   pthread_mutex_unlock(&g_worm_mu);
+   cJSON_Delete(out);
+   return NULL;
+}
+
+/* Snapshot-bounded transport. Domain interpretation remains in Go. */
+cJSON *audit_worm_read_request(const char *principal, const char *request_id)
+{
+   return audit_worm_read_request_through(principal, request_id, LONG_MAX);
+}
+
+cJSON *audit_worm_memory_requests(const char *principal, const char *from, const char *until,
+                                  long head, int *truncated)
+{
+   if (!principal || !*principal || !from || !until || head < 0 || !truncated)
+      return NULL;
+   *truncated = 0;
+   cJSON *out = cJSON_CreateArray();
+   sqlite3_stmt *q = NULL;
+   int rc = SQLITE_ERROR;
+   pthread_mutex_lock(&g_worm_mu);
+   if (!g_worm_db && worm_open_locked_default() != 0)
+      goto fail;
+   const char *sql = "SELECT json_extract(detail,'$.binding.request_id') FROM audit_event "
+                     "WHERE seq<=?4 AND actor_role='host' AND actor_principal=?1 "
+                     "AND action='memory.provider.prepared' AND json_valid(detail) "
+                     "AND julianday(json_extract(detail,'$.at'))>=julianday(?2)-1.0/86400 "
+                     "AND julianday(json_extract(detail,'$.at'))<=julianday(?3)+1.0/86400 "
+                     "GROUP BY json_extract(detail,'$.binding.request_id') ORDER BY min(seq) "
+                     "DESC LIMIT 257";
+   if (sqlite3_prepare_v2(g_worm_db, sql, -1, &q, NULL) != SQLITE_OK)
+      goto fail;
+   sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(q, 2, from, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(q, 3, until, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(q, 4, head);
+   while ((rc = sqlite3_step(q)) == SQLITE_ROW)
+   {
+      if (cJSON_GetArraySize(out) == 256)
+      {
+         *truncated = 1;
+         break;
+      }
+      const char *id = (const char *)sqlite3_column_text(q, 0);
+      if (!id || !*id || strlen(id) > 256)
+         goto fail;
+      cJSON_AddItemToArray(out, cJSON_CreateString(id));
+   }
+   if (rc != SQLITE_DONE && !*truncated)
       goto fail;
    sqlite3_finalize(q);
    pthread_mutex_unlock(&g_worm_mu);

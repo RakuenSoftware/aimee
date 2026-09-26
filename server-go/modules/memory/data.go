@@ -475,6 +475,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	health          *healthOwnerState
 	recoveryDB      store.DB
 	personalActor   personalActor
 	pageRankSamples *[]pageRankResult
@@ -502,7 +503,7 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if err != nil {
 		return nil, err
 	}
-	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}
+	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled, health: &healthOwnerState{}}
 	if publisher, ok := db.(interface {
 		MemoryAuditAction(context.Context, audit.Action) error
 	}); ok {

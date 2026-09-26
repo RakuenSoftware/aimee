@@ -3619,6 +3619,37 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/health:
+    post:
+      summary: Aggregate the authenticated principal's receipt-backed retrieval health
+      description: >-
+        Optional collection requires AIMEE_MEMORY_HEALTH_ENABLED=1 on the serving
+        owner. Scans at most 256 principal-owned requests through a verified local
+        ledger head, reconciles attempts into bounded private PostgreSQL state,
+        and reports one exact project/workspace/purpose/query-class population.
+        No cross-principal aggregation is offered. Raw queries, memory text,
+        record IDs, family IDs and task IDs are not returned. Older receipts with
+        missing metadata report unknown metrics. Truncation, import failures,
+        unknown dispatch and incomplete windows are explicit. Required receipts
+        and serving decisions are unchanged when collection is disabled.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window: { type: string, default: 24h, description: Positive Go duration at most 24 hours. }
+                project: { type: string, default: '' }
+                workspace: { type: string, default: '' }
+                purpose: { type: string, default: provider_input }
+                query_class: { type: string, default: unclassified }
+                stage: { type: string, enum: [dispatched, assembled_unsent, unknown_dispatch, network_uncertain], default: dispatched }
+      responses:
+        "200":
+          description: Aggregate, collection coverage and readable text, or explicit disabled/unavailable state
+          content:
+            application/json:
+              schema: { type: object }
   /memory/receipt:
     post:
       summary: Inspect the authenticated principal's durable provider attempt receipts

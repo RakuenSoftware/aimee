@@ -1,0 +1,254 @@
+{
+  "candidate": "0a25108fc",
+  "topology": "T3",
+  "passed_checks": [
+    "native fixture explicitly enables automatic recall",
+    "native fixture stores complete private identity",
+    "native fixture reads its private source version",
+    "healthy native run queues a real asynchronous worker",
+    "healthy native run completes",
+    "healthy native run dispatches exactly once",
+    "native provider receives complete Go memory",
+    "provider arrival sees committed preparation and admission",
+    "public receipt verification matches real provider bytes",
+    "native receipt binds the retained private revision and fresh source check",
+    "native receipt retains the private collection dependency",
+    "supplied receipt does not claim producer or chain authentication",
+    "public receipt verification detects changed provider bytes",
+    "authenticated receipt lookup reads actual durable acknowledgement",
+    "real provider write has a distinct durable started observation",
+    "commitment-only receipt does not invent replay or remote effects",
+    "exploration fixture creates an authenticated session",
+    "exploration fixture pins the local synthetic provider",
+    "exploration session selects its bounded fixture persona",
+    "native indexed miss exposes a host-owned recovery reference",
+    "native expansion tool accepts the observed gap",
+    "primary session completes native indexed recovery",
+    "primary fixture resolves its host-isolated worktree",
+    "external find_symbol passes authenticated dispatch",
+    "external context_contract_expand passes authenticated dispatch",
+    "external expansion accepts only host-observed evidence",
+    "external grep passes authenticated dispatch",
+    "inherited zero byte cap queues a real asynchronous worker",
+    "worker preserves inherited byte refusal",
+    "inherited byte refusal sends no provider request",
+    "native fixture identifies exactly one Go memory owner",
+    "paused Go memory owner queues a real asynchronous worker",
+    "native worker reports memory owner refusal",
+    "native owner refusal sends no provider request",
+    "supervised memory restart preserves committed identity",
+    "recovered native run queues a real asynchronous worker",
+    "new native worker recovers and dispatches once",
+    "recovered provider retains complete Go memory",
+    "native context refresh queues a real asynchronous worker",
+    "native refresh fixture commits its memory update",
+    "native multi-turn run completes after five tool calls",
+    "native refresh follows five real file reads",
+    "initial context predates the new identity",
+    "refreshed provider context contains the new complete identity",
+    "native fixture identifies exactly one Go memory owner",
+    "native refresh owner outage queues a real asynchronous worker",
+    "native refresh intervention succeeds",
+    "native refresh reports memory owner refusal",
+    "native refresh refusal prevents a sixth provider request",
+    "recovered native refresh queues a real asynchronous worker",
+    "worker recovers after refresh refusal",
+    "refresh recovery retains both committed identities",
+    "protected native fold queues a real asynchronous worker",
+    "protected native fold completes through five real tool calls",
+    "native reduction preserves complete user constraint bytes",
+    "native provider observes actual optional history reduction",
+    "native generated history is not promoted to user instructions",
+    "unobservable tmux-cli queues a real asynchronous worker",
+    "tmux-cli refuses unobservable final request accounting",
+    "tmux-cli accounting refusal sends no provider request",
+    "unobservable provider-cli queues a real asynchronous worker",
+    "provider-cli refuses unobservable final request accounting",
+    "provider-cli accounting refusal sends no provider request",
+    "native provider error queues a real asynchronous worker",
+    "provider failure terminates without a successful response",
+    "provider error events retain complete escaped diagnostics",
+    "permanent provider error is not retried",
+    "private correction before transport retry queues a real asynchronous worker",
+    "provider fixture commits correction before retryable response",
+    "private correction refuses stale native transport retry",
+    "corrected private source prevents a second provider send",
+    "every actual native send has separate durable admission",
+    "completed native transports retain durable response observations",
+    "owner outage leaves admitted transport unresolved without invented acknowledgement",
+    "native fixture retires its refreshed identity",
+    "native fixture retires its private identity",
+    "native and external session persist observed recovery and exact dispatch charges",
+    "owned Server recovers after an ungraceful process kill",
+    "host crash preserves exploration revisions and shared accounting exactly",
+    "host crash preserves every committed provider stage exactly",
+    "host recovery does not invent acknowledgement for unresolved transport"
+  ],
+  "runs": [
+    {
+      "name": "healthy native run",
+      "run_id": "run_1790414004_1",
+      "status": "completed",
+      "elapsed_seconds": 0.616058831976261,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23867
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "primary native recovery",
+      "status": 200,
+      "elapsed_seconds": 2.2792857750318944,
+      "provider_requests": 4,
+      "provider_request_bytes": [
+        29301,
+        29861,
+        30310,
+        31537
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "inherited zero byte cap",
+      "run_id": "run_1790414007_2",
+      "status": "failed",
+      "elapsed_seconds": 0.4171959510422312,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_exceeded"
+      ]
+    },
+    {
+      "name": "paused Go memory owner",
+      "run_id": "run_1790414008_3",
+      "status": "failed",
+      "elapsed_seconds": 60.22100060101366,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native run",
+      "run_id": "run_1790414070_4",
+      "status": "completed",
+      "elapsed_seconds": 0.7096248029847629,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23974
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native context refresh",
+      "run_id": "run_1790414071_5",
+      "status": "completed",
+      "elapsed_seconds": 3.13605994801037,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        23974,
+        24454,
+        24934,
+        25414,
+        25894,
+        26644
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native refresh owner outage",
+      "run_id": "run_1790414074_6",
+      "status": "failed",
+      "elapsed_seconds": 79.43176004599081,
+      "provider_requests": 5,
+      "provider_request_bytes": [
+        24244,
+        24724,
+        25204,
+        25684,
+        26164
+      ],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native refresh",
+      "run_id": "run_1790414156_7",
+      "status": "completed",
+      "elapsed_seconds": 0.7141290580038913,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24293
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "protected native fold",
+      "run_id": "run_1790414157_8",
+      "status": "completed",
+      "elapsed_seconds": 3.6493725879699923,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        25904,
+        26384,
+        26864,
+        27223,
+        27703,
+        28183
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "unobservable tmux-cli",
+      "run_id": "run_1790414161_9",
+      "status": "failed",
+      "elapsed_seconds": 0.10579483699984848,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_unavailable",
+        "unavailable"
+      ]
+    },
+    {
+      "name": "unobservable provider-cli",
+      "run_id": "run_1790414161_10",
+      "status": "failed",
+      "elapsed_seconds": 0.11269518604967743,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_unavailable",
+        "unavailable"
+      ]
+    },
+    {
+      "name": "native provider error",
+      "run_id": "run_1790414162_11",
+      "status": "failed",
+      "elapsed_seconds": 0.6177333960076794,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24287
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "private correction before transport retry",
+      "run_id": "run_1790414162_12",
+      "status": "failed",
+      "elapsed_seconds": 1.7168038230156526,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24377
+      ],
+      "refusal_kinds": [
+        "stale_context"
+      ]
+    }
+  ]
+}

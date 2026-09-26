@@ -1916,6 +1916,7 @@ const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/audit", NULL, RM_EXACT, "dashboard.audit", 0, rh_dispatch_op},
     {"POST", "/v1/memory/receipt/forget", NULL, RM_EXACT, "memory.receipt_forget", 0,
      rh_dispatch_op},
+    {"POST", "/v1/memory/health", NULL, RM_EXACT, "memory.health", 0, rh_dispatch_op},
     {"POST", "/v1/memory/receipt", NULL, RM_EXACT, "memory.receipt", 0, rh_dispatch_op},
     {"GET", "/v1/audit/verify", NULL, RM_EXACT, "audit.verify", 0, rh_dispatch_op},
     {"GET", "/v1/audit/captures", NULL, RM_EXACT, "audit.captures", 0, rh_dispatch_op},

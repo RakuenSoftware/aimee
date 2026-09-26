@@ -1,6 +1,6 @@
 # MR-08: Retrieval health telemetry with defined metrics
 
-- **State:** Proposed
+- **State:** In progress; receipt collector and health command implemented; acceptance remains open
 - **Priority:** P1; instrument and establish baseline during the foundation wave
 - **Owner:** Go memory diagnostics and existing observability
 - **Depends on:** [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) for actual final selection; [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for family metrics
@@ -58,3 +58,11 @@ Health-report access uses the same scoped identity as recall. Cross-scope admini
 Hand-calculated populations pin top-k/HHI/entropy, empty/single-record behavior, repeats and sample handling. Historical recalls do not trigger stale-current alerts. Retries do not inflate exposure. Unauthorized users cannot discover record/family IDs through health queries. An event overflow produces visible loss rather than a reassuring zero. Measure overhead and retention growth before widening collection; rollback disables optional collection without dropping required receipts.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+The initial Go-only calculator and bounded journal foundation have
+[hand-calculated and reconciliation tests](../../validation/memory-mr08-health-2026-09-26.md).
+The journal has a tested PostgreSQL owner foundation and receipt-derived importer.
+The authenticated health route and CLI are implemented but their deployed
+authentication/migration acceptance remains open. Complete metadata, baseline
+alerts and trace drill-down remain in progress. No production baseline or
+end-to-end acceptance is claimed.

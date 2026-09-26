@@ -94,6 +94,7 @@
     {"entities.unmerge", handle_entities_unmerge},
     {"memory.validity", handle_memory_validity},
     {"memory.receipt", handle_memory_receipt},
+    {"memory.health", handle_memory_health},
     {"memory.receipt_forget", handle_memory_receipt_forget},
     {"memory.hygiene", handle_memory_hygiene},
     {"memory.read", handle_memory_read},

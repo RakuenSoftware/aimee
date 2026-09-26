@@ -2136,7 +2136,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "36f64cefe9a6107a97632708e2ca09009d2dc0a7b43c21f397f607a3d50e61f4"
+      "sha256": "d81f880fbca8ecb153a8dd1be9267c674d6f78630c15af6de2402198dcbc9816"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2157,7 +2157,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "d87470778e7d1ea7e374a07d65df78e784ee522840246077d94b0689a987f2e9"
+      "sha256": "777591c25a4bdb8c783499eff38a06c1b7157f3f7de11072c7e53320fe55bce9"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2597,12 +2597,13 @@
     "src/server/openapi_server_data.h": {
       "disposition": "protocol-catalog",
       "symbols": [
+        "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "327aaf3c43de688b4ae2b8d1c502ef7a17908f9a499555b959220bc94259cda9",
+      "sha256": "2c4899ce7aa1fef77755b2c904696829cefb85fcbd8954e92a9758eb3c1d5af3",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "997442a7408f159fb4c73083d36d98390b44a2914718160b3e13db72630826c6"
+        "api/openapi-server-v1.yaml": "81804f8863c636efe9f77a2c8fa935e85fd5f65a4949a9bc5a2c849897121f54"
       }
     }
   }

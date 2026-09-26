@@ -63,7 +63,9 @@ class Stack:
         # loopback and wildcard bindings. Keep the production service intact.
         self.network_override = output.resolve() / (self.project + '-network.yaml')
         self.network_override.write_text(
-            'services:\n  aimee-' + role + ':\n    ports: !reset []\n')
+            'services:\n  aimee-' + role + ':\n    ports: !reset []\n' +
+            ('    environment:\n      AIMEE_MEMORY_HEALTH_ENABLED: \"1\"\n'
+             if role == 'server' and env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1' else ''))
 
     def compose_args(self):
         encryption = ('-f', 'compose.kb.luks.yaml' if self.role == 'kb' else 'compose.luks.yaml') if self.env.get('AIMEE_POSTGRES_STORAGE') == 'luks' else ()
@@ -1323,6 +1325,10 @@ def main():
             command('python3', str(ROOT / 'tests/e2e/memory-native-async-e2e.py'),
                 '--server', server.application, '--output', str(args.output / 'native-async.json'), timeout=600)
             check('Live asynchronous native memory refusal and recovery gate', True)
+            if env.get('AIMEE_MEMORY_HEALTH_FIXTURE') == '1':
+                command('python3', str(ROOT / 'tests/e2e/memory-health-e2e.py'),
+                    '--server', server.application, '--output', str(args.output / 'memory-health.json'), timeout=600)
+                check('Receipt health persistence and public principal isolation gate', True)
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)

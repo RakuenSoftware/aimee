@@ -252,6 +252,41 @@ cJSON *marshal_memory_search(int argc, char **argv)
 
 /* Decode CLI spelling only. Scope authorization and all budget policy remain
  * in the Go owner. Unsupported options must not silently become a dry run. */
+cJSON *marshal_memory_health(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.health");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      const char *value = strchr(arg, '=');
+      size_t n = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = n == 8 && !strncmp(arg, "--window", n)         ? "window"
+                          : n == 9 && !strncmp(arg, "--project", n)      ? "project"
+                          : n == 11 && !strncmp(arg, "--workspace", n)   ? "workspace"
+                          : n == 9 && !strncmp(arg, "--purpose", n)      ? "purpose"
+                          : n == 13 && !strncmp(arg, "--query-class", n) ? "query_class"
+                          : n == 7 && !strncmp(arg, "--stage", n)        ? "stage"
+                                                                         : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      if (!*value || !strncmp(value, "--", 2))
+         goto invalid;
+      cJSON_AddStringToObject(req, field, value);
+   }
+   return req;
+invalid:
+   cJSON_Delete(req);
+   return NULL;
+}
+
 cJSON *marshal_memory_receipt(int argc, char **argv)
 {
    cJSON *req = marshal_no_args("memory.receipt");
@@ -861,4 +896,31 @@ void pt_print_memory_read(const char *method, cJSON *resp)
 void pt_print_memory_stats(const char *method, cJSON *resp)
 {
    print_memory_stats(resp);
+}
+
+void pt_print_memory_health(const char *method, cJSON *resp)
+{
+   (void)method;
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "text"));
+   if (text)
+      fputs(text, stdout);
+   else
+   {
+      char *json = cJSON_Print(resp);
+      if (json)
+      {
+         puts(json);
+         free(json);
+      }
+   }
+   const cJSON *collection = cJSON_GetObjectItemCaseSensitive(resp, "collection");
+   if (collection)
+   {
+      char *json = cJSON_PrintUnformatted(collection);
+      if (json)
+      {
+         printf("Receipt collection: %s\n", json);
+         free(json);
+      }
+   }
 }

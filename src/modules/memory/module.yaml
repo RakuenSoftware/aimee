@@ -199,7 +199,12 @@
     "server-go/modules/memory/provider_receipt.go",
     "server-go/modules/memory/receipt_verification.go",
     "server-go/modules/memory/evidence_recovery_execution.go",
-    "server-go/modules/memory/evidence_tasks.go"
+    "server-go/modules/memory/evidence_tasks.go",
+    "server-go/modules/memory/retrieval_health_metrics.go",
+    "server-go/modules/memory/retrieval_health_state.go",
+    "server-go/modules/memory/retrieval_health_store.go",
+    "server-go/modules/memory/retrieval_health_runtime.go",
+    "server-go/modules/memory/retrieval_health_report.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -360,7 +365,11 @@
     "server-go/modules/memory/evidence_recovery_execution_test.go",
     "server-go/modules/memory/evidence_tasks_test.go",
     "server-go/modules/memory/evidence_tasks_postgres_test.go",
-    "server-go/modules/memory/evidence_frozen_eval_test.go"
+    "server-go/modules/memory/evidence_frozen_eval_test.go",
+    "server-go/modules/memory/retrieval_health_metrics_test.go",
+    "server-go/modules/memory/retrieval_health_state_test.go",
+    "server-go/modules/memory/retrieval_health_store_test.go",
+    "server-go/modules/memory/retrieval_health_runtime_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

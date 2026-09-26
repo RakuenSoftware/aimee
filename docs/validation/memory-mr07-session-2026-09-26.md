@@ -99,3 +99,24 @@ The non-PostgreSQL race suites for execution policy, memory and session families
 passed, and all 77 lint checks passed. This is implementation validation, not
 measured workload acceptance. No experimental or calibration artifact has been
 installed on production, and no passing paired workload is claimed.
+
+The `323ffd98b` full run was invalidated by CT109 disk exhaustion: driver exit 1,
+reported T2 exit 1 and T3 exit 120. Its native report was absent and other evidence
+files were incomplete. This does not diagnose the earlier enrolled recovery
+failure and is not successful process acceptance. The [infrastructure record](memory-mr07-session-evidence-2026-09-26/323ffd98b-infrastructure-failure.json)
+preserves the result. Obsolete task archives/build cache were removed, leaving
+22 GiB free; owned failed-run stacks were cleaned. The dedicated test PostgreSQL
+was retained. Candidate `0a25108fc` built successfully as
+`sha256:10843abe298548f8e6560b79671537ed687d58b9e0c8071d5109d53e67daf6a0`;
+a fresh sequential T2/T3 run now checks free space before each topology and
+atomically replaces its image-capture evidence.
+
+The `0a25108fc` sequential matrix completed with actual driver exit 0 and T2/T3
+exits both 0. The [process results](memory-mr07-session-evidence-2026-09-26/0a25108fc-process-exits.json)
+and [nine image identities](memory-mr07-session-evidence-2026-09-26/0a25108fc-image-identities.json)
+bind the exercised applications, PostgreSQL images and all three 32768-byte
+provider caps. T2 passed all 99 native checks and T3 all 81, including enrolled
+refresh recovery, exact dispatch charges and ungraceful host restart persistence.
+This fresh pass does not erase the earlier failed and infrastructure-invalid
+runs. Measured workload promotion and an activated process experiment remain
+open; these fixture providers are not task-quality evidence.

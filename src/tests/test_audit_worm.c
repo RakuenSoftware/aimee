@@ -531,10 +531,60 @@ static void test_dispatch_owner_crash(void)
         "survive SIGKILL");
 }
 
+static void test_health_snapshot_scope_and_bounds(void)
+{
+   char path[512];
+   snprintf(path, sizeof path, "%s/health.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   const char *detail = "{\"at\":\"2026-09-26T10:00:00.123456789Z\",\"binding\":{\"request_id\":"
+                        "\"private-request\"}}";
+   assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt", "record",
+                            detail) == 0);
+   long head = audit_worm_count();
+   assert(audit_worm_append("host", "alice", "memory.provider.acknowledged", "attempt", "record",
+                            "{}") == 0);
+   int truncated = 0;
+   cJSON *ids = audit_worm_memory_requests("alice", "2026-09-26T09:00:00Z", "2026-09-26T11:00:00Z",
+                                           head, &truncated);
+   assert(ids && cJSON_GetArraySize(ids) == 1 && !truncated);
+   cJSON_Delete(ids);
+   ids = audit_worm_memory_requests("bob", "2026-09-26T09:00:00Z", "2026-09-26T11:00:00Z", head,
+                                    &truncated);
+   assert(ids && cJSON_GetArraySize(ids) == 0 && !truncated);
+   cJSON_Delete(ids);
+   ids = audit_worm_memory_requests("alice", "2026-09-25T09:00:00Z", "2026-09-25T11:00:00Z", head,
+                                    &truncated);
+   assert(ids && cJSON_GetArraySize(ids) == 0);
+   cJSON_Delete(ids);
+   cJSON *rows = audit_worm_read_request_through("alice", "private-request", head);
+   assert(rows && cJSON_GetArraySize(rows) == 1);
+   cJSON_Delete(rows);
+   rows = audit_worm_read_request("alice", "private-request");
+   assert(rows && cJSON_GetArraySize(rows) == 2);
+   cJSON_Delete(rows);
+   for (int i = 0; i < 257; i++)
+   {
+      char body[256], subject[32];
+      snprintf(subject, sizeof subject, "attempt-%d", i);
+      snprintf(body, sizeof body,
+               "{\"at\":\"2026-09-26T10:00:00Z\",\"binding\":{\"request_id\":\"r-%d\"}}", i);
+      assert(audit_worm_append("host", "alice", "memory.provider.prepared", subject, "record",
+                               body) == 0);
+   }
+   ids = audit_worm_memory_requests("alice", "2026-09-26T09:00:00Z", "2026-09-26T11:00:00Z",
+                                    audit_worm_count(), &truncated);
+   assert(ids && cJSON_GetArraySize(ids) == 256 && truncated);
+   cJSON_Delete(ids);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+   puts("  test_health_snapshot_scope_and_bounds: ok");
+}
+
 int main(void)
 {
    mk_tmpdir();
    assert(atexit(rm_tmpdir) == 0);
+   test_health_snapshot_scope_and_bounds();
    test_dispatch_owner_crash();
    test_cross_engine_vector();
    test_metric_snapshot();

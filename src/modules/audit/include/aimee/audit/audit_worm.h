@@ -116,6 +116,11 @@ extern "C"
    int audit_worm_dispatch_owner(char out[33]);
    struct cJSON *audit_worm_read_request(const char *principal, const char *request_id);
 
+   struct cJSON *audit_worm_read_request_through(const char *principal, const char *request_id,
+                                                 long head);
+   struct cJSON *audit_worm_memory_requests(const char *principal, const char *from,
+                                            const char *until, long head, int *truncated);
+
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);
 
