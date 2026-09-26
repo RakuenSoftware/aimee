@@ -878,6 +878,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       return NULL;
    }
    cJSON *assembly = cJSON_Duplicate(assembly_plan, 1);
+   cJSON_AddStringToObject(assembly, "project", active_project);
    int legacy_preview_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "legacy_preview"));
    int facts_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "facts"));
    int temporal_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "temporal"));
@@ -898,9 +899,12 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON_AddNumberToObject(task, "elapsed_ms", ingress_elapsed_ms(&started, &finished));
       cJSON_AddBoolToObject(task, "unavailable",
                             kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
-      cJSON *packet = raw ? cJSON_Parse(raw) : NULL;
+      /* Preserve opaque owner JSON, including exact int64 generations. */
+      if (raw)
+         cJSON_AddRawToObject(task, "packet", raw);
+      else
+         cJSON_AddNullToObject(task, "packet");
       free(raw);
-      cJSON_AddItemToObject(task, "packet", packet ? packet : cJSON_CreateNull());
       cJSON *result = ingress_command(task, 0);
       const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "block"));
       const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(result, "confidence");
@@ -908,6 +912,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       {
          cJSON_AddStringToObject(assembly, "task_block", block);
          cJSON_AddNumberToObject(assembly, "task_confidence", confidence->valuedouble);
+         const char *task_packet =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "task_packet_json"));
+         if (task_packet)
+            cJSON_AddStringToObject(assembly, "task_packet_json", task_packet);
       }
       const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "log"));
       if (message)
@@ -1010,7 +1018,6 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    {
       cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
       cJSON_AddStringToObject(assembly, "workspace", active_workspace);
-      cJSON_AddStringToObject(assembly, "project", active_project);
       ingress_release_context(assembly, rctx);
    }
    cJSON *response = ingress_command(assembly, 1);

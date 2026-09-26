@@ -1209,3 +1209,46 @@ func TestExplorationCoverageSurvivesNativeRefresh(t *testing.T) {
 		})
 	}
 }
+
+func TestExplorationIndexGenerationFollowsRetainedParts(t *testing.T) {
+	state := &sourceReleaseState{}
+	args := sourceReleaseArgs(map[string]any{"request_id": "generation", "project": "app"})
+	assembly := map[string]any{"facts_projection": map[string]any{"retained_items": []typedProjectionRef{releaseTestRef()}},
+		"indexed_context": map[string]any{"project": "app", "generation": "9007199254740993"}}
+	first, err := state.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.explorationOffer(first)["index_generation"] != "9007199254740993" {
+		t.Fatal("lost exact index generation")
+	}
+	args["source_release_ticket"], _ = json.Marshal(first)
+	ref := releaseTestRef()
+	ref.Channel = "native_identity"
+	ref.Source.Kind = "memory_record"
+	next, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": []typedProjectionRef{ref}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.explorationOffer(next)["index_generation"] != "9007199254740993" {
+		t.Fatal("native refresh erased index observation")
+	}
+	args["source_release_ticket"], _ = json.Marshal(next)
+	assembly["indexed_context"].(map[string]any)["generation"] = "9007199254740994"
+	conflict, err := state.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.explorationOffer(conflict)["index_generation"] != "unavailable" {
+		t.Fatal("mixed retained generations labeled current")
+	}
+	delete(args, "source_release_ticket")
+	assembly["indexed_context"].(map[string]any)["project"] = "another"
+	foreign, err := state.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.explorationOffer(foreign)["index_generation"] != "unavailable" {
+		t.Fatal("transferred another project's generation")
+	}
+}

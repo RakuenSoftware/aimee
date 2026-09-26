@@ -127,6 +127,8 @@ type ingressProjectionEvidenceRef struct {
 }
 
 type ingressAssemblyRequest struct {
+	Project          string                 `json:"project"`
+	TaskPacketJSON   string                 `json:"task_packet_json,omitempty"`
 	TypedRequested   bool                   `json:"typed_requested"`
 	TypedContextJSON string                 `json:"typed_context_json"`
 	ContextLimits    *ContextLimits         `json:"context_limits,omitempty"`
@@ -171,6 +173,13 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	}
 	if request.CompressMin <= 0 {
 		request.CompressMin = 80
+	}
+	var taskPacket ingressTaskPacket
+	if len(request.TaskPacketJSON) > 0 {
+		block, count, _ := ingressTaskContext(json.RawMessage(request.TaskPacketJSON), request.Project)
+		if count == 0 || block != request.TaskBlock || json.Unmarshal([]byte(request.TaskPacketJSON), &taskPacket) != nil {
+			return nil, fmt.Errorf("task packet differs from retained code context")
+		}
 	}
 	entries := make([]ingressEntry, 0, 15)
 	memoryEntries := make(map[int]ingressRetainedMemory, len(request.Memories))
@@ -338,6 +347,10 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	selectedEntry := map[int]bool{}
 	for _, i := range selected {
 		selectedEntry[i] = true
+	}
+	if selectedEntry[0] && request.TaskBlock != "" && taskPacket.Generation > 0 {
+		result["indexed_context"] = map[string]any{"project": taskPacket.Project,
+			"generation": fmt.Sprint(taskPacket.Generation), "packet_digest": releaseDigest(json.RawMessage(request.TaskPacketJSON))}
 	}
 	dispositions := []map[string]any{}
 	addDisposition := func(channel, id string, kept bool) {

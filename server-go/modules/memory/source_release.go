@@ -30,6 +30,7 @@ type sourceReleaseState struct {
 	receiptProducer string
 }
 type sourceReleasePart struct {
+	IndexGeneration   string `json:"index_generation,omitempty"`
 	Native            bool   `json:"native"`
 	Digest            string `json:"digest"`
 	CoverageStatus    string `json:"coverage_status,omitempty"`
@@ -167,6 +168,9 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	_, nativePart := assembly["native_projection"]
 	part := sourceReleasePart{Native: nativePart, Digest: releaseDigest(assembly)}
+	if context, ok := assembly["indexed_context"].(map[string]any); ok && context["project"] == project {
+		part.IndexGeneration, _ = context["generation"].(string)
+	}
 	if projection, ok := assembly["typed_projection"].(map[string]any); ok {
 		if coverage, ok := projection["evidence_coverage"].(*evidenceCoverage); ok && coverage != nil {
 			part.CoverageStatus = coverage.Status
@@ -374,7 +378,15 @@ func (s *sourceReleaseState) explorationOffer(ticket string) map[string]any {
 	complete := true
 	class, requirement := "unclassified", "unavailable"
 	requirements := []string{}
+	generation := ""
+	conflictingGenerations := false
 	for _, part := range e.assemblyParts {
+		if part.IndexGeneration != "" {
+			if generation != "" && generation != part.IndexGeneration {
+				conflictingGenerations = true
+			}
+			generation = part.IndexGeneration
+		}
 		if part.CoverageStatus == "" {
 			continue
 		}
@@ -388,5 +400,8 @@ func (s *sourceReleaseState) explorationOffer(ticket string) map[string]any {
 	} else {
 		class, requirement = "typed_requirements", releaseDigest(requirements)
 	}
-	return map[string]any{"memory_owner": s.receiptProducer, "plan_digest": e.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(e.sources)), "query_class": class, "coverage_complete": complete, "confidence_provenance": "uncalibrated:" + requirement, "index_generation": "unavailable", "expires": e.expires}
+	if generation == "" || conflictingGenerations {
+		generation = "unavailable"
+	}
+	return map[string]any{"memory_owner": s.receiptProducer, "plan_digest": e.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(e.sources)), "query_class": class, "coverage_complete": complete, "confidence_provenance": "uncalibrated:" + requirement, "index_generation": generation, "expires": e.expires}
 }

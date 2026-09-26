@@ -103,7 +103,11 @@ func ingressTaskResult(state *gatewayState, request ingressTaskResultRequest) ma
 	if visible == 0 {
 		block = ""
 	}
-	return map[string]any{"status": "ok", "block": block, "confidence": confidence, "log": log}
+	result := map[string]any{"status": "ok", "block": block, "confidence": confidence, "log": log}
+	if visible != 0 {
+		result["task_packet_json"] = string(request.Packet)
+	}
+	return result
 }
 
 func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, bus.ModuleStatus) {

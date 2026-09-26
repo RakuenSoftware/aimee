@@ -351,15 +351,16 @@ char *kb_client_code_context(const char *query, const char *symbol, const char *
    }
    if (status_out)
       *status_out = 200;
-   return strdup("{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":7,"
-                 "\"freshness\":\"current\",\"resolved\":true,"
-                 "\"max_results\":4,\"max_tokens\":1200,\"item_count\":1,"
-                 "\"answerability\":{\"decision\":\"answerable\"},\"results\":[{"
-                 "\"project\":\"active-project\",\"file_path\":\"src/local.c\","
-                 "\"generation\":7,\"freshness\":\"current\",\"confidence\":0.95,"
-                 "\"accepted\":true,\"provenance\":[\"code\"],"
-                 "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
-                 "\"snippet\":\"int local_answer(void);\"}],\"why\":[]}");
+   return strdup(
+       "{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":9007199254740993,"
+       "\"freshness\":\"current\",\"resolved\":true,"
+       "\"max_results\":4,\"max_tokens\":1200,\"item_count\":1,"
+       "\"answerability\":{\"decision\":\"answerable\"},\"results\":[{"
+       "\"project\":\"active-project\",\"file_path\":\"src/local.c\","
+       "\"generation\":9007199254740993,\"freshness\":\"current\",\"confidence\":0.95,"
+       "\"accepted\":true,\"provenance\":[\"code\"],"
+       "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
+       "\"snippet\":\"int local_answer(void);\"}],\"why\":[]}");
 }
 kb_client_result_status_t kb_client_last_result_status(void)
 {
@@ -579,6 +580,7 @@ static void test_task_context_mode_and_first_turn_gate(void)
 
    char *first = ingress_preinject_build("fix local resolver", 0);
    assert(first && strstr(first, "recommended (task-conditioned code") != NULL);
+   assert(strstr(first, "generation=9007199254740993") != NULL);
    assert(strstr(first, "src/local.c:12") != NULL);
    assert(strstr(first, "memory previews") == NULL);
    assert(strstr(first, "global preference") == NULL);

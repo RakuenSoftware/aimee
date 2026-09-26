@@ -150,3 +150,41 @@ func TestIngressTaskPacketIntegralJSONNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressAssemblyBindsOnlyRetainedIndexGeneration(t *testing.T) {
+	packet := json.RawMessage(ingressPacketFixture)
+	block, _, _ := ingressTaskContext(packet, "active-project")
+	request := ingressAssemblyRequest{Project: "active-project", TaskPacketJSON: string(packet), TaskBlock: block, Budget: 6144}
+	result, err := ingressAssemble(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, ok := result["indexed_context"].(map[string]any)
+	if !ok || indexed["generation"] != "7" || indexed["project"] != "active-project" {
+		t.Fatal(result)
+	}
+	request.Budget = 400
+	result, err = ingressAssemble(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["indexed_context"] != nil {
+		t.Fatal("dropped context retained generation proof")
+	}
+	request.Budget = 6144
+	request.Project = "other-project"
+	if _, err := ingressAssemble(request); err == nil {
+		t.Fatal("accepted another project's packet")
+	}
+	request.Project = "active-project"
+	request.TaskBlock += " changed"
+	if _, err := ingressAssemble(request); err == nil {
+		t.Fatal("accepted changed rendering")
+	}
+	request.TaskBlock = block
+	request.TaskPacketJSON = ""
+	result, err = ingressAssemble(request)
+	if err != nil || result["indexed_context"] != nil {
+		t.Fatal("invented provenance for legacy text", err)
+	}
+}

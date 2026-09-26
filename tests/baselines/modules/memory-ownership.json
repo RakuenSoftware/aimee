@@ -2087,7 +2087,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "a791ae49faff984ed24c541c230dd4a72080d451b2470499e60a9cfd1330cb9e"
+      "sha256": "05f31c398b87f10fca8e7a540d7e71ec5b7fe8d48c9ce1e6e3bb674afe6cbbed"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2347,7 +2347,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "218732ce043642e9db7bd6eab42d6fdd2113c5433d81bcaf3e5273dfd3dda8a5"
+      "sha256": "d1f2c5767b3d1aa663b648a0678fc97bc699eb098dcf52fabe23e940a9f3a869"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
