@@ -124,6 +124,11 @@ func TestUtilityHorizonExplicitDeadlineIsACap(t *testing.T) {
 	if d := evaluateUtilityHorizon(r, p, "current", now); d.Elapsed || d.Deadline != now.Add(time.Hour).Format(time.RFC3339Nano) {
 		t.Fatal("explicit deadline extended duration", d)
 	}
+	rule.Deadline = now.Add(time.Nanosecond).Format(time.RFC3339Nano)
+	p.Kinds[r.Kind] = rule
+	if d := evaluateUtilityHorizon(r, p, "current", now); d.Status != "unknown" || !d.WouldExclude {
+		t.Fatal("submicrosecond policy was silently rounded", d)
+	}
 	rule.Deadline = "tomorrow"
 	p.Kinds[r.Kind] = rule
 	if d := evaluateUtilityHorizon(r, p, "current", now); d.Status != "unknown" || !d.WouldExclude {

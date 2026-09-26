@@ -65,7 +65,7 @@ type horizonDecision struct {
 func validHorizonRule(r horizonRule) bool {
 	if r.Deadline != "" {
 		at, err := time.Parse(time.RFC3339Nano, r.Deadline)
-		if err != nil || at.Year() < 1 || at.Year() > 9999 {
+		if err != nil || at.Year() < 1 || at.Year() > 9999 || at.Nanosecond()%1000 != 0 {
 			return false
 		}
 	}

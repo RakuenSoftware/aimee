@@ -858,7 +858,9 @@ record-version `overrides`. Policy schema 1 declares its revision,
 `allow`). There is no wildcard or default duration for other kinds. A rule has
 an ID, `duration_seconds` (0 through ten years), `anchor` (`created` or
 `confirmed`), and an optional absolute `deadline` which can only shorten that
-rule's deadline. An example shadow artifact is:
+rule's deadline. Explicit deadlines must have at most microsecond precision,
+matching the canonical storage clock; finer values are rejected. An example
+shadow artifact is:
 
 ```json
 {"mode":"shadow","policy":{"schema_version":1,"revision":"task-state-1","transient_kinds":{"task_state":true},"kinds":{"task_state":{"id":"task-day","duration_seconds":86400,"anchor":"created"}},"unknown_rule":"exclude"}}
