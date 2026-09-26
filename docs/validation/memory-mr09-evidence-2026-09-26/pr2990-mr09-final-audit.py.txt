@@ -1,0 +1,16 @@
+import json,subprocess
+from pathlib import Path
+head='44c6e8a50'
+names=json.loads(Path('/opt/pr2990-evidence/mr07-managed-be46915db/names.json').read_text())
+rows=[]
+for role in ['server','kb']:
+ info=json.loads(subprocess.check_output(['docker','inspect',names[role]],text=True))[0]
+ env=info['Config'].get('Env',[])
+ row=dict(role=role,image=info['Image'],configured_image=info['Config']['Image'],healthy=info['State']['Health']['Status']=='healthy',selection_flag_present=any(v.startswith('AIMEE_MEMORY_SELECTION_POLICY=') for v in env),health_flag_present=any(v.startswith('AIMEE_MEMORY_HEALTH_ENABLED=') for v in env))
+ assert row['configured_image']=='aimee-pr2990:'+head and row['healthy'] and not row['selection_flag_present'] and not row['health_flag_present']
+ rows.append(row)
+checks=json.loads(Path('/opt/pr2990-evidence/mr09-native-'+head+'/inside/checks.json').read_text())
+assert len(checks)==41 and all(c['passed'] for c in checks)
+result=dict(candidate=head,owners=rows,native_checks=len(checks),native_passed=sum(c['passed'] for c in checks),adaptive_promotion=False,default_selection='baseline',health_collection='disabled')
+Path('/opt/pr2990-evidence/mr09-overhead-'+head+'/final-audit.json').write_text(json.dumps(result,indent=2)+'\n')
+print(json.dumps(result))

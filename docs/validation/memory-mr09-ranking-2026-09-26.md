@@ -1,6 +1,6 @@
 # MR-09 implementation and validation — 2026-09-26
 
-Status: implementation validation in progress; this is not a promotion record.
+Status: implementation and baseline/selector acceptance complete on `44c6e8a50`. Optional selection remains disabled; the controlled adaptive pilot does not authorize promotion.
 
 ## Serving contracts
 
@@ -61,7 +61,7 @@ baseline (unset the selector variable). A request snapshots one compiled artifac
 repository text and caller arguments cannot tune it. The baseline retains hard
 eligibility, fair pools, source versions and truthful diagnostics.
 
-## Evidence collected so far
+## Validation
 
 - Prior-cap restricted-role PostgreSQL replay: passed, 279.130 seconds.
 - Full local memory race suite after capability envelope updates: passed, 15.849 seconds.
@@ -73,11 +73,11 @@ eligibility, fair pools, source versions and truthful diagnostics.
   input reporting and rejection of forged imported health proofs.
 - Repository lint: all 77 checks passed.
 
-The final full PostgreSQL memory race suite passed in 343.113 seconds, including
+The final full PostgreSQL memory race suite passed in 347.198 seconds, including
 the actual owner selector retaining the required rank-31 hit in 1,507 rendered
 bytes behind thirty copies. Dense unavailability correctly keeps coverage unknown;
 the test does not reinterpret retained lexical evidence as a complete hybrid read.
-The exported memory owner build passed in 5.574 seconds and native ingress passed.
+The exported memory owner build passed in 5.638 seconds and native ingress passed.
 Compact dispatch-receipt parts retain the selection policy/version digest and
 missing-type list across native refreshes. Outer-repacking regression checks pass with protected selection commitments and
 only the originally enabled channels contributing desired floors.
@@ -94,6 +94,33 @@ observations. The pilot found no strict fit improvement and is explicitly
 **ineligible for promotion**. It does not establish production quality or permit
 learned routing/exposure. See [raw pilot results](memory-mr09-evidence-2026-09-26/routing-pilot.json).
 
-Isolated deployment and its functional/overhead checks are still being collected.
-MR-09 is not closed by this checkpoint. CT100 production remains outside the
-candidate rollout.
+Final deployed validation passed **41/41 checks**, including actual provider-byte
+commitments, guarded source release, private/shared owner versions, private
+capabilities, policy identity in durable dispatch assembly parts, and preservation
+of disabled channel floors. Both canary containers are healthy and their bundled
+native CLI reports `aimee v0.4.5-pr2990.44c6e8a50`.
+
+The quiet off/on/on/off comparison completed all 32 measured requests and 12
+warmups without a failure, at equal budgets with a fixed synthetic provider:
+
+| Selector | Measured n | Mean seconds | p50 seconds | p95 seconds |
+|---|---:|---:|---:|---:|
+| Off | 16 | 4.068067 | 4.052282 | 4.271876 |
+| On | 16 | 4.074934 | 4.050218 | 4.280017 |
+
+Mean delta: 6.87 ms;
+p95 ratio: 1.001906. This is a descriptive fixture comparison;
+n=16 makes nearest-rank p95 the sample maximum. It is not evidence of production
+tail latency, answer quality or billing cost. Health collection was identical in
+both arms. No build, lint or test workload overlapped measurement.
+
+The controller restored **both selector and health flags to unset on both owners**;
+a separate final audit confirmed healthy services on the pinned image. No learned
+routing/exposure policy was enabled, and no adaptive promotion gate is claimed to
+have passed. CT100 remained healthy on `aimee-native-core:0.4.5-bridge.2`; the
+registered local thinclient status check returned exit zero.
+
+[Complete evidence and frozen harnesses](memory-mr09-evidence-2026-09-26/README.md)
+include the earlier compact-receipt failure and its successful follow-up. Selection
+priorities in diagnostic records are 0 mandatory, 1 required/potential distinct
+support, 2 desired type floor and 3 discretionary; hard budgets always win.

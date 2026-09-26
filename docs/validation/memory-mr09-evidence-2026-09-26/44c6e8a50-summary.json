@@ -1,0 +1,25 @@
+{
+  "manifest_sha256": "f36bdd364d16d5163808b7fe5349f2733885be8892a39dd2d591889dab5de52b",
+  "candidate": "44c6e8a50",
+  "arms": {
+    "off": {
+      "n": 16,
+      "mean_seconds": 4.06806686949858,
+      "p50_seconds": 4.052282092976384,
+      "p95_seconds": 4.271875716978684
+    },
+    "on": {
+      "n": 16,
+      "mean_seconds": 4.074933729611075,
+      "p50_seconds": 4.050217768992297,
+      "p95_seconds": 4.28001716703875
+    }
+  },
+  "p95_ratio": 1.0019058255903157,
+  "measured_failures": {
+    "off": 0,
+    "on": 0
+  },
+  "comparison_eligible": true,
+  "mean_delta_seconds": 0.0068668601124954876
+}

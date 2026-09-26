@@ -1,6 +1,6 @@
 # MR-09: Fair hybrid candidates, bounded priors and exposure-aware selection
 
-- **State:** Proposed
+- **State:** Complete — implementation and baseline/selector acceptance validated 2026-09-26; no adaptive policy promoted
 - **Priority:** P1 for candidate parity; P2 for fitted routing and exposure control
 - **Owner:** Go memory retrieval and context selection
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate with [MR-08](memory-reliability-08-retrieval-health-telemetry.md)/[MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
@@ -64,4 +64,34 @@ Canary each slice separately. Freeze evaluation before tuning and record model/i
 removes pre-fusion lexical capacity vetoes on dense and graph-only evidence,
 bounds graph expansion independently and records truthful graph-arm votes.
 Restricted-role adversarial replay covers the reproduced failure and hidden
-parents. Prior caps, lineage diversity, exposure and quality gates remain open.
+parents. Prior caps, lineage diversity, exposure and quality gates were still open
+at that checkpoint; the final implementation evidence follows.
+
+## Final implementation and gated outcome — 2026-09-26
+
+[Final validation report](../../validation/memory-mr09-ranking-2026-09-26.md) and
+[frozen evidence](../../validation/memory-mr09-evidence-2026-09-26/README.md)
+cover the final deployed candidate `44c6e8a50`:
+
+1. Independent native pools, cross-version conflict handling and explicit
+   placement/endpoint arm observations pass full-pool PostgreSQL adversaries.
+2. Frozen native rank and assertion/graph score artifacts enforce stage-specific
+   individual/joint bounds and deterministic ties, with actual contribution proofs.
+3. Optional selector v2 preserves constraints, corrections, required evidence and
+   bounded representatives of distinct canonical origins under unchanged hard
+   budgets. Thirty copies cannot crowd out the distinct potential source in the
+   canonical lineage fixture; independence still remains unavailable without a
+   certificate. Disabled mode keeps baseline selection. Final repacking and
+   dispatch receipts preserve policy/priority commitments and missing-type reports.
+4. The frozen controlled routing/exposure pilot fits six tasks and measures six
+   separate held-out tasks with real model answers, latency and explicitly
+   estimated token-rate cost. It selects all arms and zero exposure penalty and
+   is **ineligible for promotion**: no strict improvement, insufficient size and
+   no representative native workload. No adaptive policy is enabled. This is an
+   implementation closeout, not a claim that MR-18/S3 release-quality gates pass.
+
+The full PostgreSQL race suite, exported owner build, all 77 lint checks and all
+41 deployed checks pass. The quiet 32-request comparison and separate final audit
+leave optional selection and health collection unset on both canary owners.
+The last-known-good baseline artifact remains available for atomic request-level
+rollback; CT100 production stays on healthy 0.4.5.

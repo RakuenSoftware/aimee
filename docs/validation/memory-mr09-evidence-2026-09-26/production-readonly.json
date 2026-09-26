@@ -1,0 +1,6 @@
+{
+  "registered_cli_status_exit": 0,
+  "production_image": "aimee-native-core:0.4.5-bridge.2",
+  "production_health": "healthy",
+  "action": "read-only status; no production deployment"
+}

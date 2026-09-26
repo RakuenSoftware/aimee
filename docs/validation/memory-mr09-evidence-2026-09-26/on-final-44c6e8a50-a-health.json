@@ -1,0 +1,162 @@
+{
+  "status": 200,
+  "result": {
+    "baseline": {
+      "record_hhi_change_by_kind": null,
+      "state": "unavailable",
+      "reason": "fewer_than_30_invocations_per_window",
+      "from": "2026-09-26T16:09:58.775204357Z",
+      "until": "2026-09-26T17:09:58.775204357Z",
+      "retained_invocations": 27,
+      "record_hhi_change": null,
+      "alerts": []
+    },
+    "collector": "authenticated_local_receipt_scan",
+    "health": {
+      "sampling_probability_ppm_counts": {
+        "1000000": 27
+      },
+      "metadata_gaps": {
+        "family": 27,
+        "previous_eligible_turn": 25,
+        "trust": 27
+      },
+      "sample_metrics": {
+        "lifecycle_label_verifiers": {
+          "source_owner_guard_v2": 27
+        },
+        "record_concentration_by_kind": {
+          "fact": {
+            "occurrences": 8,
+            "distinct": 6,
+            "top_1_share": 0.25,
+            "top_5_share": 0.875,
+            "hhi": 0.1875,
+            "simpson_diversity": 0.8125,
+            "entropy_bits": 2.5,
+            "normalized_entropy": 0.967132018086354
+          },
+          "world_fact": {
+            "occurrences": 27,
+            "distinct": 1,
+            "top_1_share": 1,
+            "top_5_share": 1,
+            "hhi": 1,
+            "simpson_diversity": 0,
+            "entropy_bits": 0,
+            "normalized_entropy": null
+          }
+        },
+        "labelled_selection": {
+          "unlabeled_invocations": 27,
+          "arm_contamination": null,
+          "fusion_recovery_by_baseline_arm": null,
+          "sole_support_displacement": {
+            "numerator": 0,
+            "denominator": 0,
+            "unknown": 0,
+            "rate": null
+          }
+        },
+        "low_trust_tasks_per_family": {},
+        "low_trust_occurrences_without_task": 0,
+        "aggregate_version": 1,
+        "population": {
+          "namespace": "51fdbd6c-4d10-45ba-a934-dc111805d399",
+          "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+          "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+          "purpose": "provider_input",
+          "query_class": "typed_requirements",
+          "stage": "dispatched",
+          "from": "2026-09-26T17:09:58.775204357Z",
+          "until": "2026-09-26T18:09:58.775204357Z"
+        },
+        "retained_invocations": 27,
+        "sampled": false,
+        "concentration_population": "retained_invocations",
+        "records": {
+          "occurrences": 35,
+          "distinct": 7,
+          "top_1_share": 0.7714285714285715,
+          "top_5_share": 0.942857142857143,
+          "hhi": 0.6048979591836736,
+          "simpson_diversity": 0.3951020408163264,
+          "entropy_bits": 1.3469412295617194,
+          "normalized_entropy": 0.4797901465820008
+        },
+        "versions": {
+          "occurrences": 35,
+          "distinct": 7,
+          "top_1_share": 0.7714285714285715,
+          "top_5_share": 0.942857142857143,
+          "hhi": 0.6048979591836736,
+          "simpson_diversity": 0.3951020408163264,
+          "entropy_bits": 1.3469412295617194,
+          "normalized_entropy": 0.4797901465820008
+        },
+        "consecutive_appearances": {
+          "retained_contiguous_run_lengths": {
+            "1": 27,
+            "2": 4
+          },
+          "runs_with_unknown_start": 31,
+          "runs_with_unknown_end": 29
+        },
+        "repeat_serving": {
+          "numerator": 4,
+          "denominator": 4,
+          "unknown": 31,
+          "rate": 1
+        },
+        "current_lifecycle_reentry": {
+          "numerator": 0,
+          "denominator": 35,
+          "unknown": 0,
+          "rate": 0
+        },
+        "families_per_invocation": {
+          "0": 22,
+          "1": 2,
+          "2": 3
+        },
+        "unknown_origin_occurrences": 27,
+        "low_trust_tasks_per_record": {},
+        "unknown_trust_occurrences": 35,
+        "estimated_record_occurrences": 35,
+        "estimated_record_occurrences_standard_error": 0,
+        "estimate_method": "invocation_bernoulli_horvitz_thompson",
+        "unmeasured_metrics": [
+          "sole_support_displacement",
+          "arm_contamination",
+          "fusion_recovery"
+        ]
+      },
+      "exact_retained_attempts_by_stage": {
+        "dispatched": 27
+      },
+      "exact_retained_record_occurrences_by_stage": {
+        "dispatched": 35
+      },
+      "sampled_invocations": 27,
+      "unsampled_invocations": 0,
+      "window_complete": true,
+      "coverage_start": "2026-09-26T13:26:16.94344875Z",
+      "retention_seconds": 86400,
+      "capacity_evictions_since_start": 0,
+      "retention_expirations_since_start": 0,
+      "old_range_incomplete": false
+    },
+    "record_population": "versioned_memory_inputs",
+    "stage_basis": "latest_verified_snapshot",
+    "status": "ok",
+    "text": "Retrieval health (prepared-at window, latest reconciled stages): 2026-09-26T17:09:58Z to 2026-09-26T18:09:58Z\nProject: \"local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f\"; workspace: \"local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f\"; purpose: provider_input; query class: typed_requirements\nWindow complete: true; capacity evictions: 0; retention expirations: 0\ndispatched: 27 retained attempts, 35 record occurrences\nassembled_unsent: 0 retained attempts, 0 record occurrences\nunknown_dispatch: 0 retained attempts, 0 record occurrences\nnetwork_uncertain: 0 retained attempts, 0 record occurrences\nSelected stage: dispatched; retained sample: 27 invocations; 0 unsampled invocations\nRecord concentration (retained sample): top-1 0.7714; top-5 0.9429; HHI 0.6049; Simpson 0.3951; entropy 1.3469; normalized entropy 0.4798\nEstimated occurrences: 35.0000; sampling-design standard error: 0.0000\nRepeat-serving: 1.0000 (4 comparable, 31 unknown); lifecycle re-entry: 0.0000 (35 labeled, 0 unknown)\nVersion concentration: 35 occurrences, 7 distinct; top-1 0.7714; HHI 0.6049; entropy 1.3469\nMemory kind fact: 8 occurrences; HHI 0.1875\nMemory kind world_fact: 27 occurrences; HHI 1.0000\nUnknown origins: 27; unknown trust: 35; inferred/low-trust occurrences without task: 0\nLifecycle verifier source_owner_guard_v2: 27 invocations (source admission only)\nFamilies per invocation: 0=22 1=2 2=3\nDistinct tasks per inferred/low-trust record: unavailable\nDistinct tasks per inferred/low-trust family: unavailable\nRetained consecutive run lengths: 1=27 2=4\nRun boundaries unknown: 31 starts, 29 ends\nInvocation sample probabilities (parts per million): 1000000=27\nInvocations without selection-verifier labels: 27\nSole-support displacement: unknown (0/0, 0 unknown)\nMissing family: 27 invocations\nMissing previous_eligible_turn: 25 invocations\nMissing trust: 27 invocations\nUnmeasured: sole_support_displacement, arm_contamination, fusion_recovery\nAdjacent-window baseline: unavailable (fewer_than_30_invocations_per_window); 27 retained invocations\n",
+    "time_basis": "prepared_at",
+    "collection": {
+      "selected_requests": 62,
+      "imported_requests": 62,
+      "failed_requests": 0,
+      "truncated": false,
+      "verified_through_sequence": "978382"
+    }
+  }
+}

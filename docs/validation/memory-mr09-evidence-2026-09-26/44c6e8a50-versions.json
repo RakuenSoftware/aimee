@@ -1,0 +1,12 @@
+[
+  {
+    "role": "server",
+    "exit": 0,
+    "version": "aimee v0.4.5-pr2990.44c6e8a50"
+  },
+  {
+    "role": "kb",
+    "exit": 0,
+    "version": "aimee v0.4.5-pr2990.44c6e8a50"
+  }
+]

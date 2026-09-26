@@ -1,0 +1,56 @@
+"""Matched native serving measurements with a fixed synthetic provider."""
+import http.client,json,os,socket,sqlite3,sys,threading,time,uuid
+from pathlib import Path
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+label=sys.argv[1];enabled=sys.argv[2]=='1';count=int(sys.argv[3]);warmup=int(sys.argv[4])
+assert (os.environ.get('AIMEE_MEMORY_SELECTION_POLICY')=='typed-diversity-rankwindow3-v2')==enabled
+root=Path('/var/lib/aimee/mr09-overhead')/label;root.mkdir(parents=True,exist_ok=False)
+class Local(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(120);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+def api(path,body):
+ c=Local('localhost');c.request('POST',path,json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();status=r.status;c.close()
+ try:d=json.loads(raw)
+ except ValueError:d=raw.decode()
+ return status,d
+requests=[]
+class Provider(BaseHTTPRequestHandler):
+ def log_message(self,*args):pass
+ def do_POST(self):
+  raw=self.rfile.read(int(self.headers['Content-Length']));body=json.loads(raw)
+  requests.append(dict(bytes=len(raw),messages=len(body.get('messages',[]))))
+  response=json.dumps(dict(id='health-overhead',object='chat.completion',model='health-overhead',usage=dict(prompt_tokens=1,completion_tokens=1,total_tokens=2),choices=[dict(index=0,finish_reason='stop',message=dict(role='assistant',content='MR08_OVERHEAD_OK'))])).encode()
+  self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(response)));self.end_headers();self.wfile.write(response)
+provider=ThreadingHTTPServer(('127.0.0.1',0),Provider);threading.Thread(target=provider.serve_forever,daemon=True).start()
+roster=Path('/var/lib/aimee/models.json');prior=roster.read_bytes() if roster.exists() else None
+rows=[];name='mr09-overhead'
+try:
+ roster.write_text(json.dumps(dict(default_agent=name,default_delegate=name,fallback_chain=[],models=[dict(name=name,model='health-overhead',provider='openai',auth_type='none',endpoint=f'http://127.0.0.1:{provider.server_port}/v1',roles=['all'],enabled=True,tools_enabled=True,context_window=16384,max_tokens=4096,max_output=4096,max_parallel=1,max_turns=1)])))
+ for i in range(warmup+count):
+  print('HEALTH_BENCH_SETTLE',flush=True);assert sys.stdin.readline().strip()=='continue'
+  status,d=api('/v1/sessions/create',dict(client_type=name));assert status==200 and d.get('session_id');sid=d['session_id']
+  status,d=api('/v1/sessions/'+sid+'/primary',dict(agent=name));assert status==200 and d.get('agent')==name
+  print('HEALTH_BENCH_SETTLE',flush=True);assert sys.stdin.readline().strip()=='continue'
+  before=len(requests);started=time.monotonic()
+  status,result=api('/v1/chat/stream',dict(message='mr07activation_state',aimee_session_id=sid,cwd='/var/lib/aimee/mr07-activated-fixture/repository',model=name,evidence_requirements=dict(schema_version=1,task_revision='overhead:1',query_mode='current_state',obligations=[dict(subject='mr07activation',relation='naming_convention')])))
+  elapsed=time.monotonic()-started
+  completed=status==200 and 'MR08_OVERHEAD_OK' in str(result) and len(requests)==before+1
+  if not completed:
+   (root/('failure-'+str(i)+'.json')).write_text(json.dumps(dict(status=status,result=result,provider_calls=len(requests)-before,session=sid),indent=2)+'\n')
+  rows.append(dict(ordinal=i,warmup=i<warmup,latency_seconds=elapsed,completed=completed,provider_calls=len(requests)-before,provider=requests[-1] if len(requests)>before else None,session=sid))
+  (root/'observations.json').write_text(json.dumps(rows,indent=2)+'\n')
+  print('HEALTH_BENCH_ROW '+json.dumps(dict(label=label,ordinal=i,warmup=i<warmup,latency_seconds=elapsed,completed=completed)),flush=True)
+ with sqlite3.connect('file:/var/lib/aimee/audit/worm-live.db?mode=ro',uri=True) as audit:
+  prepared=json.loads(audit.execute("SELECT detail FROM audit_event WHERE actor_principal='uid:1000' AND action='memory.provider.prepared' ORDER BY seq DESC LIMIT 1").fetchone()[0]);binding=prepared['binding']
+  assembled=json.loads(audit.execute("SELECT detail FROM audit_event WHERE actor_principal='uid:1000' AND action='memory.provider.assembled' AND subject=? ORDER BY seq DESC LIMIT 1",(prepared['attempt_id'],)).fetchone()[0])
+  projection=assembled.get('projection',{});captured=any(p.get('selection_policy')=='typed-diversity-rankwindow3-v2' for p in projection.get('projection_parts',[]))
+  assert captured==enabled
+  (root/'capture-check.json').write_text(json.dumps(dict(enabled=enabled,optional_metadata_captured=captured),indent=2)+'\n')
+ if enabled:
+  status,d=api('/v1/memory/health',dict(window='1h',project=binding['project'],workspace=binding['workspace'],query_class='typed_requirements'))
+  (root/'health.json').write_text(json.dumps(dict(status=status,result=d),indent=2)+'\n')
+ print('HEALTH_BENCH_COMPLETE '+str(root),flush=True)
+finally:
+ if prior is None:roster.unlink(missing_ok=True)
+ else:roster.write_bytes(prior)
+ provider.shutdown()

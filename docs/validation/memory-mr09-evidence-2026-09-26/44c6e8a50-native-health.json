@@ -1,0 +1,161 @@
+{
+  "status": 200,
+  "result": {
+    "baseline": {
+      "record_hhi_change_by_kind": null,
+      "state": "unavailable",
+      "reason": "fewer_than_30_invocations_per_window",
+      "from": "2026-09-26T18:01:51.148464808Z",
+      "until": "2026-09-26T18:02:51.148464808Z",
+      "retained_invocations": 0,
+      "record_hhi_change": null,
+      "alerts": []
+    },
+    "collector": "authenticated_local_receipt_scan",
+    "health": {
+      "sampling_probability_ppm_counts": {
+        "1000000": 2
+      },
+      "metadata_gaps": {
+        "family": 2,
+        "previous_eligible_turn": 1,
+        "trust": 2
+      },
+      "sample_metrics": {
+        "lifecycle_label_verifiers": {
+          "source_owner_guard_v2": 2
+        },
+        "record_concentration_by_kind": {
+          "fact": {
+            "occurrences": 3,
+            "distinct": 2,
+            "top_1_share": 0.6666666666666666,
+            "top_5_share": 1,
+            "hhi": 0.5555555555555556,
+            "simpson_diversity": 0.4444444444444444,
+            "entropy_bits": 0.9182958340544896,
+            "normalized_entropy": 0.9182958340544896
+          },
+          "world_fact": {
+            "occurrences": 2,
+            "distinct": 1,
+            "top_1_share": 1,
+            "top_5_share": 1,
+            "hhi": 1,
+            "simpson_diversity": 0,
+            "entropy_bits": 0,
+            "normalized_entropy": null
+          }
+        },
+        "labelled_selection": {
+          "unlabeled_invocations": 2,
+          "arm_contamination": null,
+          "fusion_recovery_by_baseline_arm": null,
+          "sole_support_displacement": {
+            "numerator": 0,
+            "denominator": 0,
+            "unknown": 0,
+            "rate": null
+          }
+        },
+        "low_trust_tasks_per_family": {},
+        "low_trust_occurrences_without_task": 0,
+        "aggregate_version": 1,
+        "population": {
+          "namespace": "51fdbd6c-4d10-45ba-a934-dc111805d399",
+          "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+          "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+          "purpose": "provider_input",
+          "query_class": "typed_requirements",
+          "stage": "dispatched",
+          "from": "2026-09-26T18:02:51.148464808Z",
+          "until": "2026-09-26T18:03:51.148464808Z"
+        },
+        "retained_invocations": 2,
+        "sampled": false,
+        "concentration_population": "retained_invocations",
+        "records": {
+          "occurrences": 5,
+          "distinct": 3,
+          "top_1_share": 0.4,
+          "top_5_share": 1,
+          "hhi": 0.3600000000000001,
+          "simpson_diversity": 0.6399999999999999,
+          "entropy_bits": 1.5219280948873621,
+          "normalized_entropy": 0.9602297178607611
+        },
+        "versions": {
+          "occurrences": 5,
+          "distinct": 3,
+          "top_1_share": 0.4,
+          "top_5_share": 1,
+          "hhi": 0.3600000000000001,
+          "simpson_diversity": 0.6399999999999999,
+          "entropy_bits": 1.5219280948873621,
+          "normalized_entropy": 0.9602297178607611
+        },
+        "consecutive_appearances": {
+          "retained_contiguous_run_lengths": {
+            "1": 1,
+            "2": 2
+          },
+          "runs_with_unknown_start": 3,
+          "runs_with_unknown_end": 2
+        },
+        "repeat_serving": {
+          "numerator": 2,
+          "denominator": 2,
+          "unknown": 3,
+          "rate": 1
+        },
+        "current_lifecycle_reentry": {
+          "numerator": 0,
+          "denominator": 5,
+          "unknown": 0,
+          "rate": 0
+        },
+        "families_per_invocation": {
+          "1": 1,
+          "2": 1
+        },
+        "unknown_origin_occurrences": 2,
+        "low_trust_tasks_per_record": {},
+        "unknown_trust_occurrences": 5,
+        "estimated_record_occurrences": 5,
+        "estimated_record_occurrences_standard_error": 0,
+        "estimate_method": "invocation_bernoulli_horvitz_thompson",
+        "unmeasured_metrics": [
+          "sole_support_displacement",
+          "arm_contamination",
+          "fusion_recovery"
+        ]
+      },
+      "exact_retained_attempts_by_stage": {
+        "dispatched": 2
+      },
+      "exact_retained_record_occurrences_by_stage": {
+        "dispatched": 5
+      },
+      "sampled_invocations": 2,
+      "unsampled_invocations": 0,
+      "window_complete": true,
+      "coverage_start": "2026-09-26T13:26:16.94344875Z",
+      "retention_seconds": 86400,
+      "capacity_evictions_since_start": 0,
+      "retention_expirations_since_start": 0,
+      "old_range_incomplete": false
+    },
+    "record_population": "versioned_memory_inputs",
+    "stage_basis": "latest_verified_snapshot",
+    "status": "ok",
+    "text": "Retrieval health (prepared-at window, latest reconciled stages): 2026-09-26T18:02:51Z to 2026-09-26T18:03:51Z\nProject: \"local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f\"; workspace: \"local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f\"; purpose: provider_input; query class: typed_requirements\nWindow complete: true; capacity evictions: 0; retention expirations: 0\ndispatched: 2 retained attempts, 5 record occurrences\nassembled_unsent: 0 retained attempts, 0 record occurrences\nunknown_dispatch: 0 retained attempts, 0 record occurrences\nnetwork_uncertain: 0 retained attempts, 0 record occurrences\nSelected stage: dispatched; retained sample: 2 invocations; 0 unsampled invocations\nRecord concentration (retained sample): top-1 0.4000; top-5 1.0000; HHI 0.3600; Simpson 0.6400; entropy 1.5219; normalized entropy 0.9602\nEstimated occurrences: 5.0000; sampling-design standard error: 0.0000\nRepeat-serving: 1.0000 (2 comparable, 3 unknown); lifecycle re-entry: 0.0000 (5 labeled, 0 unknown)\nVersion concentration: 5 occurrences, 3 distinct; top-1 0.4000; HHI 0.3600; entropy 1.5219\nMemory kind fact: 3 occurrences; HHI 0.5556\nMemory kind world_fact: 2 occurrences; HHI 1.0000\nUnknown origins: 2; unknown trust: 5; inferred/low-trust occurrences without task: 0\nLifecycle verifier source_owner_guard_v2: 2 invocations (source admission only)\nFamilies per invocation: 1=1 2=1\nDistinct tasks per inferred/low-trust record: unavailable\nDistinct tasks per inferred/low-trust family: unavailable\nRetained consecutive run lengths: 1=1 2=2\nRun boundaries unknown: 3 starts, 2 ends\nInvocation sample probabilities (parts per million): 1000000=2\nInvocations without selection-verifier labels: 2\nSole-support displacement: unknown (0/0, 0 unknown)\nMissing family: 2 invocations\nMissing previous_eligible_turn: 1 invocations\nMissing trust: 2 invocations\nUnmeasured: sole_support_displacement, arm_contamination, fusion_recovery\nAdjacent-window baseline: unavailable (fewer_than_30_invocations_per_window); 0 retained invocations\n",
+    "time_basis": "prepared_at",
+    "collection": {
+      "selected_requests": 2,
+      "imported_requests": 2,
+      "failed_requests": 0,
+      "truncated": false,
+      "verified_through_sequence": "957228"
+    }
+  }
+}
