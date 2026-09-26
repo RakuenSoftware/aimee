@@ -209,7 +209,9 @@
     "server-go/modules/memory/retrieval_health_baseline.go",
     "server-go/modules/memory/retrieval_health_traces.go",
     "server-go/modules/memory/retrieval_health_capture.go",
-    "server-go/modules/memory/retrieval_health_selection.go"
+    "server-go/modules/memory/retrieval_health_execution.go",
+    "server-go/modules/memory/retrieval_health_selection.go",
+    "server-go/modules/memory/retrieval_health_families.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -377,7 +379,9 @@
     "server-go/modules/memory/retrieval_health_runtime_test.go",
     "server-go/modules/memory/retrieval_health_labels_test.go",
     "server-go/modules/memory/retrieval_health_baseline_test.go",
-    "server-go/modules/memory/retrieval_health_capture_test.go"
+    "server-go/modules/memory/retrieval_health_capture_test.go",
+    "server-go/modules/memory/retrieval_health_execution_test.go",
+    "server-go/modules/memory/retrieval_health_families_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

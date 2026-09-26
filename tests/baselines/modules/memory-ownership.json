@@ -1975,6 +1975,7 @@
     "src/modules/kb_client/kb_client_memory.c": {
       "disposition": "kb-client",
       "symbols": [
+        "AIMEE_MEMORY_HEALTH_ENABLED",
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
@@ -1994,7 +1995,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "347b02e45daab7f75ac5e8f3ede3a5a22383f2e3349a71ed97444bcc6820903b"
+      "sha256": "55453384ba215afd419b6b19fb3b39c146bc0889cddbbf5edbb6ffd8d20e3998"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2083,13 +2084,14 @@
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
       "symbols": [
+        "AIMEE_MEMORY_HEALTH_ENABLED",
         "AIMEE_MEMORY_RECEIPT_RETENTION",
         "kb_client_memory_assemble_typed_context_requirements_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "b5f5e37f84d1a59f19e160aac3936c2810abe9faf2b3300c16f6623fa0434ef5"
+      "sha256": "51a345b24b39ba8259ade5b5d5270485d880c50f5d535a1d0e6f2fd15fc53161"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2371,6 +2373,7 @@
     "src/tests/test_kb_client_memory.c": {
       "disposition": "host-fixture",
       "symbols": [
+        "AIMEE_MEMORY_HEALTH_ENABLED",
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
         "kb_client_memory_assemble_typed_context_json",
@@ -2389,7 +2392,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "4692f352e7a0f239fb5bc3221d0a8522f363fc006b765a2334dd1b86078aaa3c"
+      "sha256": "c85a1319440cf4562c296f9be154db27236f2d5b30c3d90e934e7d7c1c1a06a4"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",

@@ -186,7 +186,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 		prepared: prepared, admitted: admitted, at: at, expires: now.Add(sourceReleaseTTL)}
 	s.receiptBytes += len(prepared) + len(admitted)
 	prelude := []map[string]string{}
-	metadata := receiptMetadataWithHealth(entry)
+	metadata := receiptMetadataWithExecution(entry, args, binding, bindingDigest)
 	if len(metadata) > 0 {
 		for _, stage := range []string{"retrieved", "assembled"} {
 			detail, ok := receiptEventJSON(providerReceiptEvent{SchemaVersion: 1, Stage: stage, AttemptID: attempt, At: at, BindingDigest: bindingDigest, Projection: metadata, Reason: "assembly_observed_before_preparation"})

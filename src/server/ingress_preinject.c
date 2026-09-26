@@ -396,6 +396,10 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
    cJSON_AddStringToObject(request, "payload_sha256", digest);
    cJSON_AddStringToObject(request, "payload_bytes", count);
    cJSON_AddStringToObject(request, "turn_id", ingress_preinject_turn_id());
+   /* Host-issued execution identity only; never accepted from HTTP fields. */
+   const char *health_enabled = getenv("AIMEE_MEMORY_HEALTH_ENABLED");
+   if (health_enabled && strcmp(health_enabled, "1") == 0 && context->exploration_binding[0])
+      cJSON_AddStringToObject(request, "health_execution_binding", context->exploration_binding);
    cJSON_AddStringToObject(request, "producer_build", AIMEE_VERSION);
    const char *caller_limits =
        context->request_budget_present ? context->request_budget_limits : "";

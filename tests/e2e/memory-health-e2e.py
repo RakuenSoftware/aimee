@@ -22,7 +22,10 @@ def inside():
             self.sock.settimeout(60)
             self.sock.connect('/var/lib/aimee/aimee-http.sock')
 
+    report_latencies = []
+
     def query(body):
+        started = time.monotonic()
         conn = Local('localhost', timeout=60)
         try:
             conn.request('POST', '/v1/memory/health', json.dumps(body), {'Content-Type': 'application/json'})
@@ -33,6 +36,7 @@ def inside():
             return result
         finally:
             conn.close()
+            report_latencies.append(time.monotonic() - started)
 
     if os.getuid() == 0:
         result = query(dict(window='1h', health_principal='uid:1000', principal='uid:1000', collection_complete=True, traces=True))
@@ -91,6 +95,9 @@ def inside():
         fingerprints = sum(actual.values()) - health['metadata_gaps'].get('query_fingerprint', 0)
         if fingerprints <= 0:
             raise RuntimeError('no serving query fingerprint reached the receipt collector')
+        families = health['sample_metrics'].get('families_per_invocation', {})
+        if not any(int(count) > 0 and invocations > 0 for count, invocations in families.items()):
+            raise RuntimeError('no canonical personal source family reached the receipt collector')
         kinds = health['sample_metrics'].get('record_concentration_by_kind', {})
         if not any(kind != 'unknown' and metric['occurrences'] > 0 for kind, metric in kinds.items()):
             raise RuntimeError('retained native memory kind did not reach the collector')
@@ -116,7 +123,8 @@ def inside():
             raise RuntimeError('public fields changed authenticated collection')
         print(json.dumps(dict(counts=actual, sampled=health['sampled_invocations'], scope_isolated=True,
                               late_stage_reconciled=True, metadata_gaps_visible=True, public_fields_ignored=True,
-                              serving_fingerprints=fingerprints, native_kind_observed=True, scoped_traces=True, cli_parity=True)))
+                              serving_fingerprints=fingerprints, native_kind_observed=True, canonical_family_observed=True, scoped_traces=True, cli_parity=True,
+                              report_latency_seconds=report_latencies)))
 
 
 def main():
@@ -151,6 +159,7 @@ def main():
         check('health public principal and ledger fields cannot replace host identity', before['public_fields_ignored'])
         check('health missing metadata is explicit in JSON and text', before['metadata_gaps_visible'])
         check('health keyed query capture and native selection kind reach durable receipts', before['serving_fingerprints'] > 0 and before['native_kind_observed'])
+        check('health canonical personal source family matches retained revision', before['canonical_family_observed'])
         check('health optional receipt references remain in exact scope', before['scoped_traces'])
         check('health CLI JSON and readable text match authenticated HTTP', before['cli_parity'])
         check('health foreign UDS principal cannot enumerate another population', run(0)['foreign_principal_isolated'])
@@ -166,6 +175,10 @@ def main():
             raise RuntimeError('owned health fixture did not recover')
         after = run(1000)
         check('health persisted attempts reconcile idempotently after SIGKILL and restart', before['counts'] == after['counts'])
+        measurements = dict(before_restart_report_seconds=before['report_latency_seconds'],
+                            after_restart_report_seconds=after['report_latency_seconds'],
+                            workload='synthetic provider fixture; report latency, not provider p95')
+        Path(args.output).with_suffix('.measurements.json').write_text(json.dumps(measurements, indent=2) + '\n')
     finally:
         subprocess.run(['docker', 'exec', '-u', '0', server, 'rm', '-f', remote], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

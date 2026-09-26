@@ -242,6 +242,12 @@ func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]b
 	if len(p.HealthRecords) > 0 && len(p.HealthRecords) <= 256 {
 		assembly["health_records"] = p.HealthRecords
 	}
+	if raw := args["_health_records"]; len(raw) > 0 {
+		var records []healthRecord
+		if json.Unmarshal(raw, &records) == nil && len(records) <= 256 {
+			assembly["health_records"] = records
+		}
+	}
 	if raw := args["_health_context"]; len(raw) > 0 {
 		var capture healthQueryContext
 		if json.Unmarshal(raw, &capture) == nil {

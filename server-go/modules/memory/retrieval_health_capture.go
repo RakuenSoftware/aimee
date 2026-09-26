@@ -90,6 +90,7 @@ func captureHealthQuery(options handlerOptions, invocation bus.ModuleInvocation,
 func prepareHealthQueryCapture(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, operation string) {
 	// The only producer of this internal field is the authenticated Go owner.
 	delete(args, "_health_context")
+	prepareHealthFamilyCapture(options, invocation, args, operation)
 	query, source := "", ""
 	if operation == "ingress-assemble" && options.gateway != nil {
 		query, source = options.gateway.releases.consumeHealthQuery(args.stringOr("_health_query_token", "")), "ingress_query"

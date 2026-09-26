@@ -121,3 +121,28 @@ Remaining acceptance includes deployed validation of these subsequent changes,
 end-to-end overhead/retention measurements, and owned task/turn/family/arm and
 verifier metadata producers. Missing metadata and labels remain visible as
 unknown or unmeasured; synthetic labels do not establish production usefulness.
+
+## Capture acceptance failure and repair
+
+Candidate `38771c3f1` built successfully and passed all 77 repository checks,
+the full PostgreSQL memory race suite, and the focused enrolled-KB provider
+boundary (352 checks) and native suite (99 checks). The health fixture then
+failed because no serving query fingerprint reached collection. All 27 observed
+assembly receipts had native selection metadata, but none had query context.
+The failure is retained in the evidence directory; this candidate did not pass
+MR-08 acceptance and T3 was not started.
+
+The native composition transport omitted the task hint, so the Go owner's
+single-use query token was never created on that path. The repair forwards at
+most 4,096 bytes only for opted-in native composition, without copying query
+text into the returned projection. Native transport tests cover disabled,
+enabled and oversized inputs, and the full KB client and ingress suites passed.
+The broader Go memory/execution-policy/families race suites also passed.
+
+Further metadata work binds the host-issued task/session identity and ingress
+turn to the exact receipt commitment. It does not infer predecessor turns across
+requests or branches. Personal family capture reuses MR-04's scoped canonical
+owner in a repeatable-read snapshot, accepts only the exact recalled revision,
+and has a 50 ms batch deadline and 16-record ceiling. Shared, historical,
+multiple-origin and unavailable ancestry remain explicit gaps. Deployed
+validation of this repair and these additions is pending.

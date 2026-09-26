@@ -48,9 +48,10 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		e.SamplingEpoch = old.Invocation.SamplingEpoch
 	}
 	var metadata struct {
-		Context *healthQueryContext   `json:"health_context"`
-		Records []healthRecord        `json:"health_records"`
-		Labels  *healthLabelsEnvelope `json:"health_labels"`
+		Context   *healthQueryContext     `json:"health_context"`
+		Records   []healthRecord          `json:"health_records"`
+		Labels    *healthLabelsEnvelope   `json:"health_labels"`
+		Execution *healthExecutionContext `json:"health_execution"`
 	}
 	if json.Unmarshal(r.Assembly, &metadata) == nil && metadata.Context != nil {
 		capture := metadata.Context
@@ -64,6 +65,18 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 			}
 			e.MetadataGaps = gaps
 		}
+	}
+	if execution := metadata.Execution; execution != nil && execution.valid(r.Prepared.BindingDigest) {
+		e.Task, e.Turn, e.QueryClass = execution.Task, execution.Turn, execution.QueryClass
+		gaps := e.MetadataGaps[:0]
+		for _, gap := range e.MetadataGaps {
+			if gap != "task_turn_links" && gap != "query_class" {
+				gaps = append(gaps, gap)
+			}
+		}
+		// A host-owned task/turn identity does not establish adjacency across
+		// requests or branches. Repeats remain unknown without an owned link.
+		e.MetadataGaps = append(gaps, "previous_eligible_turn")
 	}
 	var refs []typedProjectionRef
 	if json.Unmarshal(b.Sources, &refs) != nil {
@@ -96,18 +109,19 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 	for _, record := range metadata.Records {
 		known[healthVersionKey(record)] = record
 	}
-	knownKinds, knownTrust := len(e.Records) > 0, len(e.Records) > 0
+	knownKinds, knownTrust, knownFamilies := len(e.Records) > 0, len(e.Records) > 0, len(e.Records) > 0
 	for i, record := range e.Records {
 		if observed, ok := known[healthVersionKey(record)]; ok && healthLabelName(observed.Kind) {
-			record.Kind, record.LowTrust = observed.Kind, observed.LowTrust
+			record.Kind, record.LowTrust, record.Family = observed.Kind, observed.LowTrust, observed.Family
 			e.Records[i] = record
 		}
 		knownKinds = knownKinds && record.Kind != "unknown"
 		knownTrust = knownTrust && record.LowTrust != nil
+		knownFamilies = knownFamilies && record.Family != ""
 	}
 	gaps := e.MetadataGaps[:0]
 	for _, gap := range e.MetadataGaps {
-		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust) {
+		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust || gap == "family" && knownFamilies) {
 			gaps = append(gaps, gap)
 		}
 	}

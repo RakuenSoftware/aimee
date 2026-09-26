@@ -468,6 +468,10 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       cJSON_AddStringToObject(request, "shared_json", j);
       if (native_bytes)
          cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
+      const char *health_enabled = getenv("AIMEE_MEMORY_HEALTH_ENABLED");
+      if (native_bytes && health_enabled && strcmp(health_enabled, "1") == 0 && task_hint &&
+          task_hint[0] && strlen(task_hint) <= 4096)
+         cJSON_AddStringToObject(request, "task_hint", task_hint);
       cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
       cJSON_AddBoolToObject(request, "session_start", session_start != 0);
       cJSON *reply = NULL;

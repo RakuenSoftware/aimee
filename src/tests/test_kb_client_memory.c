@@ -96,6 +96,7 @@ int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_
 
 static int composition_calls;
 static int native_projection_bytes;
+static char composition_task_hint[4097];
 static int composition_transport = 1;
 static const char *composition_reply;
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
@@ -110,6 +111,8 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    composition_calls++;
    const cJSON *native = cJSON_GetObjectItemCaseSensitive(args, "native_context_bytes");
    native_projection_bytes = cJSON_IsNumber(native) ? native->valueint : -1;
+   const char *hint = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "task_hint"));
+   snprintf(composition_task_hint, sizeof(composition_task_hint), "%s", hint ? hint : "");
    *result = NULL;
    if (composition_transport != 1)
       return composition_transport;
@@ -360,10 +363,25 @@ static void test_recall_carries_and_records_production_activation(void)
    assert(activation_writes == writes);
    composition_transport = 1;
    mock_agent_http_reset();
+   mock_agent_http_set_post_handler(empty_ok_post_handler);
    composition_reply = "{\"status\":\"ok\",\"recall\":{\"identity\":[]}}";
+   unsetenv("AIMEE_MEMORY_HEALTH_ENABLED");
    json = kb_client_memory_recall_native_json("native projection", 128, 0, 4096);
    assert(json && native_projection_bytes == 4096);
    free(json);
+   assert(!composition_task_hint[0]);
+   setenv("AIMEE_MEMORY_HEALTH_ENABLED", "1", 1);
+   json = kb_client_memory_recall_native_json("native health capture", 128, 0, 4096);
+   assert(json && strcmp(composition_task_hint, "native health capture") == 0);
+   assert(!strstr(json, "native health capture"));
+   free(json);
+   char oversized_hint[4098];
+   memset(oversized_hint, 'x', sizeof(oversized_hint) - 1);
+   oversized_hint[sizeof(oversized_hint) - 1] = 0;
+   json = kb_client_memory_recall_native_json(oversized_hint, 128, 0, 4096);
+   assert(json && !composition_task_hint[0]);
+   free(json);
+   unsetenv("AIMEE_MEMORY_HEALTH_ENABLED");
    composition_reply = NULL;
    printf("  PASS: test_recall_carries_and_records_production_activation\n");
 }
