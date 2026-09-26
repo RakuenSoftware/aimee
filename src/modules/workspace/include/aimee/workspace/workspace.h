@@ -3,12 +3,9 @@
 
 #include "aimee.h"
 
-/* Installed once by the server before serving requests. The runner resolves
- * request-scoped forge credentials; CLI builds retain the bounded ambient
- * git_net_exec path. NULL restores the default runner (also useful in tests). */
-typedef int (*worktree_git_network_runner_fn)(const char *cwd, const char *const *args,
-                                             char **out, size_t max_out);
-void worktree_register_git_network_runner(worktree_git_network_runner_fn runner);
+/* Bind the existing model Git-tool runner at server startup. Workspace-only
+ * clients keep their bounded ambient Git path without linking server tooling. */
+void worktree_register_git_runner(char *(*runner)(const char *cmd, int *exit_code));
 
 #define MAX_DISCOVERED_PROJECTS 256
 #define MAX_WORKSPACE_DEPTH     10

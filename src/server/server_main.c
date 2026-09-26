@@ -12,7 +12,7 @@
 #include "modules/git/git_host_cred.h"
 #include "modules/git/git_host_resolve.h"
 #include "modules/git/git_forge_vault.h"
-#include "modules/git/git_cred_inject.h"
+#include "modules/git/mcp_git.h"
 #include <aimee/git/git_ops.h>
 #include "guardrails.h"
 #include <aimee/workspace/workspace.h>
@@ -29,7 +29,6 @@
 #include "turn_registry.h"
 #include "events.h"
 #include "agent_exec.h"
-#include "util.h"
 #include "log.h"
 #include <aimee/audit/audit_action.h>
 #include <aimee/audit/audit_worm.h>
@@ -62,50 +61,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-extern char **environ;
-
-/* Session provisioning happens before the agent starts, but its mandatory
- * fetch is still an authenticated Git operation. Use the request principal and
- * the repo's origin to resolve the same vault credentials as the Git panel.
- * Never copy secrets into the daemon environment, argv, or a file. */
-static int server_worktree_git_network(const char *cwd, const char *const *args,
-                                        char **out, size_t max_out)
-{
-   if (out)
-      *out = NULL;
-   size_t n = 0;
-   while (args[n])
-      n++;
-   const char **argv = calloc(n + 2, sizeof(*argv));
-   if (!argv)
-      return -1;
-   argv[0] = "git";
-   for (size_t i = 0; i < n; i++)
-      argv[i + 1] = args[i];
-
-   int token_fd = -1;
-   char **envp = git_cred_inject_build_env_for_repo(agent_get_request_vault_principal(), NULL,
-                                                    cwd, NULL, environ, &token_fd);
-   char *captured = NULL;
-   int rc;
-   if (envp)
-      rc = safe_exec_capture_cwd_env_fd_timeout(argv, cwd, envp, &captured,
-                                                max_out ? max_out : 4096, GIT_NET_TIMEOUT_MS,
-                                                token_fd,
-                                                token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
-   else
-      rc = git_net_exec(cwd, args, &captured, max_out);
-   if (token_fd >= 0)
-      close(token_fd);
-   git_cred_inject_free_env(envp);
-   free(argv);
-   if (out)
-      *out = captured;
-   else
-      free(captured);
-   return rc;
-}
 
 /* Platform-specific server helpers (posix/server_main.c, windows/server_main.c) */
 void platform_server_redirect_stderr(FILE *log_fp);
@@ -323,7 +278,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * + editor) act on the SAME isolated worktree the session's agent edits, rather
     * than the shared project checkout (session_isolation_target, workspace.c). */
    git_ops_register_session_isolation(session_isolation_target);
-   worktree_register_git_network_runner(server_worktree_git_network);
+   worktree_register_git_runner(mcp_git_run);
 
    /* Fail closed on an undeclared tool BEFORE serving anything. The
     * externalization gate consults the egress declaration registry, so a

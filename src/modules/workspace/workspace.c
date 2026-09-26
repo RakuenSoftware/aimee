@@ -33,24 +33,41 @@
 #define O_DIRECTORY 0
 #endif
 
+/* The server installs the SAME runner the model-facing Git tools use. No
+ * workspace-specific credential resolution or process executor belongs here. */
+static char *(*g_worktree_git_runner)(const char *cmd, int *exit_code);
+
+void worktree_register_git_runner(char *(*runner)(const char *cmd, int *exit_code))
+{
+   g_worktree_git_runner = runner;
+}
+
+static int worktree_fetch(const char *cwd, int default_head)
+{
+   if (g_worktree_git_runner)
+   {
+      /* mcp_git_run resolves credentials and routing from the thread-local cwd.
+       * Provisioning runs before the turn binds its worktree, so bind the source
+       * repository temporarily and restore the caller's context on all results. */
+      char previous[MAX_PATH_LEN];
+      const char *old_cwd = run_cmd_get_cwd();
+      snprintf(previous, sizeof(previous), "%s", old_cwd ? old_cwd : "");
+      run_cmd_set_cwd(cwd);
+      int rc = -1;
+      const char *cmd = "git fetch --quiet --prune origin 2>&1";
+      if (default_head)
+         cmd = "git fetch --quiet origin HEAD 2>&1";
+      char *out = g_worktree_git_runner(cmd, &rc);
+      run_cmd_set_cwd(previous[0] ? previous : NULL);
+      free(out);
+      return rc;
+   }
+   const char *fetch_all[] = {"fetch", "--quiet", "--prune", "origin", NULL};
+   const char *fetch_head[] = {"fetch", "--quiet", "origin", "HEAD", NULL};
+   return git_net_exec(cwd, default_head ? fetch_head : fetch_all, NULL, 0);
+}
+
 /* --- recursive git discovery --- */
-
-static worktree_git_network_runner_fn g_worktree_git_network_runner;
-
-void worktree_register_git_network_runner(worktree_git_network_runner_fn runner)
-{
-   g_worktree_git_network_runner = runner;
-}
-
-static int worktree_git_network(const char *cwd, const char *const *args)
-{
-   /* The daemon seals and removes credential environment variables at startup.
-    * Its fetch must use the same vault policy as webchat's other Git operations.
-    * Keep that server dependency out of CLI/workspace-only builds. */
-   if (g_worktree_git_network_runner)
-      return g_worktree_git_network_runner(cwd, args, NULL, 0);
-   return git_net_exec(cwd, args, NULL, 0);
-}
 
 /* Directories to skip during discovery */
 static int is_skip_dir(const char *name)
@@ -1337,33 +1354,10 @@ int worktree_find_branch_registered(const char *branch, char *out_dir, size_t ou
    return found;
 }
 
-/* Detect the base branch for a NEW worktree rooted at git_root.
- *
- * A fresh session must start from the repository's DEFAULT branch, not from
- * whatever branch the source checkout happens to be sitting on — otherwise a
- * session forks off a random feature branch and inherits unrelated WIP. Order:
- * With origin configured, a bounded non-interactive fetch is mandatory and the
- * exact fetched HEAD commit is pinned. A failed fetch fails session start;
- * stale tracking data is never silently accepted. `current` and
- * `local_default` are explicit offline/stale overrides.
- * Callers that want a specific base (delegates inheriting a parent, or the
- * session-checkout path that bases on origin/<primary>) pass base_ref instead
- * and never reach here. */
-/* Resolve the base ref for a NEW session worktree.
- *
- * Order, in full:
- * A configured feature/release ref selects the work to continue, but does not
- * waive freshness: the new session branch incorporates the freshly fetched
- * default tip when it is not already an ancestor. main/master are the local
- * authority only when no origin exists.
- *
- * What is deliberately NOT in the chain: the currently checked-out branch. The old code
- * ended at `rev-parse --abbrev-ref HEAD`, so when the shared checkout happened to sit on
- * some session or feature branch, every new session was cut from it and silently
- * inherited unmerged work it did not author and could not separate from its own. main and
- * master are dumb fallbacks but they are STABLE; "whatever is checked out" is not.
- *
- * Returns 0 and fills `buf`, or -1 with `buf` emptied when nothing resolves. */
+/* New sessions use the freshly fetched remote default, never an incidental
+ * checked-out feature branch. Explicit feature/release bases incorporate that
+ * default tip; current/local_default are operator-selected offline overrides.
+ * Without origin, main/master supplies the default authority. */
 
 /* Resolve one candidate branch NAME to a usable ref, preferring origin/<name>.
  * Returns 1 and fills out on success. */
@@ -1475,10 +1469,7 @@ static int wt_session_bases(const char *git_root, char *selected, size_t selecte
 
    if (have_origin && strcmp(mode, "local_default") != 0)
    {
-      const char *fetch_all[] = {"fetch", "--quiet", "--prune", "origin", NULL};
-      const char *fetch_head[] = {"fetch", "--quiet", "origin", "HEAD", NULL};
-      if (worktree_git_network(git_root, fetch_all) != 0 ||
-          worktree_git_network(git_root, fetch_head) != 0 ||
+      if (worktree_fetch(git_root, 0) != 0 || worktree_fetch(git_root, 1) != 0 ||
           wt_ref_oid(git_root, "FETCH_HEAD", default_oid, default_len) != 0)
       {
          fprintf(stderr,
@@ -1586,12 +1577,7 @@ static int worktree_create_sibling_at_ref_unlocked(const char *git_root, const c
       snprintf(base_branch, sizeof(base_branch), "%s", base_ref);
    else
    {
-      /* Detect base branch: root the worktree on the repository's DEFAULT
-       * branch so a fresh session always starts from there rather than from
-       * whatever branch the source checkout happens to have checked out.
-       * Refuses when no authoritative default is known. */
-      /* Remote default by policy. A hard failure here is deliberate: guessing a base
-       * is what let sessions inherit another session's branch. */
+      /* Refuse an unknown default; never inherit an incidental session branch. */
       if (wt_session_bases(git_root, base_branch, sizeof(base_branch), default_oid,
                            sizeof(default_oid), &enforce_default) != 0)
       {
@@ -1723,9 +1709,7 @@ static int worktree_create_sibling_at_ref_unlocked(const char *git_root, const c
       return 0;
    }
 
-   /* Hard failure: isolation could not be established. Log loudly — the caller
-    * continues without a per-session worktree, so writes fall to the guardrail
-    * that blocks edits outside a managed worktree. */
+   /* Hard failure: the caller must abort rather than share a checkout. */
    LOG_ERROR("workspace", "failed to create worktree '%s' (base=%s): %s; branch-attach retry: %s",
              wt_path, base_branch, out ? out : "unknown", out2 ? out2 : "unknown");
    fprintf(stderr, "aimee: failed to create worktree at %s: %s\n", wt_path, out ? out : "unknown");
@@ -2499,9 +2483,7 @@ int session_isolation_target(const char *cwd, const char *sid, char *target, siz
          return 0;
       if (worktree_create_sibling(gr, sid, NULL) != 0)
       {
-         /* Could not create the session worktree — the caller falls back to the
-          * shared checkout, so surface it: this is the one path where session
-          * isolation silently does not apply. */
+         /* Fail the turn if isolation cannot be established. */
          LOG_WARN("workspace", "session isolation worktree create failed for %s (sid=%s)", gr, sid);
          return -1;
       }
