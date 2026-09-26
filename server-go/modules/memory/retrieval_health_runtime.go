@@ -14,6 +14,7 @@ import (
 )
 
 type inspectedHealthReceipt struct {
+	Dispatch *providerReceiptEvent `json:"dispatch_receipt"`
 	Assembly json.RawMessage       `json:"assembly"`
 	Prepared *providerReceiptEvent `json:"prepared_receipt"`
 	Sequence string                `json:"prepared_sequence"`
@@ -119,6 +120,10 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 	knownRelease := len(e.Records) > 0 && healthReleaseValid(metadata.Release, *b, r.Prepared.BindingDigest, at)
 	if knownRelease {
 		e.ReleaseVerifier = metadata.Release.Verifier
+	}
+	if len(e.Records) > 0 && healthDispatchReleaseValid(r.Dispatch, r.Prepared) {
+		knownRelease = true
+		e.ReleaseVerifier = r.Dispatch.HealthRelease.Verifier
 	}
 	knownPositions := len(e.Records) > 0
 	knownArms := len(e.Records) > 0

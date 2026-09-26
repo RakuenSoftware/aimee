@@ -398,3 +398,24 @@ The full PostgreSQL memory race suite passed in 417.589s, followed by the
 exported-owner build check in 7.009s. Final focused placement/provenance tests
 passed in 10.083s. The native ingress fixture and all 77 lint checks also passed.
 Deployed and final overhead validation remain before closing MR-08.
+
+
+### Final deployed validation correction
+
+The first `9cfe9552f` replay exposed a real ordering gap: preparation uses
+preflight revalidation, while the v2 send guard is acquired later at the socket
+write. Its proof therefore cannot be attached to the earlier assembled receipt.
+The owner now binds the later guard check to the pending prepared attempt and
+persists it in the existing dispatch-started event. Verified ledger inspection
+carries that event into health import. Attempt, source digest, preparation check,
+guard check and timestamps must agree; optional proof capacity never prevents
+the required dispatch observation. Regression coverage exercises the actual
+prepare → guard → write-observation → verified-ledger → health-import order.
+
+The deployed diagnostic also confirmed completed-turn adjacency and private
+families. Shared canonical family metadata matched the first retained shared
+source; the second native selection omitted that source entirely. The harness
+checks families against each final source set, not the preceding turn's set.
+Repeated fixture setup initially reused erased shared content and correctly hit
+the surviving erasure intent. Subsequent fixtures use unique keys and content.
+No product eligibility or erasure rule was relaxed.

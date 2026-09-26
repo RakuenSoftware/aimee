@@ -49,6 +49,7 @@ type providerReceiptBinding struct {
 }
 
 type providerReceiptEvent struct {
+	HealthRelease          *healthReleaseCheck     `json:"health_release,omitempty"`
 	Projection             json.RawMessage         `json:"projection,omitempty"`
 	ResponseRepresentation string                  `json:"response_representation,omitempty"`
 	SchemaVersion          int                     `json:"schema_version"`
@@ -64,6 +65,7 @@ type providerReceiptEvent struct {
 }
 
 type providerReceiptEntry struct {
+	healthRelease            *healthReleaseCheck
 	healthTurnHandle         string
 	binding, digest, attempt string
 	prepared, admitted       string
@@ -186,6 +188,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	s.receipts[attempt] = &providerReceiptEntry{binding: entry.binding, digest: bindingDigest, attempt: attempt,
 		prepared: prepared, admitted: admitted, at: at, expires: now.Add(sourceReleaseTTL)}
 	s.receiptBytes += len(prepared) + len(admitted)
+	entry.healthAttempt = attempt
 	prelude := []map[string]string{}
 	metadata := receiptMetadataWithExecution(entry, args, binding, bindingDigest)
 	metadata = receiptMetadataWithRelease(metadata, entry, binding, bindingDigest, now)
@@ -313,7 +316,13 @@ func (s *sourceReleaseState) receiptStarted(args commandArgs) ([]byte, bus.Modul
 		return commandResult(commandError("unavailable", "provider attempt unavailable"))
 	}
 	if e.started == "" {
-		raw, ok := receiptEventJSON(providerReceiptEvent{SchemaVersion: 1, Stage: "dispatch_started", AttemptID: e.attempt, At: time.Now().UTC().Format(time.RFC3339Nano), BindingDigest: e.digest, Reason: "request_write_returned"})
+		event := providerReceiptEvent{SchemaVersion: 1, Stage: "dispatch_started", AttemptID: e.attempt, At: time.Now().UTC().Format(time.RFC3339Nano), BindingDigest: e.digest, Reason: "request_write_returned", HealthRelease: e.healthRelease}
+		raw, ok := receiptEventJSON(event)
+		if event.HealthRelease != nil && (!ok || !s.receiptRoom(0, len(raw))) {
+			// Optional health cannot consume capacity needed for dispatch evidence.
+			event.HealthRelease = nil
+			raw, ok = receiptEventJSON(event)
+		}
 		if !ok || !s.receiptRoom(0, len(raw)) {
 			return commandResult(commandError("unavailable", "provider observation exceeds bound"))
 		}
@@ -341,6 +350,7 @@ func inspectProviderReceipts(args commandArgs) ([]byte, bus.ModuleStatus) {
 	type attempt struct {
 		PreparedSequence                         uint64
 		Prepared                                 *providerReceiptEvent
+		StartedEvent                             *providerReceiptEvent
 		Stages                                   []string
 		Projection                               json.RawMessage
 		Admitted, Started, Acknowledged, Unknown bool
@@ -396,6 +406,7 @@ func inspectProviderReceipts(args commandArgs) ([]byte, bus.ModuleStatus) {
 				return commandResult(commandError("unavailable", "transport observation lacks admission"))
 			}
 			a.Started = true
+			a.StartedEvent = &event
 		case "acknowledged":
 			if !a.Admitted || event.HTTPStatus < 100 || event.HTTPStatus > 599 {
 				return commandResult(commandError("unavailable", "acknowledgement lacks admission"))
@@ -466,7 +477,7 @@ func inspectProviderReceipts(args commandArgs) ([]byte, bus.ModuleStatus) {
 				actions = append(actions, map[string]string{"attempt_id": id, "action": "read"})
 			}
 		}
-		out = append(out, map[string]any{"attempt_id": id, "prepared_sequence": strconv.FormatUint(a.PreparedSequence, 10), "state": state, "dispatch_ownership": ownership, "stages": a.Stages, "prepared_receipt": a.Prepared, "assembly": a.Projection,
+		out = append(out, map[string]any{"attempt_id": id, "prepared_sequence": strconv.FormatUint(a.PreparedSequence, 10), "state": state, "dispatch_ownership": ownership, "stages": a.Stages, "prepared_receipt": a.Prepared, "assembly": a.Projection, "dispatch_receipt": a.StartedEvent,
 			"evidence":       map[string]any{"schema_valid": true, "authenticated_producer": "local_host_ledger", "source_version_available": "not_checked", "payload_verifiable": payloadState, "decision_replayed": false, "chain_included": true, "externally_compared": "unavailable", "effect_confirmed": false},
 			"retention_mode": a.Prepared.Binding.Retention, "replay": replay, "payload_base64": encoded, "local_acceptance": "durable", "checkpoint_state": args.stringOr("checkpoint_state", "unknown")})
 	}

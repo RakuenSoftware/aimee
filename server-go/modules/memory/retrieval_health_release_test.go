@@ -2,6 +2,8 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/JBailes/aimee/server-go/bus"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +87,61 @@ func TestHealthReleaseProducerRequiresActualGuardConfirmation(t *testing.T) {
 		json.Unmarshal(event.Projection, &projection)
 		if (projection.Release != nil) != guarded {
 			t.Fatal("guard proof leaked between admissions", string(event.Projection))
+		}
+	}
+}
+
+func TestHealthReleaseRealTransportOrdering(t *testing.T) {
+	t.Setenv("AIMEE_MEMORY_HEALTH_ENABLED", "1")
+	s := &sourceReleaseState{}
+	args := receiptTestAdmission(t, s)
+	receipt := sourceReleaseCall(t, s, args)
+	var prepared providerReceiptEvent
+	json.Unmarshal([]byte(receipt["prepared_detail"].(string)), &prepared)
+	args["attempt_id"], _ = json.Marshal(prepared.AttemptID)
+	args["operation"] = json.RawMessage(`"source-release-plan"`)
+	args["send_guard"] = json.RawMessage(`true`)
+	planned := sourceReleaseCall(t, s, args)
+	check := planned["request"].(map[string]any)["revalidation"].(map[string]any)["check_id"].(string)
+	args["operation"] = json.RawMessage(`"source-release-result"`)
+	args["owner_response"], _ = json.Marshal(map[string]any{"status": "ok", "eligible": true, "check_id": check, "sources_digest": releaseDigest([]typedProjectionRef{releaseTestRef()}), "send_guard": "acquired", "lease_ms": 5000, "guard_schema_version": 2})
+	sourceReleaseCall(t, s, args)
+	args["operation"] = json.RawMessage(`"provider-receipt-started"`)
+	result := sourceReleaseCall(t, s, args)
+	var dispatched providerReceiptEvent
+	json.Unmarshal([]byte(result["observation_detail"].(string)), &dispatched)
+	if !healthDispatchReleaseValid(&dispatched, &prepared) || dispatched.HealthRelease.GuardCheck == prepared.Binding.SourceCheckID {
+		t.Fatal(result)
+	}
+	j, _ := newHealthJournal("owner", "operator", "private", "", time.Now())
+	snapshot, err := healthSnapshotFromReceipt(inspectedHealthReceipt{Prepared: &prepared, Dispatch: &dispatched, Sequence: "1"}, j, 1000000)
+	if err != nil || snapshot.Invocation.ReleaseVerifier != "source_owner_guard_v2" || snapshot.Invocation.Records[0].LifecycleViolation == nil {
+		t.Fatal(snapshot, err)
+	}
+	rows := []map[string]any{}
+	for _, detail := range []string{receipt["prepared_detail"].(string), receipt["admitted_detail"].(string), result["observation_detail"].(string)} {
+		var e providerReceiptEvent
+		json.Unmarshal([]byte(detail), &e)
+		rows = append(rows, map[string]any{"sequence": fmt.Sprint(len(rows) + 1), "action": "memory.provider." + e.Stage, "attempt_id": e.AttemptID, "detail": detail, "row_hash": strings.Repeat("f", 64)})
+	}
+	inspected, status := inspectProviderReceipts(sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("a", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows}))
+	body, decodeErr := bus.DecodeCommandResult(inspected)
+	var ledger struct {
+		Receipts []inspectedHealthReceipt `json:"receipts"`
+	}
+	if status != 0 || decodeErr != nil || json.Unmarshal(body, &ledger) != nil || len(ledger.Receipts) != 1 || !healthDispatchReleaseValid(ledger.Receipts[0].Dispatch, ledger.Receipts[0].Prepared) {
+		t.Fatal(string(body), status, decodeErr)
+	}
+	for _, mutate := range []func(*providerReceiptEvent){
+		func(e *providerReceiptEvent) { e.AttemptID = "foreign" },
+		func(e *providerReceiptEvent) { e.BindingDigest = strings.Repeat("e", 64) },
+		func(e *providerReceiptEvent) { e.Stage = "dispatch_admitted" },
+		func(e *providerReceiptEvent) { e.At = time.Now().Add(6 * time.Second).UTC().Format(time.RFC3339Nano) },
+	} {
+		copy := dispatched
+		mutate(&copy)
+		if healthDispatchReleaseValid(&copy, &prepared) {
+			t.Fatal("foreign/stale dispatch accepted")
 		}
 	}
 }

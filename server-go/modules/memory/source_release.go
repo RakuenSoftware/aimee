@@ -43,6 +43,7 @@ type sourceReleasePart struct {
 }
 
 type sourceReleaseEntry struct {
+	healthAttempt                                string
 	guardedAdmission                             string
 	guardedAdmissionAt                           time.Time
 	assemblyParts                                []sourceReleasePart
@@ -327,6 +328,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		return s.receiptPlan(args, entry)
 	}
 	if operation == "source-release-plan" {
+		if receipt := s.receipts[entry.healthAttempt]; receipt != nil && receipt.started == "" {
+			receipt.healthRelease = nil
+		}
 		entry.admitted = ""
 		entry.guardedAdmission = ""
 		entry.guardedAdmissionAt = time.Time{}
@@ -425,6 +429,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if guarded {
 		entry.guardedAdmission = check
 		entry.guardedAdmissionAt = time.Now()
+		s.healthGuardObserved(entry, check)
 	}
 	return commandResult(map[string]any{"status": "ok", "admitted": true, "boundary": "source_revalidation"})
 }

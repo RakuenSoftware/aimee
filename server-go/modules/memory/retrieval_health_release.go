@@ -10,6 +10,7 @@ import (
 // owners while holding their v2 send guards. It is not a truth, usefulness,
 // contamination or fusion-recovery label.
 type healthReleaseCheck struct {
+	GuardCheck string `json:"guard_check_id,omitempty"`
 	Binding    string `json:"receipt_binding_sha256"`
 	Check      string `json:"source_check_id"`
 	Sources    string `json:"sources_digest"`
@@ -42,4 +43,34 @@ func receiptMetadataWithRelease(metadata json.RawMessage, entry *sourceReleaseEn
 		return metadata
 	}
 	return raw
+}
+
+// Preparation precedes socket acquisition. The actual v2 send guard has a new
+// check ID; bind it to the exact pending receipt, then persist it in the existing
+// dispatch-started observation. Never retrofit this later proof into assembly.
+func (s *sourceReleaseState) healthGuardObserved(source *sourceReleaseEntry, check string) {
+	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" {
+		return
+	}
+	receipt := s.receipts[source.healthAttempt]
+	if receipt == nil || receipt.binding != source.binding || receipt.started != "" {
+		return
+	}
+	var prepared providerReceiptEvent
+	if json.Unmarshal([]byte(receipt.prepared), &prepared) != nil || prepared.Binding == nil || prepared.Binding.SourcesDigest != source.digest {
+		return
+	}
+	receipt.healthRelease = &healthReleaseCheck{Binding: receipt.digest, Check: prepared.Binding.SourceCheckID, GuardCheck: check, Sources: source.digest, ObservedAt: source.guardedAdmissionAt.UTC().Format(time.RFC3339Nano), Verifier: "source_owner_guard_v2"}
+}
+func healthDispatchReleaseValid(dispatch, prepared *providerReceiptEvent) bool {
+	if dispatch == nil || prepared == nil || prepared.Binding == nil || dispatch.Stage != "dispatch_started" || dispatch.AttemptID != prepared.AttemptID || dispatch.BindingDigest != prepared.BindingDigest || dispatch.HealthRelease == nil || !releaseTokenValid(dispatch.HealthRelease.GuardCheck) {
+		return false
+	}
+	start, err := time.Parse(time.RFC3339Nano, dispatch.At)
+	if err != nil || !healthReleaseValid(dispatch.HealthRelease, *prepared.Binding, prepared.BindingDigest, start) {
+		return false
+	}
+	before, err := time.Parse(time.RFC3339Nano, prepared.At)
+	observed, e := time.Parse(time.RFC3339Nano, dispatch.HealthRelease.ObservedAt)
+	return err == nil && e == nil && !observed.Before(before)
 }
