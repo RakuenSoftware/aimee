@@ -1,0 +1,42 @@
+[
+  {
+    "name": "health migration and committed receipt import through actual HTTP and store bus",
+    "passed": true
+  },
+  {
+    "name": "health public principal and ledger fields cannot replace host identity",
+    "passed": true
+  },
+  {
+    "name": "health missing metadata is explicit in JSON and text",
+    "passed": true
+  },
+  {
+    "name": "health keyed query capture and native selection kind reach durable receipts",
+    "passed": true
+  },
+  {
+    "name": "health canonical personal source family matches retained revision",
+    "passed": true
+  },
+  {
+    "name": "health uses the actual host-owned primary task and turn",
+    "passed": true
+  },
+  {
+    "name": "health optional receipt references remain in exact scope",
+    "passed": true
+  },
+  {
+    "name": "health CLI JSON and readable text match authenticated HTTP",
+    "passed": true
+  },
+  {
+    "name": "health foreign UDS principal cannot enumerate another population",
+    "passed": true
+  },
+  {
+    "name": "health persisted attempts reconcile idempotently after SIGKILL and restart",
+    "passed": true
+  }
+]

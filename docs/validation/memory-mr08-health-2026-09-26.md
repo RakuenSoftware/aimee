@@ -202,3 +202,28 @@ wall-clock bound, while withholding the retryable provider reply until the
 mutation commits. Transport exceptions still fail the fixture. An isolated
 16-check diagnostic passed shared insertion and private correction, each
 preventing a stale second provider send. The full T2/T3 run is still required.
+
+## Current deployed candidate: `2efe810ff`
+
+Both owned CT109 topologies passed with the ordinary 32 KiB provider request
+ceiling: T2 passed all 99 native checks and 10 health checks; T3 passed all 81
+native checks and 10 health checks. Each fixture process exited zero. This
+covers the repaired owner-restart recovery, bounded mutation intervention,
+primary task/query metadata, canonical private families, authenticated CLI and
+HTTP reports, scoped isolation, and exact retained counts after SIGKILL.
+[Process and immutable image evidence](memory-mr08-health-evidence-2026-09-26/2efe810ff-T2-process-exits.json)
+and [T3 process evidence](memory-mr08-health-evidence-2026-09-26/2efe810ff-T3-process-exits.json)
+are retained alongside the individual checks and image identities.
+
+T2 retained 52,806 bytes across two health namespaces (largest 46,452 bytes);
+T3 retained 49,229 bytes (largest 42,876 bytes). Six report calls per topology,
+including calls after restart, took 0.905–1.139 seconds for T2 and 0.729–0.952
+seconds for T3. These are small synthetic workload observations, not a serving
+p95 overhead comparison or a production growth forecast. The initial T3 launch
+stopped before topology creation at the disk-space precondition; after removing
+specific obsolete build-cache entries, the independent T3 run passed. Both
+successful topologies were removed after evidence export. CT100 was unchanged.
+
+MR-08 remains in progress: the event metadata gaps and serving-overhead
+acceptance still need resolution. These deployed passes do not supply MR-07's
+activated paired-workload quality or cost measurements.
