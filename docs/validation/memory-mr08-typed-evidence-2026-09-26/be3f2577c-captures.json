@@ -1,0 +1,92 @@
+[
+  {
+    "payload_sha256": "00b774aef7c5fcee69b5f7b80b357899a0f0a8c75ee3c26e5bacda750de54ca4",
+    "payload_bytes": 33520,
+    "positions": [
+      {
+        "kind": "world_fact",
+        "state": "persistent",
+        "confidence_class": "A",
+        "arms": [
+          {
+            "name": "vector",
+            "rank": 1,
+            "raw_score": 0.6436817433644392,
+            "contribution": 0.01639344262295082,
+            "fused_score": 0.01639344262295082,
+            "policy": "assertion_rrf_k60_v1"
+          }
+        ],
+        "positions": [
+          {
+            "projection": "typed_projection",
+            "projection_sha256": "4168a97f7ed8c10284af3ed29bdf23517c227fb4326f0352d4dd58ce534d0c22",
+            "rank": 1
+          }
+        ]
+      },
+      {
+        "kind": "fact",
+        "state": null,
+        "confidence_class": null,
+        "arms": [],
+        "positions": [
+          {
+            "projection": "native_projection",
+            "projection_sha256": "2a6edafe19f1cc88843d5d8372e84ec833142f6bebe09000a5548a0beded044c",
+            "rank": 1
+          }
+        ]
+      }
+    ],
+    "scope": {
+      "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+      "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f"
+    }
+  },
+  {
+    "payload_sha256": "00b774aef7c5fcee69b5f7b80b357899a0f0a8c75ee3c26e5bacda750de54ca4",
+    "payload_bytes": 33520,
+    "positions": [
+      {
+        "kind": "world_fact",
+        "state": "persistent",
+        "confidence_class": "A",
+        "arms": [
+          {
+            "name": "vector",
+            "rank": 1,
+            "raw_score": 0.6436817433644392,
+            "contribution": 0.01639344262295082,
+            "fused_score": 0.01639344262295082,
+            "policy": "assertion_rrf_k60_v1"
+          }
+        ],
+        "positions": [
+          {
+            "projection": "typed_projection",
+            "projection_sha256": "4168a97f7ed8c10284af3ed29bdf23517c227fb4326f0352d4dd58ce534d0c22",
+            "rank": 1
+          }
+        ]
+      },
+      {
+        "kind": "fact",
+        "state": null,
+        "confidence_class": null,
+        "arms": [],
+        "positions": [
+          {
+            "projection": "native_projection",
+            "projection_sha256": "2a6edafe19f1cc88843d5d8372e84ec833142f6bebe09000a5548a0beded044c",
+            "rank": 1
+          }
+        ]
+      }
+    ],
+    "scope": {
+      "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+      "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f"
+    }
+  }
+]

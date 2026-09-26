@@ -350,4 +350,14 @@ Four new regressions cover final version matching, budget omission, serving
 commitment parity, metadata privacy, malformed arm contributions and receipt
 import without invented safety labels. Focused Go race tests passed in 2.715s;
 PostgreSQL-backed health/ingress/assertion/native/source-release checks passed
-in 4.273s. All 77 lint checks passed. Deployed validation for this slice is pending.
+in 4.273s. All 77 lint checks passed.
+
+Candidate `be3f2577c` subsequently passed all 23 deployed checks, actual exit
+zero. Two native requests matched their committed provider receipts, and health
+import completed without failures or truncation. Kind and final-position gaps
+were absent for this fixture; unavailable metadata stayed explicit. The
+[retained evidence](memory-mr08-typed-evidence-2026-09-26/README.md) includes
+checks, capture summaries, health output, image identities and harness snapshots.
+Both isolated applications are healthy on this candidate. Optional collection
+is restored off. The earlier measured serving-overhead comparison applies to
+`71208d807`, not this new slice; no new latency result is claimed.

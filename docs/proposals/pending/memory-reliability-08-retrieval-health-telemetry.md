@@ -72,5 +72,6 @@ The initial authenticated collector passed deployed T2/T3 migration, isolation a
 restart checks. Candidate `2efe810ff` also passed all T2/T3 native and health
 checks, including serving metadata, trace access, and restart recovery. Candidate
 `71208d807` additionally passed 15 deployed final-position checks and a quiet
-32-request serving-overhead comparison. Remaining metadata producers are still
-open. No production baseline or complete proposal acceptance is claimed.
+32-request serving-overhead comparison. Candidate `be3f2577c` passed 23 deployed checks for retained typed
+assertion kind, lifecycle, confidence class and actual arm contributions.
+Remaining metadata producers are still open. No production baseline or complete proposal acceptance is claimed.
