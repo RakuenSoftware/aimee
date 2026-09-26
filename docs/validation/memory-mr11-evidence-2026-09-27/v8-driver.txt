@@ -1,0 +1,13 @@
+PASS fresh candidate KB healthy
+PASS future and historical assertions withheld before boundary
+PASS superseded historical assertion has semantic trace
+PASS clock-only activation yields future semantic assertion
+PASS clock boundary did not mutate canonical versions
+PASS rollback retains current semantic assertion
+PASS rollback retains explicit historical semantic assertion
+FAIL erasure cascades every shared memory vector generation
+Traceback (most recent call last):
+  File "<stdin>", line 71, in <module>
+  File "<stdin>", line 16, in check
+RuntimeError: erasure cascades every shared memory vector generation
+live generations actual exit 1

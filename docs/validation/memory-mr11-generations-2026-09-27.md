@@ -1,6 +1,6 @@
-# MR-11 embedding generations: implementation candidate
+# MR-11 embedding generations: functional closeout
 
-MR-11 remains in progress until deployed acceptance is recorded. This change adds
+Functional implementation and acceptance complete on `ba8f0a631`. This change adds
 full embedding identity commitments and versioned background indexing to the Go
 memory owner. It does not enable the MR-07, MR-09, or MR-10 optional policies.
 
@@ -64,13 +64,59 @@ verified by the Go memory adapter.
 - Temporary-table shadow and erasure regression: passed, 1.395 seconds.
 - Python identity commitment and Go family migration unit checks passed.
 
-## Deployment acceptance still required
+## Deployed acceptance
 
-Build the immutable candidate, migrate the isolated CT109 owners, and exercise
-retained/future semantic coverage, restart, generation rollback, and cleanup over
-the deployed interfaces. Record actual process exits and verify production
-CT100 remains healthy on 0.4.5. Family migration 40 and owner schema version 2
-require explicit binary compatibility assessment; this report does not promise
-that older binaries can start after those migrations.
+The immutable `aimee-pr2990:ba8f0a631` image built with exit zero. Its image ID is
+`sha256:40f0521f2c0c81ee74e894934a3509129719357109d1af5ff443f65bfc2597dd`.
+Both existing isolated CT109 owners upgraded with their identities and volumes
+preserved and became healthy. The native upgrade audit passed 12 checks with
+exit zero: the persisted `db1` owner reached migration 40, personal/code owners
+reached version 2, background private indexing published the exact source
+revision, native search worked, retirement withheld current reads and explicit
+fixture destruction cascaded all retained vectors. Optional health, selection
+and horizon policies remained unset on both owners.
 
-[Evidence directory](memory-mr11-evidence-2026-09-27/)
+A fresh disposable KB using that image passed 17 checks with exit zero. It
+exercised two generation cutovers, retained historical assertion semantics,
+clock-only future activation without a canonical version change, rollback,
+retirement, physical fixture erasure, restart recovery and readiness reporting.
+Changing only the provider query prefix at dimension 384 produced lexical
+fallback with no old-generation semantic trace. Backfilling and activating the
+new commitment restored semantic retrieval; reverting provider and generation
+restored it again. Every assertion query reported zero indexed documents.
+
+The provider fixture used the pinned 0.4.5 model weights and installed runtime,
+with the new health protocol. Its prefix variant changed only the query prefix.
+This does not relabel production's legacy provider identity as verified.
+The disposable stack and its volumes were removed after the run.
+
+Earlier harness failures are retained rather than counted as passes: missing
+provider cap/operator authority and undrained indexing during fixture startup;
+then a duplicate canonical assertion triple, an incorrect string scope for the
+assertion-search API (v7), and treating model-authority retirement as physical
+erasure (v8). The final v9 fixture uses valid distinct triples, `include_all`
+for assertion search, and an exact-fixture owner destruction after retirement.
+No production authorization rule was weakened to satisfy these checks.
+
+## Acceptance mapping and limits
+
+| Frozen gate | Evidence |
+|---|---|
+| A1, A7: identity separation and query-time checks | Full identity/dimension regressions; deployed same-dimension prefix swap, new cutover and rollback |
+| A2: resumable work | Private/code interrupted bounded-batch regressions reuse committed rows; shared reembed replay does not regenerate completed drafts; deployed restart retains active semantic reads |
+| A3, A9: edits, erasure, revocation and rollback | Shared reembed replay rejects changed sources and suppressed drafts; code deletion/rollback and private offline-provider revocation tests; deployed all-generation fixture destruction |
+| A4, A5: historical and future semantic coverage | Deployed superseded assertion at explicit valid/belief time and future assertion crossing its boundary without a write |
+| A6: horizon and retained admission | Full suite includes MR-10 current-versus-history/horizon tests; generation admission excludes processing-prohibited inputs independently of current utility/validity; retained private versions survive expiry and rebuild |
+| A8: bounded read work | PostgreSQL rebuild-lock test returns lexical fallback within one second without aborting its transaction; deployed assertion queries perform no backlog refresh |
+
+The advertised modes are those listed above: retained assertion semantic history
+is covered; private memory/code and whole-memory/unit adapters do not claim a
+historical semantic API. Request-level readiness remains conservative. Synthetic
+fixtures do not establish production task quality or promote optional policies.
+Family migration 40 and owner schema version 2 do not promise old-binary startup;
+validated rollback here means compatible vector-generation rollback.
+
+CT100 stayed healthy on `aimee-native-core:0.4.5-bridge.2`, with healthy 0.4.5
+embedder and PostgreSQL containers. This candidate was not deployed to CT100.
+
+[Checks, frozen harnesses and hashes](memory-mr11-evidence-2026-09-27/README.md)

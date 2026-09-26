@@ -1,6 +1,6 @@
 # MR-11: Versioned embedding generations and bounded index freshness
 
-- **State:** In progress — generation implementation candidate; deployed acceptance pending
+- **State:** Functional implementation and acceptance complete — declared adapter modes; compatible generation rollback validated
 - **Priority:** P1: retrieval integrity and operations
 - **Owner:** Go memory indexing, with DB2/PostgreSQL generation and storage adapters
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md); trace integration with [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)

@@ -1,0 +1,14 @@
+PASS private generation adapter migrated on native upgrade
+PASS code generation adapter migrated on native upgrade
+PASS native private create succeeds after migration
+PASS background owner publishes exact private revision
+PASS native private search survives upgrade
+PASS verified migration40 installed
+PASS private retirement excludes current read
+PASS private fixture destruction clears all generation vectors
+PASS server healthy on requested image
+PASS server optional policies unset
+PASS kb healthy on requested image
+PASS kb optional policies unset
+MR11_UPGRADE_ACCEPTANCE_COMPLETE 12
+native upgrade audit actual exit 0

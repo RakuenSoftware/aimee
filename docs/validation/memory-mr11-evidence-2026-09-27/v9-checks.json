@@ -1,0 +1,70 @@
+[
+  {
+    "name": "fresh candidate KB healthy",
+    "passed": true
+  },
+  {
+    "name": "future and historical assertions withheld before boundary",
+    "passed": true
+  },
+  {
+    "name": "superseded historical assertion has semantic trace",
+    "passed": true
+  },
+  {
+    "name": "clock-only activation yields future semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "clock boundary did not mutate canonical versions",
+    "passed": true
+  },
+  {
+    "name": "rollback retains current semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "rollback retains explicit historical semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "model delete retires the canonical fixture",
+    "passed": true
+  },
+  {
+    "name": "erasure cascades every shared memory vector generation",
+    "passed": true
+  },
+  {
+    "name": "restart recovers active semantic generation",
+    "passed": true
+  },
+  {
+    "name": "status identifies full provider commitment",
+    "passed": true
+  },
+  {
+    "name": "status declares all owned shared record classes",
+    "passed": true
+  },
+  {
+    "name": "same-dimension prefix change cannot join old vectors",
+    "passed": true
+  },
+  {
+    "name": "prefix change creates a distinct generation commitment",
+    "passed": true
+  },
+  {
+    "name": "new compatible generation restores semantic retrieval",
+    "passed": true
+  },
+  {
+    "name": "provider and generation rollback restore semantic retrieval",
+    "passed": true
+  },
+  {
+    "name": "query never refreshes assertion backlog",
+    "passed": true
+  }
+]

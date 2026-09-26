@@ -1,0 +1,7 @@
+{
+  "complete": true,
+  "checks": 17,
+  "candidate": "ba8f0a631",
+  "provider_image": "aimee-pr2990-embedder:21f36c56a",
+  "promotes_optional_policies": false
+}

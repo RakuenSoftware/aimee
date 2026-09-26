@@ -1,0 +1,22 @@
+{
+  "migrations": [
+    {
+      "owner": "db1",
+      "version": 40
+    },
+    {
+      "owner": "memory-code",
+      "version": 2
+    },
+    {
+      "owner": "memory-health",
+      "version": 1
+    },
+    {
+      "owner": "memory-personal",
+      "version": 2
+    }
+  ],
+  "private_generation_table": true,
+  "code_generation_table": true
+}

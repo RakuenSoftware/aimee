@@ -1,0 +1,50 @@
+import json,subprocess,sys,http.client,socket,time
+from pathlib import Path
+head=sys.argv[1];n=json.loads(Path('/opt/pr2990-evidence/mr07-managed-be46915db/names.json').read_text());out=Path('/opt/pr2990-evidence/mr11-upgrade-'+head)/'native-v2';out.mkdir(exist_ok=False)
+checks=[]
+def check(name,ok):
+ checks.append(dict(name=name,passed=bool(ok)));(out/'native-checks.json').write_text(json.dumps(checks,indent=2)+'\n');print(('PASS ' if ok else 'FAIL ')+name,flush=True)
+ if not ok:raise RuntimeError(name)
+helper='''import http.client,socket,json,sys
+class Local(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(60);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+a=json.load(sys.stdin);c=Local('localhost');c.request('POST',a['path'],json.dumps(a['body']),{'Content-Type':'application/json'});r=c.getresponse();print(json.dumps([r.status,json.loads(r.read())]))
+'''
+def api(path,body,label):
+ p=subprocess.run(['docker','exec','-i','-u','1000',n['server'],'python3','-c',helper],input=json.dumps(dict(path=path,body=body)),capture_output=True,text=True,timeout=70)
+ if p.returncode:raise RuntimeError('native API process failed')
+ d=json.loads(p.stdout);(out/(label+'.json')).write_text(json.dumps(d,indent=2)+'\n');return d
+sqlcmd=['docker','exec',n['project']+'-aimee-store-db-1','psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c']
+def sql(q):return subprocess.check_output(sqlcmd+[q],text=True,stderr=subprocess.PIPE).strip()
+metadata=json.loads(sql("SELECT json_build_object('migrations',(SELECT json_agg(m) FROM (SELECT owner,max(version) AS version FROM schema_migrations GROUP BY owner ORDER BY owner) m),'private_generation_table',to_regclass('user_embedding_generations') IS NOT NULL,'code_generation_table',to_regclass('user_code_embedding_generations') IS NOT NULL)"));(out/'native-migrations.json').write_text(json.dumps(metadata,indent=2)+'\n')
+check('private generation adapter migrated on native upgrade',metadata['private_generation_table'])
+check('code generation adapter migrated on native upgrade',metadata['code_generation_table'])
+key='mr11-native-v2-'+head;mid=None
+# Remove only the retired fixture left by the first audit's incorrect erasure assertion.
+sql("DELETE FROM user_memories WHERE key='mr11-native-"+head+"' AND content='MR11 private generation upgrade fixture'")
+try:
+ status,d=api('/v1/memory/store',dict(store='user',key=key,content='MR11 private generation upgrade fixture',kind='fact',tier='L2'),'native-store')
+ check('native private create succeeds after migration',status==200 and d.get('status')=='ok');mid=int(d['id'])
+ deadline=time.monotonic()+90;count='0'
+ while time.monotonic()<deadline:
+  count=sql("SELECT count(*) FROM user_memory_embedding_versions v JOIN user_memories m ON m.id=v.memory_id AND m.record_revision=v.record_revision JOIN user_embedding_active a ON a.generation=v.generation WHERE m.id="+str(mid))
+  if count=='1':break
+  time.sleep(1)
+ check('background owner publishes exact private revision',count=='1')
+ status,d=api('/v1/memory/search',dict(store='user',keywords=[key]),'native-search')
+ check('native private search survives upgrade',status==200 and key in json.dumps(d))
+ check('verified migration40 installed',any(x['owner']=='db1' and x['version']>=40 for x in metadata['migrations']))
+finally:
+ if mid is not None:
+  api('/v1/memory/delete',dict(store='user',id=str(mid)),'native-cleanup')
+  status,retired=api('/v1/memory/get',dict(store='user',id=str(mid)),'native-retired-get')
+  check('private retirement excludes current read',status==404 and retired.get('kind')=='not_found')
+  # Explicit fixture destruction tests FK cleanup separately from retention.
+  sql("DELETE FROM user_memories WHERE id="+str(mid)+" AND key='"+key+"'")
+  check('private fixture destruction clears all generation vectors',sql('SELECT count(*) FROM user_memory_embedding_versions WHERE memory_id='+str(mid))=='0')
+for role in ['server','kb']:
+ info=json.loads(subprocess.check_output(['docker','inspect',n[role]],text=True))[0]
+ check(role+' healthy on requested image',info['Config']['Image']=='aimee-pr2990:'+head and info['State']['Health']['Status']=='healthy')
+ check(role+' optional policies unset',not any(x.startswith(('AIMEE_MEMORY_HEALTH_ENABLED=','AIMEE_MEMORY_SELECTION_POLICY=','AIMEE_MEMORY_UTILITY_HORIZON_POLICY=')) for x in info['Config']['Env']))
+print('MR11_UPGRADE_ACCEPTANCE_COMPLETE',len(checks),flush=True)
