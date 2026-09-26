@@ -1,0 +1,30 @@
+import json,re,subprocess,time
+from pathlib import Path
+head='71208d807';names=json.loads(Path('/opt/pr2990-evidence/mr08-positions-upgrade-'+head+'/names.json').read_text())
+out=Path('/opt/pr2990-evidence/mr08-positions-native-'+head);out.mkdir(exist_ok=False)
+server=names['server'];info=json.loads(subprocess.check_output(['docker','inspect',server],text=True))[0]
+assert re.fullmatch('aimee-e2e-server-[a-f0-9]+',names['project']) and info['Config']['Labels']['com.docker.compose.project']==names['project']
+assert info['Config']['Image']=='aimee-pr2990:'+head
+def settle():
+ previous=None;start=time.monotonic();stable=start
+ while time.monotonic()-start<45:
+  q="SELECT json_build_object('pending',(SELECT count(*) FROM kb_async_jobs WHERE kind='memory_index' AND status<>'done'),'canonical',(SELECT COALESCE(sum(generation),0) FROM memory_collection_generations),'projection',(SELECT COALESCE(sum(generation),0) FROM memory_projection_generations))"
+  row=json.loads(subprocess.check_output(['docker','exec',names['kb_project']+'-aimee-store-db-1','psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',q],text=True))
+  if row!=previous or row['pending']!=0:previous=row;stable=time.monotonic()
+  if row['pending']==0 and time.monotonic()-stable>=2:return
+  time.sleep(.25)
+ raise RuntimeError('index did not settle')
+subprocess.run(['docker','cp','/tmp/pr2990-mr08-positions-inside.py',server+':/tmp/mr08-positions-inside.py'],check=True,stdout=subprocess.DEVNULL)
+with (out/'stderr.log').open('w') as stderr:
+ child=subprocess.Popen(['docker','exec','-i','-u','1000',server,'python3','/tmp/mr08-positions-inside.py'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr,text=True)
+ try:
+  for line in child.stdout:
+   if line.strip()=='POSITIONS_SETTLE':settle();child.stdin.write('continue\n');child.stdin.flush()
+   else:print(line.strip(),flush=True)
+  code=child.wait(timeout=30)
+ finally:
+  child.stdin.close()
+  if child.poll() is None:child.wait(timeout=30)
+subprocess.run(['docker','cp',server+':/var/lib/aimee/mr08-positions-'+head,str(out/'inside')],check=True,stdout=subprocess.DEVNULL)
+(out/'process-exit.json').write_text(json.dumps(dict(exit_code=code))+'\n')
+raise SystemExit(code)

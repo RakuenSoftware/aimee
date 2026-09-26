@@ -1,0 +1,22 @@
+{
+  "http_status": 200,
+  "status": "ok",
+  "collection": {
+    "selected_requests": 2,
+    "imported_requests": 2,
+    "failed_requests": 0,
+    "truncated": false,
+    "verified_through_sequence": "185883"
+  },
+  "metadata_gaps": {
+    "arm_contributions": 2,
+    "family": 2,
+    "memory_kind": 2,
+    "previous_eligible_turn": 2,
+    "release_labels": 2,
+    "trust": 2
+  },
+  "counts": {
+    "dispatched": 2
+  }
+}

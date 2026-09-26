@@ -245,8 +245,10 @@ The existing optional metadata pool and receipt bounds still apply.
 
 The focused health/native/source-release race suite passed in 2.95 seconds,
 including four new position regressions and the existing serving-content
-invariance check. Deployed validation of this addition remains pending; the
-ongoing serving-overhead experiment uses the earlier `be46915db` image.
+invariance check. The PostgreSQL-backed focused race suite subsequently passed
+in 4.07 seconds. All 77 lint checks ran; the sole failure was the new file's
+module registration. After registering the source and its test, that schema
+check passed, as did the added bounded-position regression.
 
 ## Native serving observations on `be46915db`
 
@@ -282,3 +284,48 @@ an incomplete native request and restored the environment; it is not a passing
 comparison. A four-request enabled diagnostic then passed. The subsequent
 frozen comparison retained every measurement and would have made any measured
 failure ineligible, without silently retrying or dropping it.
+
+## Deployed positions and quiet serving comparison on `71208d807`
+
+Both owned CT109 applications upgraded from `be46915db` to `71208d807` with
+their stores, Vaults, workspaces and enrolled identities preserved. Both became
+healthy. The immutable application image is
+`sha256:e1c8283fdb70ddc4dfe10d49f01504e7e2d88c40585d733421bf152ec224a6b6`.
+The native position fixture passed all 15 assertions and exited zero. It stored
+a private identity through the authenticated API, verified its exact owner and
+revision, and matched the bytes of two actual provider requests to committed
+receipts. Both native and typed projections retained valid positions. The
+authenticated report imported both dispatched attempts without loss and cleared
+their `final_rank` gap. Unsupported predecessor metadata remained unknown.
+[Checks](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-positions-checks.json),
+[captured positions](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-positions-captures.json)
+and [health summary](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-positions-health-summary.json)
+are retained with the exercised harness sources. The temporary identity was
+deleted and the model roster restored.
+
+A subsequent quiet off/on/on/off run used eight measured requests and three
+excluded warm-ups per block. No other CT109 builds or validation suites ran
+during collection. The corpus, synthetic provider, context limit and settlement
+procedure matched the preceding experiment; the manifest and harness hashes
+were frozen before collection. All 32 measured requests completed, with zero
+failures in either arm. Each block verified optional capture was actually off
+or on.
+
+| Collection | Requests | Mean | p50 | p95 |
+|---|---:|---:|---:|---:|
+| Off | 16 | 3.158 s | 3.166 s | 3.358 s |
+| On | 16 | 3.185 s | 3.161 s | 3.318 s |
+
+Mean latency increased by 26.7 ms (about 0.85%). The empirical p95 ratio was
+0.9881; with only 16 observations per arm, this nearest-rank p95 is the sample
+maximum and does not establish a speedup or a production distribution.
+[Manifest](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-manifest.json),
+[observations](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-progress.json)
+and [summary](memory-mr08-serving-overhead-evidence-2026-09-26/71208d807-summary.json)
+are retained. The namespace held 220,947 bytes including earlier fixture
+receipts; no per-request or production growth rate is inferred. The controller
+exited zero, restored collection to off, and left the upgraded Server healthy.
+
+MR-08 remains open for the other metadata producers, including owned predecessor
+links and the incomplete arm, release/verifier and provenance metadata paths.
+These observations do not supply MR-07's independent paired quality/cost gate.

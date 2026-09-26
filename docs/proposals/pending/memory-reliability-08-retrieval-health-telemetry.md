@@ -70,5 +70,7 @@ The initial Go-only calculator and bounded journal foundation have
 The journal has a tested PostgreSQL owner foundation and receipt-derived importer.
 The initial authenticated collector passed deployed T2/T3 migration, isolation and
 restart checks. Candidate `2efe810ff` also passed all T2/T3 native and health
-checks, including serving metadata, trace access, and restart recovery. Complete
-metadata producers and serving-overhead acceptance remain open. No production baseline or full end-to-end acceptance is claimed.
+checks, including serving metadata, trace access, and restart recovery. Candidate
+`71208d807` additionally passed 15 deployed final-position checks and a quiet
+32-request serving-overhead comparison. Remaining metadata producers are still
+open. No production baseline or complete proposal acceptance is claimed.

@@ -1,0 +1,77 @@
+import hashlib,http.client,json,math,re,socket,subprocess,sys,time
+from pathlib import Path
+head='71208d807'
+names=json.loads(Path('/opt/pr2990-evidence/mr07-managed-be46915db/names.json').read_text())
+out=Path('/opt/pr2990-evidence/mr08-serving-overhead-confirmed-'+head);out.mkdir(parents=True,exist_ok=False)
+manifest=dict(kind='native_optional_health_overhead',candidate=head,order=['off-current-a','on-current-a','on-current-b','off-current-b'],measured_per_block=8,warmup_per_block=3,provider='fixed synthetic single response; no real-model latency or cost inference',query='mr07activation_state',requirements='mr07activation naming_convention',cache='settled warm index; fresh session and provider connection for every request',population='isolated enrolled Server plus KB; one complete typed requirement; no production generalization',max_request_bytes=65536,retention='24h; 256 attempts; 384KiB per namespace; 128 namespaces per principal',comparison='descriptive matched p50/p95 and retention; default remains disabled')
+manifest['application_failures']='retain every observation and failure; any measured failure makes comparison ineligible; no silent retries'
+manifest['harness_sha256']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path(__file__),Path('/tmp/pr2990-mr08-overhead-inside.py')]}
+raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();(out/'manifest.json').write_bytes(raw)
+class Docker(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(90);self.sock.connect('/var/run/docker.sock')
+def api(method,path,body=None):
+ c=Docker('localhost');c.request(method,path,None if body is None else json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+ if r.status>=400:raise RuntimeError('Docker action failed '+str(r.status))
+ return json.loads(raw) if raw else None
+server=names['server'];original=api('GET','/containers/'+server+'/json')
+assert re.fullmatch('aimee-e2e-server-[a-f0-9]+',names['project'])
+assert original['Config']['Labels']['com.docker.compose.project']==names['project']
+assert original['Config']['Image']=='aimee-pr2990:'+head
+assert not original['HostConfig'].get('PortBindings')
+original['Config']['Env']=[v for v in original['Config']['Env'] if not v.startswith('AIMEE_MEMORY_HEALTH_ENABLED=')]
+subprocess.run(['docker','exec',server,'test','!','-e','/etc/aimee/exploration-experiment.json'],check=True)
+def replace(enabled):
+ info=api('GET','/containers/'+server+'/json');config=dict(info['Config'])
+ config['Env']=[e for e in config['Env'] if not e.startswith('AIMEE_MEMORY_HEALTH_ENABLED=')]
+ if enabled is not None:config['Env'].append('AIMEE_MEMORY_HEALTH_ENABLED='+('1' if enabled else '0'))
+ else:config['Env'].extend(e for e in original['Config']['Env'] if e.startswith('AIMEE_MEMORY_HEALTH_ENABLED='))
+ config['HostConfig']=info['HostConfig'];config['NetworkingConfig']=dict(EndpointsConfig={k:dict(Aliases=v.get('Aliases',[]),IPAMConfig=v.get('IPAMConfig'),DriverOpts=v.get('DriverOpts')) for k,v in info['NetworkSettings']['Networks'].items()})
+ api('POST','/containers/'+server+'/stop?t=30');api('DELETE','/containers/'+server)
+ api('POST','/containers/create?name='+server,config);api('POST','/containers/'+server+'/start')
+ deadline=time.monotonic()+180
+ while time.monotonic()<deadline:
+  current=api('GET','/containers/'+server+'/json')
+  if current['State'].get('Health',{}).get('Status')=='healthy':return
+  time.sleep(1)
+ raise RuntimeError('owned Server health timeout')
+kbpg=names['kb_project']+'-aimee-store-db-1'
+def sql(query):
+ return subprocess.check_output(['docker','exec',kbpg,'psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',query],text=True)
+def settle():
+ started=time.monotonic();stable=started;previous=None
+ while time.monotonic()-started<45:
+  row=json.loads(sql("SELECT json_build_object('pending',(SELECT count(*) FROM kb_async_jobs WHERE kind='memory_index' AND status<>'done'),'canonical',(SELECT COALESCE(sum(generation),0) FROM memory_collection_generations),'projection',(SELECT COALESCE(sum(generation),0) FROM memory_projection_generations))"))
+  if row!=previous or row['pending']!=0:previous=row;stable=time.monotonic()
+  if row['pending']==0 and time.monotonic()-stable>=2:return
+  time.sleep(.25)
+ raise RuntimeError('index did not settle')
+all_rows=[];current=None
+try:
+ for label in manifest['order']:
+  enabled=label.startswith('on')
+  if current!=enabled:replace(enabled);current=enabled
+  subprocess.run(['docker','cp','/tmp/pr2990-mr08-overhead-inside.py',server+':/tmp/mr08-overhead-inside.py'],check=True,stdout=subprocess.DEVNULL)
+  with (out/(label+'-stderr.log')).open('w') as stderr:
+   child=subprocess.Popen(['docker','exec','-i','-u','1000',server,'python3','/tmp/mr08-overhead-inside.py',label,'1' if enabled else '0',str(manifest['measured_per_block']),str(manifest['warmup_per_block'])],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=stderr,text=True)
+   try:
+    for line in child.stdout:
+     if line.strip()=='HEALTH_BENCH_SETTLE':settle();child.stdin.write('continue\n');child.stdin.flush()
+     elif line.startswith('HEALTH_BENCH_ROW '):
+      row=json.loads(line.split(' ',1)[1]);all_rows.append(row);(out/'progress.json').write_text(json.dumps(all_rows,indent=2)+'\n');print(label,row['ordinal'],'seconds',round(row['latency_seconds'],3),flush=True)
+    if child.wait(timeout=30)!=0:raise RuntimeError('inside measurement failed '+label)
+   finally:
+    child.stdin.close()
+    if child.poll() is None:child.wait(timeout=30)
+  subprocess.run(['docker','cp',server+':/var/lib/aimee/mr08-overhead/'+label,str(out/label)],check=True,stdout=subprocess.DEVNULL)
+ summary=dict(manifest_sha256=hashlib.sha256(raw).hexdigest(),candidate=head,arms={})
+ for arm in ['off','on']:
+  samples=sorted(r['latency_seconds'] for r in all_rows if r['label'].startswith(arm) and not r['warmup']);assert len(samples)==16
+  summary['arms'][arm]=dict(n=len(samples),mean_seconds=sum(samples)/len(samples),p50_seconds=samples[math.ceil(.50*len(samples))-1],p95_seconds=samples[math.ceil(.95*len(samples))-1])
+ summary['p95_ratio']=summary['arms']['on']['p95_seconds']/summary['arms']['off']['p95_seconds']
+ summary['measured_failures']={arm:sum(not r['completed'] for r in all_rows if r['label'].startswith(arm) and not r['warmup']) for arm in ['off','on']}
+ summary['comparison_eligible']=not any(summary['measured_failures'].values())
+ summary['mean_delta_seconds']=summary['arms']['on']['mean_seconds']-summary['arms']['off']['mean_seconds']
+ (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n');print('measurement complete',flush=True)
+finally:
+ replace(None);print('original optional-health environment restored; Server healthy',flush=True)

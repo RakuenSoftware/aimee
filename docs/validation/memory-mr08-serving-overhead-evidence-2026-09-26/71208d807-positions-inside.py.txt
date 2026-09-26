@@ -1,0 +1,66 @@
+import hashlib,http.client,json,os,socket,sqlite3,sys,threading,time
+from pathlib import Path
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+assert os.getuid()==1000 and os.environ.get('AIMEE_MEMORY_HEALTH_ENABLED')=='1'
+root=Path('/var/lib/aimee/mr08-positions-71208d807');root.mkdir(exist_ok=False)
+checks=[];captures=[];errors=[];memory_id=None;version=None
+def check(name,passed):
+ checks.append(dict(name=name,passed=bool(passed)));(root/'checks.json').write_text(json.dumps(checks,indent=2)+'\n')
+ if not passed:raise RuntimeError(name)
+class Local(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(120);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+def api(path,body):
+ c=Local('localhost');c.request('POST',path,json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();status=r.status;c.close()
+ try:d=json.loads(raw)
+ except ValueError:d=raw.decode()
+ return status,d
+def settle():
+ print('POSITIONS_SETTLE',flush=True);assert sys.stdin.readline().strip()=='continue'
+class Provider(BaseHTTPRequestHandler):
+ def log_message(self,*args):pass
+ def do_POST(self):
+  raw=self.rfile.read(int(self.headers['Content-Length']));digest=hashlib.sha256(raw).hexdigest()
+  try:
+   with sqlite3.connect('file:/var/lib/aimee/audit/worm-live.db?mode=ro',uri=True) as audit:
+    row=audit.execute("SELECT subject,detail FROM audit_event WHERE actor_role='host' AND actor_principal='uid:1000' AND action='memory.provider.prepared' AND json_extract(detail,'$.binding.payload_sha256')=? ORDER BY seq DESC LIMIT 1",(digest,)).fetchone()
+    check('provider bytes match a committed prepared receipt',row is not None)
+    attempt,prepared=row[0],json.loads(row[1]);binding=prepared['binding']
+    row=audit.execute("SELECT detail FROM audit_event WHERE actor_role='host' AND actor_principal='uid:1000' AND action='memory.provider.assembled' AND subject=? ORDER BY seq DESC LIMIT 1",(attempt,)).fetchone()
+    projection=json.loads(row[0])['projection'];records=projection.get('health_records',[])
+    private=next((r for r in records if json.loads(r['record_id'])==['user_memory_record',version['owner_id'],str(memory_id)] and r['version_id']==version['record_revision']),None)
+    check('native private identity appears in the actual provider bytes',b'MR08_POSITION_IDENTITY' in raw)
+    check('actual retained private version has owner-rendered native positions',private is not None and any(p['projection']=='native_projection' and p['rank']>=1 and len(p['projection_sha256'])==64 for p in private.get('final_positions',[])))
+    check('typed retained source has final ingress positions',any(any(p['projection']=='typed_projection' and p['rank']>=1 for p in r.get('final_positions',[])) for r in records))
+    captures.append(dict(payload_sha256=digest,payload_bytes=len(raw),positions=[dict(kind=r['kind'],positions=r.get('final_positions',[])) for r in records],scope=dict(project=binding['project'],workspace=binding['workspace'])))
+    (root/'captures.json').write_text(json.dumps(captures,indent=2)+'\n')
+  except Exception as exc:errors.append(type(exc).__name__)
+  response=json.dumps(dict(id='positions',object='chat.completion',model='positions',usage=dict(prompt_tokens=1,completion_tokens=1,total_tokens=2),choices=[dict(index=0,finish_reason='stop',message=dict(role='assistant',content='MR08_POSITIONS_OK' if not errors else 'MR08_POSITIONS_FAILED'))])).encode()
+  self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(response)));self.end_headers();self.wfile.write(response)
+provider=ThreadingHTTPServer(('127.0.0.1',0),Provider);threading.Thread(target=provider.serve_forever,daemon=True).start()
+roster=Path('/var/lib/aimee/models.json');prior=roster.read_bytes() if roster.exists() else None;name='mr08-positions'
+try:
+ roster.write_text(json.dumps(dict(default_agent=name,default_delegate=name,fallback_chain=[],models=[dict(name=name,model='positions',provider='openai',auth_type='none',endpoint=f'http://127.0.0.1:{provider.server_port}/v1',roles=['all'],enabled=True,tools_enabled=True,context_window=16384,max_tokens=4096,max_output=4096,max_parallel=1,max_turns=1)])))
+ status,d=api('/v1/memory/store',dict(key='identity:mr08-positions',content='MR08_POSITION_IDENTITY'))
+ check('private identity stored through authenticated API',status==200 and d.get('status')=='ok');memory_id=d['id']
+ status,d=api('/v1/memory/get',dict(id=str(memory_id),include_version=True));version=d.get('memory',{}).get('version')
+ check('private source owner and revision are observed',status==200 and bool(version))
+ status,d=api('/v1/sessions/create',dict(client_type=name));assert status==200;session=d['session_id']
+ status,d=api('/v1/sessions/'+session+'/primary',dict(agent=name));assert status==200 and d.get('agent')==name
+ for i in range(2):
+  settle();before=len(captures)
+  status,d=api('/v1/chat/stream',dict(message='mr07activation_state',aimee_session_id=session,cwd='/var/lib/aimee/mr07-activated-fixture/repository',model=name,evidence_requirements=dict(schema_version=1,task_revision='positions:1',query_mode='current_state',obligations=[dict(subject='mr07activation',relation='naming_convention')])))
+  (root/('turn-'+str(i)+'.json')).write_text(json.dumps(dict(status=status,response=d),indent=2)+'\n')
+  check('native turn '+str(i)+' completes with exactly one verified provider request',status==200 and 'MR08_POSITIONS_OK' in str(d) and not errors and len(captures)==before+1)
+ status,d=api('/v1/memory/health',dict(window='1m',query_class='typed_requirements',**captures[-1]['scope']))
+ (root/'health.json').write_text(json.dumps(dict(status=status,result=d),indent=2)+'\n')
+ health=d.get('health',{});counts=health.get('exact_retained_attempts_by_stage',{})
+ check('authenticated health imports current dispatched receipts',status==200 and d.get('status')=='ok' and counts.get('dispatched',0)>=2 and d.get('collection',{}).get('failed_requests')==0)
+ check('current complete positions clear the final-rank gap',health.get('metadata_gaps',{}).get('final_rank',0)==0)
+ check('unsupported predecessor evidence remains visibly unknown',health.get('metadata_gaps',{}).get('previous_eligible_turn',0)>=2)
+ print('POSITIONS_COMPLETE '+str(root),flush=True)
+finally:
+ if memory_id is not None:api('/v1/memory/delete',dict(id=str(memory_id)))
+ if prior is None:roster.unlink(missing_ok=True)
+ else:roster.write_bytes(prior)
+ provider.shutdown()
