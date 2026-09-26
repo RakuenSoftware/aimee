@@ -20,7 +20,9 @@ hashes. Retained semantic assertions have their own generation storage and
 background queue; recall embeds only the query. Canonical assertion and evidence
 changes invalidate derived assertion vectors in every retained generation.
 Schema-owned cleanup triggers also work when invoked by the subject-erasure
-owner, without granting that owner general index writes.
+owner, without granting that owner general index writes. Their fixed search path
+resolves canonical relations before caller temporary relations; a PostgreSQL
+regression proves cleanup cannot be redirected to a temporary shadow table.
 
 Private memory generations retain independent historical revisions. Private code
 generations bind the published project watermark and exact file inputs. Both
@@ -59,6 +61,7 @@ verified by the Go memory adapter.
 - Focused erasure/private cleanup/identity/rebuild checks: passed, 2.146 seconds.
 - Final vector-validation predicate regression: passed, 1.749 seconds.
 - Full-identity dimension regression: passed, 1.786 seconds; exported owner rebuilt.
+- Temporary-table shadow and erasure regression: passed, 1.395 seconds.
 - Python identity commitment and Go family migration unit checks passed.
 
 ## Deployment acceptance still required

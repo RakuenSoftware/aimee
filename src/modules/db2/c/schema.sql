@@ -19410,7 +19410,7 @@ UPDATE memory_embedder_versions v SET generation_state='active'
  WHERE generation_state='created' AND EXISTS(SELECT 1 FROM memory_active_embedder a WHERE a.version=v.version);
 
 CREATE OR REPLACE FUNCTION memory_assertion_index_enqueue() RETURNS trigger
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
 DECLARE target BIGINT;
 BEGIN
  target:=CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END;
@@ -19434,7 +19434,7 @@ DO $$ BEGIN
 END $$;
 
 CREATE OR REPLACE FUNCTION memory_assertion_dependency_enqueue() RETURNS trigger
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
 DECLARE before_id BIGINT; after_id BIGINT;
 BEGIN
  IF TG_TABLE_NAME='memories' THEN
