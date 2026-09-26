@@ -109,7 +109,7 @@ ceilings still require durable accounting. Final memory assembly provides plan/s
 C forwards them without deciding memory sufficiency. Native dispatch and the
 authenticated `hooks.pre` route consume the Go accounting decision. Literal
 operator ceilings live under `exploration` in the operator policy; optional
-observe-only ceilings live under `adaptive_exploration`.
+adaptive ceilings live under `adaptive_exploration` and default to observe.
 
 `context_contract_expand` is registered as a native control tool. It consumes a
 reason and references from a host-observed `code_search`/`find_symbol` failure or
@@ -125,9 +125,9 @@ upgrade their task counters without resetting spent work.
 
 The retained code-context packet supplies an exact index generation when present;
 dropped, mixed-generation or unprovenanced context cannot claim one. Native
-refresh preserves retained ingress coverage and index observations. This records
-the observed generation; it does not prove that the index/worktree remains current
-at a later admission. The external `tools.execute` route binds the authenticated
+refresh preserves retained ingress coverage and index observations. Before native discovery admission, the host rechecks the exact generation via
+the scoped project-stats route, with a one-second transport timeout. Unknown,
+stale, rejected or malformed replies invalidate adaptive freshness. The external `tools.execute` route binds the authenticated
 session and observes actual indexed results before exposing expansion references.
 
 The host observes a clean Git worktree at issuance and rechecks it before
@@ -135,8 +135,27 @@ discovery admission. A dirty tree or changed commit invalidates the adaptive
 binding without resetting operator work counters. The bounded read disables
 Git filesystem-monitor commands and treats errors/timeouts as unavailable.
 
-MR-07 is still in progress. Current-index revalidation and calibrated activation
-remain unfinished; production issuance stays observe-only. Live native and external
-recovery pass on the disposable candidate. Fresh full deployment acceptance and
-the paired quality/efficiency gates remain required. MR-08 and MR-09 have not
-started. Component tests are not evidence of task-quality noninferiority.
+Final provider receipt admission adds the routed provider/model, route and
+context-limit commitments. Subsequent receipts for the same plan preserve the
+revision and recovery gaps; changed models or limits create a revision without
+resetting usage. A private memory-owner probe checks the retained plan before
+native admission. Restarted owners, expired handles and scope changes invalidate
+adaptive control.
+
+Enforcement additionally requires `AIMEE_EXPLORATION_ENFORCE=1` and a reviewed,
+root-owned `/etc/aimee/exploration-calibration.json`. Every ancestor must be
+protected from non-root writes; symlinks and non-regular artifacts are rejected.
+The file and opt-in are checked again for each admission, so revocation takes
+effect without deleting budget history. The artifact pins the supported query
+class, project/workspace/directory, clean checkout, exact index generation,
+provider/model/route, final context-limit digest and adaptive limits. Only raw
+scan caps are eligible in this first activation path. A missing or incompatible
+artifact preserves observe mode and baseline operator policy. See the
+[calibration contract](../../benchmarks/memory/EXPLORATION_GATE.md).
+
+MR-07 is still in progress. Both disposable process topologies passed at
+`6008b3835`; the later receipt/freshness/activation changes need fresh process
+acceptance. Native task requirement forwarding, hook freshness parity, generic
+external issuance and measured paired workload gates remain open. No reviewed
+calibration artifact is installed or shipped. MR-08 and MR-09 have not started.
+Component tests are not evidence of task-quality noninferiority.

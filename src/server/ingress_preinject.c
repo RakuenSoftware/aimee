@@ -463,6 +463,14 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
       {
          memcpy(attempt, id, 33);
          rc = 0;
+         /* Bind the final routed model and limits only after both receipt
+          * stages are durable. Earlier context offers remain observe-only. */
+         char workspace[512] = "", project[512] = "";
+         if (ingress_preinject_resolve_active_scope(workspace, sizeof(workspace), project,
+                                                    sizeof(project)) == 0)
+            (void)policy_prepare_exploration(
+                cJSON_GetObjectItemCaseSensitive(plan, "exploration_offer"), g_session_id,
+                workspace, project);
       }
    }
    if (!prepared_ok && replay_stored && vault_service_delete)

@@ -108,6 +108,25 @@ int db1_session_exploration_apply(const char *principal, const char *sid, const 
    return 0;
 }
 
+char *kb_client_index_generation_check(const char *project, const char *generation, int *status_out)
+{
+   (void)project;
+   (void)generation;
+   if (status_out)
+      *status_out = 0;
+   return NULL;
+}
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
+                                                    int timeout_ms, cJSON **response)
+{
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation")),
+                 "exploration-owner-observe") == 0);
+   *response = NULL;
+   return 0;
+}
+
 int main(void)
 {
    char reason[256];

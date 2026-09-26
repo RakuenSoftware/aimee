@@ -38,6 +38,12 @@ func (l explorationLimits) valid() bool {
 }
 
 type explorationBinding struct {
+	Route                string `json:"route,omitempty"`
+	IndexObservedCurrent bool   `json:"index_observed_current,omitempty"`
+	OwnerObservedCurrent bool   `json:"owner_observed_current,omitempty"`
+	Provider             string `json:"provider,omitempty"`
+	Model                string `json:"model,omitempty"`
+	LimitsDigest         string `json:"limits_digest,omitempty"`
 	BudgetTask           string `json:"budget_task,omitempty"`
 	WorkingDirectory     string `json:"working_directory,omitempty"`
 	PlanDigest           string `json:"plan_digest,omitempty"`
@@ -64,6 +70,7 @@ func (b explorationBinding) budgetTask() string {
 }
 
 type explorationContract struct {
+	ReceiptDigest        string             `json:"receipt_digest,omitempty"`
 	ID                   string             `json:"id"`
 	Revision             uint64             `json:"revision"`
 	Binding              explorationBinding `json:"binding"`

@@ -1107,6 +1107,9 @@ char *kb_client_code_graph_node(const char *project, const char *node, int max_r
  * Returns 0 on success and writes to the out pointers (either may be NULL),
  * -1 if kb is unreachable.  Mirrors canonical_index_project_stats(). */
 int kb_client_index_project_stats(const char *project, int *files_out, int *defs_out);
+/* Bounded read with an exact expected generation; Go interprets the response. */
+char *kb_client_index_generation_check(const char *project, const char *generation,
+                                       int *status_out);
 
 /* Language breakdown for one project: writes a JSON array of {lang,count}
  * objects sorted by count desc (up to 8 entries) into buf. Returns 0 on

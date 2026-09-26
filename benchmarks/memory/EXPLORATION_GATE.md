@@ -60,3 +60,38 @@ Even a passing reviewed experiment is insufficient by itself: live enforcement
 also requires operator opt-in, a supported query class, complete context,
 authenticated task/scope binding, fresh index/worktree generations and a valid
 calibration receipt. Unknown freshness continues to require observe mode.
+
+## Reviewed deployment artifact
+
+The host reads only `/etc/aimee/exploration-calibration.json`, with explicit
+`AIMEE_EXPLORATION_ENFORCE=1` opt-in. The file and its ancestors must be root-owned
+and not group/world writable; symlinks are rejected. It is never loaded from a
+repository, tool arguments, or an agent-created policy file. No artifact is
+included in the release, and the parser's synthetic tests must not be used as
+measurements.
+
+The JSON envelope contains `schema_version: 1`, nonempty `reviewed_by`, RFC3339
+`created`/`expires` (at most 30 days apart), `scope`, `limits`, `report_sha256`,
+and the complete scorer `report`. Hash the exact compact JSON representation of
+`report` before embedding it. The report retains the frozen manifest and raw
+results hashes. Review must verify the underlying collector/judge evidence;
+aggregate numbers alone cannot attest task quality.
+
+`scope` pins `project`, `workspace`, `working_directory`, `worktree_generation`,
+`index_generation`, `query_class`, `route`, `provider`, `model`, and
+`limits_digest`. Values must exactly match the issued live contract; wildcards
+are unsupported. `limits` must exactly match the host's adaptive policy. This
+first activation path accepts only `enabled: true` with an explicit `raw_scans`
+ceiling and optional `starvation_turns`; file/graph/byte/token caps do not have a
+calibrated live accounting path yet.
+
+The host requires complete Go-owned coverage, current index and memory-owner
+observations, a clean pinned checkout and a final provider receipt. It checks the
+scorer's policy, decision, interval and all numerical gates. Each admission
+re-reads deployment approval; removing the artifact or opt-in immediately stops
+new adaptive restrictions while preserving operator limits and usage. Repeating
+an already admitted attempt retains its original accounting decision.
+
+Implementation status: activation parsing and native freshness checks are
+implemented; no measured passing workload has been collected. Native requirement
+forwarding and hook freshness parity are still required before MR-07 completion.

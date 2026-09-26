@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +19,10 @@ import (
 // A single session usage counter is shared by every task and delegate. Task
 // snapshots retain their own revisions/attempts, not copies of that counter.
 func SessionExploration(principal, session string, state, operationJSON []byte, now time.Time) ([]byte, []byte, error) {
+	return sessionExploration(principal, session, state, operationJSON, now, approvedExplorationCalibration)
+}
+
+func sessionExploration(principal, session string, state, operationJSON []byte, now time.Time, calibration func(explorationContract, time.Time) string) ([]byte, []byte, error) {
 	var req sessionExplorationRequest
 	dec := json.NewDecoder(bytes.NewReader(operationJSON))
 	dec.DisallowUnknownFields()
@@ -45,11 +50,14 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 	}
 	if req.Operation == "prepare" {
 		req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
+		req.Binding.IndexObservedCurrent = req.IndexObservation.current(req.Binding)
+		req.Binding.OwnerObservedCurrent = req.OwnerObservation.current(req.Binding)
 		o := req.Offer
 		if o == nil || o.MemoryOwner != req.Binding.MemoryOwner || o.IndexGeneration != req.Binding.IndexGeneration {
 			return nil, nil, errors.New("memory offer binding mismatch")
 		}
-		req.Contract = &explorationContract{ID: req.Binding.Task, Revision: 1, Binding: req.Binding, PlanDigest: o.PlanDigest, SourceVersionsDigest: o.SourceVersionsDigest, QueryClass: o.QueryClass, CoverageComplete: o.CoverageComplete, ConfidenceProvenance: o.ConfidenceProvenance, SupportedClasses: []string{"raw_scan"}, Created: now, Expires: o.Expires, Limits: explorationLimits{Enabled: false}, Tier: "observe"}
+		req.Binding.Route, req.Binding.Provider, req.Binding.Model, req.Binding.LimitsDigest = o.Route, o.Provider, o.Model, o.LimitsDigest
+		req.Contract = &explorationContract{ReceiptDigest: o.ReceiptDigest, ID: req.Binding.Task, Revision: 1, Binding: req.Binding, PlanDigest: o.PlanDigest, SourceVersionsDigest: o.SourceVersionsDigest, QueryClass: o.QueryClass, CoverageComplete: o.CoverageComplete, ConfidenceProvenance: o.ConfidenceProvenance, SupportedClasses: []string{"raw_scan"}, Created: now, Expires: o.Expires, Limits: explorationLimits{Enabled: false}, Tier: "observe"}
 		policy, err := defaultPolicyLoader()
 		if err != nil {
 			return nil, nil, err
@@ -115,9 +123,12 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		} else {
 			req.Contract.Revision = 1
 		}
-		// Activation is unavailable without a separately verified calibration
-		// artifact. A host/model similarity score cannot turn this into enforcement.
+		// Only deployment-owned reviewed measurements may activate a contract.
 		req.Contract.Tier = "observe"
+		req.Contract.CalibrationReceipt = calibration(*req.Contract, now)
+		if req.Contract.CalibrationReceipt != "" {
+			req.Contract.Tier = "enforce"
+		}
 		err = l.issue(*req.Contract, now)
 		result = map[string]any{"status": "ok", "contract": req.Contract}
 	case "check":
@@ -142,14 +153,22 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("invalid arguments")
 		}
 		action, _ := json.Marshal([]any{req.Tool, canonical})
+		if req.Binding.IndexObservedCurrent && !req.IndexObservation.current(req.Binding) {
+			req.Binding.IndexObservedCurrent = false
+		}
+		if req.Binding.OwnerObservedCurrent && !req.OwnerObservation.current(req.Binding) {
+			req.Binding.OwnerObservedCurrent = false
+		}
 		// A changed or dirty worktree invalidates only the adaptive binding.
 		// The same durable root/session counters still enforce operator ceilings.
 		if strings.HasPrefix(req.Binding.WorktreeGeneration, "git-clean:") {
 			req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
+			req.Binding.IndexObservedCurrent = req.IndexObservation.current(req.Binding)
 		}
 		a := explorationAttempt{ID: req.AttemptID, Binding: req.Binding, Class: "raw_scan", Path: explorationDiscoveryPath(req.Tool, req.Arguments, req.Binding.WorkingDirectory), Bytes: req.Bytes, Tokens: req.Tokens, ActionDigest: fmt.Sprintf("%x", sha256.Sum256(action))}
 		var decision explorationDecision
-		decision, err = l.reserve(a, operator, false, nil, now)
+		approved := calibration(snapshot.Revisions[len(snapshot.Revisions)-1], now)
+		decision, err = l.reserve(a, operator, approved != "", func(_, receipt string) bool { return receipt == approved }, now)
 		// This check is the host's dispatch admission, after hard directives.
 		// Commit admission and possible-dispatch together: a lost response or
 		// hook client crash cannot leave a refundable, possibly executed call.
@@ -174,7 +193,19 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		if policy != nil {
 			operator = policy.Exploration
 		}
-		result, err = l.reserve(*req.Attempt, operator, false, nil, now)
+		// Lower-level reservations do not bypass live host freshness checks.
+		attempt := *req.Attempt
+		if attempt.Binding.IndexObservedCurrent && !req.IndexObservation.current(attempt.Binding) {
+			attempt.Binding.IndexObservedCurrent = false
+		}
+		if attempt.Binding.OwnerObservedCurrent && !req.OwnerObservation.current(attempt.Binding) {
+			attempt.Binding.OwnerObservedCurrent = false
+		}
+		if strings.HasPrefix(attempt.Binding.WorktreeGeneration, "git-clean:") {
+			attempt.Binding.WorktreeGeneration = explorationWorktreeGeneration(attempt.Binding.WorkingDirectory)
+		}
+		approved := calibration(snapshot.Revisions[len(snapshot.Revisions)-1], now)
+		result, err = l.reserve(attempt, operator, approved != "", func(_, receipt string) bool { return receipt == approved }, now)
 	case "observe_indexed":
 		if req.Tool != "code_search" && req.Tool != "find_symbol" {
 			return nil, nil, errors.New("unsupported indexed outcome")
@@ -292,33 +323,54 @@ type sessionExplorationState struct {
 	Tasks     map[string]explorationSnapshot `json:"tasks"`
 }
 type sessionExplorationRequest struct {
-	TurnID           string                     `json:"turn_id,omitempty"`
-	ToolResult       string                     `json:"tool_result,omitempty"`
-	UnknownOutput    bool                       `json:"unknown_output,omitempty"`
-	Tool             string                     `json:"tool,omitempty"`
-	SideEffect       string                     `json:"side_effect,omitempty"`
-	Arguments        json.RawMessage            `json:"tool_arguments,omitempty"`
-	Path             string                     `json:"canonical_path,omitempty"`
-	Bytes            int64                      `json:"bytes,omitempty"`
-	Tokens           int64                      `json:"tokens,omitempty"`
-	Offer            *sessionExplorationOffer   `json:"offer,omitempty"`
-	Operation        string                     `json:"operation"`
-	Binding          explorationBinding         `json:"binding"`
-	Contract         *explorationContract       `json:"contract,omitempty"`
-	Attempt          *explorationAttempt        `json:"attempt,omitempty"`
-	Outcome          *explorationIndexedOutcome `json:"outcome,omitempty"`
-	AttemptID        string                     `json:"attempt_id,omitempty"`
-	OutcomeID        string                     `json:"outcome_id,omitempty"`
-	Reason           string                     `json:"reason,omitempty"`
-	Gap              string                     `json:"gap,omitempty"`
-	Turn             uint64                     `json:"turn,omitempty"`
-	Constrained      bool                       `json:"constrained,omitempty"`
-	Unresolved       bool                       `json:"unresolved,omitempty"`
-	IndexedFailed    bool                       `json:"indexed_failed,omitempty"`
-	VerifiedProgress bool                       `json:"verified_progress,omitempty"`
+	OwnerObservation *explorationOwnerObservation `json:"owner_observation,omitempty"`
+	IndexObservation *explorationIndexObservation `json:"index_observation,omitempty"`
+	TurnID           string                       `json:"turn_id,omitempty"`
+	ToolResult       string                       `json:"tool_result,omitempty"`
+	UnknownOutput    bool                         `json:"unknown_output,omitempty"`
+	Tool             string                       `json:"tool,omitempty"`
+	SideEffect       string                       `json:"side_effect,omitempty"`
+	Arguments        json.RawMessage              `json:"tool_arguments,omitempty"`
+	Path             string                       `json:"canonical_path,omitempty"`
+	Bytes            int64                        `json:"bytes,omitempty"`
+	Tokens           int64                        `json:"tokens,omitempty"`
+	Offer            *sessionExplorationOffer     `json:"offer,omitempty"`
+	Operation        string                       `json:"operation"`
+	Binding          explorationBinding           `json:"binding"`
+	Contract         *explorationContract         `json:"contract,omitempty"`
+	Attempt          *explorationAttempt          `json:"attempt,omitempty"`
+	Outcome          *explorationIndexedOutcome   `json:"outcome,omitempty"`
+	AttemptID        string                       `json:"attempt_id,omitempty"`
+	OutcomeID        string                       `json:"outcome_id,omitempty"`
+	Reason           string                       `json:"reason,omitempty"`
+	Gap              string                       `json:"gap,omitempty"`
+	Turn             uint64                       `json:"turn,omitempty"`
+	Constrained      bool                         `json:"constrained,omitempty"`
+	Unresolved       bool                         `json:"unresolved,omitempty"`
+	IndexedFailed    bool                         `json:"indexed_failed,omitempty"`
+	VerifiedProgress bool                         `json:"verified_progress,omitempty"`
+}
+
+// The private memory process attests only its current immutable plan handle.
+// A restarted owner has no matching handle, so its prior contract cannot enforce.
+type explorationOwnerObservation struct {
+	Status               string `json:"status"`
+	MemoryOwner          string `json:"memory_owner"`
+	PlanDigest           string `json:"plan_digest"`
+	SourceVersionsDigest string `json:"source_versions_digest"`
+}
+
+func (o *explorationOwnerObservation) current(b explorationBinding) bool {
+	return o != nil && o.Status == "ok" && o.MemoryOwner != "" && o.MemoryOwner == b.MemoryOwner &&
+		o.PlanDigest != "" && o.PlanDigest == b.PlanDigest && o.SourceVersionsDigest != "" && o.SourceVersionsDigest == b.SourceVersionsDigest
 }
 
 type sessionExplorationOffer struct {
+	Route                string    `json:"route,omitempty"`
+	Provider             string    `json:"provider,omitempty"`
+	Model                string    `json:"model,omitempty"`
+	LimitsDigest         string    `json:"limits_digest,omitempty"`
+	ReceiptDigest        string    `json:"receipt_digest,omitempty"`
 	MemoryOwner          string    `json:"memory_owner"`
 	PlanDigest           string    `json:"plan_digest"`
 	SourceVersionsDigest string    `json:"source_versions_digest"`
@@ -327,4 +379,37 @@ type sessionExplorationOffer struct {
 	ConfidenceProvenance string    `json:"confidence_provenance"`
 	IndexGeneration      string    `json:"index_generation"`
 	Expires              time.Time `json:"expires"`
+}
+
+// Transport metadata is supplied only by the authenticated host. The stats
+// route returns 200 only after checking the exact expected generation against
+// the current project under the same caller scope as normal indexed reads.
+type explorationIndexObservation struct {
+	Generation string `json:"generation"`
+	HTTPStatus int    `json:"http_status"`
+	Body       string `json:"body"`
+}
+
+func (o *explorationIndexObservation) current(binding explorationBinding) bool {
+	if o == nil || o.HTTPStatus != 200 || o.Generation != binding.IndexGeneration || len(o.Body) > 16384 {
+		return false
+	}
+	var body struct {
+		Status  string          `json:"status"`
+		Project string          `json:"project"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(o.Body), &body) != nil || body.Status != "ok" || body.Project != binding.Project || len(body.Error) > 0 {
+		return false
+	}
+	if len(o.Generation) == 0 || len(o.Generation) > 19 || o.Generation[0] == '0' {
+		return false
+	}
+	for _, c := range o.Generation {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	n, err := strconv.ParseInt(o.Generation, 10, 64)
+	return err == nil && n > 0
 }

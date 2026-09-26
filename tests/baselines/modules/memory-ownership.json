@@ -1950,7 +1950,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "63b192df45870cd37c1e165ed4c57c214e547e7bfaf43bad12b5a40fce4f9097"
+      "sha256": "588069497286b6685e5db952a722a8f4136541dee23cbc1b6183f6220cf5333f"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
@@ -2087,7 +2087,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "05f31c398b87f10fca8e7a540d7e71ec5b7fe8d48c9ce1e6e3bb674afe6cbbed"
+      "sha256": "531263d66e61d3d7864cf9ae00eccf707ae2cae7dc14cfa7a23b3c55c6cb2255"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",

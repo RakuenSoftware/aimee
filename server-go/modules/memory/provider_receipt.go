@@ -195,8 +195,18 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 			prelude = append(prelude, map[string]string{"stage": stage, "detail": detail})
 		}
 	}
+	var offer map[string]any
+	if entry.assemblyDigest != "" {
+		offer = s.explorationOfferForEntry(entry)
+		if offer != nil {
+			offer["route"], offer["provider"], offer["model"] = binding.Route, binding.Provider, binding.Model
+			offer["limits_digest"] = releaseDigest([]string{binding.CallerLimitsDigest, binding.OperatorLimitsDigest, binding.RendererVersion, binding.PolicyVersion})
+			offer["receipt_digest"] = bindingDigest
+		}
+	}
 	return commandResult(map[string]any{"status": "ok", "durable": false, "requires_durable_acceptance": true,
-		"attempt_id": attempt, "at": at, "assembly_events": prelude, "prepared_detail": prepared, "admitted_detail": admitted, "replay_store": binding.Retention == "replayable"})
+		"exploration_offer": offer,
+		"attempt_id":        attempt, "at": at, "assembly_events": prelude, "prepared_detail": prepared, "admitted_detail": admitted, "replay_store": binding.Retention == "replayable"})
 }
 
 // Host observations remain distinct from intent. A transport error, including a

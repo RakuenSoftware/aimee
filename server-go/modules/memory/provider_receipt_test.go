@@ -458,3 +458,60 @@ func TestProviderReceiptReplayRetention(t *testing.T) {
 		t.Fatal("expired ciphertext was replayed", result)
 	}
 }
+
+func TestExplorationOfferBindsFinalReceiptModelAndLimits(t *testing.T) {
+	var previousLimits string
+	for i, limit := range []string{strings.Repeat("d", 64), strings.Repeat("e", 64)} {
+		state := &sourceReleaseState{}
+		args := receiptTestAdmission(t, state)
+		args["provider"] = json.RawMessage(`"openai"`)
+		args["dispatch_owner"] = json.RawMessage(`"0123456789abcdef0123456789abcdef"`)
+		args["operator_limits_sha256"], _ = json.Marshal(limit)
+		plan := sourceReleaseCall(t, state, args)
+		offer, ok := plan["exploration_offer"].(map[string]any)
+		if !ok {
+			t.Fatal("missing final receipt offer", plan)
+		}
+		var prepared providerReceiptEvent
+		if err := json.Unmarshal([]byte(plan["prepared_detail"].(string)), &prepared); err != nil {
+			t.Fatal(err)
+		}
+		if offer["receipt_digest"] != prepared.BindingDigest || offer["model"] != "test-model" || offer["provider"] != "openai" || offer["plan_digest"] != prepared.Binding.AssemblyDigest {
+			t.Fatal(offer)
+		}
+		limits, ok := offer["limits_digest"].(string)
+		if !ok || !receiptDigestValid(limits) || i > 0 && limits == previousLimits {
+			t.Fatal("changed final limits reused binding", offer)
+		}
+		previousLimits = limits
+	}
+}
+
+func TestExplorationOwnerObservationRejectsRestartAndScopeChanges(t *testing.T) {
+	s := &sourceReleaseState{}
+	args := receiptTestAdmission(t, s)
+	args["provider"] = json.RawMessage(`"openai"`)
+	args["dispatch_owner"] = json.RawMessage(`"0123456789abcdef0123456789abcdef"`)
+	plan := sourceReleaseCall(t, s, args)
+	offer := plan["exploration_offer"].(map[string]any)
+	args["operation"] = json.RawMessage(`"exploration-owner-observe"`)
+	current := sourceReleaseCall(t, s, args)
+	for _, key := range []string{"memory_owner", "plan_digest", "source_versions_digest"} {
+		if current["status"] != "ok" || current[key] != offer[key] {
+			t.Fatal("owner did not attest exact retained plan", current, offer)
+		}
+	}
+	if restarted := sourceReleaseCall(t, &sourceReleaseState{}, args); restarted["status"] == "ok" {
+		t.Fatal("restarted owner accepted prior handle", restarted)
+	}
+	principal := args["principal"]
+	args["principal"] = json.RawMessage(`"other-principal"`)
+	if crossed := sourceReleaseCall(t, s, args); crossed["status"] == "ok" {
+		t.Fatal("owner attestation crossed principal", crossed)
+	}
+	args["principal"] = principal
+	s.entries[args.stringOr("source_release_ticket", "")].expires = time.Now().Add(-time.Second)
+	if expired := sourceReleaseCall(t, s, args); expired["status"] == "ok" {
+		t.Fatal("expired plan attested", expired)
+	}
+}

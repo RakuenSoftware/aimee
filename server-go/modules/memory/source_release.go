@@ -258,6 +258,10 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if entry == nil || entry.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "source release handle unavailable"))
 	}
+	if operation == "exploration-owner-observe" {
+		return commandResult(map[string]any{"status": "ok", "memory_owner": s.receiptProducer,
+			"plan_digest": entry.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(entry.sources))})
+	}
 	if operation == "provider-receipt-plan" {
 		return s.receiptPlan(args, entry)
 	}
@@ -361,7 +365,11 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 func (s *sourceReleaseState) explorationOffer(ticket string) map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.entries[ticket]
+	return s.explorationOfferForEntry(s.entries[ticket])
+}
+
+// Caller holds s.mu. Receipt preparation uses the same immutable plan entry.
+func (s *sourceReleaseState) explorationOfferForEntry(e *sourceReleaseEntry) map[string]any {
 	if e == nil {
 		return nil
 	}

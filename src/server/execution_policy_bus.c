@@ -8,6 +8,8 @@
 #include "headers/module_json_call.h"
 
 #include "request_context.h"
+#include "kb_client.h"
+#include "module_commands.h"
 #include "util.h"
 #include <limits.h>
 #include <unistd.h>
@@ -32,6 +34,52 @@ static void set_reason(char *out, size_t cap, const char *reason)
 
 static int policy_baseline(const char *tool_name, const char *side_effect, const char *args_json,
                            char *reason_out, size_t reason_len, int *discovery);
+
+static void policy_observe_index_generation(cJSON *request, const cJSON *binding)
+{
+   const char *project = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "project"));
+   const char *generation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "index_generation"));
+   int status = 0;
+   char *reply = kb_client_index_generation_check(project, generation, &status);
+   cJSON *observation = cJSON_CreateObject();
+   cJSON_AddStringToObject(observation, "generation", generation ? generation : "");
+   cJSON_AddNumberToObject(observation, "http_status", status);
+   cJSON_AddStringToObject(observation, "body", reply ? reply : "");
+   cJSON_AddItemToObject(request, "index_observation", observation);
+   free(reply);
+}
+
+static void policy_observe_memory_owner(cJSON *request)
+{
+   const request_context_t *ctx = request_context_get();
+   if (!ctx || !ctx->memory_source_release[0])
+      return;
+   cJSON *probe = cJSON_CreateObject();
+   cJSON_AddStringToObject(probe, "operation", "exploration-owner-observe");
+   cJSON_AddStringToObject(probe, "source_release_ticket", ctx->memory_source_release);
+   cJSON_AddStringToObject(probe, "request_id", ctx->request_id);
+   cJSON_AddStringToObject(probe, "principal", ctx->principal);
+   cJSON_AddStringToObject(probe, "caller_subject", ctx->caller_subject);
+   cJSON *reply = NULL;
+   int rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", probe, 500, &reply);
+   cJSON_Delete(probe);
+   if (rc == 1 && cJSON_IsObject(reply))
+   {
+      /* Transport only; the Go session owner validates the observation. */
+      cJSON *observation = cJSON_CreateObject();
+      const char *fields[] = {"status", "memory_owner", "plan_digest", "source_versions_digest"};
+      for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
+      {
+         const char *value =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, fields[i]));
+         if (value)
+            cJSON_AddStringToObject(observation, fields[i], value);
+      }
+      cJSON_AddItemToObject(request, "owner_observation", observation);
+   }
+   cJSON_Delete(reply);
+}
 
 static int policy_check_exploration(const char *tool, const char *effect, const char *args,
                                     const char *attempt, char *reason, size_t reason_len)
@@ -67,6 +115,10 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
       return -1;
    }
    cJSON_AddStringToObject(request, "operation", "check");
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(binding, "index_observed_current")))
+      policy_observe_index_generation(request, binding);
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(binding, "owner_observed_current")))
+      policy_observe_memory_owner(request);
    cJSON_AddItemToObject(request, "binding", binding);
    cJSON_AddStringToObject(request, "tool", tool);
    cJSON_AddStringToObject(request, "side_effect", effect ? effect : "");
@@ -244,6 +296,8 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    cJSON_AddStringToObject(binding, "source_versions_digest", versions ? versions : "");
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "prepare");
+   policy_observe_index_generation(request, binding);
+   policy_observe_memory_owner(request);
    cJSON_AddItemToObject(request, "binding", cJSON_Duplicate(binding, 1));
    cJSON_AddItemToObject(request, "offer", cJSON_Duplicate(offer, 1));
    char *wire = cJSON_PrintUnformatted(request);

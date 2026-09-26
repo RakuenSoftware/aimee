@@ -300,3 +300,141 @@ func TestSessionExplorationLegacyTaskUsageSurvivesGroupUpgrade(t *testing.T) {
 		t.Fatal(decoded)
 	}
 }
+
+func TestSessionFinalReceiptRevisionsPreserveRecoveryAndAccounting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIMEE_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "policy.json"), []byte(`{"exploration":{"raw_scans":1}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c := testContract(now)
+	var state []byte
+	offer := sessionExplorationOffer{MemoryOwner: c.Binding.MemoryOwner, IndexGeneration: c.Binding.IndexGeneration,
+		PlanDigest: c.PlanDigest, SourceVersionsDigest: c.SourceVersionsDigest, QueryClass: c.QueryClass,
+		ConfidenceProvenance: c.ConfidenceProvenance, Expires: c.Expires, Provider: "provider", Model: "model-a", LimitsDigest: "limits-a", ReceiptDigest: "receipt-a"}
+	prepare := func() explorationContract {
+		t.Helper()
+		raw, _ := json.Marshal(sessionExplorationRequest{Operation: "prepare", Binding: c.Binding, Offer: &offer})
+		next, reply, err := SessionExploration("alice", "session", state, raw, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = next
+		var result struct {
+			Contract explorationContract `json:"contract"`
+		}
+		json.Unmarshal(reply, &result)
+		return result.Contract
+	}
+	first := prepare()
+	if first.Binding.Model != "model-a" || first.Binding.Provider != "provider" || first.Binding.LimitsDigest != "limits-a" || first.ReceiptDigest != "receipt-a" {
+		t.Fatal(first)
+	}
+	offer.ReceiptDigest = "receipt-b"
+	if again := prepare(); again.Revision != first.Revision {
+		t.Fatal("every provider turn invalidated recovery", again)
+	}
+	a := attempt(first, "first")
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "reserve", Binding: first.Binding, Attempt: &a})
+	next, _, err := SessionExploration("alice", "session", state, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state = next
+	offer.Model = "model-b"
+	changed := prepare()
+	if changed.Revision != first.Revision+1 || changed.Binding.Model != "model-b" || changed.ReceiptDigest != "receipt-b" {
+		t.Fatal(changed)
+	}
+	a = attempt(changed, "second")
+	raw, _ = json.Marshal(sessionExplorationRequest{Operation: "reserve", Binding: changed.Binding, Attempt: &a})
+	_, reply, err := SessionExploration("alice", "session", state, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision explorationDecision
+	json.Unmarshal(reply, &decision)
+	if !decision.Restricted || decision.Reason != "operator_exploration_budget_exhausted" {
+		t.Fatal("model change reset allowance", decision)
+	}
+}
+
+func TestExplorationIndexObservationRequiresMatchingFreshOwner(t *testing.T) {
+	b := testContract(time.Now()).Binding
+	b.Project = "project"
+	b.IndexGeneration = "9007199254740993"
+	good := explorationIndexObservation{Generation: b.IndexGeneration, HTTPStatus: 200, Body: `{"status":"ok","project":"project"}`}
+	if !good.current(b) {
+		t.Fatal("exact generation lost")
+	}
+	for _, mutate := range []func(*explorationIndexObservation){
+		func(o *explorationIndexObservation) { o.HTTPStatus = 409 },
+		func(o *explorationIndexObservation) { o.Generation = "9007199254740992" },
+		func(o *explorationIndexObservation) { o.Body = `{"status":"ok","project":"other"}` },
+		func(o *explorationIndexObservation) { o.Body = `{"status":"ok","project":"project","error":{}}` },
+		func(o *explorationIndexObservation) { o.Body = `null` },
+	} {
+		bad := good
+		mutate(&bad)
+		if bad.current(b) {
+			t.Fatal("invalid freshness observation accepted", bad)
+		}
+	}
+	b.IndexGeneration = "9223372036854775808"
+	good.Generation = b.IndexGeneration
+	if good.current(b) {
+		t.Fatal("overflowing generation accepted")
+	}
+	var missing *explorationIndexObservation
+	if missing.current(b) {
+		t.Fatal("missing observation accepted")
+	}
+}
+
+func TestSessionIndexInvalidationRetainsOperatorAccounting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIMEE_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "policy.json"), []byte(`{"exploration":{"raw_scans":2}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c := testContract(now)
+	c.Binding.IndexGeneration = "7"
+	c.Binding.IndexObservedCurrent = true
+	c.Limits.Enabled = true
+	c.Limits.RawScans = ceiling(0)
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	state, _, err := SessionExploration("alice", "session", nil, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := &explorationIndexObservation{Generation: "7", HTTPStatus: 200, Body: fmt.Sprintf(`{"status":"ok","project":%q}`, c.Binding.Project)}
+	for i := 0; i < 3; i++ {
+		observation := good
+		if i > 0 {
+			observation = nil
+		}
+		raw, _ = json.Marshal(sessionExplorationRequest{Operation: "check", Binding: c.Binding, IndexObservation: observation,
+			Tool: "grep", SideEffect: "filesystem", Arguments: json.RawMessage(`{"path":".","pattern":"sample"}`), AttemptID: fmt.Sprint(i)})
+		next, reply, err := SessionExploration("alice", "session", state, raw, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = next
+		var result response
+		json.Unmarshal(reply, &result)
+		if result.Exploration == nil {
+			t.Fatal("missing accounting decision")
+		}
+		if i == 0 && !result.Exploration.WouldRestrict {
+			t.Fatal("fresh indexed contract not observed")
+		}
+		if i == 1 && (result.Exploration.Reason != "contract_invalidated" || !result.Allowed) {
+			t.Fatal(result)
+		}
+		if i == 2 && result.Allowed {
+			t.Fatal("index outage reset operator work")
+		}
+	}
+}

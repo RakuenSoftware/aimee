@@ -16,14 +16,16 @@
     "server-go/modules/execution-policy/exploration.go",
     "server-go/modules/execution-policy/exploration_recovery.go",
     "server-go/modules/execution-policy/exploration_session.go",
-    "server-go/modules/execution-policy/exploration_worktree.go"
+    "server-go/modules/execution-policy/exploration_worktree.go",
+    "server-go/modules/execution-policy/exploration_calibration.go"
   ],
   "go_tests": [
     "server-go/modules/execution-policy/execution_policy_test.go",
     "server-go/modules/execution-policy/exploration_test.go",
     "server-go/modules/execution-policy/exploration_recovery_test.go",
     "server-go/modules/execution-policy/exploration_session_test.go",
-    "server-go/modules/execution-policy/exploration_worktree_test.go"
+    "server-go/modules/execution-policy/exploration_worktree_test.go",
+    "server-go/modules/execution-policy/exploration_calibration_test.go"
   ],
   "public_headers": [
     "src/modules/execution-policy/include/aimee/execution-policy/module_api.h"

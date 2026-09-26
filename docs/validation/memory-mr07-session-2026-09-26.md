@@ -34,7 +34,23 @@ also passed. A repeated broad live family suite hit an existing test-table clean
 dependency; it is not represented as passing. The new live owner test is isolated
 and passed independently.
 
-Remaining acceptance: fresh CT109 candidate deployment; complete external-client
-recovery and generation freshness; measured calibration and the predeclared
-MR-18 paired quality/efficiency gates. Unit and storage fixtures are not evidence
+The full disposable CT109 matrix passed at `6008b3835`: both enrolled (T2)
+and standalone (T3) processes exited zero. The captured application image was
+`sha256:b9f73e533a381c6a0b16060fb8a98da2ec26e1b6bd56bfe3b669ff29704b82fa`;
+all three application instances retained the 32768-byte provider request cap.
+The evidence directory includes the actual exits and all nine image identities.
+These runs include native/external recovery and exact exploration-state
+preservation across the host crash; scripted provider fixtures validate process
+contracts, not completion quality.
+
+Subsequent changes bind final provider model/route/limits and receipt admission,
+recheck the exact indexed generation, invalidate restarted memory owners, and
+require a protected operator-reviewed calibration artifact before activation.
+The targeted and full non-PG memory/policy/family race suites and native
+policy/index-client/ingress tests pass. Artifact parsing tests use explicitly
+synthetic numbers and confer no release calibration.
+
+Remaining acceptance: native task requirement forwarding, hook freshness parity,
+generic external-client issuance, fresh process acceptance of the later changes,
+and measured calibration with the predeclared MR-18 paired quality/efficiency gates. Unit and storage fixtures are not evidence
 of task-quality noninferiority. MR-08 and MR-09 have not started.
