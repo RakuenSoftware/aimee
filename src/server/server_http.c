@@ -2062,8 +2062,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
          server_http_identity_override_principal(first_user_principal);
       /* The backend response is Connection: close, including truncated transfers. */
       server_http_keepalive_set(0);
+      int response_status = 0;
       int forwarded = server_native_delivery_forward(fd, method, path,
-          server_http_identity_principal(), body, body_len);
+          server_http_identity_principal(), body, body_len, &response_status);
+      server_http_log_access(method, path, forwarded ? forwarded :
+          (response_status ? response_status : 502), request_id);
       server_http_identity_clear();
       if (forwarded)
          send_response(fd, forwarded, "{\"error\":\"native publication unavailable\"}", request_id);
