@@ -63,6 +63,8 @@ static const egress_entry_t TOOLS[] = {
     /* Local index / notes / symbol store. */
     {"code_search", TOOL_EGRESS_NONE, NULL},
     {"find_symbol", TOOL_EGRESS_NONE, NULL},
+    /* Session-owner control only; no external data or effect. */
+    {"context_contract_expand", TOOL_EGRESS_NONE, NULL},
     {"read_symbol", TOOL_EGRESS_NONE, NULL},
     {"edit_symbol", TOOL_EGRESS_NONE, NULL},
     {"create_note", TOOL_EGRESS_NONE, NULL},

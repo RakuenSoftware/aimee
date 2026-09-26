@@ -59,9 +59,18 @@ static void test_internal_service_tools_are_not_external(void)
 /* Ordinary local tools must stay ungated, otherwise the gate is useless. */
 static void test_local_tools_are_none(void)
 {
-   static const char *local[] = {"read_file",  "write_file",  "edit_file", "list_files",
-                                 "grep",       "git_log",     "git_diff",  "git_status",
-                                 "git_commit", "find_symbol", NULL};
+   static const char *local[] = {"read_file",
+                                 "write_file",
+                                 "edit_file",
+                                 "list_files",
+                                 "grep",
+                                 "git_log",
+                                 "git_diff",
+                                 "git_status",
+                                 "git_commit",
+                                 "find_symbol",
+                                 "context_contract_expand",
+                                 NULL};
    for (int i = 0; local[i]; i++)
    {
       assert(tool_egress_for(local[i]) == TOOL_EGRESS_NONE);

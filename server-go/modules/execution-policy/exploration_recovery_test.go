@@ -1,7 +1,10 @@
 package executionpolicy
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -102,5 +105,36 @@ func TestIndexedFallbackCannotWidenOperatorOrSurviveExpiry(t *testing.T) {
 				t.Fatal("failed admission consumed fallback")
 			}
 		})
+	}
+}
+
+func TestDiscoveryFallbackAttestsActualRoots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		tool    string
+		args    map[string]string
+		allowed bool
+	}{
+		{"grep", map[string]string{"path": ".", "pattern": "value"}, true},
+		{"grep", map[string]string{"path": "escape", "pattern": "value"}, false},
+		{"grep", map[string]string{"path": outside, "pattern": "value"}, false},
+		{"bash", map[string]string{"command": "rg value ."}, true},
+		{"bash", map[string]string{"command": "rg value . " + outside}, false},
+		{"exec_command", map[string]string{"command": "rg --follow value ."}, false},
+		{"bash", map[string]string{"command": "rg value escape"}, false},
+		{"bash", map[string]string{"command": "rg --files"}, true},
+		{"bash", map[string]string{"command": "find ."}, true},
+		{"bash", map[string]string{"command": "find -L ."}, false},
+	}
+	for _, c := range cases {
+		raw, _ := json.Marshal(c.args)
+		got := explorationDiscoveryPath(c.tool, raw, root)
+		if (got == root) != c.allowed {
+			t.Fatalf("%s %v: %q", c.tool, c.args, got)
+		}
 	}
 }

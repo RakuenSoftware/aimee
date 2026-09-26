@@ -255,6 +255,9 @@ char *policy_observe_indexed(const char *tool, const char *arguments, const char
                              const char *result);
 char *policy_expand_exploration(const char *reason, const char *gap, const char *outcome);
 void policy_complete_exploration_turn(int turn);
+int policy_bind_session_exploration(const char *session);
+char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
+                              char *result);
 int policy_load(void);
 struct cJSON;
 int policy_prepare_exploration(const struct cJSON *offer, const char *session,

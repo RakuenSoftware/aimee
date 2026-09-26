@@ -376,6 +376,20 @@ def inside(output):
             aimee_session_id=exploration_session, cwd=fixture_files.name, model=prefix))
         check('primary session completes native indexed recovery', status == 200 and not provider_errors and
               len(captures) == scenario_start + 4 and any('NATIVE_MEMORY_OK' in text for text in strings(events)))
+        worktrees = subprocess.check_output(['git', '-C', fixture_files.name, 'worktree', 'list', '--porcelain'], text=True)
+        roots = [line[9:] for line in worktrees.splitlines() if line.startswith('worktree ') and line[9:] != fixture_files.name]
+        check('primary fixture resolves its host-isolated worktree', len(roots) == 1)
+        def external_tool(name, arguments):
+            status, result = api('/v1/tools/execute', dict(tool=name, arguments=json.dumps(arguments),
+                session_id=exploration_session, cwd=roots[0], timeout_ms=30000))
+            check('external ' + name + ' passes authenticated dispatch', status == 200 and result.get('status') == 'ok')
+            return result.get('result', '')
+        lookup = external_tool('find_symbol', dict(identifier=prefix + '_external_miss'))
+        gap = json.loads(lookup.split('Exploration recovery: ', 1)[1])
+        expanded = external_tool('context_contract_expand', dict(reason='external indexed lookup was empty',
+            gap_ref=gap['gap_ref'], outcome_id=gap['outcome_id']))
+        check('external expansion accepts only host-observed evidence', json.loads(expanded).get('status') == 'ok')
+        external_tool('grep', dict(path='.', pattern=prefix, max_results=1))
         before = len(captures)
         result, events = run('inherited zero byte cap', dict(schema_version=1, max_request_bytes=0))
         check('worker preserves inherited byte refusal', result.get('status') == 'failed' and
@@ -574,12 +588,12 @@ def main():
         state = json.loads(raw)
         tasks = list(state.get('tasks', {}).values())
         integrated = (state.get('session') == sid and len(tasks) == 1 and
-            len(tasks[0].get('revisions', [])) >= 2 and len(tasks[0].get('fallbacks', [])) == 1 and
-            len(tasks[0].get('indexed_outcomes', {})) == 1 and state.get('usage', {}).get('raw_scans') == 1 and
+            len(tasks[0].get('revisions', [])) >= 3 and len(tasks[0].get('fallbacks', [])) == 2 and
+            len(tasks[0].get('indexed_outcomes', {})) == 2 and state.get('usage', {}).get('raw_scans') == 2 and
             len(tasks[0].get('completed_turns', {})) == 3 and
             all(r.get('tier') == 'observe' for r in tasks[0]['revisions']) and
             all(a.get('started') for a in tasks[0].get('attempts', {}).values()))
-        evidence['checks'].append(dict(name='real primary session persists observed recovery and single dispatch charge', passed=integrated))
+        evidence['checks'].append(dict(name='native and external session persist observed recovery and exact dispatch charges', passed=integrated))
         Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')
         if not integrated:
             raise RuntimeError('native exploration session state did not match actual dispatches')

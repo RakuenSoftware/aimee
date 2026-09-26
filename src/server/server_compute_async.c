@@ -1,6 +1,7 @@
 /* server_compute_async.c: dedicated async lanes for tool.execute and chat.send_stream */
 #include "server_compute_impl.h"
 #include "aimee.h"
+#include "agent_exec.h"
 #include "agent_config.h" /* agent_set_request_codex_creds */
 #include "json_fluent.h"  /* jo_ok, jo_str */
 #include <aimee/tools/agent_tools.h>
@@ -225,6 +226,21 @@ static void tool_execute_worker(void *arg)
       return;
    }
 
+   (void)policy_bind_session_exploration(sid);
+   char policy_reason[256] = "";
+   if (policy_check_tool_attempt(tool, tool_side_effect(tool), args, "external-tool", policy_reason,
+                                 sizeof(policy_reason)) != 0)
+   {
+      cJSON *blocked = cJSON_CreateObject();
+      cJSON_AddStringToObject(blocked, "status", "blocked");
+      cJSON_AddStringToObject(blocked, "message", policy_reason);
+      compute_respond(cctx, blocked);
+      run_cmd_set_cwd(NULL);
+      workspace_turn_unbind_active();
+      compute_ctx_free(cctx);
+      return;
+   }
+
    /* Execute tool. External mutations require an authorization decision carried
     * out-of-band from their model-supplied arguments. The local operator socket
     * arrives with CAPS_ALL and is the trusted execution-policy boundary for this
@@ -232,6 +248,7 @@ static void tool_execute_worker(void *arg)
    agent_tools_set_effect_authorized(trusted_local);
    char *result = dispatch_tool_call(tool, args, timeout_ms);
    agent_tools_set_effect_authorized(0);
+   result = policy_annotate_indexed(tool, args, "external-tool", result);
 
    /* Clear thread-local CWD + the detached provider binding */
    run_cmd_set_cwd(NULL);

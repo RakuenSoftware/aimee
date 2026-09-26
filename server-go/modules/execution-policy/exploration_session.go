@@ -24,7 +24,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 	if len(operationJSON) > 65536 || decodeSingle(dec, &req) != nil || principal == "" || session == "" || len(principal) > 128 || len(session) > 128 {
 		return nil, nil, errors.New("invalid host exploration request")
 	}
-	if req.Operation == "check_session" {
+	if req.Operation == "check_session" || req.Operation == "bind_session" {
 		var current sessionExplorationState
 		if len(state) > 1048576 || json.Unmarshal(state, &current) != nil || current.Version != 1 || current.Principal != principal || current.Session != session {
 			return nil, nil, errors.New("session contract unavailable")
@@ -34,7 +34,11 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("session contract unavailable")
 		}
 		req.Binding = task.Revisions[len(task.Revisions)-1].Binding
-		req.Operation = "check"
+		if req.Operation == "check_session" {
+			req.Operation = "check"
+		} else if req.Path == "" || req.Path != req.Binding.WorkingDirectory {
+			return nil, nil, errors.New("execution directory differs from session contract")
+		}
 	}
 	if !req.Binding.valid() || req.Binding.Principal != principal || req.Binding.Session != session {
 		return nil, nil, errors.New("invalid authenticated task binding")
@@ -124,7 +128,7 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("invalid arguments")
 		}
 		action, _ := json.Marshal([]any{req.Tool, canonical})
-		a := explorationAttempt{ID: req.AttemptID, Binding: req.Binding, Class: "raw_scan", Path: req.Path, Bytes: req.Bytes, Tokens: req.Tokens, ActionDigest: fmt.Sprintf("%x", sha256.Sum256(action))}
+		a := explorationAttempt{ID: req.AttemptID, Binding: req.Binding, Class: "raw_scan", Path: explorationDiscoveryPath(req.Tool, req.Arguments, req.Binding.WorkingDirectory), Bytes: req.Bytes, Tokens: req.Tokens, ActionDigest: fmt.Sprintf("%x", sha256.Sum256(action))}
 		var decision explorationDecision
 		decision, err = l.reserve(a, operator, false, nil, now)
 		// This check is the host's dispatch admission, after hard directives.
@@ -237,6 +241,8 @@ func SessionExploration(principal, session string, state, operationJSON []byte, 
 		err = l.expand(req.Reason, req.Gap, req.OutcomeID, now)
 	case "completed_turn":
 		err = l.completedTurn(req.Turn, req.Constrained, req.Unresolved, req.IndexedFailed, req.VerifiedProgress)
+	case "bind_session":
+		result = map[string]any{"status": "ok", "binding": req.Binding}
 	case "inspect":
 		result = map[string]any{"status": "ok", "contract": snapshot.Revisions[len(snapshot.Revisions)-1], "task_usage": snapshot.TaskUsage, "session_usage": s.Usage}
 	default:

@@ -1931,26 +1931,8 @@ native_provider_http:
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
          agent_tools_set_effect_authorized(0);
-         char *exploration_outcome = policy_observe_indexed(
-             parsed.calls[i].name, parsed.calls[i].arguments, parsed.calls[i].id, result_str);
-         if (exploration_outcome)
-         {
-            cJSON *observation = cJSON_Parse(exploration_outcome);
-            if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observation, "expansion_available")))
-            {
-               size_t n = (result_str ? strlen(result_str) : 0) + strlen(exploration_outcome) + 32;
-               char *with_gap = malloc(n);
-               if (with_gap)
-               {
-                  snprintf(with_gap, n, "%s\nExploration recovery: %s",
-                           result_str ? result_str : "", exploration_outcome);
-                  free(result_str);
-                  result_str = with_gap;
-               }
-            }
-            cJSON_Delete(observation);
-            free(exploration_outcome);
-         }
+         result_str = policy_annotate_indexed(parsed.calls[i].name, parsed.calls[i].arguments,
+                                              parsed.calls[i].id, result_str);
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();

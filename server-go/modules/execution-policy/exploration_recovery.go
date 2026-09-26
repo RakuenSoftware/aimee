@@ -1,6 +1,7 @@
 package executionpolicy
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -99,4 +100,94 @@ func (l *explorationLedger) expand(reason, gap, outcomeID string, now time.Time)
 	}
 	s.Fallbacks = append(s.Fallbacks, explorationFallback{Outcome: o, Expires: expires, Remaining: 1})
 	return l.save(s)
+}
+
+// A working-directory label alone does not prove a scan stayed in that tree.
+// Resolve explicit roots and symlinks for the small pure-discovery grammar we
+// can attest. Unknown options/quoting remain usable under baseline policy, but
+// cannot spend a path-scoped fallback capability.
+func explorationDiscoveryPath(tool string, raw []byte, cwd string) string {
+	if !canonicalDiscoveryPath(cwd) {
+		return ""
+	}
+	root, err := filepath.EvalSymlinks(cwd)
+	if err != nil || root != cwd {
+		return ""
+	}
+	var args map[string]any
+	if json.Unmarshal(raw, &args) != nil {
+		return ""
+	}
+	var paths []string
+	if tool == "grep" {
+		p := textField(args, "path", "file_path")
+		if p == "" {
+			return ""
+		}
+		paths = []string{p}
+	} else if shellTool(tool) {
+		command := textField(args, "command", "cmd")
+		if strings.ContainsAny(command, "\"'\\$`;|&<>\n\r") {
+			return ""
+		}
+		fields := strings.Fields(command)
+		if len(fields) < 2 {
+			return ""
+		}
+		switch fields[0] {
+		case "rg", "ripgrep", "grep":
+			pattern, literal := false, false
+			for _, field := range fields[1:] {
+				if !literal && field == "--" {
+					literal = true
+					continue
+				}
+				if !literal && strings.HasPrefix(field, "-") {
+					switch field {
+					case "--files":
+						if fields[0] == "grep" {
+							return ""
+						}
+						pattern = true
+					case "-n", "-r", "-rn", "-nr", "-i", "-l", "-w", "-F", "--hidden", "--no-ignore":
+					default:
+						return ""
+					}
+					continue
+				}
+				if !pattern {
+					pattern = true
+				} else {
+					paths = append(paths, field)
+				}
+			}
+			if !pattern {
+				return ""
+			}
+		case "find":
+			for _, field := range fields[1:] {
+				if strings.HasPrefix(field, "-") {
+					return ""
+				}
+				paths = append(paths, field)
+			}
+		default:
+			return ""
+		}
+	} else {
+		return ""
+	}
+	if len(paths) == 0 {
+		paths = []string{"."}
+	}
+	for _, p := range paths {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(cwd, p)
+		}
+		resolved, err := filepath.EvalSymlinks(p)
+		if err != nil || (resolved != cwd && !strings.HasPrefix(resolved, strings.TrimSuffix(cwd, string(filepath.Separator))+string(filepath.Separator))) {
+			return ""
+		}
+	}
+	return cwd
 }

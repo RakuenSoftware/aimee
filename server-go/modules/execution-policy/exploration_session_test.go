@@ -187,3 +187,34 @@ func TestSessionAdmissionIsNotRefundableAndIndexedFormatsAreExact(t *testing.T) 
 		t.Fatal("cross-project lookup granted fallback")
 	}
 }
+
+func TestExternalToolBindingUsesOwnedSessionAndExecutionDirectory(t *testing.T) {
+	now := time.Now()
+	c := testContract(now)
+	c.ID, c.Binding.Task = "session-task", "session-task"
+	c.Binding.WorkingDirectory = t.TempDir()
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	state, _, err := SessionExploration("alice", "session", nil, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := sessionExplorationRequest{Operation: "bind_session", Path: c.Binding.WorkingDirectory}
+	// A client-created binding is never used for this host owner lookup.
+	req.Binding.Principal = "mallory"
+	raw, _ = json.Marshal(req)
+	_, reply, err := SessionExploration("alice", "session", state, raw, now)
+	var out struct {
+		Binding explorationBinding `json:"binding"`
+	}
+	if err != nil || json.Unmarshal(reply, &out) != nil || out.Binding != c.Binding {
+		t.Fatal("owned binding unavailable", err)
+	}
+	if _, _, err = SessionExploration("mallory", "session", state, raw, now); err == nil {
+		t.Fatal("foreign principal obtained binding")
+	}
+	req.Path = t.TempDir()
+	raw, _ = json.Marshal(req)
+	if _, _, err = SessionExploration("alice", "session", state, raw, now); err == nil {
+		t.Fatal("different worktree rebound contract")
+	}
+}

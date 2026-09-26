@@ -378,3 +378,63 @@ void policy_complete_exploration_turn(int turn)
    cJSON_AddStringToObject(request, "turn_id", id);
    free(policy_session_operation(request));
 }
+
+/* Resolve the protected session contract at an authenticated external tool
+ * boundary. Client JSON supplies no binding, allowance or observed outcome. */
+int policy_bind_session_exploration(const char *session)
+{
+   (void)request_context_set_exploration_binding("");
+   const request_context_t *ctx = request_context_get();
+   if (!ctx || !ctx->principal[0] || !session || !session[0])
+      return -1;
+   char cwd[PATH_MAX], canonical[PATH_MAX];
+   const char *effective = run_cmd_get_cwd();
+   if ((!effective || !effective[0]) && getcwd(cwd, sizeof(cwd)))
+      effective = cwd;
+   if (!effective || !realpath(effective, canonical))
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "bind_session");
+   cJSON_AddStringToObject(request, "canonical_path", canonical);
+   char *wire = cJSON_PrintUnformatted(request);
+   char *reply = malloc(65536);
+   int rc = -1;
+   if (wire && reply &&
+       db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
+   {
+      cJSON *result = cJSON_Parse(reply);
+      cJSON *binding = cJSON_GetObjectItemCaseSensitive(result, "binding");
+      char *serialized = cJSON_IsObject(binding) ? cJSON_PrintUnformatted(binding) : NULL;
+      if (serialized)
+         rc = request_context_set_exploration_binding(serialized);
+      free(serialized);
+      cJSON_Delete(result);
+   }
+   free(reply);
+   free(wire);
+   cJSON_Delete(request);
+   return rc;
+}
+
+char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
+                              char *result)
+{
+   char *outcome = policy_observe_indexed(tool, arguments, attempt, result);
+   if (!outcome)
+      return result;
+   cJSON *observation = cJSON_Parse(outcome);
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observation, "expansion_available")))
+   {
+      size_t n = (result ? strlen(result) : 0) + strlen(outcome) + 32;
+      char *with_gap = malloc(n);
+      if (with_gap)
+      {
+         snprintf(with_gap, n, "%s\nExploration recovery: %s", result ? result : "", outcome);
+         free(result);
+         result = with_gap;
+      }
+   }
+   cJSON_Delete(observation);
+   free(outcome);
+   return result;
+}
