@@ -1009,7 +1009,8 @@ done:
  * unsent attempt. Raw detail interpretation belongs to the producer's Go owner. */
 cJSON *audit_worm_read_request_through(const char *principal, const char *request_id, long head)
 {
-   if (!principal || !*principal || !request_id || !*request_id || strlen(request_id) > 256 || head <= 0)
+   if (!principal || !*principal || !request_id || !*request_id || strlen(request_id) > 256 ||
+       head <= 0)
       return NULL;
    cJSON *out = cJSON_CreateArray();
    sqlite3_stmt *q = NULL;
@@ -1019,13 +1020,13 @@ cJSON *audit_worm_read_request_through(const char *principal, const char *reques
    pthread_mutex_lock(&g_worm_mu);
    if (!g_worm_db && worm_open_locked_default() != 0)
       goto fail;
-   const char *sql =
-       "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
-       "WHERE seq<=?3 AND actor_role='host' AND actor_principal=?1 AND action LIKE 'memory.provider.%' "
-       "AND subject IN (SELECT subject FROM audit_event WHERE actor_role='host' AND "
-       "actor_principal=?1 "
-       "AND action='memory.provider.prepared' AND json_valid(detail) "
-       "AND json_extract(detail,'$.binding.request_id')=?2) ORDER BY seq LIMIT 65";
+   const char *sql = "SELECT seq,event_id,action,subject,detail,row_hash FROM audit_event "
+                     "WHERE seq<=?3 AND actor_role='host' AND actor_principal=?1 AND action LIKE "
+                     "'memory.provider.%' "
+                     "AND subject IN (SELECT subject FROM audit_event WHERE actor_role='host' AND "
+                     "actor_principal=?1 "
+                     "AND action='memory.provider.prepared' AND json_valid(detail) "
+                     "AND json_extract(detail,'$.binding.request_id')=?2) ORDER BY seq LIMIT 65";
    if (sqlite3_prepare_v2(g_worm_db, sql, -1, &q, NULL) != SQLITE_OK)
       goto fail;
    sqlite3_bind_text(q, 1, principal, -1, SQLITE_TRANSIENT);

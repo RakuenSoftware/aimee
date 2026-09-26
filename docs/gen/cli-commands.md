@@ -167,6 +167,7 @@ Subcommands:
   list             List memories
   get              Read a memory by id (--as-of <ts>: was it in force then?)
   evidence <id>    Inspect authorized evidence lineage (--json)
+  health           Receipt-backed health (--window 24h --project P --workspace W --json)
   receipt <request-id>  Inspect durable provider attempts (--json)
   read             Assemble current memory context
 ```
