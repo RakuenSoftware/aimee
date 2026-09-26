@@ -97,7 +97,7 @@ func TestRankingArtifactsFrozen(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		selection bool
-	}{{"baseline", false}, {"diversity", true}} {
+	}{{"baseline", false}, {"diversity-v2", true}} {
 		raw, err := os.ReadFile("../../../tests/eval/memory_mr09/" + tc.name + "-policy.json")
 		if err != nil {
 			t.Fatal(err)

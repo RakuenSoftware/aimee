@@ -101,6 +101,64 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 			t.Fatalf("copy %d changed origin: %v", i, p)
 		}
 	}
+
+	t.Run("selector preserves a distinct complete origin after thirty copies", func(t *testing.T) {
+		t.Setenv("AIMEE_MEMORY_SELECTION_POLICY", typedSelectionPolicyVersion)
+		exec(`SAVEPOINT selector_origins`)
+		defer exec(`RESET ROLE; ROLLBACK TO SAVEPOINT selector_origins; RELEASE SAVEPOINT selector_origins`)
+		const owner = "00000000-0000-0000-0000-000000000001"
+		exec(`UPDATE memory_collection_owner SET owner_id=$1;`, owner)
+		exec(`UPDATE memory_lineage SET source_ref=replace(source_ref,'fixture-owner',$1)`, owner)
+		exec(`SET LOCAL ROLE evidence_projection_test`)
+		r := coverageFixture(t)
+		r.Requirements.Obligations[0].Role = "independent_support"
+		r.Requirements.Obligations[0].MinIndependent = 2
+		firstFamily := ""
+		for i := int64(1); i <= 31; i++ {
+			parentID := i
+			if i == 31 {
+				parentID = 32
+			}
+			item := coverageHit(1000+i, "service", "same supported claim")
+			h := item.value.(assertionHit)
+			h.ownerID = owner
+			h.memoryParents = []MemoryRecordVersion{{SchemaVersion: 1, OwnerID: owner, RecordID: fmt.Sprint(parentID), RecordRevision: "1"}}
+			item.value = h
+			item.source = h.sourceVersion()
+			item.families = s.selectionAssertionFamilies(ctx, h)
+			stale := h
+			stale.memoryParents = append([]MemoryRecordVersion(nil), h.memoryParents...)
+			stale.memoryParents[0].RecordRevision = "2"
+			if len(s.selectionAssertionFamilies(ctx, stale)) != 0 {
+				t.Fatal("selector accepted a stale parent revision", i)
+			}
+			if len(item.families) != 1 {
+				t.Fatal("owner did not establish complete revision-bound family", i, item.families)
+			}
+			if i == 1 {
+				firstFamily = item.families[0]
+			}
+			if (i < 31 && item.families[0] != firstFamily) || (i == 31 && item.families[0] == firstFamily) {
+				t.Fatal("copy origin or independent root misidentified", i)
+			}
+			r.add("current_assertions", item)
+		}
+		limit := 1600
+		r.limits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit}
+		if err := r.finish(); err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, ref := range r.Retained {
+			ids[ref.ID] = true
+		}
+		if !ids["1001"] || !ids["1031"] || r.RenderedBytes > limit {
+			t.Fatal("canonical copies displaced distinct potential support", r.Retained)
+		}
+		if r.Coverage.Roles[0].Status != "unavailable" || r.Sufficiency == "complete" {
+			t.Fatal("origin families invented independent support", r.Coverage)
+		}
+	})
 	parent(32, 1)
 	parent(32, 9007199254740993)
 	hidden := read(32)

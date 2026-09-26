@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const typedSelectionPolicyVersion = "typed-diversity-rankwindow3-v1"
+const typedSelectionPolicyVersion = "typed-diversity-rankwindow3-v2"
 const typedSelectionCandidateLimit = 128
 
 type typedSelectionCandidate struct {
@@ -82,13 +82,34 @@ func (r *typedContextResult) applySelection() {
 				if len(ids) > 0 {
 					required[ids[0]] = true
 				}
-				// Without an independence certificate, retain the strongest potential
-				// support; coverage remains unknown rather than inventing independence.
-				if role.Role == "independent_support" && len(ids) == 0 {
+				// Canonical families are not independence certificates. Preserve
+				// the strongest potential support plus bounded representatives
+				// of different complete origins so copies cannot crowd out the
+				// only potentially independent source. Coverage stays unknown.
+				if role.Role == "independent_support" {
+					families := map[string]bool{}
+					representatives, first := 0, false
 					for _, item := range items {
-						if h, ok := coverageAssertion(item); ok && h.Subject == role.Subject && h.Relation == role.Relation {
+						h, ok := coverageAssertion(item)
+						if !ok || h.Subject != role.Subject || h.Relation != role.Relation {
+							continue
+						}
+						if !first {
 							required[item.id] = true
-							break
+							first = true
+						}
+						novel := false
+						for _, family := range item.families {
+							if !families[family] {
+								novel = true
+							}
+						}
+						if novel && representatives < min(16, max(2, role.MinIndependent)) {
+							required[item.id] = true
+							representatives++
+							for _, family := range item.families {
+								families[family] = true
+							}
 						}
 					}
 				}
@@ -219,6 +240,9 @@ func (s *postgresDataStore) selectionAssertionFamilies(ctx context.Context, h as
 		if err != nil {
 			return nil
 		}
+		// Match the successful public owner envelope before applying the shared
+		// exact-revision family validator; memoryEvidence returns its payload only.
+		evidence["status"] = "ok"
 		raw, err := json.Marshal(evidence)
 		if err != nil {
 			return nil

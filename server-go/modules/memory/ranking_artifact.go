@@ -23,7 +23,7 @@ type retrievalPolicyArtifact struct {
 func rankingArtifact(selection bool) retrievalPolicyArtifact {
 	artifact := retrievalPolicyArtifact{SchemaVersion: 1, Version: "fair-hybrid-bounded-priors-v1", Fusion: "independent-eligible-pools-staged-rrf60", NativePrior: nativeRankingPriorPolicy(), AssertionPrior: assertionLexicalPriorPolicy, AssertionJointBound: assertionLexicalPriorBound, GraphPrior: graphRankingPriorPolicy, GraphJointBound: graphRankingPriorBound, Selection: "baseline", Routing: "fixed_declared_arms_no_learned_early_stop", Exposure: "disabled"}
 	if selection {
-		artifact.Version = "fair-hybrid-diversity-v1"
+		artifact.Version = "fair-hybrid-diversity-v2"
 		artifact.Selection = typedSelectionPolicyVersion
 	}
 	return artifact

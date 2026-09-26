@@ -407,6 +407,7 @@
     "tests/eval/memory_mr05_coverage_cases.json",
     "tests/eval/memory_mr09/baseline-policy.json",
     "tests/eval/memory_mr09/diversity-policy.json",
+    "tests/eval/memory_mr09/diversity-v2-policy.json",
     "tests/eval/memory_mr09/code-navigation-pilot.json"
   ],
   "docs": [

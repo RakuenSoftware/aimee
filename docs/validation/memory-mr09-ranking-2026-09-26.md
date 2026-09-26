@@ -28,9 +28,9 @@ are inspectable; unsupported or nonfinite evidence does not become a score.
 
 ## Optional final selection
 
-The owner-only `AIMEE_MEMORY_SELECTION_POLICY=typed-diversity-rankwindow3-v1`
+The owner-only `AIMEE_MEMORY_SELECTION_POLICY=typed-diversity-rankwindow3-v2`
 selects the frozen
-[diversity-policy.json](../../tests/eval/memory_mr09/diversity-policy.json).
+[diversity-v2-policy.json](../../tests/eval/memory_mr09/diversity-v2-policy.json).
 Any other value uses baseline selection. This applies to typed context, not a
 claim that every legacy prompt channel has the same diversity policy.
 
@@ -40,8 +40,14 @@ one desired item per enabled type. Duplicate mandatory copies do not create
 thirty separate reservations. Discretionary text/family diversity operates only
 within a three-position, same-channel base-rank window. Families require exact
 revision matches in complete canonical ancestry; they never certify independence.
+For an independence obligation, v2 also protects bounded representatives of distinct
+complete origins behind duplicate claims (up to the requested count, minimum two,
+maximum sixteen). This is conservative preservation of potential support, never
+an independence verdict. The earlier v1 artifact remains frozen for audit.
 Automatic serving counts never increase authority or confidence, and exposure
-adaptation remains disabled.
+adaptation remains disabled. The canonical PostgreSQL lineage fixture verifies
+thirty copies share one origin, a separate root keeps its distinct origin, and
+both representatives survive the byte cap while independence stays unavailable.
 
 Channel/total estimates and exact rendered-byte limits still win over reservations.
 Whole-row pruning removes discretionary tails before protected tails, reports
@@ -72,7 +78,8 @@ the actual owner selector retaining the required rank-31 hit in 1,507 rendered
 bytes behind thirty copies. Dense unavailability correctly keeps coverage unknown;
 the test does not reinterpret retained lexical evidence as a complete hybrid read.
 The exported memory owner build passed in 5.574 seconds and native ingress passed.
-Outer-repacking regression checks pass with protected selection commitments and
+Compact dispatch-receipt parts retain the selection policy/version digest and
+missing-type list across native refreshes. Outer-repacking regression checks pass with protected selection commitments and
 only the originally enabled channels contributing desired floors.
 
 The frozen controlled code-navigation pilot used six fit tasks and six separate

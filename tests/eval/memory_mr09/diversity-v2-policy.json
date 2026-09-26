@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "version": "fair-hybrid-diversity-v2",
+  "fusion": "independent-eligible-pools-staged-rrf60",
+  "native_prior": {
+    "version": "staged-rrf60-prior-rankcap3-v2",
+    "base_scale": "eligible_staged_rrf60_order",
+    "strata": "existing_scope_priority",
+    "individual_max_rank_displacement": {
+      "pagerank": 3,
+      "recency": 0,
+      "automatic_serving": 0,
+      "outcome": 0,
+      "trust": 0
+    },
+    "joint_max_rank_displacement": 3,
+    "exposure_state": "disabled; not_authority_or_confidence"
+  },
+  "assertion_prior": "assertion-lexical-priors-v2",
+  "assertion_joint_bound": 0.125,
+  "graph_prior": "graph-relevance-priors-v2",
+  "graph_joint_bound": 0.025,
+  "selection": "typed-diversity-rankwindow3-v2",
+  "routing": "fixed_declared_arms_no_learned_early_stop",
+  "exposure": "disabled"
+}

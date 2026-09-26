@@ -150,3 +150,34 @@ func TestSelectionPolicyReceiptSurvivesNativeRefresh(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectionPotentialIndependentOriginSurvivesThirtyCopies(t *testing.T) {
+	t.Setenv("AIMEE_MEMORY_SELECTION_POLICY", typedSelectionPolicyVersion)
+	r := coverageFixture(t)
+	r.Requirements.Obligations[0].Role = "independent_support"
+	r.Requirements.Obligations[0].MinIndependent = 2
+	for i := int64(1); i <= 31; i++ {
+		item := coverageHit(i, "service", "same supported claim")
+		family := strings.Repeat("a", 64)
+		if i == 31 {
+			family = strings.Repeat("b", 64)
+		}
+		item.families = []string{"sha256:" + family}
+		r.add("current_assertions", item)
+	}
+	limit := 1600
+	r.limits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit}
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, ref := range r.Retained {
+		ids[ref.ID] = true
+	}
+	if !ids["1"] || !ids["31"] || r.RenderedBytes > limit {
+		t.Fatal("copies displaced distinct potential support", r.Retained)
+	}
+	if r.Coverage.Roles[0].Status != "unavailable" || r.Sufficiency == "complete" {
+		t.Fatal("origin families fabricated independence", r.Coverage)
+	}
+}
