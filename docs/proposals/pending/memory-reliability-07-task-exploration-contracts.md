@@ -70,5 +70,7 @@ budget sharing and authenticated fallback remain unimplemented by this repair.
 
 The [session integration report](../../validation/memory-mr07-session-2026-09-26.md)
 records migration 38, shared PostgreSQL accounting, native/hook admission and
-native indexed recovery. Activation and paired workload acceptance remain open;
-the shipping default remains observe.
+native indexed recovery. Authenticated activation, bounded expansion and
+same-query revocation passed on `be46915db`. Real-provider collection also passed
+a source-answer smoke test. Paired workload acceptance remains open; the
+shipping default remains observe.

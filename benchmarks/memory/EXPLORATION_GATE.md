@@ -92,10 +92,12 @@ re-reads deployment approval; removing the artifact or opt-in immediately stops
 new adaptive restrictions while preserving operator limits and usage. Repeating
 an already admitted attempt retains its original accounting decision.
 
-Implementation status: activation parsing and native freshness checks are
-implemented; no measured passing workload has been collected. Native requirement forwarding and hook freshness admission are implemented.
-Fresh process acceptance and measured workload acceptance remain required before
-MR-07 completion.
+Implementation status: activation parsing, native freshness checks, requirement
+forwarding and hook admission are implemented. The authenticated native
+activation/expansion/revocation journey passed on `be46915db`; see the
+[process evidence](../../docs/validation/memory-mr07-session-2026-09-26.md).
+No measured passing paired workload has been collected. That acceptance remains
+required before MR-07 completion.
 
 ## Collection before calibration
 
@@ -126,3 +128,28 @@ no experiment opt-in. Record both raw provider usage and all declared stage cost
 components; unavailable usage/cost is an invalid cell, never an estimated zero.
 Experimental authorization alone is not evidence that the task-quality gates
 passed. The measured report still decides whether release review is eligible.
+
+## Native provider collection
+
+`native_provider_relay.py` keeps enrolled TLS keys and the paired bearer on the
+collector machine while an explicitly selected isolated driver executes native
+tools. The driver emits `EVAL_RELAY {"id": ..., "body": ...}` lines and reads
+the corresponding response on stdin. Requests must contain explicit tool
+schemas so the paired endpoint acts as a provider relay. The collector verifies
+TLS and the enrolled leaf before sending the bearer. An optional
+`--tls-server-name` selects the certificate's verified name; it does not disable
+verification.
+
+The collector requires a model, new private output directory, explicit call
+ceiling and driver command after `--`. It retains both native and forwarded
+payloads because routing changes model, streaming and the 4096-token output
+ceiling. Freeze these settings in the experiment manifest. Driver stderr goes
+directly to a private evidence file, avoiding pipe backpressure. Missing or
+inconsistent token usage invalidates collection; no billing cost is inferred.
+
+The optional `tests/e2e/memory-exploration-real-provider-e2e.py` driver takes an
+owned activation fixture's `names.json` and candidate image suffix. It checks
+the exact Docker image/project and revoked approval before running one source
+lookup. Its final-answer verifier is evaluation-only. This is a collection
+smoke test, not a paired corpus or a gate result. Raw requests/responses remain
+private; reviewed summaries can retain their hashes and usage.

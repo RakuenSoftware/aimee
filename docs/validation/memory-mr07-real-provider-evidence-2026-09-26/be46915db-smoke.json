@@ -1,0 +1,154 @@
+{
+  "summary.json": {
+    "kind": "real_model_collector_smoke",
+    "release_evidence": false,
+    "passed": true,
+    "status": 200,
+    "provider_calls": 4,
+    "latency_seconds": 35.978898272966035,
+    "evidence_directory": "/var/lib/aimee/mr07-real-pilot-77aac6409de84163b589f5f127ed5c73",
+    "session": "5098f975-f370-aa96-7460-7905dcdf85aa",
+    "errors": []
+  },
+  "calls.json": [
+    {
+      "request_sha256": "482ece89906d6fde0bddf8e1fdd545eb75f149ab03dbfdc7889592c51acfa31b",
+      "request_bytes": 33467,
+      "evidence_sha256": "0e02179a9c63e85f50b06d617362680558665be6ce38bb926cba780e2f6a97e1",
+      "elapsed_seconds": 7.595866449992172,
+      "usage": {
+        "prompt_tokens": 7587,
+        "completion_tokens": 48,
+        "total_tokens": 7635,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "request_sha256": "9a42d5029c504a37c6aabce49068ef7d4d5145d66282a173d891243eb688e124",
+      "request_bytes": 34166,
+      "evidence_sha256": "b8a7edeb421862eba41e6a178e9cd3b9ab13c6db66c7c854b4459efaaf1f8f4b",
+      "elapsed_seconds": 7.0417216990026645,
+      "usage": {
+        "prompt_tokens": 6146,
+        "completion_tokens": 21,
+        "total_tokens": 6167,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "request_sha256": "f01334d98597019941978951b5d536c05bbe2bdd25eef5b0466da55111f9a0d5",
+      "request_bytes": 34645,
+      "evidence_sha256": "52c3147a7a7bf1f05b52ab3ac62433861b5dbba69e031234745775a9d8fdc895",
+      "elapsed_seconds": 7.353094334946945,
+      "usage": {
+        "prompt_tokens": 6220,
+        "completion_tokens": 35,
+        "total_tokens": 6255,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "request_sha256": "ba9ed60ca2cdba8b17fb2ef8a2a9202b8ff7afed3c20fec9fa1dc9307907e818",
+      "request_bytes": 35027,
+      "evidence_sha256": "ec02a3efcc4d0b663c88f6ea58a592716b48990f2e66f6f47d93b6bce6e7350c",
+      "elapsed_seconds": 8.04335773200728,
+      "usage": {
+        "prompt_tokens": 6283,
+        "completion_tokens": 57,
+        "total_tokens": 6340
+      }
+    }
+  ],
+  "verifier.json": {
+    "kind": "exact-source-answer",
+    "passed": true,
+    "final_text": "Verified directly in `state.c`: `mr07activation_state()` returns the exact string **`\"actual-source-value\"`**.\n\nNo files were edited. The required Aimee CLI lookup was unavailable, so I used symbol lookup followed by reading the current source."
+  },
+  "collector": {
+    "actual_exit": 0,
+    "model_calls": 4,
+    "billing_cost_available": false,
+    "release_evidence": false
+  },
+  "candidate": "be46915db",
+  "paired_workload": false,
+  "model_route": "codex",
+  "declared_underlying_model": "gpt-6-astra",
+  "cost": null,
+  "cost_reason": "paired endpoint reports usage but no billing cost; this is not a release cell",
+  "calls": [
+    {
+      "ordinal": 1,
+      "evidence_sha256": "0e02179a9c63e85f50b06d617362680558665be6ce38bb926cba780e2f6a97e1",
+      "native_request_sha256": "d03413fd86ee45bd92a0068c88ca6b2c00523723b03c724c5140492bf2659ad0",
+      "http_status": 200,
+      "elapsed_seconds": 7.595866449992172,
+      "usage": {
+        "completion_tokens": 48,
+        "prompt_tokens": 7587,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7635
+      },
+      "tool_names": [
+        "execute_script"
+      ]
+    },
+    {
+      "ordinal": 2,
+      "evidence_sha256": "b8a7edeb421862eba41e6a178e9cd3b9ab13c6db66c7c854b4459efaaf1f8f4b",
+      "native_request_sha256": "7186fa70d5578316a8f8798103e0948242feff6386088731204101620ec9d543",
+      "http_status": 200,
+      "elapsed_seconds": 7.0417216990026645,
+      "usage": {
+        "completion_tokens": 21,
+        "prompt_tokens": 6146,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6167
+      },
+      "tool_names": [
+        "find_symbol"
+      ]
+    },
+    {
+      "ordinal": 3,
+      "evidence_sha256": "52c3147a7a7bf1f05b52ab3ac62433861b5dbba69e031234745775a9d8fdc895",
+      "native_request_sha256": "380897a4dbbd8a15d08d9198a942929c6060beea2c460457073a6d1a2abfc12e",
+      "http_status": 200,
+      "elapsed_seconds": 7.353094334946945,
+      "usage": {
+        "completion_tokens": 35,
+        "prompt_tokens": 6220,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6255
+      },
+      "tool_names": [
+        "read_file"
+      ]
+    },
+    {
+      "ordinal": 4,
+      "evidence_sha256": "ec02a3efcc4d0b663c88f6ea58a592716b48990f2e66f6f47d93b6bce6e7350c",
+      "native_request_sha256": "f338a8a60f41e9aa04de14882f111acd6490f5804519c0943251d716d5b6b2f5",
+      "http_status": 200,
+      "elapsed_seconds": 8.04335773200728,
+      "usage": {
+        "completion_tokens": 57,
+        "prompt_tokens": 6283,
+        "total_tokens": 6340
+      },
+      "tool_names": []
+    }
+  ]
+}

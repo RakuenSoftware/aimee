@@ -208,3 +208,25 @@ claims, then exercise actual authorization, source checks, provider dispatch and
 tool enforcement. They do not provide independent task-quality measurements or
 justify calibration. MR-07's frozen paired quality, latency and complete-cost
 gate remains open; production enforcement remains off.
+
+## Real-provider collection smoke passed
+
+The isolated native runtime on `be46915db` completed a real-model source lookup
+through the paired `codex` provider route. The reusable collector run made four
+provider calls, took 35.98 seconds end to end, and reported 26,397 total tokens
+across those calls. The final text correctly named `actual-source-value`, not
+the deliberately wrong supplied claim. The verifier examines only final text,
+not tool output that happens to contain the answer. The actual process exited
+zero and the temporary model roster was restored.
+[The summary](memory-mr07-real-provider-evidence-2026-09-26/be46915db-smoke.json)
+retains native-call metadata, provider usage, raw-evidence hashes and the final
+answer. Full requests/responses remain in private collector storage.
+
+`benchmarks/memory/native_provider_relay.py` records both native and forwarded
+payloads, checks complete token usage, caps calls and keeps local pairing keys
+out of the fixture. Five collector regressions pass, including rejection before
+an unscoped request reaches the paired endpoint, missing usage, call-ceiling
+enforcement and stderr backpressure. The paired endpoint reports no billing
+cost. This single smoke test has no frozen independent-task corpus or treatment
+comparison and cannot establish scan reduction, noninferiority, p95 or cost
+parity. Those gates remain open.
