@@ -168,3 +168,43 @@ index observation for each assembly. Ordinary first-task suppression, request
 opt-out, code-context opt-out and the minimum usable budget remain in force.
 Focused Go race tests, native ingress tests and all 77 lint checks passed.
 Deployed activation and the paired quality/cost experiment remain open.
+
+## Activated native process journey passed on `be46915db`
+
+The managed fixture passed all 13 native checks and seven controller checks,
+with an actual zero process exit. It exercises the authenticated primary/native
+path, complete typed obligations, a current indexed source packet, a literal-zero
+raw-scan allowance, an actual structured restriction, a host-issued indexed-miss
+reference, bounded expansion, and a fallback read of the contradictory source.
+The persisted task state records exactly one raw scan and experiment approval.
+After removing the root-owned experiment artifact, the same query still has
+complete coverage and current owner/index observations but returns to observe.
+[Native checks](memory-mr07-activation-evidence-2026-09-26/be46915db-inside-checks.json),
+[controller checks](memory-mr07-activation-evidence-2026-09-26/be46915db-checks.json)
+and [persisted state](memory-mr07-activation-evidence-2026-09-26/be46915db-persisted-exploration-state.json)
+are retained. The fixture uses the explicit 65,536-byte functional-test ceiling;
+MR-08's separate T2/T3 native runs use the ordinary 32,768-byte ceiling.
+
+The fixture now stores its repository under the persistent application volume
+and indexes its visible canonical root. Earlier fixture attempts indexed a
+hidden `.aimee/worktrees` root, which lexical search excludes. The earlier
+application replacement preserved Docker volumes but removed its disposable
+`/tmp` corpus; that was not a corpus-preservation test. Authorization evidence
+from that replacement remains valid, but it is not activation evidence.
+
+Each primary turn records feedback episodes asynchronously. Starting the next
+frozen-workload phase while their index projections are changing produced a
+correct `stale_context` refusal. The successful fixture waits for all
+`memory_index` jobs to finish and for canonical/projection generation sums to
+remain unchanged for two seconds, bounded by 45 seconds, between phases.
+Settlement measurements are retained for every phase. The serving source fence
+and background feedback remain enabled. Earlier failed runs are retained on
+CT109 under `mr07-managed-be46915db` and `mr07-managed-reuse-be46915db`.
+
+The reproducible disposable-stack controller and synthetic inside provider are
+`tests/e2e/memory-exploration-activation-e2e.py` and
+`tests/e2e/memory-exploration-activation-inside.py`. They seed tenancy and test
+claims, then exercise actual authorization, source checks, provider dispatch and
+tool enforcement. They do not provide independent task-quality measurements or
+justify calibration. MR-07's frozen paired quality, latency and complete-cost
+gate remains open; production enforcement remains off.

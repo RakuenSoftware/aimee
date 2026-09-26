@@ -1,0 +1,18 @@
+{
+  "candidate": "be46915db",
+  "kind": "functional_process_experiment",
+  "limits": {
+    "enabled": true,
+    "raw_scans": 0,
+    "starvation_turns": 2
+  },
+  "phases": [
+    "scope",
+    "coverage",
+    "activated",
+    "revoked"
+  ],
+  "promotion": false,
+  "provider": "synthetic; this is not a quality measurement",
+  "schema_version": 1
+}

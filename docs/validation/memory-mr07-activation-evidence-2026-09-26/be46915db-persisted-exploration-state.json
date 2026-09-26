@@ -1,0 +1,707 @@
+{
+  "budget_groups": {
+    "session-task": {
+      "raw_scans": 1,
+      "graph_expansions": 0,
+      "returned_bytes": 32768,
+      "returned_tokens": 32768,
+      "files": {}
+    }
+  },
+  "version": 1,
+  "principal": "uid:1000",
+  "session": "c20329f2-2139-f665-33da-684113c1b4af",
+  "usage": {
+    "raw_scans": 1,
+    "graph_expansions": 0,
+    "returned_bytes": 32768,
+    "returned_tokens": 32768,
+    "files": {}
+  },
+  "tasks": {
+    "session-task": {
+      "completed_turns": {
+        "754-87:0": true,
+        "754-87:1": true,
+        "754-87:2": true,
+        "754-87:3": true
+      },
+      "completed_at": "2026-09-26T13:03:52.889597548Z",
+      "unresolved_gap": true,
+      "indexed_outcomes": {
+        "754-87:2:activation-2": {
+          "id": "754-87:2:activation-2",
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+            "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "contract_id": "session-task",
+          "revision": 8,
+          "gap": "indexed:e3c1e7c6e297276160158f4c49de14fa",
+          "fallback_class": "raw_scan",
+          "canonical_scope": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+          "status": "empty",
+          "completed": "2026-09-26T13:03:50.76460172Z"
+        }
+      },
+      "fallbacks": [
+        {
+          "outcome": {
+            "id": "754-87:2:activation-2",
+            "binding": {
+              "host_worktree": true,
+              "producer_build": "v0.4.5-pr2990.be46915db",
+              "route": "openai_chat",
+              "index_observed_current": true,
+              "owner_observed_current": true,
+              "provider": "openai",
+              "model": "mr07activation",
+              "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+              "budget_task": "session-task",
+              "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+              "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+              "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+              "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "principal": "uid:1000",
+              "session": "c20329f2-2139-f665-33da-684113c1b4af",
+              "task": "session-task",
+              "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+              "index_generation": "1",
+              "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+            },
+            "contract_id": "session-task",
+            "revision": 9,
+            "gap": "indexed:e3c1e7c6e297276160158f4c49de14fa",
+            "fallback_class": "raw_scan",
+            "canonical_scope": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "status": "empty",
+            "completed": "2026-09-26T13:03:50.76460172Z"
+          },
+          "expires": "2026-09-26T13:04:51.818651728Z",
+          "remaining": 0
+        }
+      ],
+      "revisions": [
+        {
+          "id": "session-task",
+          "revision": 1,
+          "binding": {
+            "host_worktree": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2b056a7d9e9780914d19977a7d6f7cc7f4260f55b03ea5ac5cdb23a607edc20d",
+            "source_versions_digest": "1386dae5f358a0421dec7784a781ce813f89c572054283c60a6792a8c604ce48",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "unavailable",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "2b056a7d9e9780914d19977a7d6f7cc7f4260f55b03ea5ac5cdb23a607edc20d",
+          "source_versions_digest": "1386dae5f358a0421dec7784a781ce813f89c572054283c60a6792a8c604ce48",
+          "query_class": "unclassified",
+          "coverage_complete": false,
+          "confidence_provenance": "uncalibrated:unavailable",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:28.000922102Z",
+          "expires": "2026-09-26T13:18:27.919307462Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "receipt_digest": "97b84418341f3883f50c38c5dd47e83857842c7f988f51365c29b721e65ef253",
+          "id": "session-task",
+          "revision": 2,
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2b056a7d9e9780914d19977a7d6f7cc7f4260f55b03ea5ac5cdb23a607edc20d",
+            "source_versions_digest": "1386dae5f358a0421dec7784a781ce813f89c572054283c60a6792a8c604ce48",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "unavailable",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "2b056a7d9e9780914d19977a7d6f7cc7f4260f55b03ea5ac5cdb23a607edc20d",
+          "source_versions_digest": "1386dae5f358a0421dec7784a781ce813f89c572054283c60a6792a8c604ce48",
+          "query_class": "unclassified",
+          "coverage_complete": false,
+          "confidence_provenance": "uncalibrated:unavailable",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:28.733764586Z",
+          "expires": "2026-09-26T13:18:27.919307462Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "id": "session-task",
+          "revision": 3,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "dcc5348af2b2f7816a72bb5d99ad205f42e16696e84f232c49114c6cfb09531f",
+            "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "dcc5348af2b2f7816a72bb5d99ad205f42e16696e84f232c49114c6cfb09531f",
+          "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:38.0228428Z",
+          "expires": "2026-09-26T13:18:37.959438511Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "id": "session-task",
+          "revision": 4,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "d5660818e1456c925ecef59cc29dbfc79821157fce57397963db8065ec0075bc",
+            "source_versions_digest": "ea1abf08d76d38409dd823ca1c5b13c07b674f5bec37c7df52b2fee020660c36",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "d5660818e1456c925ecef59cc29dbfc79821157fce57397963db8065ec0075bc",
+          "source_versions_digest": "ea1abf08d76d38409dd823ca1c5b13c07b674f5bec37c7df52b2fee020660c36",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:38.463465285Z",
+          "expires": "2026-09-26T13:18:38.380865621Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "receipt_digest": "960950397e946c55fad0358e6778c39328a3e982b017fbbe5398af86c1cfb8b1",
+          "id": "session-task",
+          "revision": 5,
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "d5660818e1456c925ecef59cc29dbfc79821157fce57397963db8065ec0075bc",
+            "source_versions_digest": "ea1abf08d76d38409dd823ca1c5b13c07b674f5bec37c7df52b2fee020660c36",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "d5660818e1456c925ecef59cc29dbfc79821157fce57397963db8065ec0075bc",
+          "source_versions_digest": "ea1abf08d76d38409dd823ca1c5b13c07b674f5bec37c7df52b2fee020660c36",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:39.400994643Z",
+          "expires": "2026-09-26T13:18:38.380865621Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "id": "session-task",
+          "revision": 6,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "8f730af090f54b44632610d7af722f00cf16953ada01288da2d14e2c1a60c9fa",
+            "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "8f730af090f54b44632610d7af722f00cf16953ada01288da2d14e2c1a60c9fa",
+          "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:48.002045503Z",
+          "expires": "2026-09-26T13:18:47.948488135Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "id": "session-task",
+          "revision": 7,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+            "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+          "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:48.438101213Z",
+          "expires": "2026-09-26T13:18:48.360952278Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "receipt_digest": "d3b10e9ca0302a75d7b6363732dcdf630eed37243630e19e836f490b7c84ea3d",
+          "id": "session-task",
+          "revision": 8,
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+            "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+          "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "approval_kind": "experiment",
+          "calibration_receipt": "experiment:a8b00809dfbc4e488e6241e472197dbf3bf4dae82046a07b8aedef81f12d20c7",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:49.27859656Z",
+          "expires": "2026-09-26T13:18:48.360952278Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "enforce"
+        },
+        {
+          "receipt_digest": "d3b10e9ca0302a75d7b6363732dcdf630eed37243630e19e836f490b7c84ea3d",
+          "id": "session-task",
+          "revision": 9,
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+            "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+          "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "approval_kind": "experiment",
+          "calibration_receipt": "experiment:a8b00809dfbc4e488e6241e472197dbf3bf4dae82046a07b8aedef81f12d20c7",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:49.27859656Z",
+          "expires": "2026-09-26T13:18:48.360952278Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "enforce"
+        },
+        {
+          "id": "session-task",
+          "revision": 10,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "8f730af090f54b44632610d7af722f00cf16953ada01288da2d14e2c1a60c9fa",
+            "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "8f730af090f54b44632610d7af722f00cf16953ada01288da2d14e2c1a60c9fa",
+          "source_versions_digest": "4448fa9991ac079a1f853642ac75ec377b225cb92c3a5d5c307b8e000b569886",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:57.910474514Z",
+          "expires": "2026-09-26T13:18:57.859742017Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "id": "session-task",
+          "revision": 11,
+          "binding": {
+            "host_worktree": true,
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "8ea6600f6058c32d7fda83c5fbdfbc2c3968aeda9aadb6a8f14b975a1f8547bd",
+            "source_versions_digest": "c7b92130019bb9bc0cc6a3c1a846a9c8d182d455080982b1e51a67c4d9487f84",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "8ea6600f6058c32d7fda83c5fbdfbc2c3968aeda9aadb6a8f14b975a1f8547bd",
+          "source_versions_digest": "c7b92130019bb9bc0cc6a3c1a846a9c8d182d455080982b1e51a67c4d9487f84",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:58.319074531Z",
+          "expires": "2026-09-26T13:18:58.231311403Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        },
+        {
+          "receipt_digest": "09a7d1841d37517bf82d68e3560552404c181164394d8e017f8b9f5f8e63ad29",
+          "id": "session-task",
+          "revision": 12,
+          "binding": {
+            "host_worktree": true,
+            "producer_build": "v0.4.5-pr2990.be46915db",
+            "route": "openai_chat",
+            "index_observed_current": true,
+            "owner_observed_current": true,
+            "provider": "openai",
+            "model": "mr07activation",
+            "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+            "budget_task": "session-task",
+            "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "plan_digest": "8ea6600f6058c32d7fda83c5fbdfbc2c3968aeda9aadb6a8f14b975a1f8547bd",
+            "source_versions_digest": "c7b92130019bb9bc0cc6a3c1a846a9c8d182d455080982b1e51a67c4d9487f84",
+            "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "principal": "uid:1000",
+            "session": "c20329f2-2139-f665-33da-684113c1b4af",
+            "task": "session-task",
+            "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+            "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+            "index_generation": "1",
+            "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+          },
+          "plan_digest": "8ea6600f6058c32d7fda83c5fbdfbc2c3968aeda9aadb6a8f14b975a1f8547bd",
+          "source_versions_digest": "c7b92130019bb9bc0cc6a3c1a846a9c8d182d455080982b1e51a67c4d9487f84",
+          "query_class": "typed_requirements",
+          "coverage_complete": true,
+          "confidence_provenance": "uncalibrated:c261d7da38738f2a8dd32b9d88080ed1f4da2fa009194bf5de7753106593ecb7",
+          "calibration_receipt": "",
+          "supported_classes": [
+            "raw_scan"
+          ],
+          "created": "2026-09-26T13:03:59.210514408Z",
+          "expires": "2026-09-26T13:18:58.231311403Z",
+          "limits": {
+            "starvation_turns": 2,
+            "enabled": true,
+            "raw_scans": 0
+          },
+          "tier": "observe"
+        }
+      ],
+      "task_usage": {
+        "raw_scans": 1,
+        "graph_expansions": 0,
+        "returned_bytes": 32768,
+        "returned_tokens": 32768,
+        "files": {}
+      },
+      "session_usage": {
+        "raw_scans": 0,
+        "graph_expansions": 0,
+        "returned_bytes": 0,
+        "returned_tokens": 0,
+        "files": null
+      },
+      "attempts": {
+        "754-87:1:activation-1": {
+          "reserved_at": "2026-09-26T13:03:49.730403266Z",
+          "attempt": {
+            "action_digest": "c903fe139de1f84c05c984ce8da35577cb56a31bd8c62170cb22b60ecaa855ea",
+            "canonical_path": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "id": "754-87:1:activation-1",
+            "binding": {
+              "host_worktree": true,
+              "producer_build": "v0.4.5-pr2990.be46915db",
+              "route": "openai_chat",
+              "index_observed_current": true,
+              "owner_observed_current": true,
+              "provider": "openai",
+              "model": "mr07activation",
+              "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+              "budget_task": "session-task",
+              "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+              "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+              "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+              "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "principal": "uid:1000",
+              "session": "c20329f2-2139-f665-33da-684113c1b4af",
+              "task": "session-task",
+              "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+              "index_generation": "1",
+              "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+            },
+            "class": "raw_scan",
+            "bytes": 32768,
+            "tokens": 32768
+          },
+          "decision": {
+            "mode": "enforce",
+            "reason": "adaptive_exploration_budget_exhausted",
+            "would_restrict": true,
+            "restricted": true,
+            "alternatives": [
+              "find_symbol",
+              "code_search",
+              "aimee index span <file> <start> <end>",
+              "context_contract_expand"
+            ]
+          },
+          "charged": false,
+          "started": false,
+          "refunded": false
+        },
+        "754-87:4:activation-4": {
+          "reserved_at": "2026-09-26T13:03:52.728408728Z",
+          "attempt": {
+            "action_digest": "c903fe139de1f84c05c984ce8da35577cb56a31bd8c62170cb22b60ecaa855ea",
+            "canonical_path": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+            "id": "754-87:4:activation-4",
+            "binding": {
+              "host_worktree": true,
+              "producer_build": "v0.4.5-pr2990.be46915db",
+              "route": "openai_chat",
+              "index_observed_current": true,
+              "owner_observed_current": true,
+              "provider": "openai",
+              "model": "mr07activation",
+              "limits_digest": "1c76a189c60d1aedc7e1020a4d8ce800f2e4c92f4b8f93dd8cd70a7e544aa79d",
+              "budget_task": "session-task",
+              "working_directory": "/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/c20329f2-f8270c2a0e5622e7/main",
+              "plan_digest": "2a6998eb274c8f8c6075b075e9fa2eee30573443394ebf6f544637232cc7c25b",
+              "source_versions_digest": "31b132fce9010465438f9769426292bbe5fbe4c51288edab8273d8a6d579ea61",
+              "workspace": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "principal": "uid:1000",
+              "session": "c20329f2-2139-f665-33da-684113c1b4af",
+              "task": "session-task",
+              "project": "local:56ef44f4-21f7-4bcf-8b67-bbd39f7ae96f",
+              "worktree_generation": "git-clean:d8845e939c62e5c4016ae61a9110491e7dfbb5a8",
+              "index_generation": "1",
+              "memory_owner": "4f4c4b4b271db3e696cc9aa80cc01f62"
+            },
+            "class": "raw_scan",
+            "bytes": 32768,
+            "tokens": 32768
+          },
+          "decision": {
+            "mode": "enforce",
+            "reason": "host_recorded_indexed_fallback",
+            "would_restrict": true,
+            "restricted": false,
+            "alternatives": [
+              "find_symbol",
+              "code_search",
+              "aimee index span <file> <start> <end>",
+              "context_contract_expand"
+            ]
+          },
+          "charged": true,
+          "started": true,
+          "refunded": false
+        }
+      },
+      "last_turn": 4,
+      "starved_turns": 0
+    }
+  }
+}
