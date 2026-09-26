@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -247,6 +248,28 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal("request scope leaked", got, status)
 	}
 	req.Project = "pagerank-recall-local"
+	// A completely full initial pool still lets a graph-only endpoint compete.
+	exec("SAVEPOINT full_initial_pool")
+	exec(`RESET ROLE; INSERT INTO memories(id,tier,kind,key,content,scope_type,scope_value,lifecycle_state,updated_at)
+ SELECT 9007199254780000+i,'L2','fact','fair-distractor-'||i,'rankneedle','project','pagerank-recall-local','active','2026-01-01' FROM generate_series(1,123) i;
+ SET LOCAL ROLE aimee_store_runtime`)
+	req.Operation, req.Limit = "diagnose", 100
+	got, status = call(handler)
+	admittedNeighbor := false
+	if got.RankingTrace != nil {
+		for _, candidate := range got.RankingTrace.Candidates {
+			if candidate.ID == strconv.FormatInt(ids["neighbor"], 10) {
+				for _, step := range candidate.Steps {
+					admittedNeighbor = admittedNeighbor || step.Operation == "pagerank"
+				}
+			}
+		}
+	}
+	if status != bus.ModuleStatusOK || !admittedNeighbor || len(got.Diagnostics) > 100 || got.RetrievalCapabilities == nil {
+		t.Fatal("full lexical pool vetoed graph or exceeded caller cap", status, got)
+	}
+	exec("ROLLBACK TO SAVEPOINT full_initial_pool; RELEASE SAVEPOINT full_initial_pool")
+	req.Operation, req.Limit = "search", 20
 	// The graph scorer may finish but the request must commit before counting it.
 	failing := bound
 	failing.db = pageRankFailCommitDB{runtimeRoleDB{evalQueryer{tx}, t}}

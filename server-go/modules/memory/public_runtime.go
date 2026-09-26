@@ -191,6 +191,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return nil, bus.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	switch verb {
 	case "fold_session":
 		if response.Count == nil {

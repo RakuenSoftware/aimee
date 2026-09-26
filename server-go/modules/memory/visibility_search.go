@@ -55,5 +55,6 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
 	if err != nil {
 		return nil, err
 	}
+	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "owner_eligible_sql", Candidates: len(records), Quota: req.Limit, IndexReadiness: "query_executed"})
 	return s.finalizeRecall(ctx, req, false, records)
 }

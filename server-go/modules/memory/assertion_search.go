@@ -42,6 +42,8 @@ type assertionTrace struct {
 	Rank    int     `json:"rank"`
 }
 type assertionHit struct {
+	priorScore            *scorePriorResult
+	lexicalBase           float64
 	OriginState           string              `json:"source_origin_state,omitempty"`
 	PriorVersionID        string              `json:"prior_version_id,omitempty"`
 	ID                    int64               `json:"assertion_id"`
@@ -205,7 +207,10 @@ func assertionParams(request DataRequest, exact Scope, query string) []any {
 }
 func (s *postgresDataStore) assertionCandidates(ctx context.Context, request DataRequest, exact Scope, query string, limit int, vector string) ([]assertionHit, error) {
 	params := assertionParams(request, exact, query)
-	score := `(CASE WHEN lower(e.source)=$4 OR lower(e.target)=$4 THEN 4.0 WHEN lower(e.relation)=$4 THEN 3.5 ELSE 1.0 END+e.confidence+e.authority_rank::double precision/100.0)`
+	baseScore := `(CASE WHEN lower(e.source)=$4 OR lower(e.target)=$4 THEN 4.0 WHEN lower(e.relation)=$4 THEN 3.5 ELSE 1.0 END)`
+	score := `(` + baseScore + `+LEAST(0.125,GREATEST(-0.125,
+ LEAST(0.0625,GREATEST(-0.0625,e.confidence::double precision/16.0))+
+ LEAST(0.0625,GREATEST(-0.0625,e.authority_rank::double precision/1600.0)))))`
 	from := ` FROM entity_edges e WHERE ` + assertionFilter + ` AND (lower(e.source) LIKE '%'||$4||'%' OR lower(e.relation) LIKE '%'||$4||'%' OR lower(e.target) LIKE '%'||$4||'%' OR lower(e.source||' '||e.relation||' '||e.target) LIKE '%'||$4||'%')`
 	order := ` ORDER BY score DESC,e.authority_rank DESC,e.id DESC LIMIT $7`
 	params = append(params, limit)
@@ -223,7 +228,7 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	if request.TypedContext != nil {
 		parentsSQL = assertionMemoryVersions
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+parentsSQL+`,`+score+` AS score`+from+order, params...)
+	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+parentsSQL+`,`+baseScore+`,`+score+` AS score`+from+order, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +237,7 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	for rows.Next() {
 		h := assertionHit{Evidence: []assertionEvidence{}, Retrieval: []assertionTrace{}}
 		var parents string
-		if err = rows.Scan(&h.ID, &h.Version, &h.PriorVersionID, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.raw); err != nil {
+		if err = rows.Scan(&h.ID, &h.Version, &h.PriorVersionID, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.lexicalBase, &h.raw); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(parents), &h.memoryParents); err != nil || len(h.memoryParents) > maxTypedMemoryParents {
@@ -254,6 +259,8 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 		}
 		h.Reason = "lexical semantic match after lifecycle, authority, and temporal filters"
 		if vector == "" {
+			proof := boundedScorePriors(assertionLexicalPriorPolicy, h.lexicalBase, assertionLexicalPriorBound, scorePriorAdjustment{Name: "confidence", Raw: h.Confidence / 16, Bound: .0625}, scorePriorAdjustment{Name: "authority", Raw: float64(h.Authority) / 1600, Bound: .0625})
+			h.priorScore = &proof
 			h.Retrieval = append(h.Retrieval, assertionTrace{Channel: "lexical", Raw: h.raw, Rank: len(hits) + 1})
 		}
 		hits = append(hits, h)
@@ -377,6 +384,7 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 	if err != nil {
 		return nil, err
 	}
+	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "eligible_temporal_assertions", Candidates: len(hits), Quota: request.Limit, IndexReadiness: "query_executed"})
 	// Optional vector errors roll back only derived indexing. They must not abort
 	// the request transaction or turn successful lexical retrieval into empty data.
 	if _, err = s.db.Exec(ctx, `SAVEPOINT assertion_vectors`); err != nil {
@@ -391,6 +399,11 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 	}
 	if _, err = s.db.Exec(ctx, `RELEASE SAVEPOINT assertion_vectors`); err != nil {
 		return nil, err
+	}
+	if vectorErr != nil {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "assertion_embedding_or_index_fallback", Quota: min(64, request.Limit*4)})
+	} else {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "version_filtered_assertion_vectors", Candidates: len(vectors), Quota: min(64, request.Limit*4), IndexReadiness: "eligible_versions_only; coverage_not_proven"})
 	}
 	find := func(id int64) int {
 		for i := range hits {
@@ -452,6 +465,7 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 						continue
 					}
 					h.Hops = hop
+					h.priorScore = nil
 					h.Reason = fmt.Sprintf("bounded semantic hop %d with temporal and scope filters reapplied", hop)
 					graphCount++
 					// The anchor lookup is a graph vote, not lexical evidence
@@ -462,6 +476,11 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 			}
 		}
 		start, end = end, len(hits)
+	}
+	if request.Assertions.Hops > 0 {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "available", Reason: "bounded_temporal_assertion_hops", Candidates: graphCount, Quota: request.Limit, IndexReadiness: "parent_and_temporal_filtered"})
+	} else {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "not_executed", Reason: "zero_requested_hops"})
 	}
 	lexicalOnly, vectorOnly := 0, 0
 	for i := range hits {
@@ -504,6 +523,16 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 		result["mode"] = "lexical_degraded"
 		result["channel_status"] = "degraded"
 		result["degraded_reason"] = "embedding or vector index unavailable"
+	}
+	priorTraces := map[string]*scorePriorResult{}
+	for _, hit := range hits {
+		if hit.priorScore != nil {
+			priorTraces[hit.StableID] = hit.priorScore
+		}
+	}
+	result["score_prior_traces"] = priorTraces
+	if capabilities := observedRetrievalCapabilities(ctx); capabilities != nil {
+		result["retrieval_capabilities"] = capabilities
 	}
 	return result, nil
 }

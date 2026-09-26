@@ -142,6 +142,38 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if source.Kind != "semantic_assertion" || source.Version.OwnerID != owner || source.Version.RecordID != fmt.Sprint(current) || source.Version.RecordRevision != "1" {
 		t.Fatal("source version disagrees with the selected owner row", projection)
 	}
+
+	t.Run("bounded selection behind thirty duplicate SQL candidates", func(t *testing.T) {
+		t.Setenv("AIMEE_MEMORY_SELECTION_POLICY", typedSelectionPolicyVersion)
+		exec(`SAVEPOINT mr09_selector; RESET ROLE`)
+		defer exec(`ROLLBACK TO SAVEPOINT mr09_selector; RELEASE SAVEPOINT mr09_selector`)
+		exec(`INSERT INTO entity_edges(id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,commit_id)
+ SELECT 9007199254790000+i,CASE WHEN i=0 THEN 'required-service' ELSE 'duplicate-service' END,'uses','MR09Selector','semantic','world_fact','persistent','A',.8,80,'assertion-search-fixture' FROM generate_series(0,30) i`)
+		exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version)
+ SELECT 'assertion-search-fixture',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version FROM entity_edges WHERE id BETWEEN 9007199254790000 AND 9007199254790030`)
+		exec(`SET LOCAL ROLE aimee_store_runtime`)
+		envelope := runHostRuntime(t, handler, `{"operation":"typed-context","query":"MR09Selector","enable_observations":false,"enable_approved_procedures":false,"context_limits":{"schema_version":1,"max_context_bytes":1600},"evidence_requirements":{"schema_version":1,"task_revision":"mr09-pg:1","query_mode":"current_state","obligations":[{"subject":"required-service","relation":"uses"}]}}`)
+		var result typedContextResult
+		if json.Unmarshal([]byte(envelope["json"].(string)), &result) != nil || result.SelectionPolicy == nil || result.Coverage == nil || result.Coverage.Roles[0].Status != "unavailable" || result.RenderedBytes > 1600 || len(result.Retained) == 0 || result.Retained[0].ID != "9007199254790000" {
+			t.Fatal("actual owner selector lost required hit or concealed dense unavailability", result.Retained, result.Coverage, result.RenderedBytes)
+		}
+		if len(result.ScorePriorTraces) != 31 {
+			t.Fatal("SQL prior evidence missing", len(result.ScorePriorTraces))
+		}
+
+		for _, item := range result.Channels["current_assertions"].Items {
+			raw, _ := json.Marshal(item)
+			var h assertionHit
+			if json.Unmarshal(raw, &h) != nil || len(h.Retrieval) != 1 || h.Retrieval[0].Raw != result.ScorePriorTraces[h.StableID].Final {
+				t.Fatal("SQL score differs from native contribution proof", h.StableID)
+			}
+		}
+		for _, p := range result.ScorePriorTraces {
+			if !validScorePriorResult(p) || p.Base != 4 {
+				t.Fatal("invalid native SQL prior", p)
+			}
+		}
+	})
 	// Stored offsets and subsecond endpoints must compare as instants, even
 	// though this public request contract retains second-precision UTC anchors.
 	exec(`SAVEPOINT assertion_instant; SET LOCAL TIME ZONE 'Asia/Tokyo'`)

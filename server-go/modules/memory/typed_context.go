@@ -38,10 +38,12 @@ type typedPackTrace struct {
 	Reason   string `json:"reason"`
 }
 type typedItem struct {
-	value    any
-	id, text string
-	tokens   int
-	source   *typedSourceVersion
+	value             any
+	id, text          string
+	tokens            int
+	selectionPriority int
+	families          []string
+	source            *typedSourceVersion
 }
 type typedChannel struct {
 	Enabled  bool   `json:"enabled"`
@@ -61,44 +63,50 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
-	recoveryExecution  *evidenceRecoveryExecution
-	Recovery           *evidenceRecoveryPlan   `json:"evidence_recovery,omitempty"`
-	Requirements       *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
-	Coverage           *evidenceCoverage       `json:"evidence_coverage,omitempty"`
-	coverageCandidates []typedItem
-	coveragePrior      *evidenceCoverage
-	Accounting         ContextAccounting        `json:"context_accounting"`
-	ProjectionVersion  int                      `json:"projection_schema_version"`
-	SelectionDigest    string                   `json:"selection_digest"`
-	ProjectionDigest   string                   `json:"projection_digest"`
-	RenderedBytes      int                      `json:"rendered_bytes"`
-	TokenCountState    string                   `json:"token_count_state"`
-	Retained           []typedProjectionRef     `json:"retained_items"`
-	SourceVersionState string                   `json:"source_version_state"`
-	Availability       string                   `json:"retrieval_availability"`
-	Status             string                   `json:"status"`
-	Enabled            bool                     `json:"default_injection"`
-	Budget             int                      `json:"total_budget_tokens"`
-	Used               int                      `json:"used_tokens"`
-	RenderedTokens     int                      `json:"rendered_tokens"`
-	EnvelopeExcess     int                      `json:"envelope_excess_tokens,omitempty"`
-	Channels           map[string]*typedChannel `json:"channels"`
-	Trace              []typedPackTrace         `json:"packing_trace"`
-	Watermark          typedWatermark           `json:"watermark"`
-	Sufficiency        string                   `json:"context_sufficiency"`
-	Reason             string                   `json:"sufficiency_reason"`
-	Rendered           string                   `json:"rendered_context"`
-	MissingContext     bool                     `json:"active_context_missing"`
-	ErrorType          string                   `json:"error_type,omitempty"`
-	Message            string                   `json:"message,omitempty"`
-	degraded           bool
-	limits             *ContextLimits
+	SelectionPolicy       *typedSelectionReport `json:"selection_policy,omitempty"`
+	selectionPending      []typedSelectionCandidate
+	selectionCollect      bool
+	ScorePriorTraces      map[string]*scorePriorResult `json:"score_prior_traces,omitempty"`
+	RetrievalCapabilities *retrievalCapabilities       `json:"retrieval_capabilities,omitempty"`
+	recoveryExecution     *evidenceRecoveryExecution
+	Recovery              *evidenceRecoveryPlan   `json:"evidence_recovery,omitempty"`
+	Requirements          *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
+	Coverage              *evidenceCoverage       `json:"evidence_coverage,omitempty"`
+	coverageCandidates    []typedItem
+	coveragePrior         *evidenceCoverage
+	Accounting            ContextAccounting        `json:"context_accounting"`
+	ProjectionVersion     int                      `json:"projection_schema_version"`
+	SelectionDigest       string                   `json:"selection_digest"`
+	ProjectionDigest      string                   `json:"projection_digest"`
+	RenderedBytes         int                      `json:"rendered_bytes"`
+	TokenCountState       string                   `json:"token_count_state"`
+	Retained              []typedProjectionRef     `json:"retained_items"`
+	SourceVersionState    string                   `json:"source_version_state"`
+	Availability          string                   `json:"retrieval_availability"`
+	Status                string                   `json:"status"`
+	Enabled               bool                     `json:"default_injection"`
+	Budget                int                      `json:"total_budget_tokens"`
+	Used                  int                      `json:"used_tokens"`
+	RenderedTokens        int                      `json:"rendered_tokens"`
+	EnvelopeExcess        int                      `json:"envelope_excess_tokens,omitempty"`
+	Channels              map[string]*typedChannel `json:"channels"`
+	Trace                 []typedPackTrace         `json:"packing_trace"`
+	Watermark             typedWatermark           `json:"watermark"`
+	Sufficiency           string                   `json:"context_sufficiency"`
+	Reason                string                   `json:"sufficiency_reason"`
+	Rendered              string                   `json:"rendered_context"`
+	MissingContext        bool                     `json:"active_context_missing"`
+	ErrorType             string                   `json:"error_type,omitempty"`
+	Message               string                   `json:"message,omitempty"`
+	degraded              bool
+	limits                *ContextLimits
 }
 
 type typedProjectionRef struct {
-	Channel string              `json:"channel"`
-	ID      string              `json:"stable_id"`
-	Source  *typedSourceVersion `json:"source_version,omitempty"`
+	SelectionPriority *int                `json:"selection_priority,omitempty"`
+	Channel           string              `json:"channel"`
+	ID                string              `json:"stable_id"`
+	Source            *typedSourceVersion `json:"source_version,omitempty"`
 }
 
 func typedEstimate(text string) int {
@@ -221,6 +229,7 @@ func newTypedContext(request DataRequest) *typedContextResult {
 		}
 		result.Channels[name] = &typedChannel{Enabled: cfg.Flags[name], Budget: cfg.Budgets[name], Status: status, Items: []any{}}
 	}
+	result.configureSelection()
 	return result
 }
 func (r *typedContextResult) trace(name, id string, tokens int, included bool, reason string) {
@@ -231,6 +240,10 @@ func (r *typedContextResult) trace(name, id string, tokens int, included bool, r
 	r.Trace = append(r.Trace, typedPackTrace{name, id, tokens, decision, reason})
 }
 func (r *typedContextResult) add(name string, item typedItem) {
+	if r.selectionCollect {
+		r.collectSelection(name, item)
+		return
+	}
 	if r.Requirements != nil && name != "working_context" {
 		r.coverageCandidates = append(r.coverageCandidates, item)
 	}
@@ -346,6 +359,7 @@ func (cache typedProjectionCache) render(r *typedContextResult, size int) string
 	return out.String()
 }
 func (r *typedContextResult) finish() error {
+	r.applySelection()
 	byteLimit, err := r.limits.byteLimit(maxDataBody)
 	if err != nil {
 		return err
@@ -365,6 +379,7 @@ func (r *typedContextResult) finish() error {
 			break
 		}
 		removed := false
+		dropPriority := r.selectionDropPriority()
 		for i := len(typedChannelOrder) - 1; i >= 0; i-- {
 			name := typedChannelOrder[i]
 			c := r.Channels[name]
@@ -373,6 +388,9 @@ func (r *typedContextResult) finish() error {
 				continue
 			}
 			item := c.selected[n-1]
+			if r.SelectionPolicy != nil && item.selectionPriority < dropPriority {
+				continue
+			}
 			c.Items = c.Items[:n-1]
 			c.selected = c.selected[:n-1]
 			c.Used -= item.tokens
@@ -422,9 +440,15 @@ func (r *typedContextResult) finish() error {
 		c := r.Channels[name]
 		count += len(c.Items)
 		for _, item := range c.selected {
-			r.Retained = append(r.Retained, typedProjectionRef{Channel: name, ID: item.id, Source: item.source})
+			ref := typedProjectionRef{Channel: name, ID: item.id, Source: item.source}
+			if r.SelectionPolicy != nil {
+				priority := item.selectionPriority
+				ref.SelectionPriority = &priority
+			}
+			r.Retained = append(r.Retained, ref)
 		}
 	}
+	r.finishSelectionReport()
 	r.SelectionDigest = typedSelectionDigest(r.ProjectionDigest, r.Retained)
 	r.SourceVersionState = typedSourceVersionState(r.Retained)
 	switch {
@@ -477,6 +501,7 @@ func (r *typedContextResult) fitProjectionBytes(limit int) error {
 // consistency, not current authorization or provider dispatch.
 func decodeTypedProjection(raw string) (*typedContextResult, error) {
 	var input struct {
+		SelectionPolicy *typedSelectionReport   `json:"selection_policy"`
 		Requirements    *evidenceRequirementSet `json:"evidence_requirements"`
 		Coverage        *evidenceCoverage       `json:"evidence_coverage"`
 		SelectionDigest string                  `json:"selection_digest"`
@@ -520,6 +545,15 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 		cfg.Flags[name] = true
 	}
 	r := newTypedContext(DataRequest{TypedContext: cfg})
+	r.selectionCollect = false
+	r.SelectionPolicy = nil
+	if input.SelectionPolicy != nil {
+		p := input.SelectionPolicy
+		if p.ArtifactDigest != rankingArtifactDigest(true) || p.Version != typedSelectionPolicyVersion || p.Exposure != "disabled" || p.Tolerance != 3 || p.MaxItems != 64 {
+			return invalid()
+		}
+		r.SelectionPolicy = p
+	}
 	r.coveragePrior = input.Coverage
 	if cfg.Requirements != nil && (input.Coverage == nil || input.Coverage.SelectionDigest != input.SelectionDigest) {
 		return invalid()
@@ -544,6 +578,14 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 			seen[key] = true
 			r.Channels[name].Items = append(r.Channels[name].Items, value)
 			item := typedItem{value: value, id: ref.ID, source: ref.Source}
+			if ref.SelectionPriority != nil {
+				if r.SelectionPolicy == nil || *ref.SelectionPriority < 0 || *ref.SelectionPriority > 3 {
+					return invalid()
+				}
+				item.selectionPriority = *ref.SelectionPriority
+			} else if r.SelectionPolicy != nil {
+				return invalid()
+			}
 			r.Channels[name].selected = append(r.Channels[name].selected, item)
 			if name != "working_context" && r.Requirements != nil {
 				r.coverageCandidates = append(r.coverageCandidates, item)
@@ -680,6 +722,7 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 		if err != nil {
 			r.fail("current_assertions", "semantic retrieval unavailable")
 		} else {
+			r.ScorePriorTraces, _ = result["score_prior_traces"].(map[string]*scorePriorResult)
 			if result["channel_status"] != "ok" {
 				r.fail("current_assertions", "lexical fallback; vector unavailable")
 			}
@@ -699,7 +742,11 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 				if source != nil {
 					source.ReadPolicy = &sourceReadPolicy{ValidAt: request.Assertions.ValidAt, BelievedAt: request.Assertions.BelievedAt, Historical: request.Assertions.Historical}
 				}
-				r.add(name, typedItem{value: h, id: h.StableID, text: h.Rendered, source: source})
+				item := typedItem{value: h, id: h.StableID, text: h.Rendered, source: source}
+				if r.selectionCollect {
+					item.families = s.selectionAssertionFamilies(ctx, h)
+				}
+				r.add(name, item)
 			}
 		}
 	}
@@ -765,6 +812,7 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 			return *r, err
 		}
 	}
+	r.RetrievalCapabilities = observedRetrievalCapabilities(ctx)
 	if invalid {
 		r.Reason = "invalid temporal request; no context assembled"
 	}

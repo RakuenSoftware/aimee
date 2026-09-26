@@ -16,6 +16,17 @@ func validatedHealthRanking(steps []rankingStep) []rankingStep {
 		if !healthLabelName(step.Operation) || !finite(step.Score) || len(step.Contributions) == 0 || len(step.Contributions) > 8 {
 			return nil
 		}
+		if step.PriorPolicy != "" && !healthLabelName(step.PriorPolicy) {
+			return nil
+		}
+		if step.BaseRank != 0 || step.FinalRank != 0 || step.MaxRankDisplacement != 0 {
+			if step.PriorPolicy != nativePriorPolicy || step.MaxRankDisplacement != nativePriorRankDisplacement || step.BaseRank < 1 || step.FinalRank < 1 || step.BaseRank > pageRankCandidateCap || step.FinalRank > pageRankCandidateCap || math.Abs(float64(step.BaseRank-step.FinalRank)) > float64(nativePriorRankDisplacement) {
+				return nil
+			}
+		}
+		if step.PriorScore != nil && (!validScorePriorResult(step.PriorScore) || step.PriorScore.Policy != step.PriorPolicy || math.Abs(step.PriorScore.Final-step.Score) > 1e-12) {
+			return nil
+		}
 		for _, c := range step.Contributions {
 			if !healthLabelName(c.Arm) || c.Rank < 0 || c.Rank > maxDataBody || !finite(c.Value) {
 				return nil

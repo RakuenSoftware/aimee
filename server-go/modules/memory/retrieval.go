@@ -14,8 +14,11 @@ type Diagnostic struct {
 }
 
 type DiagnosticParts struct {
-	ScoreEvidence string        `json:"score_evidence,omitempty"`
-	RankingSteps  []rankingStep `json:"ranking_steps,omitempty"`
+	PriorPolicy    *rankPriorPolicy `json:"prior_policy,omitempty"`
+	PriorBaseRank  int              `json:"prior_base_rank,omitempty"`
+	PriorFinalRank int              `json:"prior_final_rank,omitempty"`
+	ScoreEvidence  string           `json:"score_evidence,omitempty"`
+	RankingSteps   []rankingStep    `json:"ranking_steps,omitempty"`
 
 	RankingPolicy string  `json:"ranking_policy,omitempty"`
 	RetrievalBase float64 `json:"retrieval_base,omitempty"`
@@ -215,6 +218,12 @@ func diagnosticFor(record Record, query string) Diagnostic {
 	parts.GraphScore, parts.CodeProximity = record.graphScore, record.codeProximity
 	if record.pageRankApplied {
 		parts = DiagnosticParts{RankingPolicy: pageRankRecallPolicy, RetrievalBase: record.retrievalBase, PageRank: record.pageRankBonus, Confidence: record.Confidence, Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
+	}
+	if record.pageRankApplied {
+		policy := nativeRankingPriorPolicy()
+		parts.PriorPolicy = &policy
+		parts.PriorBaseRank = record.priorBaseRank
+		parts.PriorFinalRank = record.priorFinalRank
 	}
 	if len(record.rankingSteps) > 0 {
 		parts.ScoreEvidence = "observed_ranking_steps"

@@ -27,9 +27,14 @@ type rankingContribution struct {
 	Value float64 `json:"value"`
 }
 type rankingStep struct {
-	Operation     string                `json:"operation"`
-	Score         float64               `json:"score"`
-	Contributions []rankingContribution `json:"contributions"`
+	PriorScore          *scorePriorResult     `json:"score_priors,omitempty"`
+	PriorPolicy         string                `json:"prior_policy,omitempty"`
+	BaseRank            int                   `json:"base_rank,omitempty"`
+	FinalRank           int                   `json:"final_rank,omitempty"`
+	MaxRankDisplacement int                   `json:"max_rank_displacement,omitempty"`
+	Operation           string                `json:"operation"`
+	Score               float64               `json:"score"`
+	Contributions       []rankingContribution `json:"contributions"`
 }
 
 // A step describes the score produced at that stage, not an additive bonus to
@@ -53,6 +58,7 @@ func fuseRanked(ctx context.Context, lexical, semantic []Record, limit int, left
 		observed = map[int64][]rankingContribution{}
 	}
 	arms := []string{leftArm, rightArm}
+	conflicts := map[int64]bool{}
 	scores := map[int64]float64{}
 	records := map[int64]Record{}
 	for arm, list := range [][]Record{lexical, semantic} {
@@ -63,6 +69,11 @@ func fuseRanked(ctx context.Context, lexical, semantic []Record, limit int, left
 				continue
 			}
 			seen[r.ID] = true
+			if old, exists := records[r.ID]; exists && !sameRankedVersion(old, r) {
+				conflicts[r.ID] = true
+				rank++
+				continue
+			}
 			contribution := 1 / float64(60+rank+1)
 			scores[r.ID] += contribution
 			if observed != nil {
@@ -91,6 +102,10 @@ func fuseRanked(ctx context.Context, lexical, semantic []Record, limit int, left
 	}
 	out := make([]Record, 0, len(records))
 	for _, r := range records {
+		if conflicts[r.ID] {
+			captureRankingCandidate(ctx, r, "conflicting_source_version")
+			continue
+		}
 		r.retrievalScore = scores[r.ID]
 		out = append(out, r)
 	}

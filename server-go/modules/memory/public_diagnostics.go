@@ -190,7 +190,7 @@ func diagnosticTraceRows(diagnostics []Diagnostic, rows []publicDiagnostic) []ma
 		results = append(results, map[string]any{
 			"subject_kind": "memory", "subject_id": strconv.FormatInt(m.ID, 10), "lane": "hybrid",
 			"trace_scope": "returned_candidates", "native_score_state": nativeState,
-			"ranking_policy": p.RankingPolicy, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "lane_rank": i + 1, "final_rank": i + 1, "scope_decision": "allowed",
+			"prior_policy": p.PriorPolicy, "prior_base_rank": p.PriorBaseRank, "prior_final_rank": p.PriorFinalRank, "ranking_policy": p.RankingPolicy, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "lane_rank": i + 1, "final_rank": i + 1, "scope_decision": "allowed",
 			"semantic_value": p.Semantic, "semantic_weight": 1, "keyword_value": p.Lexical + p.Coverage, "keyword_weight": 1,
 			"graph_value": p.GraphScore, "graph_weight": p.GraphWeight, "temporal_value": p.Temporal, "temporal_weight": 1,
 			"outcome_value": p.Outcome, "outcome_weight": 1, "final_score": final,

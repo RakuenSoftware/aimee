@@ -296,9 +296,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	if verb == "find_facts_visible" && args.stringOr("format", "") == "mcp" {
 		missing := scoped && !request.IncludeAll && request.Workspace == "" && request.Project == ""
-		return commandResult(map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing})
+		result := map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing}
+		if response.RetrievalCapabilities != nil {
+			result["retrieval_capabilities"] = response.RetrievalCapabilities
+		}
+		return commandResult(result)
 	}
 	result := map[string]any{"status": "ok"}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	if args.stringOr("view", "") == "server" {
 		result["store"] = "kb"
 	}

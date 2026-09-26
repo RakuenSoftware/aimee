@@ -181,6 +181,8 @@ type Record struct {
 	retrievalScore  float64
 	retrievalBase   float64
 	pageRankBonus   float64
+	priorBaseRank   int
+	priorFinalRank  int
 	pageRankApplied bool
 	graphScore      float64
 	codeProximity   float64
@@ -194,11 +196,12 @@ type Record struct {
 }
 
 type DataResponse struct {
-	MemoryPreviews    []ingressMemoryPreview `json:"memory_previews,omitempty"`
-	PreviewProjection *previewProjection     `json:"preview_projection,omitempty"`
-	FactProjection    *factProjection        `json:"fact_projection,omitempty"`
-	Proposal          *correctionProposal    `json:"proposal,omitempty"`
-	MutationReceipt   *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+	RetrievalCapabilities *retrievalCapabilities `json:"retrieval_capabilities,omitempty"`
+	MemoryPreviews        []ingressMemoryPreview `json:"memory_previews,omitempty"`
+	PreviewProjection     *previewProjection     `json:"preview_projection,omitempty"`
+	FactProjection        *factProjection        `json:"fact_projection,omitempty"`
+	Proposal              *correctionProposal    `json:"proposal,omitempty"`
+	MutationReceipt       *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 
 	Changes            *MemoryChangePage    `json:"changes,omitempty"`
 	Read               *MemoryReadResult    `json:"read,omitempty"`
@@ -801,8 +804,12 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		return nil, err
 	}
 	rows.Close()
+	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "owner_eligible_sql", Candidates: len(records), Quota: limit, IndexReadiness: "query_executed"})
 	lanes := recallLanes{}
 	lanes.add(records, laneLexical)
+	if s.placement == PlacementServer && s.personal == nil && query != "" {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "local_embedder_not_configured"})
+	}
 	if s.personal != nil && query != "" {
 		// Leave time to return the local lexical result when DNS or the model
 		// stalls. Consuming the bus deadline would discard that valid result.
@@ -829,9 +836,12 @@ ORDER BY (lower(key)=lower($7)) DESC,
 				return nil, releaseErr
 			}
 		}
-		if err == nil {
+		if err != nil {
+			recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "bounded_local_vector_fallback", Quota: limit})
+		} else {
+			recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "local_versioned_candidates", Candidates: len(semantic), Quota: limit, IndexReadiness: "coverage_not_proven"})
 			lanes.add(semantic, laneSemantic)
-			records = fuseRanked(ctx, records, semantic, limit, "lexical", "semantic")
+			records = fuseRanked(ctx, records, semantic, len(records)+len(semantic), "lexical", "semantic")
 		}
 	}
 	req.lanes = lanes
@@ -1317,6 +1327,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return encoded, bus.ModuleStatusOK
 	}
 
+	ctx = withRetrievalCapabilities(ctx, options.placement, request)
 	response := DataResponse{Read: readResult}
 	rollbackOnly := false
 	// Pin policy to one lazy snapshot per request, including its error. A
@@ -3146,6 +3157,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 		}
 	}
+	response.RetrievalCapabilities = observedRetrievalCapabilities(ctx)
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return nil, bus.ModuleStatusInternal

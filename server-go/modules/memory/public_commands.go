@@ -334,6 +334,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok", "store": "user"}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	switch verb {
 	case "store", "get", "supersede":
 		if len(response.Records) == 0 {
@@ -442,6 +445,9 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(response.Payload)
 	}
 	result := map[string]any{"status": "ok", "recall": response.Payload}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	if records := captureSharedRecallFamilies(options, invocation, request, response.Payload); len(records) > 0 {
 		if raw, err := json.Marshal(records); err == nil && len(raw) <= 12000 {
 			result["health_families"] = json.RawMessage(raw)

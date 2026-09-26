@@ -202,6 +202,7 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 	if err != nil {
 		return nil, err
 	}
+	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "eligible_native_active_context_sql", Candidates: len(active), Quota: activeCap, IndexReadiness: "query_executed"})
 	if s.placement == PlacementServer && query != "" {
 		active, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, query, "", "", activeCap)
 		if err != nil {
@@ -254,6 +255,10 @@ ORDER BY array_position($1::text::bigint[],id)`, memoryIDsParameter(ids))
 			}
 		}
 	}
+	for _, record := range active[min(len(active), activeCap):] {
+		captureRankingCandidate(ctx, record, "caller_limit")
+	}
+	active = active[:min(len(active), activeCap)]
 	var commitments []Record
 	if snapshot != nil {
 		var why map[int64]string

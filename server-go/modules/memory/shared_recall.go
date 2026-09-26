@@ -19,9 +19,11 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		return base, nil
 	}
 	if s.recallExecutor == nil && !s.requireSemantic {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "shared_embedder_not_configured"})
 		return base, nil
 	}
 	unavailable := func() ([]Record, error) {
+		recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "unavailable", Reason: "bounded_embedding_or_index_fallback", Quota: min(req.Limit, 256)})
 		if s.requireSemantic {
 			return nil, errors.New("memory: evaluation semantic recall unavailable")
 		}
@@ -157,7 +159,8 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		}
 		sort.SliceStable(combined, func(i, j int) bool { return scopeRank(combined[i]) < scopeRank(combined[j]) })
 	}
-	return combined[:min(len(combined), req.Limit)], nil
+	recordRetrievalArm(ctx, "dense", retrievalArmObservation{State: "available", Reason: "active_version_and_serving_identity_verified", Candidates: len(semantic), Quota: min(req.Limit, 256), IndexVersion: version, IndexReadiness: "eligible_versions_only; coverage_not_proven"})
+	return combined, nil
 }
 
 func sharedSemanticFloorScale(dimension int, configured float64) float64 {

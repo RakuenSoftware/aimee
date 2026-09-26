@@ -30,9 +30,10 @@ func (s *postgresDataStore) graphFusionEnabled() bool { return s.fusionEnabled }
 const graphNodeBudget = 192
 
 type graphVisit struct {
-	Node  string  `json:"node"`
-	Score float64 `json:"score"`
-	Hop   int     `json:"hop"`
+	Priors *scorePriorResult `json:"-"`
+	Node   string            `json:"node"`
+	Score  float64           `json:"score"`
+	Hop    int               `json:"hop"`
 }
 
 // Repeat the parent visibility predicate at both seed and result collection.
@@ -71,7 +72,8 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
 			continue
 		}
 		seen[node] = len(visits)
-		visits = append(visits, graphVisit{node, graphEdgeScore("", graphCodeNode(node), 0, 1, 0, 1, ""), 0})
+		proof := boundedGraphRelevance("", graphCodeNode(node), 0, 1, 0, 1, "")
+		visits = append(visits, graphVisit{Node: node, Score: proof.Final, Hop: 0, Priors: &proof})
 		if len(visits) == graphNodeBudget {
 			break
 		}
@@ -115,12 +117,14 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
 			if node == "" || (!code && graphCodeNode(node)) {
 				continue
 			}
-			score := graphEdgeScore(relation, graphCodeNode(node), structural, observed, graphUtility(utility, touched, now), hop, class)
+			proof := boundedGraphRelevance(relation, graphCodeNode(node), structural, observed, graphUtility(utility, touched, now), hop, class)
+			score := proof.Final
 			if index, ok := seen[node]; ok {
 				// Equal-hop paths may carry stronger evidence. A later hop never replaces
 				// the shortest path or causes a cycle to be expanded again.
 				if visits[index].Hop == hop && score > visits[index].Score {
 					visits[index].Score = score
+					visits[index].Priors = &proof
 				}
 				continue
 			}
@@ -128,7 +132,7 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
 				continue
 			}
 			seen[node] = len(visits)
-			visits = append(visits, graphVisit{node, score, hop})
+			visits = append(visits, graphVisit{Node: node, Score: score, Hop: hop, Priors: &proof})
 		}
 		err = rows.Err()
 		rows.Close()
@@ -142,6 +146,13 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
 
 func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
 	if !s.graphFusionEnabled() || s.placement != PlacementKB || req.Query == "" {
+		state, reason := "not_executed", "owner_graph_policy_disabled"
+		if s.placement != PlacementKB {
+			state, reason = "unsupported", "placement_has_no_graph_arm"
+		} else if req.Query == "" {
+			reason = "empty_query"
+		}
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: state, Reason: reason})
 		return base, nil
 	}
 	var available bool
@@ -149,6 +160,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 		return nil, err
 	}
 	if !available {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "unavailable", Reason: "graph_index_absent"})
 		return base, nil
 	}
 	ids := make([]int64, 0, len(base))
@@ -181,13 +193,23 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if err != nil {
 		return nil, err
 	}
+	if len(req.CodePointIDs) > 0 && graphCodeQuery(req.Query) {
+		recordRetrievalArm(ctx, "code", retrievalArmObservation{State: "available", Reason: "host_supplied_structural_seeds_not_an_independent_score_arm", Candidates: len(codeSeeds), Quota: 32, IndexReadiness: "current_project_generation_filtered"})
+	} else {
+		recordRetrievalArm(ctx, "code", retrievalArmObservation{State: "not_executed", Reason: "no_code_query_or_host_code_points"})
+	}
 	seeds = append(seeds, codeSeeds...)
 	visits, err := s.expandGraph(ctx, seeds, graphCodeQuery(req.Query), req, exact)
 	if err != nil {
 		return nil, err
 	}
 	if len(visits) == 0 {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "available", Reason: "no_eligible_graph_seeds", Quota: req.Limit, IndexReadiness: "query_executed"})
 		return base, nil
+	}
+	proofs := map[string]*scorePriorResult{}
+	for _, visit := range visits {
+		proofs[visit.Node] = visit.Priors
 	}
 	encoded, _ := json.Marshal(visits)
 	limit := req.Limit
@@ -197,10 +219,10 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	args = append(graphScopeArgs(req, exact), string(encoded), limit, memoryIDsParameter(ids))
 	rows, err = s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisibleSQL(true)+`), reached AS (
  SELECT * FROM jsonb_to_recordset($9::jsonb) AS n(node text,score double precision,hop int)), ranked AS (
- SELECT e.memory_id,max(n.score) AS score,COALESCE(max(n.score) FILTER(WHERE n.node ~ '^(file|symbol|import|export|route|project):'),0) AS code
+ SELECT e.memory_id,(array_agg(n.node ORDER BY n.score DESC,n.node))[1] AS winning_node,max(n.score) AS score,COALESCE(max(n.score) FILTER(WHERE n.node ~ '^(file|symbol|import|export|route|project):'),0) AS code
  FROM reached n JOIN memory_entities e ON e.entity=n.node GROUP BY e.memory_id)
  SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,r.score,r.code,
- (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),m.record_revision::text
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),m.record_revision::text,r.winning_node
  FROM ranked r JOIN visible m ON m.id=r.memory_id
  ORDER BY CASE WHEN $1 THEN 0 WHEN m.scope_type='project' AND m.scope_value=$5 THEN 0
  WHEN m.scope_type='workspace' AND m.scope_value=$6 THEN 1 WHEN m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared') THEN 2 ELSE 3 END,
@@ -212,9 +234,10 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	signals := map[int64]Record{}
 	for rows.Next() {
 		var r Record
+		var winningNode string
 		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
 		r.currentRead = true
-		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
+		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity, &r.Version.OwnerID, &r.Version.RecordRevision, &winningNode); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -222,6 +245,18 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 		if !r.Version.validFor(r.ID) {
 			rows.Close()
 			return nil, fmt.Errorf("invalid graph memory version")
+		}
+		if proof := proofs[winningNode]; proof != nil && rankingTraceEnabled(ctx) {
+			contributions := []rankingContribution{{Arm: "query_graph_base", Value: proof.Base}}
+			for _, p := range proof.Adjustments {
+				contributions = append(contributions, rankingContribution{Arm: p.Name, Value: p.Applied})
+			}
+			prior := r.retrievalScore
+			r.retrievalScore = proof.Final
+			recordRankingStep(ctx, &r, "native_bounded_graph_relevance", contributions...)
+			r.rankingSteps[len(r.rankingSteps)-1].PriorPolicy = proof.Policy
+			r.rankingSteps[len(r.rankingSteps)-1].PriorScore = proof
+			r.retrievalScore = prior
 		}
 		graph = append(graph, r)
 		signals[r.ID] = r
@@ -231,6 +266,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if err != nil {
 		return nil, err
 	}
+	recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "available", Reason: "eligible_bounded_two_hop_graph", Candidates: len(graph), Quota: limit, IndexReadiness: "generation_and_parent_filtered"})
 	req.lanes.add(graph, laneGraph)
 	out := fuseRanked(ctx, base, graph, len(base)+len(graph), "prior_candidates", "graph")
 	for i := range out {
@@ -243,9 +279,6 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	// may reorder within a scope but cannot push a global match ahead of a local one.
 	if !exact {
 		sort.SliceStable(out, func(i, j int) bool { return recallScopeRank(out[i], req) < recallScopeRank(out[j], req) })
-	}
-	if len(out) > limit {
-		out = out[:limit]
 	}
 	return out, nil
 }
