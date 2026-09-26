@@ -100,6 +100,8 @@ void ingress_preinject_set_request_disabled(int disabled);
  * every request. */
 int ingress_preinject_mint_turn_id(char *buf, size_t len);
 void ingress_preinject_set_turn_id(const char *turn_id);
+/* Host-owned primary turn identity for optional receipt health metadata. */
+void ingress_preinject_set_health_turn_id(const char *turn_id);
 const char *ingress_preinject_turn_id(void);
 
 /* Per-turn aimee session id, recovered at HTTP ingress from the primary provider's

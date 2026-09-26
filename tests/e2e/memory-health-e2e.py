@@ -51,11 +51,18 @@ def inside():
         if not rows:
             raise RuntimeError('requires real prepared provider inputs from the native fixture')
         bindings = [json.loads(row[2])['binding'] for row in rows]
-        binding = next((b for b in bindings if any(
+        captured_attempts = set()
+        for attempt, detail in db.execute("SELECT subject,detail FROM audit_event WHERE actor_role='host' AND actor_principal='uid:1000' AND action='memory.provider.assembled'"):
+            if json.loads(detail).get('projection', {}).get('health_context'):
+                captured_attempts.add(attempt)
+        # Native system/task hints can be absent or exceed the capture bound.
+        # Select the real primary-session population with a captured hint;
+        # unsupported populations must retain explicit metadata gaps.
+        binding = next((b for b in bindings if b['attempt_id'] in captured_attempts and any(
             item.get('source_version', {}).get('record_kind') == 'user_memory_record'
             for item in b.get('sources', []))), None)
         if binding is None:
-            raise RuntimeError('native fixture did not retain a versioned personal memory')
+            raise RuntimeError('native fixture did not capture a query with versioned personal memory')
         scope = dict(project=binding['project'], workspace=binding['workspace'], window='1h')
         result = query(scope)
         health = result.get('health', {})
@@ -90,8 +97,10 @@ def inside():
             raise RuntimeError('health counters do not match committed stage evidence')
         if any(identity in json.dumps(result) for identity in identifiers):
             raise RuntimeError('aggregate exposed private attempt identities')
-        if not health['metadata_gaps'].get('task_turn_links') or 'Missing task_turn_links:' not in result.get('text', ''):
+        if not health['metadata_gaps'].get('previous_eligible_turn') or 'Missing previous_eligible_turn:' not in result.get('text', ''):
             raise RuntimeError('legacy metadata gap was hidden')
+        if health['metadata_gaps'].get('task_turn_links', 0) != 0:
+            raise RuntimeError('host-owned primary task and turn were not joined to receipts')
         fingerprints = sum(actual.values()) - health['metadata_gaps'].get('query_fingerprint', 0)
         if fingerprints <= 0:
             raise RuntimeError('no serving query fingerprint reached the receipt collector')
@@ -112,18 +121,19 @@ def inside():
         for key in ('project', 'workspace'):
             if scope[key]:
                 cli.extend(['--' + key, scope[key]])
-        cli_json = json.loads(subprocess.check_output(cli + ['--json'], text=True, timeout=90))
+        cli_env = dict(os.environ, AIMEE_API_ENDPOINT='unix:/var/lib/aimee/aimee-http.sock')
+        cli_json = json.loads(subprocess.check_output(cli + ['--json'], env=cli_env, text=True, timeout=90))
         if cli_json.get('health', {}).get('exact_retained_attempts_by_stage') != actual:
             raise RuntimeError('CLI JSON differs from authenticated HTTP aggregate')
-        cli_text = subprocess.check_output(cli, text=True, timeout=90)
-        if 'Window complete:' not in cli_text or 'Missing task_turn_links:' not in cli_text:
+        cli_text = subprocess.check_output(cli, env=cli_env, text=True, timeout=90)
+        if 'Window complete:' not in cli_text or 'Missing previous_eligible_turn:' not in cli_text:
             raise RuntimeError('CLI text hides health coverage or metadata gaps')
         forged = query(dict(scope, health_principal='another-principal', principal='another-principal', ledger_events=[], collection_complete=True))
         if forged['health']['exact_retained_attempts_by_stage'] != actual:
             raise RuntimeError('public fields changed authenticated collection')
         print(json.dumps(dict(counts=actual, sampled=health['sampled_invocations'], scope_isolated=True,
                               late_stage_reconciled=True, metadata_gaps_visible=True, public_fields_ignored=True,
-                              serving_fingerprints=fingerprints, native_kind_observed=True, canonical_family_observed=True, scoped_traces=True, cli_parity=True,
+                              serving_fingerprints=fingerprints, native_kind_observed=True, canonical_family_observed=True, owned_task_turn_observed=True, scoped_traces=True, cli_parity=True,
                               report_latency_seconds=report_latencies)))
 
 
@@ -160,6 +170,7 @@ def main():
         check('health missing metadata is explicit in JSON and text', before['metadata_gaps_visible'])
         check('health keyed query capture and native selection kind reach durable receipts', before['serving_fingerprints'] > 0 and before['native_kind_observed'])
         check('health canonical personal source family matches retained revision', before['canonical_family_observed'])
+        check('health uses the actual host-owned primary task and turn', before['owned_task_turn_observed'])
         check('health optional receipt references remain in exact scope', before['scoped_traces'])
         check('health CLI JSON and readable text match authenticated HTTP', before['cli_parity'])
         check('health foreign UDS principal cannot enumerate another population', run(0)['foreign_principal_isolated'])

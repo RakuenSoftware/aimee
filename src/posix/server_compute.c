@@ -844,6 +844,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * below) can create + bind an enforced work-item. Cleared with the override. */
    ingress_preinject_set_session_id(aimee_sid && aimee_sid[0] ? aimee_sid : "");
    ingress_preinject_set_task_requirements(cctx->req);
+   /* Publish the actual host-owned primary turn on the worker thread. The
+    * HTTP thread's TLS does not survive asynchronous dispatch. */
+   ingress_preinject_set_health_turn_id(cctx->presence_turn_id);
 
    stream_event(cctx, "turn_start", NULL, NULL);
    /* Surface mirror drift (client head vs server mirror) before the turn acts —
@@ -901,6 +904,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
+   ingress_preinject_set_health_turn_id("");
    workspace_turn_unbind_active();
    run_cmd_set_cwd(NULL);
    free(system_prompt);

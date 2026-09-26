@@ -60,6 +60,17 @@ void ingress_preinject_set_request_disabled(int disabled)
  * same reason as the disable override: the ingress runs synchronously on the
  * request thread. A UUID is 36 chars; 40 leaves room for the NUL. */
 static __thread char g_turn_id[40] = "";
+/* Presence turn sequences are scoped to their host request; they must never
+ * replace globally unique retrieval-event IDs. Go binds this optional identity
+ * to the exact request, task and prepared receipt. */
+static __thread char g_health_turn_id[64] = "";
+
+void ingress_preinject_set_health_turn_id(const char *turn_id)
+{
+   g_health_turn_id[0] = '\0';
+   if (turn_id && strlen(turn_id) < sizeof(g_health_turn_id))
+      snprintf(g_health_turn_id, sizeof(g_health_turn_id), "%s", turn_id);
+}
 
 int ingress_preinject_mint_turn_id(char *buf, size_t len)
 {
@@ -399,7 +410,11 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
    /* Host-issued execution identity only; never accepted from HTTP fields. */
    const char *health_enabled = getenv("AIMEE_MEMORY_HEALTH_ENABLED");
    if (health_enabled && strcmp(health_enabled, "1") == 0 && context->exploration_binding[0])
+   {
       cJSON_AddStringToObject(request, "health_execution_binding", context->exploration_binding);
+      if (g_health_turn_id[0])
+         cJSON_AddStringToObject(request, "health_turn_id", g_health_turn_id);
+   }
    cJSON_AddStringToObject(request, "producer_build", AIMEE_VERSION);
    const char *caller_limits =
        context->request_budget_present ? context->request_budget_limits : "";

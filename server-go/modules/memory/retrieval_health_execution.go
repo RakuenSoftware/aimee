@@ -21,7 +21,8 @@ func (c healthExecutionContext) valid(binding string) bool {
 }
 func receiptMetadataWithExecution(entry *sourceReleaseEntry, args commandArgs, binding providerReceiptBinding, digest string) json.RawMessage {
 	metadata := receiptMetadataWithHealth(entry)
-	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" || binding.TurnID == "" {
+	turn := args.stringOr("health_turn_id", binding.TurnID)
+	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") != "1" || turn == "" || len(turn) > 128 || binding.RequestID == "" || len(binding.RequestID) > 256 {
 		return metadata
 	}
 	raw := args.stringOr("health_execution_binding", "")
@@ -45,7 +46,7 @@ func receiptMetadataWithExecution(entry *sourceReleaseEntry, args commandArgs, b
 		}
 	}
 	task := releaseDigest([]string{"health-owned-task-v1", execution.Principal, execution.Session, execution.Task, binding.Project, binding.Workspace})
-	c := healthExecutionContext{Binding: digest, Task: task, Turn: releaseDigest([]string{"health-owned-ingress-turn-v1", task, binding.TurnID}), QueryClass: class, Source: "host_exploration_binding"}
+	c := healthExecutionContext{Binding: digest, Task: task, Turn: releaseDigest([]string{"health-owned-ingress-turn-v1", task, binding.RequestID, turn}), QueryClass: class, Source: "host_exploration_binding"}
 	if !c.valid(digest) {
 		return metadata
 	}

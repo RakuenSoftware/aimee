@@ -9,7 +9,7 @@ import (
 
 func TestHealthExecutionReceiptUsesOwnedExactScope(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_HEALTH_ENABLED", "1")
-	binding := providerReceiptBinding{TurnID: "ingress-turn", Project: "app", Workspace: "work"}
+	binding := providerReceiptBinding{RequestID: "host-request", TurnID: "ingress-turn", Project: "app", Workspace: "work"}
 	digest := strings.Repeat("a", 64)
 	entry := &sourceReleaseEntry{assemblyMetadata: json.RawMessage(`{"projection_commitment":"unchanged"}`), assemblyParts: []sourceReleasePart{{CoverageStatus: "complete", RequirementDigest: strings.Repeat("b", 64)}}}
 	fields := map[string]string{"principal": "alice", "session": "owned-session", "task": "session-task", "project": "app", "workspace": "work"}
@@ -53,8 +53,19 @@ func TestHealthExecutionReceiptUsesOwnedExactScope(t *testing.T) {
 	if context = read(receiptMetadataWithExecution(entry, args, binding, digest)); context == nil || context.Task != first.Task || context.Turn == first.Turn {
 		t.Fatal("task/turn identity is unstable")
 	}
+	priorTurn := context.Turn
+	binding.RequestID = "another-host-request"
+	context = read(receiptMetadataWithExecution(entry, args, binding, digest))
+	if context == nil || context.Task != first.Task || context.Turn == priorTurn {
+		t.Fatal("reused presence sequence aliased a different host request")
+	}
 	if context.valid(strings.Repeat("c", 64)) {
 		t.Fatal("metadata transferred across receipt bindings")
+	}
+	binding.TurnID = ""
+	args["health_turn_id"] = json.RawMessage(`"primary-turn-1"`)
+	if read(receiptMetadataWithExecution(entry, args, binding, digest)) == nil {
+		t.Fatal("host-owned primary turn absent from legacy TLS could not be joined")
 	}
 	t.Setenv("AIMEE_MEMORY_HEALTH_ENABLED", "0")
 	if read(receiptMetadataWithExecution(entry, args, binding, digest)) != nil {

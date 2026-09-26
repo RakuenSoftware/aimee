@@ -146,3 +146,23 @@ owner in a repeatable-read snapshot, accepts only the exact recalled revision,
 and has a 50 ms batch deadline and 16-record ceiling. Shared, historical,
 multiple-origin and unavailable ancestry remain explicit gaps. Deployed
 validation of this repair and these additions is pending.
+
+## Primary scope and turn identity follow-up
+
+Candidate `1d4e4b792` passed the enrolled T2 provider boundary (352 checks) and
+native suite (99 checks). The health fixture selected a different prepared
+scope without captured query context and failed. Inspection found four captured
+primary-scope queries and 43 records with canonical personal family metadata.
+Selecting that actual primary scope and setting the CLI Unix endpoint explicitly
+allowed all nine diagnostic health checks to pass, including isolation and
+idempotent persistence after SIGKILL. This diagnostic does not establish full
+acceptance for the next candidate.
+
+Primary workers also lacked the host turn identity on their own thread. The
+repair forwards a separate optional health identity and clears it after the
+worker runs. It preserves globally unique retrieval-event IDs and binds the
+health identity to the owned task and request, preventing reused presence turn
+sequences from aliasing across requests. Targeted Go race tests and native ingress
+tests passed. The updated deployed fixture requires owned task/turn metadata;
+predecessor relationships remain explicitly unknown. Both topology runs for this
+repair are pending.
