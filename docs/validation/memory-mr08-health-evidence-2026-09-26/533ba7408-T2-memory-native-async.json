@@ -1,0 +1,238 @@
+[
+  {
+    "name": "native fixture explicitly enables automatic recall",
+    "passed": true
+  },
+  {
+    "name": "native fixture stores complete private identity",
+    "passed": true
+  },
+  {
+    "name": "native fixture reads its private source version",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before healthy native run",
+    "passed": true
+  },
+  {
+    "name": "healthy native run queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "healthy native run completes",
+    "passed": true
+  },
+  {
+    "name": "healthy native run dispatches exactly once",
+    "passed": true
+  },
+  {
+    "name": "native provider receives complete Go memory",
+    "passed": true
+  },
+  {
+    "name": "provider arrival sees committed preparation and admission",
+    "passed": true
+  },
+  {
+    "name": "public receipt verification matches real provider bytes",
+    "passed": true
+  },
+  {
+    "name": "native receipt binds the retained private revision and fresh source check",
+    "passed": true
+  },
+  {
+    "name": "native receipt retains the private collection dependency",
+    "passed": true
+  },
+  {
+    "name": "supplied receipt does not claim producer or chain authentication",
+    "passed": true
+  },
+  {
+    "name": "public receipt verification detects changed provider bytes",
+    "passed": true
+  },
+  {
+    "name": "authenticated receipt lookup reads actual durable acknowledgement",
+    "passed": true
+  },
+  {
+    "name": "real provider write has a distinct durable started observation",
+    "passed": true
+  },
+  {
+    "name": "commitment-only receipt does not invent replay or remote effects",
+    "passed": true
+  },
+  {
+    "name": "exploration fixture creates an authenticated session",
+    "passed": true
+  },
+  {
+    "name": "exploration fixture pins the local synthetic provider",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before primary native recovery",
+    "passed": true
+  },
+  {
+    "name": "exploration session selects its bounded fixture persona",
+    "passed": true
+  },
+  {
+    "name": "native indexed miss exposes a host-owned recovery reference",
+    "passed": true
+  },
+  {
+    "name": "native expansion tool accepts the observed gap",
+    "passed": true
+  },
+  {
+    "name": "primary session completes native indexed recovery",
+    "passed": true
+  },
+  {
+    "name": "primary fixture resolves its host-isolated worktree",
+    "passed": true
+  },
+  {
+    "name": "external find_symbol passes authenticated dispatch",
+    "passed": true
+  },
+  {
+    "name": "external context_contract_expand passes authenticated dispatch",
+    "passed": true
+  },
+  {
+    "name": "external expansion accepts only host-observed evidence",
+    "passed": true
+  },
+  {
+    "name": "external grep passes authenticated dispatch",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before inherited zero byte cap",
+    "passed": true
+  },
+  {
+    "name": "inherited zero byte cap queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "worker preserves inherited byte refusal",
+    "passed": true
+  },
+  {
+    "name": "inherited byte refusal sends no provider request",
+    "passed": true
+  },
+  {
+    "name": "native fixture identifies exactly one Go memory owner",
+    "passed": true
+  },
+  {
+    "name": "paused Go memory owner queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "native worker reports memory owner refusal",
+    "passed": true
+  },
+  {
+    "name": "native owner refusal sends no provider request",
+    "passed": true
+  },
+  {
+    "name": "supervised memory restart preserves committed identity",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before recovered native run",
+    "passed": true
+  },
+  {
+    "name": "recovered native run queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "new native worker recovers and dispatches once",
+    "passed": true
+  },
+  {
+    "name": "recovered provider retains complete Go memory",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before native context refresh",
+    "passed": true
+  },
+  {
+    "name": "native context refresh queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "native refresh fixture commits its memory update",
+    "passed": true
+  },
+  {
+    "name": "native multi-turn run completes after five tool calls",
+    "passed": true
+  },
+  {
+    "name": "native refresh follows five real file reads",
+    "passed": true
+  },
+  {
+    "name": "initial context predates the new identity",
+    "passed": true
+  },
+  {
+    "name": "refreshed provider context contains the new complete identity",
+    "passed": true
+  },
+  {
+    "name": "native fixture identifies exactly one Go memory owner",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before native refresh owner outage",
+    "passed": true
+  },
+  {
+    "name": "native refresh owner outage queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "native refresh intervention succeeds",
+    "passed": true
+  },
+  {
+    "name": "native refresh reports memory owner refusal",
+    "passed": true
+  },
+  {
+    "name": "native refresh refusal prevents a sixth provider request",
+    "passed": true
+  },
+  {
+    "name": "shared projection settled before recovered native refresh",
+    "passed": true
+  },
+  {
+    "name": "recovered native refresh queues a real asynchronous worker",
+    "passed": true
+  },
+  {
+    "name": "worker recovers after refresh refusal",
+    "passed": false
+  },
+  {
+    "name": "native fixture retires its refreshed identity",
+    "passed": false
+  }
+]

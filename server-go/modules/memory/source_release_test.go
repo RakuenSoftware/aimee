@@ -1252,3 +1252,58 @@ func TestExplorationIndexGenerationFollowsRetainedParts(t *testing.T) {
 		t.Fatal("transferred another project's generation")
 	}
 }
+
+// Model a memory owner disappearing after its release statement, before COMMIT.
+// The store process (and its transaction) survives that owner independently.
+func TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	owner, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close(context.Background())
+	replacement, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close(context.Background())
+	token := fmt.Sprintf("%032x", time.Now().UnixNano())
+	if _, err = owner.Exec(ctx, "SELECT memory_send_guard_begin($1,5000)", token); err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Exec(context.Background(), "SELECT memory_send_guard_end($1)", token)
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementServer}
+	if ok, err := backend.guardedSourceRevalidation(ctx, &sourceRevalidation{SendGuard: "release", CheckID: token}, Scope{}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	var setting string
+	if err = tx.QueryRow(ctx, "SHOW idle_in_transaction_session_timeout").Scan(&setting); err != nil || setting != "5s" {
+		t.Fatal(setting, err)
+	}
+	started := time.Now()
+	// A replacement must acquire the barrier without waiting for the store's
+	// general five-minute abandoned-transaction reaper.
+	if _, err = replacement.Exec(ctx, "SELECT id FROM memory_send_barrier WHERE id=1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 4*time.Second || elapsed > 10*time.Second {
+		t.Fatal("unexpected idle rollback delay", elapsed)
+	}
+	var retained int
+	if err = replacement.QueryRow(ctx, "SELECT count(*) FROM memory_send_leases WHERE token=$1", token).Scan(&retained); err != nil || retained != 1 {
+		t.Fatal("uncommitted completion discarded durable protection", retained, err)
+	}
+	if _, err = owner.Exec(ctx, "SELECT 1"); err == nil {
+		t.Fatal("abandoned transaction connection survived its idle timeout")
+	}
+}

@@ -212,6 +212,15 @@ func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvoc
 // The caller owns a storage transaction, including rollback on refusal. The
 // lease and its successful source observation must commit together.
 func (s *postgresDataStore) guardedSourceRevalidation(ctx context.Context, request *sourceRevalidation, exact Scope) (bool, error) {
+	if request.SendGuard != "" {
+		// A module can disappear between a guard statement and COMMIT while
+		// the independent store owner still holds its transaction. Bound that
+		// idle lock at PostgreSQL itself. Timeout rolls back the transaction;
+		// it never expires a committed send lease or invents completion.
+		if _, err := s.db.Exec(ctx, "SET LOCAL idle_in_transaction_session_timeout = '5s'"); err != nil {
+			return false, err
+		}
+	}
 	if request.SendGuard == "release" {
 		_, err := s.db.Exec(ctx, "SELECT memory_send_guard_end($1)", request.CheckID)
 		return err == nil, err

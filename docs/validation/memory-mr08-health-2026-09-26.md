@@ -166,3 +166,29 @@ sequences from aliasing across requests. Targeted Go race tests and native ingre
 tests passed. The updated deployed fixture requires owned task/turn metadata;
 predecessor relationships remain explicitly unknown. Both topology runs for this
 repair are pending.
+
+## Interrupted guard transaction recovery
+
+Candidate `533ba7408` built and passed all 77 repository checks and the full
+PostgreSQL memory race suite and exporter. T2 then failed native recovery after
+the deliberate Go-owner outage: the replacement could read memory but its next
+provider run refused before dispatch. PostgreSQL showed an abandoned idle
+transaction holding the send barrier after `memory_send_guard_end`, with later
+completions blocked behind it. The independent store process retained that
+transaction until its five-minute idle reaper ran. This explains a concrete
+recovery failure; the failed candidate is not accepted.
+
+Guard transactions now set a PostgreSQL-local five-second idle timeout. Losing
+the Go owner between statement and commit therefore rolls back the abandoned
+transaction and releases its row lock. It does not expire committed send leases
+or assume dispatch completed. A PostgreSQL regression test observes the blocked
+replacement acquiring the lock after timeout and proves the committed guard
+survives the abandoned completion. That regression passed with the race detector.
+Deployed recovery validation of this repair is pending.
+
+The retained `533ba7408` T2 server separately passed all ten health diagnostic
+checks, including owned task/turn identity, canonical family capture, CLI parity,
+principal isolation and exact persistence after SIGKILL. The focused guard
+PostgreSQL suite and memory health/source race suite passed. These results do not
+override the failed native recovery gate. The exact two owned stacks were then
+cleaned after exporting the diagnostic evidence.
