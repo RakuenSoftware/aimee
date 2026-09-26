@@ -140,3 +140,34 @@ func TestHealthTextShowsLossAndUnknownLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestHealthTraceReferencesRequireExactScopeAndExplicitSelection(t *testing.T) {
+	journal, p, event := journalFixture(t)
+	event.Invocation.Request = "private-request"
+	event.Acknowledged = true
+	if err := journal.apply(event, p.Until); err != nil {
+		t.Fatal(err)
+	}
+	page := journal.traceReferences(p)
+	if len(page.References) != 1 || page.References[0].Request != "private-request" || page.References[0].Stage != "dispatched" {
+		t.Fatal(page)
+	}
+	foreign := p
+	foreign.Principal = "another-principal"
+	if leaked := journal.traceReferences(foreign); len(leaked.References) != 0 || leaked.MissingRequest != 0 {
+		t.Fatal(leaked)
+	}
+	foreign = p
+	foreign.Project = "another-project"
+	if leaked := journal.traceReferences(foreign); len(leaked.References) != 0 {
+		t.Fatal(leaked)
+	}
+	// Legacy persisted attempts without a locator remain visibly unavailable.
+	row := journal.Attempts[event.Invocation.Attempt]
+	row.Invocation.Request = ""
+	journal.Attempts[event.Invocation.Attempt] = row
+	page = journal.traceReferences(p)
+	if len(page.References) != 0 || page.MissingRequest != 1 {
+		t.Fatal(page)
+	}
+}

@@ -1,8 +1,8 @@
 # MR-08 retrieval health implementation evidence
 
-Status: in progress. These are Go domain tests, not evidence that production
-serving telemetry or the CLI is complete. MR-07 measured promotion remains open;
-its default stays observe.
+Status: in progress. Initial deployed collection and authorization checks passed;
+new metadata capture, baseline and drill-down changes await deployed validation.
+MR-07 measured promotion remains open; its default stays observe.
 
 The metric foundation computes top-1/top-5 share, HHI, Simpson diversity, entropy,
 normalized entropy, record/version populations, explicit previous-turn repeats,
@@ -78,3 +78,46 @@ not-collected. The aggregate exposed neither attempt nor record identities.
 The native audit and CLI suites and non-PostgreSQL memory, execution-policy and
 families race suites passed. Migration dispatch/public HTTP acceptance is still
 pending, and MR-08 is not complete.
+
+## Deployed collector and subsequent implementation
+
+Candidate `1480664e0` passed the full T2 and T3 deployment matrices with actual
+process exit 0 on both topologies. The native suites passed 99 and 81 checks;
+five additional health checks passed on each topology. These exercised actual
+HTTP authentication, lazy migration through the store bus, committed receipt
+imports, ignored forged public identity/ledger fields, foreign OS-principal
+isolation, explicit unknown metadata, and idempotent reconciliation after SIGKILL.
+The immutable application image was
+`sha256:9592125b08d953e4d06188aa88c0485343d0bec60f614c59093f12d6ff67e758`.
+[Sanitized evidence](memory-mr08-health-evidence-2026-09-26/1480664e0-process-exits.json)
+and topology-specific native/health checks are retained alongside image identities.
+Both disposable topologies were cleaned; CT100 production was not replaced.
+These results supersede the earlier pending migration/HTTP notes above.
+
+Subsequent changes add optional serving-time keyed query capture, exact retained
+native record-kind/trust metadata, per-kind and version concentration, family
+fan-out, source-bound verifier label contracts and denominators, descriptive
+adjacent-window comparisons, and explicitly requested scoped receipt references.
+A baseline needs complete unsampled matching populations with at least 30
+invocations in each window; harm alerts additionally need 30 known labels per
+window and a 10 percentage-point adverse change. Concentration alone never alerts.
+A baseline outside the 24-hour retention bound is explicitly unavailable.
+
+Optional query capture uses a 50 ms cold-path budget and a bounded one-minute key
+cache. Raw queries stay only in a bounded, single-use in-process token cache;
+receipts retain a namespace-keyed fingerprint. Optional release metadata has a
+separate 1 MiB pool and does not change required source-handle capacity or assembly
+commitments. Overflow drops optional metadata while preserving serving. The
+latest full non-PostgreSQL memory/execution-policy/families race suite passed;
+the restricted live PostgreSQL capture test also passed across owner recreation.
+
+A local warm-capture benchmark measured 1,366 ns/op, 1,254 B/op and 22 allocations.
+The full 256-attempt journal benchmark measured 898,833 ns/op, 886,990 B/op and
+270,448 retained JSON bytes. These are local component measurements, not provider
+p95 or end-to-end overhead results. Collection remains opt-in on disposable test
+stacks. No production baseline or wider rollout is claimed.
+
+Remaining acceptance includes deployed validation of these subsequent changes,
+end-to-end overhead/retention measurements, and owned task/turn/family/arm and
+verifier metadata producers. Missing metadata and labels remain visible as
+unknown or unmeasured; synthetic labels do not establish production usefulness.

@@ -145,6 +145,13 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (v)
          cJSON_AddItemToObject(query, fields[i], cJSON_Duplicate(v, 1));
    }
+   const cJSON *traces = cJSON_GetObjectItemCaseSensitive(req, "traces");
+   if (traces && !cJSON_IsBool(traces))
+   {
+      cJSON_Delete(query);
+      return server_send_error(conn, "invalid trace selection", NULL);
+   }
+   cJSON_AddBoolToObject(query, "traces", cJSON_IsTrue(traces));
    cJSON_AddStringToObject(query, "operation", "health-plan");
    cJSON *plan = memory_health_command(cJSON_Duplicate(query, 1));
    if (!plan || strcmp(jo_str(plan, "status", ""), "ok"))
@@ -161,7 +168,8 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *requests =
        verified == AUDIT_WORM_VERIFY_RED
            ? NULL
-           : audit_worm_memory_requests(context->principal, from, until, head, &truncated);
+           : audit_worm_memory_requests(context->principal, jo_str(plan, "scan_from", from), until,
+                                        head, &truncated);
    if (!requests || audit_worm_dispatch_owner(owner) != 0)
    {
       cJSON_Delete(requests);

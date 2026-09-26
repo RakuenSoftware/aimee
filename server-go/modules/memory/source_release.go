@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +18,14 @@ import (
 const sourceReleaseTTL = 15 * time.Minute
 const sourceReleaseMaxBytes = 16 << 20
 const sourceReleaseMaxEntries = 1024
+const sourceReleaseHealthMaxBytes = 1 << 20
 
 // Opaque process-local handles keep memory policy and source arrays out of the
 // C host. Losing the process or expiring an entry refuses release. These are
 // neither durable prepared receipts nor acknowledgements of provider dispatch.
 type sourceReleaseState struct {
+	healthQueries   map[string]healthPendingQuery
+	healthBytes     int
 	mu              sync.Mutex
 	entries         map[string]*sourceReleaseEntry
 	bytes           int
@@ -41,6 +45,7 @@ type sourceReleaseEntry struct {
 	assemblyParts                                []sourceReleasePart
 	assemblyDigest                               string
 	assemblyMetadata                             json.RawMessage
+	healthMetadata                               json.RawMessage
 	sources                                      json.RawMessage
 	workspace, project, binding, digest, pending string
 	admitted                                     string
@@ -87,6 +92,7 @@ func (s *sourceReleaseState) expire(now time.Time) {
 		if !now.Before(e.expires) {
 			delete(s.entries, token)
 			s.bytes -= len(e.sources) + len(e.assemblyMetadata)
+			s.healthBytes -= len(e.healthMetadata)
 		}
 	}
 }
@@ -167,7 +173,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 		return "", err
 	}
 	_, nativePart := assembly["native_projection"]
-	part := sourceReleasePart{Native: nativePart, Digest: releaseDigest(assembly)}
+	part := sourceReleasePart{Native: nativePart, Digest: healthIndependentAssemblyDigest(assembly)}
 	if context, ok := assembly["indexed_context"].(map[string]any); ok && context["project"] == project {
 		part.IndexGeneration, _ = context["generation"].(string)
 	}
@@ -195,7 +201,48 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	parts = append(parts, part)
 	assemblyDigest := releaseDigest(parts)
-	metadata, _ := json.Marshal(map[string]any{"packing_dispositions": assembly["packing_dispositions"], "context_accounting": assembly["context_accounting"], "projection_commitment": assemblyDigest, "projection_parts": parts})
+	metadataFields := map[string]any{"packing_dispositions": assembly["packing_dispositions"], "context_accounting": assembly["context_accounting"], "projection_commitment": assemblyDigest, "projection_parts": parts}
+	metadata, _ := json.Marshal(metadataFields)
+	healthFields := map[string]any{}
+	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" {
+		if capture, ok := assembly["health_context"].(*healthQueryContext); ok && capture != nil {
+			healthFields["health_context"] = capture
+		}
+		if prior != nil {
+			var previous struct {
+				Context *healthQueryContext `json:"health_context"`
+			}
+			if json.Unmarshal(prior.healthMetadata, &previous) == nil && previous.Context != nil {
+				healthFields["health_context"] = previous.Context
+			}
+		}
+		var previousMetadata json.RawMessage
+		if prior != nil {
+			previousMetadata = prior.healthMetadata
+		}
+		if records := mergeHealthSelectionMetadata(previousMetadata, assembly, unique); len(records) > 0 {
+			healthFields["health_records"] = records
+		}
+		if labels, ok := assembly["health_labels"].(*healthLabelsEnvelope); ok && labels != nil && labels.SourcesDigest == releaseDigest(unique) {
+			healthFields["health_labels"] = labels
+		}
+	}
+	var healthMetadata json.RawMessage
+	if len(healthFields) > 0 {
+		healthMetadata, _ = json.Marshal(healthFields)
+		combined := make(map[string]any, len(metadataFields)+len(healthFields))
+		for key, value := range metadataFields {
+			combined[key] = value
+		}
+		for key, value := range healthFields {
+			combined[key] = value
+		}
+		encoded, _ := json.Marshal(combined)
+		if len(encoded) > 12000 || s.healthBytes+len(healthMetadata) > sourceReleaseHealthMaxBytes {
+			healthMetadata = nil
+		}
+	}
+
 	if len(metadata) > 12000 {
 		metadata, _ = json.Marshal(map[string]any{"projection_commitment": assemblyDigest, "truncated": true, "reason": "assembly_metadata_limit"})
 	}
@@ -207,8 +254,9 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	// Assembly is not integrity acceptance. Keep the old handle immutable until
 	// the host either discards this candidate or uses it at the provider fence.
-	s.entries[token] = &sourceReleaseEntry{assemblyParts: parts, assemblyDigest: assemblyDigest, assemblyMetadata: metadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
+	s.entries[token] = &sourceReleaseEntry{assemblyParts: parts, assemblyDigest: assemblyDigest, assemblyMetadata: metadata, healthMetadata: healthMetadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
 	s.bytes += len(raw) + len(metadata)
+	s.healthBytes += len(healthMetadata)
 	return token, nil
 }
 
@@ -220,6 +268,7 @@ func (s *sourceReleaseState) drop(token, binding string, ancestors bool) {
 		}
 		delete(s.entries, token)
 		s.bytes -= len(entry.sources) + len(entry.assemblyMetadata)
+		s.healthBytes -= len(entry.healthMetadata)
 		if !ancestors {
 			return
 		}

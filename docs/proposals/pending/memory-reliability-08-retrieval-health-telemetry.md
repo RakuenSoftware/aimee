@@ -62,7 +62,7 @@ Hand-calculated populations pin top-k/HHI/entropy, empty/single-record behavior,
 The initial Go-only calculator and bounded journal foundation have
 [hand-calculated and reconciliation tests](../../validation/memory-mr08-health-2026-09-26.md).
 The journal has a tested PostgreSQL owner foundation and receipt-derived importer.
-The authenticated health route and CLI are implemented but their deployed
-authentication/migration acceptance remains open. Complete metadata, baseline
-alerts and trace drill-down remain in progress. No production baseline or
-end-to-end acceptance is claimed.
+The initial authenticated collector passed deployed T2/T3 migration, isolation and
+restart checks. Subsequent serving metadata, baseline and trace changes await
+deployed validation. Complete metadata producers and overhead acceptance remain
+open. No production baseline or full end-to-end acceptance is claimed.

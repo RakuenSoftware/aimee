@@ -260,6 +260,13 @@ cJSON *marshal_memory_health(int argc, char **argv)
       const char *arg = argv[i];
       if (!strcmp(arg, "--json"))
          continue;
+      if (!strcmp(arg, "--traces"))
+      {
+         if (cJSON_HasObjectItem(req, "traces"))
+            goto invalid;
+         cJSON_AddTrueToObject(req, "traces");
+         continue;
+      }
       const char *value = strchr(arg, '=');
       size_t n = value ? (size_t)(value - arg) : strlen(arg);
       const char *field = n == 8 && !strncmp(arg, "--window", n)         ? "window"

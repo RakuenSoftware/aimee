@@ -3627,6 +3627,12 @@ paths:
         owner. Scans at most 256 principal-owned requests through a verified local
         ledger head, reconciles attempts into bounded private PostgreSQL state,
         and reports one exact project/workspace/purpose/query-class population.
+        Windows use prepared-at timestamps with stages reconciled through the
+        verified ledger snapshot. Windows up to 12 hours also scan an adjacent
+        baseline; longer comparisons exceed the 24-hour retention bound.
+        Alerts require complete unsampled windows and at least 30 labels per
+        window, and describe observed adverse rate changes rather than
+        statistical significance. Concentration alone never triggers an alert.
         No cross-principal aggregation is offered. Raw queries, memory text,
         record IDs, family IDs and task IDs are not returned. Older receipts with
         missing metadata report unknown metrics. Truncation, import failures,
@@ -3639,6 +3645,7 @@ paths:
               type: object
               properties:
                 window: { type: string, default: 24h, description: Positive Go duration at most 24 hours. }
+                traces: { type: boolean, default: false, description: Include at most 16 receipt references owned by this principal in the exact report population. }
                 project: { type: string, default: '' }
                 workspace: { type: string, default: '' }
                 purpose: { type: string, default: provider_input }

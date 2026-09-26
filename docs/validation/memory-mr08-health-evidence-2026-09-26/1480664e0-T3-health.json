@@ -1,0 +1,22 @@
+[
+  {
+    "name": "health migration and committed receipt import through actual HTTP and store bus",
+    "passed": true
+  },
+  {
+    "name": "health public principal and ledger fields cannot replace host identity",
+    "passed": true
+  },
+  {
+    "name": "health missing metadata is explicit in JSON and text",
+    "passed": true
+  },
+  {
+    "name": "health foreign UDS principal cannot enumerate another population",
+    "passed": true
+  },
+  {
+    "name": "health persisted attempts reconcile idempotently after SIGKILL and restart",
+    "passed": true
+  }
+]

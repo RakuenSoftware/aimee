@@ -70,6 +70,16 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 		"context_limits": ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
 		"compress":       request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
 		"facts_requested": facts, "typed_requested": request.PreviewEnabled}
+	// Reuse the Go owner's bounded query cache. The host receives only a token;
+	// no raw query is copied into the final assembly or receipt metadata.
+	captureArgs := sourceReleaseArgsForHealth(request.Query)
+	state.releases.captureHealthQueryToken(captureArgs)
+	if raw := captureArgs["_health_query_token"]; len(raw) > 0 {
+		var token string
+		if json.Unmarshal(raw, &token) == nil {
+			result["assembly"].(map[string]any)["_health_query_token"] = token
+		}
+	}
 	return result
 }
 

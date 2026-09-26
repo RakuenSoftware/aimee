@@ -22,15 +22,23 @@ const healthStoreSchema = `CREATE TABLE IF NOT EXISTS memory_retrieval_health_na
 )`
 
 type healthOwnerState struct {
-	mu    sync.Mutex
-	ready bool
+	cacheMu sync.Mutex
+	keys    map[string]healthKeyCacheEntry
+	mu      sync.Mutex
+	ready   bool
 }
 
 func (s *postgresDataStore) ensureHealthStore(ctx context.Context) error {
 	if s.placement != PlacementServer || s.health == nil {
 		return errors.New("health serving owner unavailable")
 	}
-	s.health.mu.Lock()
+	for !s.health.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
 	defer s.health.mu.Unlock()
 	if s.health.ready {
 		return nil

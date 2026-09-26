@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -31,16 +32,18 @@ func commandByteLimit(args commandArgs, name string) (*int, error) {
 }
 
 type nativeRecallProjection struct {
-	AppendSources   bool                 `json:"append_sources,omitempty"`
-	Version         int                  `json:"schema_version"`
-	Text            string               `json:"text"`
-	Bytes           int                  `json:"rendered_bytes"`
-	Limit           int                  `json:"max_context_bytes"`
-	Digest          string               `json:"digest"`
-	SourceDigest    string               `json:"source_digest"`
-	Reminders       []string             `json:"retained_reminder_ids"`
-	Sources         []typedProjectionRef `json:"retained_items"`
-	SelectionDigest string               `json:"selection_digest"`
+	HealthRecords    []healthRecord       `json:"health_records,omitempty"`
+	HealthQueryToken string               `json:"health_query_token,omitempty"`
+	AppendSources    bool                 `json:"append_sources,omitempty"`
+	Version          int                  `json:"schema_version"`
+	Text             string               `json:"text"`
+	Bytes            int                  `json:"rendered_bytes"`
+	Limit            int                  `json:"max_context_bytes"`
+	Digest           string               `json:"digest"`
+	SourceDigest     string               `json:"source_digest"`
+	Reminders        []string             `json:"retained_reminder_ids"`
+	Sources          []typedProjectionRef `json:"retained_items"`
+	SelectionDigest  string               `json:"selection_digest"`
 }
 
 // Render complete rows once. A prefix preserves the existing six-section order;
@@ -192,6 +195,12 @@ func nativeRecallEnvelope(raw []byte, args commandArgs) ([]byte, error) {
 		return nil, err
 	}
 	projection.SourceDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(envelope["recall"]))
+	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && len(raw) < 64<<10 {
+		projection.HealthRecords = nativeHealthRecords(b, projection.Sources)
+	}
+	if token := args.stringOr("_health_query_token", ""); os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && releaseTokenValid(token) && len(raw) < 64<<10 {
+		projection.HealthQueryToken = token
+	}
 	_, selected, err := b.encodePrefix(count)
 	if err != nil {
 		return nil, err
@@ -230,6 +239,15 @@ func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]b
 		}
 	}
 	assembly := map[string]any{"native_projection": map[string]any{"retained_items": p.Sources, "digest": p.Digest}, "append_native_sources": p.AppendSources}
+	if len(p.HealthRecords) > 0 && len(p.HealthRecords) <= 256 {
+		assembly["health_records"] = p.HealthRecords
+	}
+	if raw := args["_health_context"]; len(raw) > 0 {
+		var capture healthQueryContext
+		if json.Unmarshal(raw, &capture) == nil {
+			assembly["health_context"] = &capture
+		}
+	}
 	ticket, err := state.prepare(args, assembly)
 	if err != nil {
 		return commandResult(commandError("unavailable", "native source release unavailable"))

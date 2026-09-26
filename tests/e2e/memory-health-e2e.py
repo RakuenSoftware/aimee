@@ -35,7 +35,7 @@ def inside():
             conn.close()
 
     if os.getuid() == 0:
-        result = query(dict(window='1h', health_principal='uid:1000', principal='uid:1000', collection_complete=True))
+        result = query(dict(window='1h', health_principal='uid:1000', principal='uid:1000', collection_complete=True, traces=True))
         if result.get('collection_state') != 'not_collected' or result.get('metrics') is not None:
             raise RuntimeError('foreign principal discovered a health population')
         print(json.dumps(dict(foreign_principal_isolated=True)))
@@ -46,7 +46,12 @@ def inside():
         rows = db.execute("SELECT seq,subject,detail FROM audit_event WHERE actor_role='host' AND actor_principal='uid:1000' AND action='memory.provider.prepared' ORDER BY seq DESC LIMIT 256").fetchall()
         if not rows:
             raise RuntimeError('requires real prepared provider inputs from the native fixture')
-        binding = json.loads(rows[0][2])['binding']
+        bindings = [json.loads(row[2])['binding'] for row in rows]
+        binding = next((b for b in bindings if any(
+            item.get('source_version', {}).get('record_kind') == 'user_memory_record'
+            for item in b.get('sources', []))), None)
+        if binding is None:
+            raise RuntimeError('native fixture did not retain a versioned personal memory')
         scope = dict(project=binding['project'], workspace=binding['workspace'], window='1h')
         result = query(scope)
         health = result.get('health', {})
@@ -81,13 +86,37 @@ def inside():
             raise RuntimeError('health counters do not match committed stage evidence')
         if any(identity in json.dumps(result) for identity in identifiers):
             raise RuntimeError('aggregate exposed private attempt identities')
-        if not health['metadata_gaps'].get('query_fingerprint') or 'Missing query_fingerprint:' not in result.get('text', ''):
+        if not health['metadata_gaps'].get('task_turn_links') or 'Missing task_turn_links:' not in result.get('text', ''):
             raise RuntimeError('legacy metadata gap was hidden')
+        fingerprints = sum(actual.values()) - health['metadata_gaps'].get('query_fingerprint', 0)
+        if fingerprints <= 0:
+            raise RuntimeError('no serving query fingerprint reached the receipt collector')
+        kinds = health['sample_metrics'].get('record_concentration_by_kind', {})
+        if not any(kind != 'unknown' and metric['occurrences'] > 0 for kind, metric in kinds.items()):
+            raise RuntimeError('retained native memory kind did not reach the collector')
+        traced = query(dict(scope, traces=True))
+        references = traced.get('traces', {}).get('references', [])
+        if not references or len(references) > 16:
+            raise RuntimeError('authorized receipt drill-down missing or unbounded')
+        allowed_requests = {b['request_id'] for b in bindings if b['project'] == scope['project'] and b['workspace'] == scope['workspace']}
+        if any(ref['request_id'] not in allowed_requests for ref in references):
+            raise RuntimeError('receipt references escaped the requested population')
+        cli = ['aimee', 'memory', 'health', '--window', '1h']
+        for key in ('project', 'workspace'):
+            if scope[key]:
+                cli.extend(['--' + key, scope[key]])
+        cli_json = json.loads(subprocess.check_output(cli + ['--json'], text=True, timeout=90))
+        if cli_json.get('health', {}).get('exact_retained_attempts_by_stage') != actual:
+            raise RuntimeError('CLI JSON differs from authenticated HTTP aggregate')
+        cli_text = subprocess.check_output(cli, text=True, timeout=90)
+        if 'Window complete:' not in cli_text or 'Missing task_turn_links:' not in cli_text:
+            raise RuntimeError('CLI text hides health coverage or metadata gaps')
         forged = query(dict(scope, health_principal='another-principal', principal='another-principal', ledger_events=[], collection_complete=True))
         if forged['health']['exact_retained_attempts_by_stage'] != actual:
             raise RuntimeError('public fields changed authenticated collection')
         print(json.dumps(dict(counts=actual, sampled=health['sampled_invocations'], scope_isolated=True,
-                              late_stage_reconciled=True, metadata_gaps_visible=True, public_fields_ignored=True)))
+                              late_stage_reconciled=True, metadata_gaps_visible=True, public_fields_ignored=True,
+                              serving_fingerprints=fingerprints, native_kind_observed=True, scoped_traces=True, cli_parity=True)))
 
 
 def main():
@@ -121,6 +150,9 @@ def main():
         check('health migration and committed receipt import through actual HTTP and store bus', before.get('sampled', 0) > 0)
         check('health public principal and ledger fields cannot replace host identity', before['public_fields_ignored'])
         check('health missing metadata is explicit in JSON and text', before['metadata_gaps_visible'])
+        check('health keyed query capture and native selection kind reach durable receipts', before['serving_fingerprints'] > 0 and before['native_kind_observed'])
+        check('health optional receipt references remain in exact scope', before['scoped_traces'])
+        check('health CLI JSON and readable text match authenticated HTTP', before['cli_parity'])
         check('health foreign UDS principal cannot enumerate another population', run(0)['foreign_principal_isolated'])
         subprocess.run(['docker', 'kill', '--signal', 'KILL', server], check=True, stdout=subprocess.DEVNULL)
         subprocess.run(['docker', 'start', server], check=True, stdout=subprocess.DEVNULL)

@@ -233,3 +233,25 @@ func BenchmarkHealthJournalAtCapacity(b *testing.B) {
 	raw, _ := json.Marshal(s)
 	b.ReportMetric(float64(len(raw)), "retained_bytes")
 }
+
+func TestHealthOldCapacityLossDoesNotPoisonLaterWindows(t *testing.T) {
+	s, p, event := journalFixture(t)
+	now := p.Until
+	s.markGap(event.Invocation.At, now)
+	p.From = event.Invocation.At.Add(time.Second)
+	report, err := s.report(p, now)
+	if err != nil || !report.Complete || report.Gap || report.Metrics.Records.HHI != nil {
+		t.Fatal(report, err)
+	}
+	p.From = event.Invocation.At
+	report, err = s.report(p, now)
+	if err != nil || report.Complete || !report.Gap {
+		t.Fatal(report, err)
+	}
+	// A journal written before loss boundaries existed cannot infer a safe past.
+	s.GapUntil = nil
+	s.markGap(event.Invocation.At, now)
+	if s.GapUntil == nil || !s.GapUntil.After(now) {
+		t.Fatal(s.GapUntil)
+	}
+}

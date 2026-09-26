@@ -62,6 +62,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		args["view"] = json.RawMessage(`"mcp"`)
 		return runtimeJSONText(handleUserCommand(options, invocation, "supersede", args))
 	case "personal-recall":
+		if options.gateway != nil {
+			options.gateway.releases.captureHealthQueryToken(args)
+		}
 		if options.placement != PlacementServer {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
@@ -75,6 +78,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		return nativeRecallText(raw, args)
 	case "compose-recall":
+		if options.gateway != nil {
+			options.gateway.releases.captureHealthQueryToken(args)
+		}
 		return handleRecallComposition(options, invocation, args)
 	case "maintenance-model-plan":
 		return planModelMaintenance(args)
@@ -113,8 +119,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "ingress-begin", "ingress-task-result", "ingress-recall-result", "ingress-metrics":
 		return handleIngressPlan(options.gateway, args)
 	case "ingress-assemble":
+		prepareHealthQueryCapture(options, invocation, args, operation)
 		return handleIngressAssembly(options.gateway, args)
 	case "native-source-release":
+		prepareHealthQueryCapture(options, invocation, args, operation)
 		return handleNativeSourceRelease(&options.gateway.releases, args)
 	case "personal-source-revalidate":
 		return handlePersonalSourceRevalidation(options, invocation, args)

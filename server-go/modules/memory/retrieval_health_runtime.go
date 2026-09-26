@@ -14,6 +14,7 @@ import (
 )
 
 type inspectedHealthReceipt struct {
+	Assembly json.RawMessage       `json:"assembly"`
 	Prepared *providerReceiptEvent `json:"prepared_receipt"`
 	Sequence string                `json:"prepared_sequence"`
 	State    string                `json:"state"`
@@ -36,14 +37,33 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 	if err != nil {
 		return healthSnapshot{}, err
 	}
-	e := healthInvocation{Attempt: r.Prepared.AttemptID, Binding: r.Prepared.BindingDigest, At: at,
+	e := healthInvocation{Request: b.RequestID, Attempt: r.Prepared.AttemptID, Binding: r.Prepared.BindingDigest, At: at,
 		Namespace: j.Namespace, Principal: j.Principal, Project: b.Project, Workspace: b.Workspace,
 		Purpose: "provider_input", QueryClass: "unclassified", Turn: b.TurnID, SamplePPM: ppm,
 		SamplingEpoch: releaseDigest([]any{"health-bernoulli-v1", j.Namespace, j.Principal, j.Project, j.Workspace, j.Key}), Records: []healthRecord{},
 		MetadataGaps: []string{"query_fingerprint", "query_class", "task_turn_links", "memory_kind", "family", "trust", "release_labels", "arm_contributions", "final_rank"}}
 	if old, ok := j.Attempts[e.Attempt]; ok {
+		e.Request = old.Invocation.Request
 		e.SamplePPM = old.Invocation.SamplePPM
 		e.SamplingEpoch = old.Invocation.SamplingEpoch
+	}
+	var metadata struct {
+		Context *healthQueryContext   `json:"health_context"`
+		Records []healthRecord        `json:"health_records"`
+		Labels  *healthLabelsEnvelope `json:"health_labels"`
+	}
+	if json.Unmarshal(r.Assembly, &metadata) == nil && metadata.Context != nil {
+		capture := metadata.Context
+		if capture.Namespace == j.Namespace && capture.Project == b.Project && capture.Workspace == b.Workspace && receiptDigestValid(capture.Fingerprint) && (capture.Source == "native_task_hint" || capture.Source == "ingress_query") {
+			e.Fingerprint = capture.Fingerprint
+			gaps := e.MetadataGaps[:0]
+			for _, gap := range e.MetadataGaps {
+				if gap != "query_fingerprint" {
+					gaps = append(gaps, gap)
+				}
+			}
+			e.MetadataGaps = gaps
+		}
 	}
 	var refs []typedProjectionRef
 	if json.Unmarshal(b.Sources, &refs) != nil {
@@ -65,6 +85,33 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		historical := source.ReadPolicy != nil && (source.ReadPolicy.Historical || source.ReadPolicy.ValidAt != "" || source.ReadPolicy.BelievedAt != "")
 		e.Records = append(e.Records, healthRecord{RecordID: string(identity), VersionID: source.Version.RecordRevision, Kind: "unknown", Historical: historical})
 	}
+	if labels := metadata.Labels; labels != nil && labels.SourcesDigest == b.SourcesDigest && labels.Labels != nil {
+		validation := healthLabelMetrics{}
+		if err := validation.add(labels.Labels); err != nil {
+			return healthSnapshot{}, err
+		}
+		e.Labels = labels.Labels
+	}
+	known := map[string]healthRecord{}
+	for _, record := range metadata.Records {
+		known[healthVersionKey(record)] = record
+	}
+	knownKinds, knownTrust := len(e.Records) > 0, len(e.Records) > 0
+	for i, record := range e.Records {
+		if observed, ok := known[healthVersionKey(record)]; ok && healthLabelName(observed.Kind) {
+			record.Kind, record.LowTrust = observed.Kind, observed.LowTrust
+			e.Records[i] = record
+		}
+		knownKinds = knownKinds && record.Kind != "unknown"
+		knownTrust = knownTrust && record.LowTrust != nil
+	}
+	gaps := e.MetadataGaps[:0]
+	for _, gap := range e.MetadataGaps {
+		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust) {
+			gaps = append(gaps, gap)
+		}
+	}
+	e.MetadataGaps = gaps
 	result := healthSnapshot{Invocation: e, PreparedSequence: seq, ResolvedUnsent: r.State == "prepared_without_dispatch"}
 	for _, stage := range r.Stages {
 		switch stage {
@@ -108,7 +155,11 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 		return commandResult(commandError("invalid_argument", "health window must be positive and at most 24h"))
 	}
 	if args.stringOr("operation", "") == "health-plan" {
-		return commandResult(map[string]any{"status": "ok", "from": now.Add(-window).Format(time.RFC3339Nano), "until": now.Format(time.RFC3339Nano)})
+		scanFrom := now.Add(-window)
+		if 2*window <= healthRetention {
+			scanFrom = scanFrom.Add(-window)
+		}
+		return commandResult(map[string]any{"status": "ok", "from": now.Add(-window).Format(time.RFC3339Nano), "scan_from": scanFrom.Format(time.RFC3339Nano), "until": now.Format(time.RFC3339Nano)})
 	}
 	s, ok := options.data.(*postgresDataStore)
 	if !ok {
@@ -192,5 +243,20 @@ func handleRetrievalHealth(options handlerOptions, invocation bus.ModuleInvocati
 	if !args.boolean("collection_complete") {
 		r.Complete = false
 	}
-	return commandResult(map[string]any{"status": "ok", "health": r, "text": healthReportText(r), "record_population": "versioned_memory_inputs", "collector": "authenticated_local_receipt_scan"})
+	baseline := healthBaseline{State: "unavailable", Reason: "comparison_exceeds_retention", Alerts: []healthAlert{}}
+	if priorFrom := from.Add(-until.Sub(from)); !priorFrom.Before(now.Add(-healthRetention)) {
+		priorPopulation := p
+		priorPopulation.From, priorPopulation.Until = priorFrom, from
+		prior, priorErr := j.report(priorPopulation, now)
+		if priorErr == nil {
+			baseline = compareHealthBaseline(r, prior)
+		}
+	}
+	result := map[string]any{"status": "ok", "health": r, "baseline": baseline, "text": healthReportText(r) + healthBaselineText(baseline), "record_population": "versioned_memory_inputs", "collector": "authenticated_local_receipt_scan", "time_basis": "prepared_at", "stage_basis": "latest_verified_snapshot"}
+	if args.boolean("traces") {
+		page := j.traceReferences(p)
+		result["traces"] = page
+		result["text"] = result["text"].(string) + healthTraceText(page)
+	}
+	return commandResult(result)
 }

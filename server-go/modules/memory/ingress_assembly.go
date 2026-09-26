@@ -465,6 +465,12 @@ func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, bus.M
 		}
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if raw := args["_health_context"]; len(raw) > 0 {
+		var capture healthQueryContext
+		if json.Unmarshal(raw, &capture) == nil {
+			result["health_context"] = &capture
+		}
+	}
 	if args.boolean("prepare_source_release") {
 		ticket, err := state.releases.prepare(args, result)
 		if err != nil {

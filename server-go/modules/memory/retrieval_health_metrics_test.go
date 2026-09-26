@@ -50,7 +50,7 @@ func TestHealthHandCalculatedPopulationAndIdentityPrivacy(t *testing.T) {
 	if r.Repeat.Denominator != 1 || r.Repeat.Unknown != 2 || r.FamilyCounts[1] != 2 || r.UnknownOrigins != 1 || r.LowTrustFanout[1] != 1 {
 		t.Fatal(r)
 	}
-	if r.Lifecycle.Denominator != 2 || r.Lifecycle.Unknown != 1 || r.EstimatedOccurrences != 3 || r.EstimateSE != 0 {
+	if r.Lifecycle.Denominator != 2 || r.Lifecycle.Unknown != 1 || r.EstimatedOccurrences == nil || *r.EstimatedOccurrences != 3 || r.EstimateSE == nil || *r.EstimateSE != 0 {
 		t.Fatal(r)
 	}
 	raw, _ := json.Marshal(r)
@@ -64,7 +64,7 @@ func TestHealthHandCalculatedPopulationAndIdentityPrivacy(t *testing.T) {
 func TestHealthEmptySingleRecordVersionsAndHistoricalLabels(t *testing.T) {
 	p, events := healthFixture()
 	r, err := aggregateHealth(nil, p)
-	if err != nil || r.Records.HHI != nil || r.Records.Entropy != nil || r.Repeat.Rate != nil || r.Lifecycle.Rate != nil {
+	if err != nil || r.Records.HHI != nil || r.Records.Entropy != nil || r.Repeat.Rate != nil || r.Lifecycle.Rate != nil || r.EstimatedOccurrences != nil || r.EstimateSE != nil {
 		t.Fatal(r, err)
 	}
 	a := events[0].Records[0]
@@ -112,7 +112,7 @@ func TestHealthPopulationBoundariesAndSamplingUncertainty(t *testing.T) {
 	}
 	events[0].SamplePPM = 500000
 	r, err := aggregateHealth(events, p)
-	if err != nil || !r.Sampled || r.EstimatedOccurrences != 5 || math.Abs(r.EstimateSE-math.Sqrt(8)) > 1e-10 || r.Repeat.Denominator != 0 {
+	if err != nil || !r.Sampled || r.EstimatedOccurrences == nil || *r.EstimatedOccurrences != 5 || r.EstimateSE == nil || math.Abs(*r.EstimateSE-math.Sqrt(8)) > 1e-10 || r.Repeat.Denominator != 0 {
 		t.Fatal(r, err)
 	}
 	// Unknown sampling is invalid data, never an exact zero or division by zero.

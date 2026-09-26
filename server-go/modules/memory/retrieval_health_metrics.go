@@ -26,24 +26,26 @@ type healthRecord struct {
 }
 
 type healthInvocation struct {
-	MetadataGaps  []string       `json:"metadata_gaps,omitempty"`
-	Attempt       string         `json:"attempt"`
-	Binding       string         `json:"binding"`
-	At            time.Time      `json:"at"`
-	Namespace     string         `json:"namespace"`
-	Principal     string         `json:"principal"`
-	Project       string         `json:"project"`
-	Workspace     string         `json:"workspace"`
-	Purpose       string         `json:"purpose"`
-	QueryClass    string         `json:"query_class"`
-	Fingerprint   string         `json:"query_fingerprint"`
-	Task          string         `json:"task"`
-	Turn          string         `json:"turn"`
-	PreviousTurn  string         `json:"previous_turn"`
-	Stage         string         `json:"stage"`
-	SamplePPM     int            `json:"sampling_probability_ppm"`
-	SamplingEpoch string         `json:"sampling_epoch"`
-	Records       []healthRecord `json:"records"`
+	Request       string                 `json:"request_id,omitempty"`
+	Labels        *healthSelectionLabels `json:"selection_labels,omitempty"`
+	MetadataGaps  []string               `json:"metadata_gaps,omitempty"`
+	Attempt       string                 `json:"attempt"`
+	Binding       string                 `json:"binding"`
+	At            time.Time              `json:"at"`
+	Namespace     string                 `json:"namespace"`
+	Principal     string                 `json:"principal"`
+	Project       string                 `json:"project"`
+	Workspace     string                 `json:"workspace"`
+	Purpose       string                 `json:"purpose"`
+	QueryClass    string                 `json:"query_class"`
+	Fingerprint   string                 `json:"query_fingerprint"`
+	Task          string                 `json:"task"`
+	Turn          string                 `json:"turn"`
+	PreviousTurn  string                 `json:"previous_turn"`
+	Stage         string                 `json:"stage"`
+	SamplePPM     int                    `json:"sampling_probability_ppm"`
+	SamplingEpoch string                 `json:"sampling_epoch"`
+	Records       []healthRecord         `json:"records"`
 }
 
 type healthPopulation struct {
@@ -137,25 +139,29 @@ type healthRuns struct {
 }
 
 type healthMetrics struct {
-	Version                 int                 `json:"aggregate_version"`
-	Population              healthPopulation    `json:"population"`
-	Invocations             int                 `json:"retained_invocations"`
-	Sampled                 bool                `json:"sampled"`
-	ConcentrationPopulation string              `json:"concentration_population"`
-	Records                 healthConcentration `json:"records"`
-	Versions                healthConcentration `json:"versions"`
-	Runs                    healthRuns          `json:"consecutive_appearances"`
-	Repeat                  healthRatio         `json:"repeat_serving"`
-	Lifecycle               healthRatio         `json:"current_lifecycle_reentry"`
-	FamilyCounts            map[int]int         `json:"families_per_invocation"`
-	UnknownOrigins          int                 `json:"unknown_origin_occurrences"`
-	LowTrustFanout          map[int]int         `json:"low_trust_tasks_per_record"`
-	UnknownTrust            int                 `json:"unknown_trust_occurrences"`
+	ByKind                  map[string]healthConcentration `json:"record_concentration_by_kind"`
+	Labels                  healthLabelMetrics             `json:"labelled_selection"`
+	LowTrustFamilyFanout    map[int]int                    `json:"low_trust_tasks_per_family"`
+	UnknownFanout           int                            `json:"low_trust_occurrences_without_task"`
+	Version                 int                            `json:"aggregate_version"`
+	Population              healthPopulation               `json:"population"`
+	Invocations             int                            `json:"retained_invocations"`
+	Sampled                 bool                           `json:"sampled"`
+	ConcentrationPopulation string                         `json:"concentration_population"`
+	Records                 healthConcentration            `json:"records"`
+	Versions                healthConcentration            `json:"versions"`
+	Runs                    healthRuns                     `json:"consecutive_appearances"`
+	Repeat                  healthRatio                    `json:"repeat_serving"`
+	Lifecycle               healthRatio                    `json:"current_lifecycle_reentry"`
+	FamilyCounts            map[int]int                    `json:"families_per_invocation"`
+	UnknownOrigins          int                            `json:"unknown_origin_occurrences"`
+	LowTrustFanout          map[int]int                    `json:"low_trust_tasks_per_record"`
+	UnknownTrust            int                            `json:"unknown_trust_occurrences"`
 	// Horvitz-Thompson total and design-based standard error for independent
 	// Bernoulli sampling of entire invocations. Never used as exact integrity
 	// counters or as an uncertainty claim for the concentration ratios above.
-	EstimatedOccurrences float64  `json:"estimated_record_occurrences"`
-	EstimateSE           float64  `json:"estimated_record_occurrences_standard_error"`
+	EstimatedOccurrences *float64 `json:"estimated_record_occurrences"`
+	EstimateSE           *float64 `json:"estimated_record_occurrences_standard_error"`
 	EstimateMethod       string   `json:"estimate_method"`
 	Unsupported          []string `json:"unmeasured_metrics"`
 }
@@ -166,7 +172,7 @@ type healthMetrics struct {
 // turn contribute exposure per dispatch but are unioned for repeat membership.
 func aggregateHealth(events []healthInvocation, population healthPopulation) (healthMetrics, error) {
 	r := healthMetrics{Version: 1, Population: population, ConcentrationPopulation: "retained_invocations",
-		FamilyCounts: map[int]int{}, LowTrustFanout: map[int]int{}, EstimateMethod: "invocation_bernoulli_horvitz_thompson",
+		FamilyCounts: map[int]int{}, LowTrustFanout: map[int]int{}, LowTrustFamilyFanout: map[int]int{}, EstimateMethod: "invocation_bernoulli_horvitz_thompson",
 		Unsupported: []string{"sole_support_displacement", "arm_contamination", "fusion_recovery"}}
 	if population.Namespace == "" || population.Principal == "" || population.Purpose == "" || population.QueryClass == "" || !population.Until.After(population.From) {
 		return r, errors.New("incomplete health population")
@@ -202,7 +208,9 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 	}
 	events = filtered
 	records, versions := map[string]int{}, map[string]int{}
+	kindRecords := map[string]map[string]int{}
 	taskRecords := map[string]map[string]bool{}
+	taskFamilies := map[string]map[string]bool{}
 	turns := map[string]map[string]bool{}
 	turnTimes := map[string]time.Time{}
 	turnPrevious := map[string]string{}
@@ -242,10 +250,13 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 		}
 	}
 	r.Runs = healthRunDistribution(turns, turnPredecessor, turnTimes, incompleteTurns)
-	variance := 0.0
+	variance, total := 0.0, 0.0
 	for _, e := range events {
 		if !population.includes(e) {
 			continue
+		}
+		if err := r.Labels.add(e.Labels); err != nil {
+			return r, err
 		}
 		r.Invocations++
 		r.Sampled = r.Sampled || e.SamplePPM != 1000000
@@ -261,6 +272,14 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 			}
 			seen[record.RecordID] = true
 			records[record.RecordID]++
+			kind := record.Kind
+			if kind == "" {
+				kind = "unknown"
+			}
+			if kindRecords[kind] == nil {
+				kindRecords[kind] = map[string]int{}
+			}
+			kindRecords[kind][record.RecordID]++
 			if record.Family == "" {
 				r.UnknownOrigins++
 			} else {
@@ -268,11 +287,19 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 			}
 			if record.LowTrust == nil {
 				r.UnknownTrust++
+			} else if *record.LowTrust && e.Task == "" {
+				r.UnknownFanout++
 			} else if *record.LowTrust && e.Task != "" {
 				if taskRecords[record.RecordID] == nil {
 					taskRecords[record.RecordID] = map[string]bool{}
 				}
 				taskRecords[record.RecordID][e.Task] = true
+				if record.Family != "" {
+					if taskFamilies[record.Family] == nil {
+						taskFamilies[record.Family] = map[string]bool{}
+					}
+					taskFamilies[record.Family][e.Task] = true
+				}
 			}
 			if !record.Historical {
 				if record.LifecycleViolation == nil {
@@ -298,13 +325,42 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 		r.FamilyCounts[len(families)]++
 		p := float64(e.SamplePPM) / 1000000
 		y := float64(len(seen))
-		r.EstimatedOccurrences += y / p
+		total += y / p
 		variance += (1 - p) * y * y / (p * p)
 	}
 	for _, tasks := range taskRecords {
 		r.LowTrustFanout[len(tasks)]++
 	}
-	r.EstimateSE = math.Sqrt(variance)
+	for _, tasks := range taskFamilies {
+		r.LowTrustFamilyFanout[len(tasks)]++
+	}
+	r.Labels.finish()
+	r.Unsupported = nil
+	if r.Labels.Displacement.Denominator == 0 {
+		r.Unsupported = append(r.Unsupported, "sole_support_displacement")
+	}
+	contamination, recovery := 0, 0
+	for _, ratio := range r.Labels.Contamination {
+		contamination += ratio.Denominator
+	}
+	for _, ratio := range r.Labels.Recovery {
+		recovery += ratio.Denominator
+	}
+	if contamination == 0 {
+		r.Unsupported = append(r.Unsupported, "arm_contamination")
+	}
+	if recovery == 0 {
+		r.Unsupported = append(r.Unsupported, "fusion_recovery")
+	}
+	if r.Invocations > 0 {
+		se := math.Sqrt(variance)
+		r.EstimatedOccurrences = &total
+		r.EstimateSE = &se
+	}
+	r.ByKind = map[string]healthConcentration{}
+	for kind, counts := range kindRecords {
+		r.ByKind[kind] = healthConcentrationOf(counts)
+	}
 	r.Records, r.Versions = healthConcentrationOf(records), healthConcentrationOf(versions)
 	r.Repeat.finish()
 	r.Lifecycle.finish()

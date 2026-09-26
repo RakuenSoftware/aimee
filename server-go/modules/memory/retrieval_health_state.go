@@ -52,8 +52,9 @@ type healthJournal struct {
 	// Once a prepared identity is evicted, late replay cannot insert it again
 	// and inflate exposure. Older unseen snapshots are also excluded; report
 	// the incomplete range rather than pretending an exact lost-attempt count.
-	EvictedThrough uint64 `json:"evicted_through_prepared_sequence,string"`
-	OldRangeGap    bool   `json:"old_range_incomplete"`
+	EvictedThrough uint64     `json:"evicted_through_prepared_sequence,string"`
+	OldRangeGap    bool       `json:"old_range_incomplete"`
+	GapUntil       *time.Time `json:"gap_until,omitempty"`
 }
 
 func newHealthJournal(namespace, principal, project, workspace string, now time.Time) (*healthJournal, error) {
@@ -141,7 +142,7 @@ func (s *healthJournal) apply(observation healthSnapshot, now time.Time) error {
 		return nil
 	}
 	if !exists && observation.PreparedSequence <= s.EvictedThrough {
-		s.OldRangeGap = true
+		s.markGap(e.At, now)
 		return nil
 	}
 	if exists {
@@ -154,6 +155,7 @@ func (s *healthJournal) apply(observation healthSnapshot, now time.Time) error {
 		old = healthStoredAttempt{healthSnapshot: observation, Sampled: healthSample(s.Key, e.Attempt, e.SamplePPM), MetadataDigest: digest, RecordCount: len(unique)}
 		if !old.Sampled {
 			old.Invocation.Records = nil
+			old.Invocation.Labels = nil
 		}
 	}
 	s.Attempts[e.Attempt] = old
@@ -177,36 +179,51 @@ func (s *healthJournal) apply(observation healthSnapshot, now time.Time) error {
 		if seq := s.Attempts[oldest].PreparedSequence; seq > s.EvictedThrough {
 			s.EvictedThrough = seq
 		}
+		s.markGap(s.Attempts[oldest].Invocation.At, now)
 		delete(s.Attempts, oldest)
 		s.Evicted++
-		s.OldRangeGap = true
 	}
 	return nil
 }
 
+// A prior capacity loss does not poison every future window forever. Legacy
+// journals without a loss boundary remain incomplete until a conservative new
+// boundary has aged out; no historical coverage is invented during migration.
+func (s *healthJournal) markGap(at, now time.Time) {
+	through := at.Add(time.Nanosecond)
+	if s.OldRangeGap && s.GapUntil == nil {
+		through = now.Add(time.Nanosecond)
+	}
+	if s.GapUntil == nil || through.After(*s.GapUntil) {
+		s.GapUntil = &through
+	}
+	s.OldRangeGap = true
+}
+
 type healthWindow struct {
-	MetadataGaps     map[string]int `json:"metadata_gaps"`
-	Metrics          healthMetrics  `json:"sample_metrics"`
-	Attempts         map[string]int `json:"exact_retained_attempts_by_stage"`
-	Records          map[string]int `json:"exact_retained_record_occurrences_by_stage"`
-	Sampled          int            `json:"sampled_invocations"`
-	NotSampled       int            `json:"unsampled_invocations"`
-	Complete         bool           `json:"window_complete"`
-	CoverageStart    time.Time      `json:"coverage_start"`
-	RetentionSeconds int64          `json:"retention_seconds"`
-	Evicted          uint64         `json:"capacity_evictions_since_start"`
-	Expired          uint64         `json:"retention_expirations_since_start"`
-	Gap              bool           `json:"old_range_incomplete"`
+	SamplingProbabilities map[int]int    `json:"sampling_probability_ppm_counts"`
+	MetadataGaps          map[string]int `json:"metadata_gaps"`
+	Metrics               healthMetrics  `json:"sample_metrics"`
+	Attempts              map[string]int `json:"exact_retained_attempts_by_stage"`
+	Records               map[string]int `json:"exact_retained_record_occurrences_by_stage"`
+	Sampled               int            `json:"sampled_invocations"`
+	NotSampled            int            `json:"unsampled_invocations"`
+	Complete              bool           `json:"window_complete"`
+	CoverageStart         time.Time      `json:"coverage_start"`
+	RetentionSeconds      int64          `json:"retention_seconds"`
+	Evicted               uint64         `json:"capacity_evictions_since_start"`
+	Expired               uint64         `json:"retention_expirations_since_start"`
+	Gap                   bool           `json:"old_range_incomplete"`
 }
 
 func (s *healthJournal) report(p healthPopulation, now time.Time) (healthWindow, error) {
-	r := healthWindow{MetadataGaps: map[string]int{}, Attempts: map[string]int{}, Records: map[string]int{}, CoverageStart: s.StartedAt,
-		RetentionSeconds: int64(healthRetention / time.Second), Evicted: s.Evicted, Expired: s.Expired, Gap: s.OldRangeGap}
+	r := healthWindow{SamplingProbabilities: map[int]int{}, MetadataGaps: map[string]int{}, Attempts: map[string]int{}, Records: map[string]int{}, CoverageStart: s.StartedAt,
+		RetentionSeconds: int64(healthRetention / time.Second), Evicted: s.Evicted, Expired: s.Expired, Gap: s.OldRangeGap && (s.GapUntil == nil || p.From.Before(*s.GapUntil))}
 	if p.Namespace != s.Namespace || p.Principal != s.Principal || p.Project != s.Project || p.Workspace != s.Workspace {
 		return healthWindow{}, errors.New("health report belongs to another namespace")
 	}
 	// This is coverage of this owner's collector, not of all serving surfaces.
-	r.Complete = !p.From.Before(s.StartedAt) && !p.From.Before(now.Add(-healthRetention)) && !p.Until.After(now) && !s.OldRangeGap
+	r.Complete = !p.From.Before(s.StartedAt) && !p.From.Before(now.Add(-healthRetention)) && !p.Until.After(now) && !r.Gap
 	var sampled []healthInvocation
 	for _, entry := range s.Attempts {
 		e := entry.Invocation
@@ -224,6 +241,7 @@ func (s *healthJournal) report(p healthPopulation, now time.Time) (healthWindow,
 		if e.Stage != p.Stage {
 			continue
 		}
+		r.SamplingProbabilities[e.SamplePPM]++
 		if entry.Sampled {
 			sampled = append(sampled, e)
 			r.Sampled++
@@ -259,7 +277,7 @@ func decodeHealthJournal(raw []byte) (*healthJournal, error) {
 		if id == "" || id != e.Attempt || e.Namespace != s.Namespace || e.Principal != s.Principal || e.Project != s.Project || e.Workspace != s.Workspace ||
 			e.Binding == "" || e.At.IsZero() || e.Stage != "" || e.SamplePPM <= 0 || e.SamplePPM > 1000000 || e.SamplingEpoch == "" ||
 			entry.PreparedSequence == 0 || !receiptDigestValid(entry.MetadataDigest) || entry.RecordCount < 0 || entry.RecordCount > 256 || len(e.Records) > 256 ||
-			entry.Sampled != healthSample(s.Key, id, e.SamplePPM) || !entry.Sampled && e.Records != nil ||
+			entry.Sampled != healthSample(s.Key, id, e.SamplePPM) || !entry.Sampled && (e.Records != nil || e.Labels != nil) ||
 			(entry.Started || entry.Acknowledged || entry.OutcomeUnknown) && !entry.Admitted || entry.ResolvedUnsent && entry.Admitted {
 			return nil, errors.New("invalid persisted health attempt")
 		}

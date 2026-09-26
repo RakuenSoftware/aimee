@@ -210,6 +210,26 @@ func TestHealthPostgresConcurrentOwnerAndRestart(t *testing.T) {
 		t.Fatal(absent)
 	}
 
+	// Keyed query capture recovers the same private namespace key after restart.
+	captureArgs := sourceReleaseArgs(map[string]any{"principal": "receipt-owner", "project": "private"})
+	captureOwner := owner()
+	captureOptions := handlerOptions{placement: PlacementServer, data: captureOwner}
+	var firstCapture *healthQueryContext
+	for i := 0; i < 5 && firstCapture == nil; i++ {
+		firstCapture = captureHealthQuery(captureOptions, bus.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
+	}
+	captureOptions.data = owner()
+	var secondCapture *healthQueryContext
+	for i := 0; i < 5 && secondCapture == nil; i++ {
+		secondCapture = captureHealthQuery(captureOptions, bus.ModuleInvocation{}, captureArgs, "yes", "ingress_query")
+	}
+	if firstCapture == nil || secondCapture == nil || firstCapture.Fingerprint != secondCapture.Fingerprint {
+		t.Fatal("query fingerprint did not survive owner restart")
+	}
+	journal, err := captureOwner.readHealthStore(ctx, "receipt-owner", "private", "")
+	if err != nil || firstCapture.Fingerprint != healthQueryFingerprint(journal.Key, journal.Namespace, "yes") {
+		t.Fatal("capture used a different namespace key", err)
+	}
 	// The per-principal quota is checked under the same transaction lock.
 	for i := 1; i < 128; i++ {
 		if _, err = s.updateHealthStore(ctx, p.Principal, fmt.Sprint(i), p.Workspace, now, func(*healthJournal) error { return nil }); err != nil {
