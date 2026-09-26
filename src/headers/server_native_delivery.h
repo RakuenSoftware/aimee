@@ -60,8 +60,10 @@ static inline int server_native_send(int fd, const void *data, size_t n)
  * to with a second HTTP response. Constant 64 KiB transfer memory per request. */
 static inline int server_native_delivery_forward(int client, const char *method, const char *path,
                                                  const char *principal, const char *body,
-                                                 size_t body_len)
+                                                 size_t body_len, int *response_status)
 {
+   if (response_status)
+      *response_status = 0;
 #if defined(__linux__)
    if (!server_native_delivery_route(method, path))
       return 404;
@@ -122,6 +124,8 @@ static inline int server_native_delivery_forward(int client, const char *method,
    }
    int started = 0;
    size_t total = 0;
+   char status_line[64] = "";
+   size_t status_len = 0;
    char chunk[65536];
    for (;;)
    {
@@ -133,6 +137,21 @@ static inline int server_native_delivery_forward(int client, const char *method,
       total += (size_t)got;
       if (total > ((size_t)1 << 30) + 65536)
          break;
+      if (response_status && !*response_status && status_len < sizeof(status_line) - 1)
+      {
+         size_t take = (size_t)got < sizeof(status_line) - 1 - status_len
+                           ? (size_t)got
+                           : sizeof(status_line) - 1 - status_len;
+         memcpy(status_line + status_len, chunk, take);
+         status_len += take;
+         status_line[status_len] = 0;
+         if (strchr(status_line, '\n') || status_len == sizeof(status_line) - 1)
+         {
+            int code = 0;
+            if (sscanf(status_line, "HTTP/%*u.%*u %d", &code) == 1 && code >= 100 && code <= 599)
+               *response_status = code;
+         }
+      }
       started = 1;
       if (server_conn_io_write_all(client, chunk, (int)got) < 0)
          break;
