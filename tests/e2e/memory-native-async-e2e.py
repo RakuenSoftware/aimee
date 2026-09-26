@@ -38,6 +38,7 @@ def inside(output):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
     checks, captures, runs, provider_errors, request_sizes = [], [], [], [], []
+    mutation_retries = []
     lock = threading.Lock()
     receipt_captures = []
     expected_unresolved = set()
@@ -65,11 +66,11 @@ def inside(output):
     class Local(http.client.HTTPConnection):
         def connect(self):
             self.sock = socket.socket(socket.AF_UNIX)
-            self.sock.settimeout(90)
+            self.sock.settimeout(self.timeout)
             self.sock.connect('/var/lib/aimee/aimee-http.sock')
 
-    def api(path, body=None, limits=None):
-        conn = Local('localhost', timeout=90)
+    def api(path, body=None, limits=None, timeout=90):
+        conn = Local('localhost', timeout=timeout)
         try:
             conn.request('GET' if body is None else 'POST', path,
                          None if body is None else json.dumps(body),
@@ -85,6 +86,23 @@ def inside(output):
             return response.status, json.loads(raw)
         finally:
             conn.close()
+
+    def fixture_mutation(path, body):
+        # Receiving the full HTTP body can precede the sender's committed
+        # guard completion. A 55P03 refusal during that interval is correct.
+        # Keep the provider reply withheld until this idempotent intervention
+        # commits, bounded to one send window; never retry a transport exception.
+        body = dict(body, idempotency_key='native-fixture-' + uuid.uuid4().hex)
+        deadline, retries = time.monotonic() + 5, 0
+        while True:
+            status, result = api(path, body, timeout=max(0.05, deadline-time.monotonic()))
+            if status == 200 and result.get('status') == 'ok':
+                mutation_retries.append(dict(path=path, retries=retries))
+                return status, result
+            if result.get('status') != 'error' or time.monotonic() >= deadline:
+                return status, result
+            retries += 1
+            time.sleep(0.05)
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -135,7 +153,7 @@ def inside(output):
                 if ordinal == 5:
                     try:
                         if scenario == 'refresh-update':
-                            status, stored = api('/v1/memory/store', dict(
+                            status, stored = fixture_mutation('/v1/memory/store', dict(
                                 key='identity:' + prefix + '-refresh', content=refreshed_content))
                             if status != 200 or stored.get('status') != 'ok':
                                 raise RuntimeError('refresh identity was not committed')
@@ -152,7 +170,7 @@ def inside(output):
                     version = current.get('memory', {}).get('version')
                     if status != 200 or not isinstance(version, dict):
                         raise RuntimeError('retry correction could not read current version')
-                    status, corrected = api('/v1/memory/supersede', dict(
+                    status, corrected = fixture_mutation('/v1/memory/supersede', dict(
                         old_id=str(memory_id), new_content=content + ' corrected before retry',
                         expected_version=version))
                     if status != 200 or corrected.get('status') != 'ok':
@@ -162,7 +180,7 @@ def inside(output):
                 response = dict(error=dict(message='retryable fixture response after source correction'))
             if scenario == 'shared-change-before-retry' and ordinal == 1:
                 try:
-                    status, stored = api('/v1/memory/store', dict(store='kb', scope='all', key=prefix+'-shared-change',
+                    status, stored = fixture_mutation('/v1/memory/store', dict(store='kb', scope='all', key=prefix+'-shared-change',
                         content='New shared constraint: deployment requires explicit review.', tier='L2', kind='fact'))
                     if status != 200 or stored.get('status') != 'ok':
                         raise RuntimeError('shared constraint was not committed')
@@ -568,6 +586,7 @@ def inside(output):
             provider.server_close()
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                provider_intervention_errors=provider_errors, provider_intervention_retries=mutation_retries,
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],

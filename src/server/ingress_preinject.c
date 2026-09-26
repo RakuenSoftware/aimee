@@ -709,6 +709,20 @@ const char *ingress_preinject_session_id(void)
    return ctx && ctx->trusted && ctx->principal[0] ? ctx->session_key : "";
 }
 
+char *ingress_preinject_task_instructions(const char *instructions, const char *query)
+{
+   if (!g_task_requirements[0])
+      return NULL;
+   char *envelope = ingress_preinject_build(query, 0);
+   if (!envelope)
+      return NULL;
+   char *result = ingress_preinject_apply(instructions, envelope);
+   free(envelope);
+   if (!result)
+      (void)request_context_refuse_assembly("unavailable");
+   return result;
+}
+
 static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
 {
    return (long)(end->tv_sec - start->tv_sec) * 1000L +

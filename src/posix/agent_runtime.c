@@ -13,6 +13,8 @@
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
+#include "ingress_preinject.h"
+#include "request_context.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include <aimee/delegates/delegate_driver.h>
@@ -568,11 +570,16 @@ native_provider_http:
    /* Build context-rich system prompt */
    /* Read, not derived: the permission was resolved when the run was configured. */
    int current_code_only = !agent_tools_knowledge_write_allowed();
+   char *task_instructions =
+       current_code_only ? NULL : ingress_preinject_task_instructions(system_prompt, user_prompt);
+   if (task_instructions)
+      system_prompt = task_instructions;
    char *assembled_sys = agent_build_exec_context_checked(
        agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
        current_code_only, out->error, sizeof(out->error));
    if (!assembled_sys)
    {
+      free(task_instructions);
       snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
       if (has_ephemeral_ssh)
          agent_ssh_cleanup(network, ephemeral_key, session_id);
@@ -598,6 +605,7 @@ native_provider_http:
    {
       snprintf(out->error, sizeof(out->error), "auth resolution failed");
       free(assembled_sys);
+      free(task_instructions);
       if (has_ephemeral_ssh)
          agent_ssh_cleanup(network, ephemeral_key, session_id);
       if (has_tunnels && network && network->tunnel_mgr)
@@ -621,6 +629,8 @@ native_provider_http:
    if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
    {
       snprintf(out->error, sizeof(out->error), "failed to build request URL");
+      free(assembled_sys);
+      free(task_instructions);
       return -1;
    }
 
@@ -644,17 +654,37 @@ native_provider_http:
    /* Build conversation history. Primary sessions pass structured provider
     * history here; delegate runs start empty and remain single-task. */
    cJSON *messages = initial_messages ? cJSON_Duplicate(initial_messages, 1) : cJSON_CreateArray();
-   int has_prior_messages = messages && cJSON_GetArraySize(messages) > 0;
 
    /* For OpenAI, system prompt goes in messages array.
     * For Anthropic and ChatGPT it goes in the request body, handled by the
     * respective request builder. */
-   if (!has_prior_messages && !chatgpt && !anthropic)
+   if (!chatgpt && !anthropic)
    {
-      cJSON *sys_msg = cJSON_CreateObject();
-      cJSON_AddStringToObject(sys_msg, "role", "system");
-      cJSON_AddStringToObject(sys_msg, "content", sys);
-      cJSON_AddItemToArray(messages, sys_msg);
+      /* History carries the preceding turn's system context. Its replacement
+       * must match the current Go assembly and source receipt. */
+      cJSON *first = cJSON_GetArrayItem(messages, 0);
+      const char *first_role =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "role"));
+      if (first_role && strcmp(first_role, "system") == 0)
+      {
+         cJSON *replacement = cJSON_CreateString(sys);
+         if (!replacement || !cJSON_ReplaceItemInObjectCaseSensitive(first, "content", replacement))
+         {
+            cJSON_Delete(replacement);
+            (void)request_context_refuse_assembly("unavailable");
+         }
+      }
+      else
+      {
+         cJSON *sys_msg = cJSON_CreateObject();
+         if (!sys_msg || !cJSON_AddStringToObject(sys_msg, "role", "system") ||
+             !cJSON_AddStringToObject(sys_msg, "content", sys) ||
+             !cJSON_InsertItemInArray(messages, 0, sys_msg))
+         {
+            cJSON_Delete(sys_msg);
+            (void)request_context_refuse_assembly("unavailable");
+         }
+      }
    }
 
    cJSON *user_msg = cJSON_CreateObject();
@@ -2204,6 +2234,7 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
+   free(task_instructions);
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)
       agent_ssh_cleanup(network, ephemeral_key, session_id);

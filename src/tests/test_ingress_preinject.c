@@ -891,9 +891,15 @@ static void test_native_task_requirements_transport_and_turn_isolation(void)
       ingress_preinject_set_task_requirements(request);
       cJSON_Delete(request); /* setter owns a bounded copy, not the request */
       g_expected_task_requirements = values[i];
-      free(ingress_preinject_build("recover deployment", 0));
+      char *instructions =
+          ingress_preinject_task_instructions("CURRENT_PRIMARY_SYSTEM", "recover deployment");
+      assert(instructions && strstr(instructions, "CURRENT_PRIMARY_SYSTEM"));
+      assert(strstr(instructions, "assertion"));
+      free(instructions);
       ingress_preinject_set_session_id("next-turn");
       g_expected_task_requirements = NULL;
+      assert(ingress_preinject_task_instructions("NEXT_PRIMARY_SYSTEM", "recover deployment") ==
+             NULL);
       free(ingress_preinject_build("recover deployment", 0));
    }
    cJSON *duplicate = cJSON_Parse("{\"evidence_requirements\":{},\"evidence_requirements\":{}}");

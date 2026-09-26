@@ -192,3 +192,13 @@ principal isolation and exact persistence after SIGKILL. The focused guard
 PostgreSQL suite and memory health/source race suite passed. These results do not
 override the failed native recovery gate. The exact two owned stacks were then
 cleaned after exporting the diagnostic evidence.
+
+Candidate `da4e67b44` passed the previously failing native recovery after owner
+loss. T2 later stopped when the fixture attempted a shared mutation before the
+sender's guard completion committed; the KB recorded SQLSTATE 55P03. That
+refusal preserves the required send boundary. Provider interventions now use
+one idempotency key and retry explicit error responses within a five-second
+wall-clock bound, while withholding the retryable provider reply until the
+mutation commits. Transport exceptions still fail the fixture. An isolated
+16-check diagnostic passed shared insertion and private correction, each
+preventing a stale second provider send. The full T2/T3 run is still required.

@@ -120,3 +120,20 @@ refresh recovery, exact dispatch charges and ungraceful host restart persistence
 This fresh pass does not erase the earlier failed and infrastructure-invalid
 runs. Measured workload promotion and an activated process experiment remain
 open; these fixture providers are not task-quality evidence.
+
+## Native requirement assembly discovered by activation testing
+
+The activated-process fixture exposed a missing path: native primary requests
+carried task requirements in worker TLS but never called the existing Go ingress
+assembler. Their persisted contracts therefore remained unclassified, without
+complete coverage or a current index observation. The native tool loop now calls
+the existing assembler for explicitly declared requirements, using the actual
+user query. Current-code-only permission still skips knowledge retrieval. The
+assembled instructions remain intact during native memory refresh.
+
+The OpenAI-compatible session path also retained the preceding turn's system
+message despite preparing a current source receipt. It now replaces that owned
+system content with the current assembly while preserving conversation history.
+The ingress unit suite passes requirement forwarding and turn isolation through
+the new native entrypoint; the native runtime compiles. Deployed activation and
+the measured paired workload remain pending.

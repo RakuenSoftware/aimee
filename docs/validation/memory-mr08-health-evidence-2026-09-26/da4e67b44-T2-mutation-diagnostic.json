@@ -1,0 +1,79 @@
+{
+  "checks": [
+    {
+      "name": "native fixture explicitly enables automatic recall",
+      "passed": true
+    },
+    {
+      "name": "native fixture stores complete private identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture reads its private source version",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before shared insertion before transport retry",
+      "passed": true
+    },
+    {
+      "name": "shared insertion before transport retry queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider fixture commits a new shared constraint",
+      "passed": true
+    },
+    {
+      "name": "new shared constraint refuses stale native transport retry",
+      "passed": true
+    },
+    {
+      "name": "new shared constraint prevents a second provider send",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before private correction before transport retry",
+      "passed": true
+    },
+    {
+      "name": "private correction before transport retry queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider fixture commits correction before retryable response",
+      "passed": true
+    },
+    {
+      "name": "private correction refuses stale native transport retry",
+      "passed": true
+    },
+    {
+      "name": "corrected private source prevents a second provider send",
+      "passed": true
+    },
+    {
+      "name": "every actual native send has separate durable admission",
+      "passed": true
+    },
+    {
+      "name": "native fixture removes its shared constraint",
+      "passed": true
+    },
+    {
+      "name": "native fixture retires its private identity",
+      "passed": true
+    }
+  ],
+  "provider_intervention_errors": [],
+  "provider_intervention_retries": [
+    {
+      "path": "/v1/memory/store",
+      "retries": 0
+    },
+    {
+      "path": "/v1/memory/supersede",
+      "retries": 0
+    }
+  ]
+}
