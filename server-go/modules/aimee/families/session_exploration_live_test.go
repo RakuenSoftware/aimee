@@ -64,6 +64,12 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	}
 	defer pool.Close()
 	for _, name := range []string{"schema_sessions.sql", "schema_guardrail.sql", "schema_session_exploration.sql"} {
+		if name == "schema_session_exploration.sql" {
+			// Populate the pre-migration shape before applying the additive change.
+			if _, e = pool.Exec(ctx, `INSERT INTO session_state(session_id,hook_call_count) VALUES('session',77)`); e != nil {
+				t.Fatal(e)
+			}
+		}
 		body, e := schemaFS.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)
@@ -71,6 +77,11 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 		if _, e = pool.Exec(ctx, string(body)); e != nil {
 			t.Fatal(name, e)
 		}
+	}
+	var legacyCount int
+	var defaultState string
+	if e = pool.QueryRow(ctx, `SELECT hook_call_count,exploration_state FROM session_state WHERE session_id='session'`).Scan(&legacyCount, &defaultState); e != nil || legacyCount != 77 || defaultState != "" {
+		t.Fatal("migration changed legacy state", e)
 	}
 	if _, e = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES('session','alice')`); e != nil {
 		t.Fatal(e)
@@ -129,6 +140,19 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 	wg.Wait()
 	if admitted.Load() != 3 {
 		t.Fatalf("cross-task allowance overspent: %d", admitted.Load())
+	}
+	// An old client's unchanged save frame cannot erase newly committed counters.
+	var beforeSave, afterSave string
+	if e = pool.QueryRow(ctx, `SELECT exploration_state FROM session_state WHERE session_id='session'`).Scan(&beforeSave); e != nil {
+		t.Fatal(e)
+	}
+	legacyFrame, _ := wire.EncodeFields(opSessionStateSave, saveFrame("session"))
+	legacyReply, legacyStatus := handler(bus.ModuleInvocation{StageID: StageGuardrailState}, legacyFrame)
+	if legacyStatus != bus.ModuleStatusOK || storeStatus(legacyReply) != store.StatusOK {
+		t.Fatal("legacy save failed")
+	}
+	if e = pool.QueryRow(ctx, `SELECT exploration_state FROM session_state WHERE session_id='session'`).Scan(&afterSave); e != nil || beforeSave != afterSave {
+		t.Fatal("legacy client overwrote exploration state", e)
 	}
 	// Recreate the handler, proving accounting lives in PostgreSQL, not its heap.
 	handler = GuardrailState.Handler(explorationLiveDB{liveQueryer{pool}})

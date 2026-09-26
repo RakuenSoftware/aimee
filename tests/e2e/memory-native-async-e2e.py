@@ -80,6 +80,8 @@ def inside(output):
             if response.getheader('Content-Type', '').startswith('text/event-stream'):
                 return response.status, [json.loads(line[5:].strip()) for line in raw.decode().splitlines()
                     if line.startswith('data:') and line[5:].strip() != '[DONE]']
+            if response.getheader('Content-Type', '').startswith('application/x-ndjson'):
+                return response.status, [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
             return response.status, json.loads(raw)
         finally:
             conn.close()

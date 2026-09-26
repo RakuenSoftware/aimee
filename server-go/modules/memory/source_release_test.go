@@ -1110,3 +1110,50 @@ func TestNativeRefreshReplacesOnlyNativeProofs(t *testing.T) {
 		t.Fatal("empty native replacement erased ingress proof", refs)
 	}
 }
+
+func TestExplorationPlanCommitmentCoversRetainedNativeBlocks(t *testing.T) {
+	state := &sourceReleaseState{}
+	args := sourceReleaseArgs(map[string]any{"request_id": "whole-plan", "project": "app"})
+	makePart := func(digest string, appendPart bool) map[string]any {
+		ref := releaseTestRef()
+		ref.Channel = "native_identity"
+		ref.Source.Kind = "memory_record"
+		return map[string]any{"native_projection": map[string]any{"retained_items": []typedProjectionRef{ref}, "digest": digest}, "append_native_sources": appendPart}
+	}
+	first, err := state.prepare(args, makePart("first-rendering", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(first)
+	combined, err := state.prepare(args, makePart("last-rendering", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDigest := state.entries[combined].assemblyDigest
+	delete(args, "source_release_ticket")
+	other, err := state.prepare(args, makePart("different-first-rendering", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(other)
+	otherCombined, err := state.prepare(args, makePart("last-rendering", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.entries[otherCombined].assemblyDigest == firstDigest {
+		t.Fatal("earlier retained rendering omitted from plan commitment")
+	}
+	for _, ticket := range []string{combined, otherCombined} {
+		args["source_release_ticket"], _ = json.Marshal(ticket)
+		refreshed, err := state.prepare(args, makePart("fresh-complete-block", false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(state.entries[refreshed].assemblyParts) != 1 {
+			t.Fatal("native refresh retained superseded rendering")
+		}
+	}
+	if len(state.entries[combined].assemblyParts) != 2 {
+		t.Fatal("refresh mutated accepted prior commitment")
+	}
+}

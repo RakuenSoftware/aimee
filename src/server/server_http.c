@@ -1096,6 +1096,7 @@ static void handle_native_chat_stream(int fd, const char *body, uint32_t conn_ca
    memset(&sc, 0, sizeof(sc));
    sc.fd = fd;
    sc.capabilities = conn_caps;
+   server_http_identity_apply(&sc);
    pthread_mutex_init(&sc.mutex, NULL);
    pthread_cond_init(&sc.can_close, NULL);
    handle_chat_send_stream(server_active_ctx(), &sc, req);

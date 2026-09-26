@@ -1876,11 +1876,17 @@ native_provider_http:
             continue;
          }
 
+         /* Provider tool IDs need only be unique within one response. Bind
+          * accounting to this host-observed turn too, so another turn cannot
+          * reuse an old admission while a retry of this dispatch stays stable. */
+         char exploration_attempt[96];
+         snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%s", api_call_count,
+                  parsed.calls[i].id);
          /* Check policy */
          char policy_reason[256] = {0};
          const char *se = tool_side_effect(parsed.calls[i].name);
          if (policy_check_tool_attempt(parsed.calls[i].name, se, parsed.calls[i].arguments,
-                                       parsed.calls[i].id, policy_reason,
+                                       exploration_attempt, policy_reason,
                                        sizeof(policy_reason)) != 0)
          {
             char *err_result = malloc(512);
@@ -1932,7 +1938,7 @@ native_provider_http:
                                                    agent->timeout_ms);
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(parsed.calls[i].name, parsed.calls[i].arguments,
-                                              parsed.calls[i].id, result_str);
+                                              exploration_attempt, result_str);
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();

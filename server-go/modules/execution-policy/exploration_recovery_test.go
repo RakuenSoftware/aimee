@@ -138,3 +138,22 @@ func TestDiscoveryFallbackAttestsActualRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestConfiguredStarvationThresholdDoesNotRewriteConfidence(t *testing.T) {
+	c := testContract(time.Now())
+	c.Limits.StarvationTurns = 4
+	l := testLedger(t, c)
+	for turn := uint64(1); turn <= 4; turn++ {
+		if err := l.completedTurn(turn, true, true, true, false); err != nil {
+			t.Fatal(err)
+		}
+		latest := l.state.Revisions[len(l.state.Revisions)-1]
+		want := "enforce"
+		if turn == 4 {
+			want = "observe"
+		}
+		if latest.Tier != want || latest.ConfidenceProvenance != c.ConfidenceProvenance {
+			t.Fatal("incorrect calibrated recovery tier", turn, latest.Tier)
+		}
+	}
+}

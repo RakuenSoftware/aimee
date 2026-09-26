@@ -1913,7 +1913,7 @@ $(TESTPREFIX)/unit-test-db2-pool: $(OBJDIR)/tests/test_db2_pool.o $(OBJDIR)/db2/
 
 $(TESTPREFIX)/unit-test-server-session-pools: $(OBJDIR)/tests/test_server_session_pools.o \
 	                               $(OBJDIR)/server/server_session_pools.o $(OBJDIR)/server/compute_pool.o \
-	                               $(OBJDIR)/log.o
+	                               $(OBJDIR)/server/request_context.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-presence: $(OBJDIR)/tests/test_presence.o \

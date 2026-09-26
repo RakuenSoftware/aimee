@@ -10,12 +10,13 @@ import (
 // A nil ceiling inherits the operator limit. Zero is a literal zero, never a
 // sentinel. Limits do not confer authorization; baseline policy runs first.
 type explorationLimits struct {
-	Enabled  bool   `json:"enabled"`
-	RawScans *int64 `json:"raw_scans,omitempty"`
-	Files    *int64 `json:"distinct_files,omitempty"`
-	Graph    *int64 `json:"graph_expansions,omitempty"`
-	Bytes    *int64 `json:"returned_bytes,omitempty"`
-	Tokens   *int64 `json:"returned_tokens,omitempty"`
+	StarvationTurns uint64 `json:"starvation_turns,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	RawScans        *int64 `json:"raw_scans,omitempty"`
+	Files           *int64 `json:"distinct_files,omitempty"`
+	Graph           *int64 `json:"graph_expansions,omitempty"`
+	Bytes           *int64 `json:"returned_bytes,omitempty"`
+	Tokens          *int64 `json:"returned_tokens,omitempty"`
 }
 
 func legacyRawScanLimit(n int64) *int64 {
@@ -25,6 +26,9 @@ func legacyRawScanLimit(n int64) *int64 {
 	return &n
 }
 func (l explorationLimits) valid() bool {
+	if l.StarvationTurns > 64 {
+		return false
+	}
 	for _, n := range []*int64{l.RawScans, l.Files, l.Graph, l.Bytes, l.Tokens} {
 		if n != nil && *n < 0 {
 			return false
@@ -400,7 +404,11 @@ func (l *explorationLedger) completedTurn(turn uint64, constrained, unresolved, 
 	} else if constrained && indexedFailed {
 		s.StarvedTurns++
 	}
-	if s.StarvedTurns >= 2 && len(s.Revisions) > 0 {
+	threshold := uint64(2)
+	if len(s.Revisions) > 0 && s.Revisions[len(s.Revisions)-1].Limits.StarvationTurns > 0 {
+		threshold = s.Revisions[len(s.Revisions)-1].Limits.StarvationTurns
+	}
+	if s.StarvedTurns >= threshold && len(s.Revisions) > 0 {
 		c := s.Revisions[len(s.Revisions)-1]
 		if c.Tier != "observe" {
 			if len(s.Revisions) >= 128 {

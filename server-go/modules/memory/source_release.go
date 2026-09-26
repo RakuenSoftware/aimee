@@ -29,7 +29,13 @@ type sourceReleaseState struct {
 	receiptBytes    int
 	receiptProducer string
 }
+type sourceReleasePart struct {
+	Native bool   `json:"native"`
+	Digest string `json:"digest"`
+}
+
 type sourceReleaseEntry struct {
+	assemblyParts                                []sourceReleasePart
 	assemblyDigest                               string
 	assemblyMetadata                             json.RawMessage
 	sources                                      json.RawMessage
@@ -157,12 +163,29 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	if err != nil {
 		return "", err
 	}
-	if prior != nil && bytes.Equal(raw, prior.sources) && prior.assemblyDigest == releaseDigest(assembly) {
+	_, nativePart := assembly["native_projection"]
+	part := sourceReleasePart{Native: nativePart, Digest: releaseDigest(assembly)}
+	if prior != nil && bytes.Equal(raw, prior.sources) && len(prior.assemblyParts) > 0 && prior.assemblyParts[len(prior.assemblyParts)-1] == part {
 		return previous, nil
 	}
-	metadata, _ := json.Marshal(map[string]any{"packing_dispositions": assembly["packing_dispositions"], "context_accounting": assembly["context_accounting"], "projection_commitment": releaseDigest(assembly)})
+	// The commitment covers every retained block, not just the last appended
+	// native projection. Refresh replaces native parts while retaining ingress.
+	parts := []sourceReleasePart{}
+	if prior != nil {
+		for _, old := range prior.assemblyParts {
+			if !replaceNative || !old.Native {
+				parts = append(parts, old)
+			}
+		}
+	}
+	if len(parts) >= 128 {
+		return "", errors.New("source assembly history capacity")
+	}
+	parts = append(parts, part)
+	assemblyDigest := releaseDigest(parts)
+	metadata, _ := json.Marshal(map[string]any{"packing_dispositions": assembly["packing_dispositions"], "context_accounting": assembly["context_accounting"], "projection_commitment": assemblyDigest, "projection_parts": parts})
 	if len(metadata) > 12000 {
-		metadata, _ = json.Marshal(map[string]any{"projection_commitment": releaseDigest(assembly), "truncated": true, "reason": "assembly_metadata_limit"})
+		metadata, _ = json.Marshal(map[string]any{"projection_commitment": assemblyDigest, "truncated": true, "reason": "assembly_metadata_limit"})
 	}
 	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
 		return "", errors.New("source release capacity")
@@ -172,7 +195,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	// Assembly is not integrity acceptance. Keep the old handle immutable until
 	// the host either discards this candidate or uses it at the provider fence.
-	s.entries[token] = &sourceReleaseEntry{assemblyDigest: releaseDigest(assembly), assemblyMetadata: metadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
+	s.entries[token] = &sourceReleaseEntry{assemblyParts: parts, assemblyDigest: assemblyDigest, assemblyMetadata: metadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
 	s.bytes += len(raw) + len(metadata)
 	return token, nil
 }

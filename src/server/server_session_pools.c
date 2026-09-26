@@ -3,6 +3,7 @@
 #include "config.h"
 #include "compute_pool.h"
 #include "log.h"
+#include "request_context.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,8 @@ typedef struct
    server_session_pool_t *entry;
    void (*fn)(void *);
    void *arg;
+   request_context_t request_context;
+   int has_request_context;
 } session_pool_work_t;
 
 static int session_id_usable(const char *session_id)
@@ -69,8 +72,12 @@ static void session_pool_release_job(server_ctx_t *ctx, server_session_pool_t *e
 static void session_pool_worker(void *arg)
 {
    session_pool_work_t *work = (session_pool_work_t *)arg;
+   /* Identity, restrictive budgets and host refusals must survive the thread
+    * handoff. Always clear afterward so a reused worker cannot leak a task. */
+   request_context_set(work->has_request_context ? &work->request_context : NULL);
    if (work->fn)
       work->fn(work->arg);
+   request_context_clear();
    session_pool_release_job(work->ctx, work->entry);
    free(work);
 }
@@ -132,6 +139,12 @@ int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (
    work->entry = entry;
    work->fn = fn;
    work->arg = arg;
+   const request_context_t *request = request_context_get();
+   if (request)
+   {
+      work->request_context = *request;
+      work->has_request_context = 1;
+   }
 
    if (compute_pool_submit(&entry->pool, session_pool_worker, work) != 0)
    {
