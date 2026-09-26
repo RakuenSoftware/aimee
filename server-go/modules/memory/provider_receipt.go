@@ -199,6 +199,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	if entry.assemblyDigest != "" {
 		offer = s.explorationOfferForEntry(entry)
 		if offer != nil {
+			offer["producer_build"] = binding.ProducerBuild
 			offer["route"], offer["provider"], offer["model"] = binding.Route, binding.Provider, binding.Model
 			offer["limits_digest"] = releaseDigest([]string{binding.CallerLimitsDigest, binding.OperatorLimitsDigest, binding.RendererVersion, binding.PolicyVersion})
 			offer["receipt_digest"] = bindingDigest

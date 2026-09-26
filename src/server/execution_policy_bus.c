@@ -10,6 +10,7 @@
 #include "request_context.h"
 #include "kb_client.h"
 #include "module_commands.h"
+#include "modules/workspace/workspace_provider.h"
 #include "util.h"
 #include <limits.h>
 #include <unistd.h>
@@ -32,8 +33,34 @@ static void set_reason(char *out, size_t cap, const char *reason)
       snprintf(out, cap, "%s", reason ? reason : "execution policy denied the action");
 }
 
+static void policy_session_reason(char *out, size_t cap, const cJSON *result, const char *fallback)
+{
+   const char *why = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "reason"));
+   const cJSON *exploration = cJSON_GetObjectItemCaseSensitive(result, "exploration");
+   const cJSON *alternatives = cJSON_GetObjectItemCaseSensitive(exploration, "alternatives");
+   if (out && cap > 0 && cap <= INT_MAX && why && cJSON_IsArray(alternatives) &&
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "allowed")))
+   {
+      cJSON *detail = cJSON_CreateObject();
+      cJSON_AddStringToObject(detail, "reason", why);
+      cJSON_AddItemToObject(detail, "alternatives", cJSON_Duplicate(alternatives, 1));
+      int written = cJSON_PrintPreallocated(detail, out, (int)cap, 0);
+      cJSON_Delete(detail);
+      if (written)
+         return;
+   }
+   set_reason(out, cap, why ? why : fallback);
+}
+
 static int policy_baseline(const char *tool_name, const char *side_effect, const char *args_json,
                            char *reason_out, size_t reason_len, int *discovery);
+
+static int policy_worktree_on_host(void)
+{
+   const workspace_provider_t *provider = workspace_provider_active();
+   return provider &&
+          (provider->kind == WS_PROVIDER_SHARED || provider->kind == WS_PROVIDER_MIRROR);
+}
 
 static void policy_observe_index_generation(cJSON *request, const cJSON *binding)
 {
@@ -53,10 +80,12 @@ static void policy_observe_index_generation(cJSON *request, const cJSON *binding
 static void policy_observe_memory_owner(cJSON *request)
 {
    const request_context_t *ctx = request_context_get();
-   if (!ctx || !ctx->memory_source_release[0])
+   if (!ctx)
       return;
    cJSON *probe = cJSON_CreateObject();
-   cJSON_AddStringToObject(probe, "operation", "exploration-owner-observe");
+   cJSON_AddStringToObject(probe, "operation",
+                           ctx->memory_source_release[0] ? "exploration-owner-observe"
+                                                         : "exploration-owner-generation");
    cJSON_AddStringToObject(probe, "source_release_ticket", ctx->memory_source_release);
    cJSON_AddStringToObject(probe, "request_id", ctx->request_id);
    cJSON_AddStringToObject(probe, "principal", ctx->principal);
@@ -68,6 +97,9 @@ static void policy_observe_memory_owner(cJSON *request)
    {
       /* Transport only; the Go session owner validates the observation. */
       cJSON *observation = cJSON_CreateObject();
+      cJSON_AddBoolToObject(
+          observation, "generation_only",
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "generation_only")));
       const char *fields[] = {"status", "memory_owner", "plan_digest", "source_versions_digest"};
       for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
       {
@@ -115,6 +147,8 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
       return -1;
    }
    cJSON_AddStringToObject(request, "operation", "check");
+   if (!policy_worktree_on_host())
+      cJSON_ReplaceItemInObjectCaseSensitive(binding, "host_worktree", cJSON_CreateBool(0));
    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(binding, "index_observed_current")))
       policy_observe_index_generation(request, binding);
    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(binding, "owner_observed_current")))
@@ -139,7 +173,7 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    int permit = valid && cJSON_IsTrue(allowed);
    if (!valid)
       fprintf(stderr, "[execution-policy] adaptive session state unavailable; using baseline\n");
-   set_reason(reason, reason_len, why ? why : "session exploration accounting unavailable");
+   policy_session_reason(reason, reason_len, result, "session exploration accounting unavailable");
    cJSON_Delete(result);
    free(reply);
    free(wire);
@@ -286,6 +320,7 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    cJSON_AddStringToObject(binding, "working_directory",
                            effective_cwd && realpath(effective_cwd, canonical) ? canonical : "");
    cJSON_AddStringToObject(binding, "worktree_generation", "unavailable");
+   cJSON_AddBoolToObject(binding, "host_worktree", policy_worktree_on_host());
    cJSON_AddStringToObject(binding, "index_generation", generation);
    cJSON_AddStringToObject(binding, "memory_owner", owner);
    const char *plan_digest =
@@ -345,6 +380,13 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
    }
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "check_session");
+   if (policy_worktree_on_host() && policy_bind_session_exploration(session) == 0)
+   {
+      cJSON *binding = cJSON_Parse(ctx->exploration_binding);
+      policy_observe_index_generation(request, binding);
+      policy_observe_memory_owner(request);
+      cJSON_Delete(binding);
+   }
    cJSON_AddStringToObject(request, "tool", tool);
    cJSON_AddStringToObject(request, "side_effect", "filesystem");
    cJSON_AddStringToObject(request, "attempt_id", attempt);
@@ -361,9 +403,8 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
    int denied =
        cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "allowed")) ||
        (discovery == 2 && !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(result, "allowed")));
-   const char *why = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "reason"));
    if (denied)
-      set_reason(reason, reason_len, why ? why : "exploration budget exhausted");
+      policy_session_reason(reason, reason_len, result, "exploration budget exhausted");
    free(reply);
    free(wire);
    cJSON_Delete(request);
@@ -464,7 +505,7 @@ int policy_bind_session_exploration(const char *session)
 {
    (void)request_context_set_exploration_binding("");
    const request_context_t *ctx = request_context_get();
-   if (!ctx || !ctx->principal[0] || !session || !session[0])
+   if (!ctx || !ctx->principal[0] || !session || !session[0] || !policy_worktree_on_host())
       return -1;
    char cwd[PATH_MAX], canonical[PATH_MAX];
    const char *effective = run_cmd_get_cwd();

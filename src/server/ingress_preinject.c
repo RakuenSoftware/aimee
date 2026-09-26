@@ -145,8 +145,8 @@ int ingress_preinject_accept_native_projection(const cJSON *projection)
       if (ingress_preinject_resolve_active_scope(workspace, sizeof(workspace), project,
                                                  sizeof(project)) == 0)
          (void)policy_prepare_exploration(
-             cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"), g_session_id,
-             workspace, project);
+             cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"),
+             ingress_preinject_session_id(), workspace, project);
    }
    cJSON_Delete(response);
    if (rc != 0)
@@ -470,8 +470,8 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
          if (ingress_preinject_resolve_active_scope(workspace, sizeof(workspace), project,
                                                     sizeof(project)) == 0)
             (void)policy_prepare_exploration(
-                cJSON_GetObjectItemCaseSensitive(plan, "exploration_offer"), g_session_id,
-                workspace, project);
+                cJSON_GetObjectItemCaseSensitive(plan, "exploration_offer"),
+                ingress_preinject_session_id(), workspace, project);
       }
    }
    if (!prepared_ok && replay_stored && vault_service_delete)
@@ -681,7 +681,13 @@ void ingress_preinject_set_task_requirements(const cJSON *request)
 
 const char *ingress_preinject_session_id(void)
 {
-   return g_session_id;
+   if (g_session_id[0])
+      return g_session_id;
+   /* Generic ingress may carry an operator-trusted proxy session. Ordinary
+    * TCP/UDS headers are not authority here; the session owner also verifies
+    * the principal's durable ownership before issuing any contract. */
+   const request_context_t *ctx = request_context_get();
+   return ctx && ctx->trusted && ctx->principal[0] ? ctx->session_key : "";
 }
 
 static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
@@ -870,7 +876,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "ingress-begin");
    cJSON_AddStringToObject(request, "query", query ? query : "");
-   cJSON_AddStringToObject(request, "session", g_session_id);
+   cJSON_AddStringToObject(request, "session", ingress_preinject_session_id());
    cJSON_AddStringToObject(request, "project", active_project);
    cJSON_AddBoolToObject(request, "active_scope", active_scope);
    cJSON_AddBoolToObject(request, "disabled", request_disabled || g_request_disabled);
@@ -923,7 +929,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       clock_gettime(CLOCK_MONOTONIC, &finished);
       cJSON *task = cJSON_CreateObject();
       cJSON_AddStringToObject(task, "operation", "ingress-task-result");
-      cJSON_AddStringToObject(task, "session", g_session_id);
+      cJSON_AddStringToObject(task, "session", ingress_preinject_session_id());
       cJSON_AddStringToObject(task, "project", active_project);
       cJSON_AddStringToObject(task, "mode", planned_mode);
       cJSON_AddNumberToObject(task, "http_status", context_status);
@@ -1095,8 +1101,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    }
    if (result)
       (void)policy_prepare_exploration(
-          cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"), g_session_id,
-          active_workspace, active_project);
+          cJSON_GetObjectItemCaseSensitive(response, "exploration_offer"),
+          ingress_preinject_session_id(), active_workspace, active_project);
    if (!result && rctx)
    {
       const char *ticket =

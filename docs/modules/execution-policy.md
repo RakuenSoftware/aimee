@@ -148,15 +148,15 @@ protected from non-root writes; symlinks and non-regular artifacts are rejected.
 The file and opt-in are checked again for each admission, so revocation takes
 effect without deleting budget history. The artifact pins the supported query
 class, project/workspace/directory, clean checkout, exact index generation,
-provider/model/route, final context-limit digest and adaptive limits. Only raw
+provider/model/route, executable build, final context-limit digest and adaptive limits. Only raw
 scan caps are eligible in this first activation path. A missing or incompatible
 artifact preserves observe mode and baseline operator policy. See the
 [calibration contract](../../benchmarks/memory/EXPLORATION_GATE.md).
 
 MR-07 is still in progress. Both disposable process topologies passed at
 `6008b3835`; the later receipt/freshness/activation changes need fresh process
-acceptance. Hook freshness parity, generic external issuance and measured paired workload
-gates remain open. No reviewed
+acceptance. Fresh process acceptance of the subsequent hook/identity changes and measured
+paired workload gates remain open. No reviewed
 calibration artifact is installed or shipped. MR-08 and MR-09 have not started.
 Component tests are not evidence of task-quality noninferiority.
 
@@ -169,3 +169,20 @@ invalid input; duplicate inner fields, null and scalars reach the strict Go
 decoder intact. Starting or ending a session turn clears the prior obligations.
 Absent requirements continue to produce uncalibrated coverage, not complete
 coverage inferred from similarity.
+
+Authenticated hooks rebind the durable session only when their currently bound
+execution directory matches the contract, then observe current index and memory
+producer generation through host transports before using the same Go admission
+policy. Hook handling keeps its workspace provider bound until this admission
+finishes. Detached and delegate-container workspaces cannot attest a same-named
+server checkout: only shared/mirror execution permits local worktree observation.
+Missing freshness removes adaptive restrictions while preserving operator
+accounting. Unknown or outside-project discovery paths are also excluded from
+adaptive restrictions. Structured reasons retain the owner-selected indexed and
+expansion alternatives through both native and hook callers.
+
+Generic model ingress may issue observe contracts for an existing session carried
+by an operator-trusted proxy. The PostgreSQL owner still checks principal/session
+ownership. Ordinary TCP/UDS session headers do not establish this identity, and
+native host session identity takes precedence. This does not add a general client
+API for authoring a task contract or a confidence value.

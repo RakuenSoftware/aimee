@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"reflect"
 	"strings"
@@ -32,6 +33,7 @@ type explorationCalibration struct {
 }
 
 type explorationCalibrationScope struct {
+	ProducerBuild      string `json:"producer_build"`
 	Project            string `json:"project"`
 	Workspace          string `json:"workspace"`
 	WorkingDirectory   string `json:"working_directory"`
@@ -46,7 +48,7 @@ type explorationCalibrationScope struct {
 
 func calibrationScope(c explorationContract) explorationCalibrationScope {
 	b := c.Binding
-	return explorationCalibrationScope{b.Project, b.Workspace, b.WorkingDirectory, b.WorktreeGeneration,
+	return explorationCalibrationScope{b.ProducerBuild, b.Project, b.Workspace, b.WorkingDirectory, b.WorktreeGeneration,
 		b.IndexGeneration, c.QueryClass, b.Route, b.Provider, b.Model, b.LimitsDigest}
 }
 
@@ -68,9 +70,9 @@ func parseExplorationCalibration(raw []byte, c explorationContract, now time.Tim
 	// Unknown coverage, stale index observations and pre-provider offers cannot
 	// accidentally activate even if a review file is overly broad.
 	b := c.Binding
-	if !c.valid(now) || !c.CoverageComplete || !b.IndexObservedCurrent || !b.OwnerObservedCurrent ||
+	if !c.valid(now) || !c.CoverageComplete || !b.HostWorktree || !b.IndexObservedCurrent || !b.OwnerObservedCurrent ||
 		c.QueryClass != "typed_requirements" || !strings.HasPrefix(b.WorktreeGeneration, "git-clean:") ||
-		b.Workspace == "" || b.WorkingDirectory == "" || b.Route == "" || b.Provider == "" || b.Model == "" ||
+		b.ProducerBuild == "" || b.Workspace == "" || b.WorkingDirectory == "" || b.Route == "" || b.Provider == "" || b.Model == "" ||
 		!sha256Text(b.LimitsDigest) || !sha256Text(c.ReceiptDigest) || a.Scope != calibrationScope(c) ||
 		!reflect.DeepEqual(a.Limits, c.Limits) || !a.Limits.Enabled || a.Limits.RawScans == nil ||
 		a.Limits.Files != nil || a.Limits.Graph != nil || a.Limits.Bytes != nil || a.Limits.Tokens != nil ||
@@ -184,10 +186,12 @@ func approvedExplorationCalibration(c explorationContract, now time.Time) string
 	}
 	raw, err := readExplorationCalibration()
 	if err != nil {
+		log.Print("[exploration] reviewed calibration unavailable; adaptive mode observe")
 		return ""
 	}
 	receipt, err := parseExplorationCalibration(raw, c, now)
 	if err != nil {
+		log.Print("[exploration] reviewed calibration does not cover the live contract; adaptive mode observe")
 		return ""
 	}
 	return receipt

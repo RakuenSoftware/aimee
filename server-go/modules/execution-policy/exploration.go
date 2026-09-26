@@ -3,6 +3,8 @@ package executionpolicy
 import (
 	"errors"
 	"math"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,6 +40,8 @@ func (l explorationLimits) valid() bool {
 }
 
 type explorationBinding struct {
+	HostWorktree         bool   `json:"host_worktree,omitempty"`
+	ProducerBuild        string `json:"producer_build,omitempty"`
 	Route                string `json:"route,omitempty"`
 	IndexObservedCurrent bool   `json:"index_observed_current,omitempty"`
 	OwnerObservedCurrent bool   `json:"owner_observed_current,omitempty"`
@@ -118,7 +122,7 @@ type explorationDecision struct {
 }
 
 func explorationAlternatives() []string {
-	return []string{"aimee index find <symbol>", "aimee index callers <symbol>", "aimee index span <file> <start> <end>"}
+	return []string{"find_symbol", "code_search", "aimee index span <file> <start> <end>", "context_contract_expand"}
 }
 
 type explorationUsage struct {
@@ -303,6 +307,12 @@ func (l *explorationLedger) reserve(a explorationAttempt, operator explorationLi
 				}
 			}
 		}
+	}
+	if active && c.Binding.WorkingDirectory != "" &&
+		(!canonicalDiscoveryPath(a.Path) || (a.Path != c.Binding.WorkingDirectory &&
+			!strings.HasPrefix(a.Path, strings.TrimSuffix(c.Binding.WorkingDirectory, string(filepath.Separator))+string(filepath.Separator)))) {
+		active = false
+		d.Reason = "adaptive_scope_unavailable"
 	}
 	tu, err := addUsage(s.TaskUsage, a)
 	if err != nil {

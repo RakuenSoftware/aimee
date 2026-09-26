@@ -55,7 +55,30 @@ both primary adapters. Native transport tests cover exact string revisions,
 duplicate/null/oversized input and turn isolation; the direct adapter and worker
 objects compile. All 77 lint checks pass.
 
-Remaining acceptance: hook freshness parity,
-generic external-client issuance, fresh process acceptance of the later changes,
-and measured calibration with the predeclared MR-18 paired quality/efficiency gates. Unit and storage fixtures are not evidence
+Hook/native admission now shares freshness observations and Go policy decisions.
+Native transport tests preserve structured recovery alternatives; detached
+workspaces and outside-project paths cannot inherit adaptive controls from a
+server checkout. The calibration scope also pins the executable build. Trusted
+proxy ingress can bind an existing owned session; ordinary session headers remain
+untrusted. Full non-PG policy/memory/family race tests, native caller tests, all
+77 lint checks and the isolated concurrent live PostgreSQL test pass.
+
+Remaining acceptance: fresh process acceptance of these later changes and
+measured calibration with the predeclared MR-18 paired quality/efficiency gates. Unit and storage fixtures are not evidence
 of task-quality noninferiority. MR-08 and MR-09 have not started.
+
+The subsequent `4b67a119d` full matrix is **not green**: T3 exited zero, T2
+exited one. In T2, the deliberate refresh-owner outage refused the sixth provider
+send as required, and the supervised replacement answered an exact committed
+memory read. The following asynchronous run nevertheless failed with
+`unavailable` before provider dispatch; fixture retirement also failed. This
+recovery failure is under isolated enrolled-stack investigation. Its process
+exits and image identities are retained separately from the passing `6008b3835`
+checkpoint.
+
+A production observation during this work found CT100 changed independently to
+`aimee-native-core:0.4.5-bridge.2` (image
+`sha256:015e395b630bf12c42bacd905953027a02231aee7e1ac52a0b27325a665d4a5d`).
+After startup its Docker health passed five consecutive probes, and the paired
+thinclient reported the server `ok` and KB disabled. No MR-07 candidate was
+deployed to CT100 by this work; candidate execution remains on CT109.

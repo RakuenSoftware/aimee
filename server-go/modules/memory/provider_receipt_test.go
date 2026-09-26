@@ -465,6 +465,7 @@ func TestExplorationOfferBindsFinalReceiptModelAndLimits(t *testing.T) {
 		state := &sourceReleaseState{}
 		args := receiptTestAdmission(t, state)
 		args["provider"] = json.RawMessage(`"openai"`)
+		args["producer_build"] = json.RawMessage(`"0.4.5-test-only"`)
 		args["dispatch_owner"] = json.RawMessage(`"0123456789abcdef0123456789abcdef"`)
 		args["operator_limits_sha256"], _ = json.Marshal(limit)
 		plan := sourceReleaseCall(t, state, args)
@@ -476,7 +477,7 @@ func TestExplorationOfferBindsFinalReceiptModelAndLimits(t *testing.T) {
 		if err := json.Unmarshal([]byte(plan["prepared_detail"].(string)), &prepared); err != nil {
 			t.Fatal(err)
 		}
-		if offer["receipt_digest"] != prepared.BindingDigest || offer["model"] != "test-model" || offer["provider"] != "openai" || offer["plan_digest"] != prepared.Binding.AssemblyDigest {
+		if offer["producer_build"] != prepared.Binding.ProducerBuild || offer["receipt_digest"] != prepared.BindingDigest || offer["model"] != "test-model" || offer["provider"] != "openai" || offer["plan_digest"] != prepared.Binding.AssemblyDigest {
 			t.Fatal(offer)
 		}
 		limits, ok := offer["limits_digest"].(string)
@@ -500,6 +501,13 @@ func TestExplorationOwnerObservationRejectsRestartAndScopeChanges(t *testing.T) 
 		if current["status"] != "ok" || current[key] != offer[key] {
 			t.Fatal("owner did not attest exact retained plan", current, offer)
 		}
+	}
+	generation := sourceReleaseArgs(map[string]any{"operation": "exploration-owner-generation"})
+	if reply := sourceReleaseCall(t, s, generation); reply["memory_owner"] != offer["memory_owner"] || reply["generation_only"] != true {
+		t.Fatal("private owner generation probe disagrees with issued plan", reply)
+	}
+	if reply := sourceReleaseCall(t, &sourceReleaseState{}, generation); reply["status"] == "ok" {
+		t.Fatal("restart preserved producer generation", reply)
 	}
 	if restarted := sourceReleaseCall(t, &sourceReleaseState{}, args); restarted["status"] == "ok" {
 		t.Fatal("restarted owner accepted prior handle", restarted)

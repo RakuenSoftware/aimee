@@ -25,7 +25,28 @@ func testLedger(t *testing.T, c explorationContract) *explorationLedger {
 }
 func measured(q, r string) bool { return q == "symbol" && r == "measurement" }
 func attempt(c explorationContract, id string) explorationAttempt {
-	return explorationAttempt{ID: id, Binding: c.Binding, Class: "raw_scan"}
+	return explorationAttempt{ID: id, Binding: c.Binding, Class: "raw_scan", Path: c.Binding.WorkingDirectory}
+}
+
+func TestExplorationDoesNotRestrictUnobservedOrOtherProjectPaths(t *testing.T) {
+	now := time.Now()
+	c := testContract(now)
+	c.Binding.WorkingDirectory = "/project"
+	c.Limits.RawScans = ceiling(0)
+	for _, path := range []string{"", "/other-project", "/project-other"} {
+		l := testLedger(t, c)
+		a := attempt(c, "first")
+		a.Path = path
+		d, err := l.reserve(a, explorationLimits{RawScans: ceiling(1)}, true, measured, now)
+		if err != nil || d.Restricted || d.WouldRestrict || d.Reason != "adaptive_scope_unavailable" {
+			t.Fatal(path, d, err)
+		}
+		a.ID = "second"
+		d, err = l.reserve(a, explorationLimits{RawScans: ceiling(1)}, true, measured, now)
+		if err != nil || !d.Restricted || d.Reason != "operator_exploration_budget_exhausted" {
+			t.Fatal("scope invalidation reset operator ceiling", path, d, err)
+		}
+	}
 }
 func TestExplorationLiteralZeroAndLegacyAdapter(t *testing.T) {
 	now := time.Now()

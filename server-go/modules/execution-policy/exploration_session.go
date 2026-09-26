@@ -49,7 +49,10 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 		return nil, nil, errors.New("invalid authenticated task binding")
 	}
 	if req.Operation == "prepare" {
-		req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
+		req.Binding.WorktreeGeneration = "unavailable"
+		if req.Binding.HostWorktree {
+			req.Binding.WorktreeGeneration = explorationWorktreeGeneration(req.Binding.WorkingDirectory)
+		}
 		req.Binding.IndexObservedCurrent = req.IndexObservation.current(req.Binding)
 		req.Binding.OwnerObservedCurrent = req.OwnerObservation.current(req.Binding)
 		o := req.Offer
@@ -57,6 +60,7 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 			return nil, nil, errors.New("memory offer binding mismatch")
 		}
 		req.Binding.Route, req.Binding.Provider, req.Binding.Model, req.Binding.LimitsDigest = o.Route, o.Provider, o.Model, o.LimitsDigest
+		req.Binding.ProducerBuild = o.ProducerBuild
 		req.Contract = &explorationContract{ReceiptDigest: o.ReceiptDigest, ID: req.Binding.Task, Revision: 1, Binding: req.Binding, PlanDigest: o.PlanDigest, SourceVersionsDigest: o.SourceVersionsDigest, QueryClass: o.QueryClass, CoverageComplete: o.CoverageComplete, ConfidenceProvenance: o.ConfidenceProvenance, SupportedClasses: []string{"raw_scan"}, Created: now, Expires: o.Expires, Limits: explorationLimits{Enabled: false}, Tier: "observe"}
 		policy, err := defaultPolicyLoader()
 		if err != nil {
@@ -354,6 +358,7 @@ type sessionExplorationRequest struct {
 // The private memory process attests only its current immutable plan handle.
 // A restarted owner has no matching handle, so its prior contract cannot enforce.
 type explorationOwnerObservation struct {
+	GenerationOnly       bool   `json:"generation_only,omitempty"`
 	Status               string `json:"status"`
 	MemoryOwner          string `json:"memory_owner"`
 	PlanDigest           string `json:"plan_digest"`
@@ -361,11 +366,20 @@ type explorationOwnerObservation struct {
 }
 
 func (o *explorationOwnerObservation) current(b explorationBinding) bool {
-	return o != nil && o.Status == "ok" && o.MemoryOwner != "" && o.MemoryOwner == b.MemoryOwner &&
-		o.PlanDigest != "" && o.PlanDigest == b.PlanDigest && o.SourceVersionsDigest != "" && o.SourceVersionsDigest == b.SourceVersionsDigest
+	if o == nil || o.Status != "ok" || o.MemoryOwner == "" || o.MemoryOwner != b.MemoryOwner {
+		return false
+	}
+	// A separately authenticated hook/dispatch has no prior request's private
+	// source handle. The durable contract already pins that accepted plan; the
+	// private host probe must still attest the same live producer generation.
+	if o.GenerationOnly {
+		return b.PlanDigest != "" && b.SourceVersionsDigest != ""
+	}
+	return o.PlanDigest != "" && o.PlanDigest == b.PlanDigest && o.SourceVersionsDigest != "" && o.SourceVersionsDigest == b.SourceVersionsDigest
 }
 
 type sessionExplorationOffer struct {
+	ProducerBuild        string    `json:"producer_build,omitempty"`
 	Route                string    `json:"route,omitempty"`
 	Provider             string    `json:"provider,omitempty"`
 	Model                string    `json:"model,omitempty"`

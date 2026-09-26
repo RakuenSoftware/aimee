@@ -42,7 +42,9 @@ func calibrationContract(now time.Time) explorationContract {
 	c.Binding.Project, c.Binding.Workspace, c.Binding.WorkingDirectory = "project", "local:project", "/project"
 	c.Binding.WorktreeGeneration, c.Binding.IndexGeneration = "git-clean:"+strings.Repeat("a", 40), "9007199254740993"
 	c.Binding.IndexObservedCurrent, c.Binding.OwnerObservedCurrent = true, true
+	c.Binding.HostWorktree = true
 	c.Binding.Route, c.Binding.Provider, c.Binding.Model = "native", "openai", "pinned-model"
+	c.Binding.ProducerBuild = "0.4.5-test-only"
 	c.Binding.LimitsDigest, c.ReceiptDigest = strings.Repeat("c", 64), strings.Repeat("d", 64)
 	c.Binding.PlanDigest, c.Binding.SourceVersionsDigest = c.PlanDigest, c.SourceVersionsDigest
 	c.QueryClass, c.CoverageComplete = "typed_requirements", true
@@ -74,6 +76,8 @@ func TestExplorationCalibrationRejectsChangedLiveScopeAndGates(t *testing.T) {
 		t.Fatal("envelope formatting changed report commitment", got, err)
 	}
 	for _, change := range []func(*explorationContract){
+		func(c *explorationContract) { c.Binding.HostWorktree = false },
+		func(c *explorationContract) { c.Binding.ProducerBuild = "different-build" },
 		func(c *explorationContract) { c.CoverageComplete = false }, func(c *explorationContract) { c.Binding.IndexObservedCurrent = false },
 		func(c *explorationContract) { c.Binding.OwnerObservedCurrent = false }, func(c *explorationContract) { c.Binding.Model = "other" },
 		func(c *explorationContract) { c.Binding.Project = "other" }, func(c *explorationContract) { c.Binding.IndexGeneration = "4" },
@@ -121,6 +125,7 @@ func TestExplorationCalibrationRejectsChangedLiveScopeAndGates(t *testing.T) {
 func TestSessionCalibrationAdmissionRevocationAndOwnerRestart(t *testing.T) {
 	now := time.Now()
 	c := calibrationContract(now)
+	c.Binding.Task = "session-task"
 	root := t.TempDir()
 	for _, args := range [][]string{{"init", "-b", "main"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture"}} {
 		if out, e := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); e != nil {
@@ -167,6 +172,13 @@ func TestSessionCalibrationAdmissionRevocationAndOwnerRestart(t *testing.T) {
 	if result := apply(check); result["allowed"] != false || result["exploration"].(map[string]any)["mode"] != "enforce" {
 		t.Fatal(result)
 	}
+	check.Operation, check.AttemptID = "check_session", "hook-restricted"
+	check.Binding = explorationBinding{}
+	check.OwnerObservation = &explorationOwnerObservation{Status: "ok", MemoryOwner: c.Binding.MemoryOwner, GenerationOnly: true}
+	if result := apply(check); result["allowed"] != false || result["exploration"].(map[string]any)["mode"] != "enforce" {
+		t.Fatal("hook admission differed from native", result)
+	}
+	check.Operation, check.Binding = "check", c.Binding
 	// Revocation takes effect on the next distinct admission, preserving state.
 	optIn = false
 	check.AttemptID = "revoked"

@@ -1709,8 +1709,30 @@ static void test_send_guard_completion_retries(void)
    puts("send completion retries unresolved owners and requires explicit release acknowledgement");
 }
 
+static void test_ingress_host_session_binding(void)
+{
+   ingress_preinject_set_session_id("");
+   request_context_t ctx = {0};
+   snprintf(ctx.principal, sizeof(ctx.principal), "%s", "alice");
+   snprintf(ctx.session_key, sizeof(ctx.session_key), "%s", "proxy-session");
+   request_context_set(&ctx);
+   assert(!ingress_preinject_session_id()[0]);
+   ctx.trusted = 1;
+   request_context_set(&ctx);
+   assert(strcmp(ingress_preinject_session_id(), "proxy-session") == 0);
+   ingress_preinject_set_session_id("native-session");
+   assert(strcmp(ingress_preinject_session_id(), "native-session") == 0);
+   ingress_preinject_set_session_id("");
+   ctx.principal[0] = '\0';
+   request_context_set(&ctx);
+   assert(!ingress_preinject_session_id()[0]);
+   request_context_clear();
+   assert(!ingress_preinject_session_id()[0]);
+}
+
 int main(void)
 {
+   test_ingress_host_session_binding();
    test_send_guard_completion_retries();
    test_native_private_source_transport();
    test_replayable_provider_receipt();

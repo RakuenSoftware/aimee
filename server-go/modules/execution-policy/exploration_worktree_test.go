@@ -44,9 +44,25 @@ func TestExplorationWorktreeObservation(t *testing.T) {
 	now := time.Now()
 	c := testContract(now)
 	c.Binding.WorkingDirectory = root
+	c.Binding.HostWorktree = true
 	offer := &sessionExplorationOffer{MemoryOwner: c.Binding.MemoryOwner, IndexGeneration: c.Binding.IndexGeneration,
 		PlanDigest: c.PlanDigest, SourceVersionsDigest: c.SourceVersionsDigest, QueryClass: c.QueryClass,
 		ConfidenceProvenance: c.ConfidenceProvenance, Expires: c.Expires}
+	detached := c.Binding
+	detached.HostWorktree = false
+	detached.WorktreeGeneration = clean // a same-named host directory is not proof
+	probe, _ := json.Marshal(sessionExplorationRequest{Operation: "prepare", Binding: detached, Offer: offer})
+	_, detachedReply, err := SessionExploration("alice", "session", nil, probe, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detachedResult struct {
+		Contract explorationContract `json:"contract"`
+	}
+	json.Unmarshal(detachedReply, &detachedResult)
+	if detachedResult.Contract.Binding.WorktreeGeneration != "unavailable" {
+		t.Fatal("detached work was attested from the host filesystem")
+	}
 	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "prepare", Binding: c.Binding, Offer: offer})
 	state, reply, err := SessionExploration("alice", "session", nil, raw, now)
 	if err != nil {

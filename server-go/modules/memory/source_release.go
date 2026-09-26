@@ -234,6 +234,12 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
 	operation := args.stringOr("operation", "")
+	if operation == "exploration-owner-generation" {
+		if s.receiptProducer == "" {
+			return commandResult(commandError("unavailable", "memory producer unavailable"))
+		}
+		return commandResult(map[string]any{"status": "ok", "generation_only": true, "memory_owner": s.receiptProducer})
+	}
 	if operation == "provider-receipt-started" {
 		return s.receiptStarted(args)
 	}

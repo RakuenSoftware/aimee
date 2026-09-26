@@ -79,7 +79,7 @@ aggregate numbers alone cannot attest task quality.
 
 `scope` pins `project`, `workspace`, `working_directory`, `worktree_generation`,
 `index_generation`, `query_class`, `route`, `provider`, `model`, and
-`limits_digest`. Values must exactly match the issued live contract; wildcards
+`limits_digest`, and `producer_build`. Values must exactly match the issued live contract; wildcards
 are unsupported. `limits` must exactly match the host's adaptive policy. This
 first activation path accepts only `enabled: true` with an explicit `raw_scans`
 ceiling and optional `starvation_turns`; file/graph/byte/token caps do not have a
@@ -93,5 +93,6 @@ new adaptive restrictions while preserving operator limits and usage. Repeating
 an already admitted attempt retains its original accounting decision.
 
 Implementation status: activation parsing and native freshness checks are
-implemented; no measured passing workload has been collected. Native requirement forwarding is implemented. Hook freshness parity and the
-measured workload acceptance are still required before MR-07 completion.
+implemented; no measured passing workload has been collected. Native requirement forwarding and hook freshness admission are implemented.
+Fresh process acceptance and measured workload acceptance remain required before
+MR-07 completion.

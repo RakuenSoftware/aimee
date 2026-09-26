@@ -358,6 +358,21 @@ func TestSessionFinalReceiptRevisionsPreserveRecoveryAndAccounting(t *testing.T)
 	if !decision.Restricted || decision.Reason != "operator_exploration_budget_exhausted" {
 		t.Fatal("model change reset allowance", decision)
 	}
+	offer.ProducerBuild = "next-build"
+	build := prepare()
+	if build.Revision != changed.Revision+1 || build.Binding.ProducerBuild != "next-build" {
+		t.Fatal("changed executable reused calibrated revision", build)
+	}
+	a = attempt(build, "new-build-attempt")
+	raw, _ = json.Marshal(sessionExplorationRequest{Operation: "reserve", Binding: build.Binding, Attempt: &a})
+	_, reply, err = SessionExploration("alice", "session", state, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal(reply, &decision)
+	if !decision.Restricted {
+		t.Fatal("build change reset allowance", decision)
+	}
 }
 
 func TestExplorationIndexObservationRequiresMatchingFreshOwner(t *testing.T) {
