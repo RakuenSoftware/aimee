@@ -1,0 +1,14 @@
+[
+  {
+    "name": "private identity stored through authenticated API",
+    "passed": true
+  },
+  {
+    "name": "private source owner and revision are observed",
+    "passed": true
+  },
+  {
+    "name": "shared identity stored through the authenticated owner API",
+    "passed": false
+  }
+]

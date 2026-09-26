@@ -1,0 +1,54 @@
+[
+  {
+    "name": "private identity stored through authenticated API",
+    "passed": true
+  },
+  {
+    "name": "private source owner and revision are observed",
+    "passed": true
+  },
+  {
+    "name": "shared identity stored through the authenticated owner API",
+    "passed": true
+  },
+  {
+    "name": "provider bytes match a committed prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "native private identity appears in the actual provider bytes",
+    "passed": true
+  },
+  {
+    "name": "actual retained private version has owner-rendered native positions",
+    "passed": true
+  },
+  {
+    "name": "typed retained source has final ingress positions",
+    "passed": true
+  },
+  {
+    "name": "final typed assertion preserves the actual memory kind",
+    "passed": true
+  },
+  {
+    "name": "final typed assertion preserves lifecycle and confidence class",
+    "passed": true
+  },
+  {
+    "name": "actual assertion arm contributions are retained separately from fused totals",
+    "passed": true
+  },
+  {
+    "name": "assertion telemetry does not invent trust or release safety",
+    "passed": true
+  },
+  {
+    "name": "source guard verifier is bound to the actual prepared receipt",
+    "passed": false
+  },
+  {
+    "name": "native turn 0 completes with exactly one verified provider request",
+    "passed": false
+  }
+]

@@ -1,7 +1,7 @@
 # MR-08 retrieval health implementation evidence
 
-Status: in progress. Initial deployed collection and authorization checks passed;
-new metadata capture, baseline and drill-down changes await deployed validation.
+Status: complete. Implementation and acceptance validated on 2026-09-26;
+optional collection remains disabled by default.
 MR-07 measured promotion remains open; its default stays observe.
 
 The metric foundation computes top-1/top-5 share, HHI, Simpson diversity, entropy,
@@ -419,3 +419,32 @@ checks families against each final source set, not the preceding turn's set.
 Repeated fixture setup initially reused erased shared content and correctly hit
 the surviving erasure intent. Subsequent fixtures use unique keys and content.
 No product eligibility or erasure rule was relaxed.
+
+
+## Final acceptance
+
+Candidate `4d0870c70` passed all 34 deployed serving-evidence checks, with two
+verified provider requests and zero collector failures or truncation. Receipt
+inspection/import retains the actual dispatch-time source guard proof. The first
+turn has unknown adjacency; the second links the completed durable first turn.
+Family metadata follows the exact final source set, including shared roots.
+
+The quiet off/on/on/off comparison completed 32 measured requests plus 12
+excluded warm-ups with zero measured failures. Off/on means were 3.730/3.789s,
+p50s 3.688/3.750s, and p95s 3.936/3.966s: 59.1ms (1.59%) mean overhead, p95 ratio
+1.0075. With 16 observations per arm, this p95 is the observed maximum. No
+real-model or production distribution claim follows. Retained state was
+292,150 bytes including earlier receipts, below the 384KiB namespace bound.
+
+The controller exited zero, restored collection to unset/off on both owners,
+and verified both remained healthy. Existing stores, workspaces, Vaults and
+enrollment survived each isolated upgrade. The final correction passed focused
+race tests (1.647s), PostgreSQL checks (4.637s), and all 77 lint checks, following
+the full memory race/native validation documented above.
+
+[Final evidence and harnesses](memory-mr08-final-evidence-2026-09-26/README.md)
+include the initial failed checks and their corrections. Unsupported labels,
+historical lineage and insufficient baseline populations remain explicitly
+unknown. They are data-availability limits, not fabricated successful outcomes.
+MR-08 implementation and acceptance are complete; widening optional collection
+and MR-07 quality/cost promotion remain separate decisions.

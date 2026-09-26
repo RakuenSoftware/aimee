@@ -1,6 +1,6 @@
 # MR-08: Retrieval health telemetry with defined metrics
 
-- **State:** In progress; receipt collector and health command implemented; acceptance remains open
+- **State:** Complete — implementation and acceptance validated 2026-09-26; optional collection remains off by default
 - **Priority:** P1; instrument and establish baseline during the foundation wave
 - **Owner:** Go memory diagnostics and existing observability
 - **Depends on:** [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) for actual final selection; [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for family metrics
@@ -74,4 +74,9 @@ checks, including serving metadata, trace access, and restart recovery. Candidat
 `71208d807` additionally passed 15 deployed final-position checks and a quiet
 32-request serving-overhead comparison. Candidate `be3f2577c` passed 23 deployed checks for retained typed
 assertion kind, lifecycle, confidence class and actual arm contributions.
-Remaining metadata producers are still open. No production baseline or complete proposal acceptance is claimed.
+Candidate `4d0870c70` completed the remaining serving-evidence producers and
+passed all 34 deployed checks plus the quiet 32-request overhead comparison.
+[Final acceptance evidence](../../validation/memory-mr08-final-evidence-2026-09-26/README.md)
+records the dispatch-proof correction, bounded retention, measured overhead and
+successful restoration to collection disabled. Semantic labels and insufficient
+production baselines remain explicitly unmeasured; no ranking promotion follows.
