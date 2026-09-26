@@ -31,6 +31,7 @@ const (
 )
 
 type DataRequest struct {
+	Restriction    *SearchRestriction `json:"restriction,omitempty"`
 	pageRankConfig *pageRankConfig
 	requestedLimit int
 	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
@@ -839,6 +840,9 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		return DataRequest{}, errors.New("memory: trailing data request")
 	}
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
+	if request.Restriction != nil && request.Operation != "search-restricted" {
+		return DataRequest{}, errors.New("memory: restriction requires search-restricted")
+	}
 	request.Kind = strings.TrimSpace(request.Kind)
 	request.Tier = strings.TrimSpace(request.Tier)
 	request.Key = strings.TrimSpace(request.Key)
@@ -1805,6 +1809,15 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		err = getErr
 		response.Records = []Record{record}
+	case "search-restricted":
+		if request.Restriction.Validate() != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		restricted, ok := options.data.(restrictedSearchStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Records, err = restricted.SearchRestricted(ctx, scope, request.Query, request.Kind, request.Tier, request.Limit, *request.Restriction)
 	case "search", "recall", "briefing", "list":
 		query := request.Query
 		if request.Operation == "briefing" || request.Operation == "list" {

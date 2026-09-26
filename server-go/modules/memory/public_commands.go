@@ -220,6 +220,12 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			return invalid(err.Error())
 		}
 		request.Query, request.Limit = strings.Join(terms, " "), limit
+		if raw, exists := args["restriction"]; exists {
+			if json.Unmarshal(raw, &request.Restriction) != nil || request.Restriction.Validate() != nil {
+				return invalid("invalid memory search restriction")
+			}
+			request.Operation = "search-restricted"
+		}
 	case "review-list":
 		request.State, request.Limit = args.stringOr("state", ""), 64
 		if value, ok := args.number("limit"); ok {
@@ -285,6 +291,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		} else {
 			delete(result, "store") // Preserve the search envelope consumed by CLI/MCP.
 			result["facts"], result["windows"] = response.Records, []any{}
+			if request.Restriction != nil {
+				result["restriction"] = request.Restriction
+			}
 		}
 	case "stats":
 		if response.Stats == nil {
