@@ -1886,6 +1886,15 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
                 growth == {"src/modules/db2/c/db2_init.c"} and
                 current_rows[symbol]["disposition"] == "system-link"):
             continue
+        # The retained retrieval-event reader measures the stored payload before
+        # copying it, so a truncated trace cannot be reported as complete. This
+        # admits only its libc strlen reference, not another host capability.
+        if (symbol == "strlen" and growth == {"src/modules/db2/c/demotion.c"}
+                and "src/modules/db2/c/demotion.c" in previous.get("translation_units", [])
+                and "src/modules/db2/c/demotion.c" in current.get("translation_units", [])
+                and previous_rows[symbol]["disposition"] == "system-link"
+                and current_rows[symbol]["disposition"] == "system-link"):
+            continue
         permitted_paths = {
             str(unit["path"]) for unit in admitted_support
             if symbol in unit["allowed_undefined"]

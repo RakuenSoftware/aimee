@@ -4,13 +4,13 @@ This page describes the current testing tree. `Done` means the path is implement
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
-The 0.4.4 candidate repairs first-boot setup, clone progress, private index publication and
-retrieval, detached runner admission, and audit hashing during shutdown. See the
-[release validation](validation/release-0.4.4-2026-09-09.md) for tested configurations and remaining
-release gates. Detached source spans read the last published snapshot; workspace registration
-alone does not start a client runner. The worktree repair for this release allows non-Git
-document work and honors `require_session_worktree=false` across startup, hooks, and native
-writes; it requires updated client and server binaries.
+The 0.4.6 candidate adds governed memory revisions, source checks at provider dispatch,
+reviewed corrections, erasure protection, and durable async run ownership. See the
+[release preparation](validation/release-0.4.6-preparation-2026-09-27.md) for completed checks
+and remaining publication gates. Optional adaptive policies are not promoted by this release;
+MR-07 remains observe-only, selection and utility-horizon policies remain disabled, and clean
+retry remains opt-in. Existing detached source spans still require a published snapshot, and
+workspace registration alone does not start a client runner.
 
 ## Runtime
 

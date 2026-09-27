@@ -1041,6 +1041,25 @@ class MemoryMigrationComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
             self.compare()
 
+    def test_bounded_trace_reader_system_reference_is_exact(self):
+        self.previous = copy.deepcopy(self.current)
+        row = next(r for r in self.previous["unresolved"] if r["symbol"] == "strlen")
+        row["references"].remove("src/modules/db2/c/demotion.c")
+        self.compare()
+        for mutation in ("reference", "disposition", "retired"):
+            with self.subTest(mutation=mutation):
+                saved = copy.deepcopy(self.current)
+                row = next(r for r in self.current["unresolved"] if r["symbol"] == "strlen")
+                if mutation == "reference":
+                    row["references"].append("src/modules/db2/c/unreviewed.c")
+                elif mutation == "disposition":
+                    row["disposition"] = "injected-module-contract"
+                else:
+                    self.current["translation_units"].remove("src/modules/db2/c/demotion.c")
+                with self.assertRaises(checker.ClosureError):
+                    self.compare()
+                self.current = saved
+
     def test_system_reference_admission_is_exact(self):
         row = next(r for r in self.current["unresolved"] if r["symbol"] == "memchr")
         row["references"].append("src/modules/db2/c/unreviewed.c")

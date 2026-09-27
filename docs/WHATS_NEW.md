@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### 0.4.6 release candidate: memory reliability
+
+- Retrieved memory carries its owner and source revisions through context assembly and final
+  provider dispatch. Changed, hidden, expired, or erased sources cannot reuse an old binding.
+- Corrections, retries, derived relationships, and embedding generations retain their governed
+  identities across restarts. Erasure prevents old derived content from returning.
+- Memory hygiene raises reviewable proposals. Model-authored corrections require an authenticated
+  review decision before they replace authoritative content.
+- Native asynchronous runs persist their authenticated session ownership before tool execution.
+  Assertion indexing yields to concurrent source edits without losing pending work.
+- The release includes frozen invariant checks, provider-boundary regressions, and deployment,
+  encrypted-storage, upgrade, and rollback gates. These checks do not establish a model-quality
+  improvement. Adaptive policy promotion remains deferred, and clean retry remains opt-in.
+
+See the [0.4.6 preparation record](validation/release-0.4.6-preparation-2026-09-27.md)
+for artifact status and upgrade validation.
+
 - Webchat opens conversations from the top session tabs; Chat no longer appears in the left panel.
   Final answer polling updates the existing reply instead of adding a duplicate. Refreshes preserve
   newer messages and pending session changes, and project pickers change the session binding only
