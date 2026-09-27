@@ -30,19 +30,11 @@
     },
     {
       "classification": "host-generated-client",
-      "path": "src/headers/rel_types.h"
-    },
-    {
-      "classification": "host-generated-client",
       "path": "src/index.c"
     },
     {
       "classification": "kb-generated-client",
       "path": "src/kb/db2_adapters/kb_service_backend_agent.c"
-    },
-    {
-      "classification": "kb-generated-client",
-      "path": "src/kb/db2_adapters/kb_service_backend_export.c"
     },
     {
       "classification": "kb-generated-client",
@@ -523,10 +515,6 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_artifacts.c"
-    },
-    {
-      "classification": "private-implementation-test",
-      "path": "src/tests/test_assertion_transport.c"
     },
     {
       "classification": "private-implementation-test",
@@ -9033,7 +9021,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 195
+          "line": 194
         }
       ],
       "signature": "int db2_kb_file_index_delete_current_project ( const char * project )",
@@ -9049,7 +9037,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 194
+          "line": 193
         }
       ],
       "signature": "int db2_kb_file_index_delete_project ( const char * project )",
@@ -9064,7 +9052,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 191
+          "line": 190
         }
       ],
       "signature": "int db2_kb_file_index_get ( const char * project , const char * file_path , char * hash_out , size_t hash_cap , char * ingested_at_out , size_t ingested_at_cap )",
@@ -9080,7 +9068,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 193
+          "line": 192
         }
       ],
       "signature": "char * db2_kb_file_index_get_content ( const char * project , const char * file_path )",
@@ -9095,7 +9083,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 196
+          "line": 195
         }
       ],
       "signature": "cJSON * db2_kb_file_index_snapshot_json ( const char * project )",
@@ -9111,7 +9099,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 189
+          "line": 188
         }
       ],
       "signature": "int db2_kb_file_index_upsert ( const char * project , const char * file_path , const char * file_hash , const char * content )",
@@ -9153,7 +9141,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 182
+          "line": 181
         }
       ],
       "signature": "int db2_kb_ingest_queue_claim_next ( db2_kb_ingest_job_t * out )",
@@ -9169,7 +9157,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 183
+          "line": 182
         }
       ],
       "signature": "int db2_kb_ingest_queue_complete ( int64_t job_id , int files_indexed , int chunks_added , int embeddings_added )",
@@ -9188,7 +9176,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 180
+          "line": 179
         }
       ],
       "signature": "int db2_kb_ingest_queue_enqueue ( const char * project , const char * root_path , const char * workspace , int force , int priority )",
@@ -9204,7 +9192,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 185
+          "line": 184
         }
       ],
       "signature": "int db2_kb_ingest_queue_fail ( int64_t job_id , const char * error_message )",
@@ -9219,7 +9207,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 187
+          "line": 186
         }
       ],
       "signature": "int db2_kb_ingest_queue_recent ( db2_kb_ingest_recent_t * rows , int max_rows )",
@@ -9234,7 +9222,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 167
+          "line": 166
         }
       ],
       "signature": "int db2_kb_ingest_queue_reset_running ( void )",
@@ -9249,7 +9237,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 186
+          "line": 185
         }
       ],
       "signature": "int db2_kb_ingest_queue_stats ( db2_kb_ingest_queue_stats_t * out )",
@@ -9881,7 +9869,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 199
+          "line": 198
         }
       ],
       "signature": "int db2_kb_service_async_job_get ( int64_t job_id , db2_kb_service_async_job_t * out )",
@@ -9898,7 +9886,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 203
+          "line": 202
         }
       ],
       "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
@@ -9913,7 +9901,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 200
+          "line": 199
         }
       ],
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
@@ -9931,7 +9919,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 198
+          "line": 197
         }
       ],
       "signature": "int db2_kb_service_async_queue_status ( db2_kb_service_async_queue_stats_t * out )",
@@ -9949,7 +9937,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 211
+          "line": 210
         }
       ],
       "signature": "int db2_kb_service_clear_current_project ( const char * project )",
@@ -9966,7 +9954,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 210
+          "line": 209
         }
       ],
       "signature": "int db2_kb_service_clear_project ( const char * project )",
@@ -10151,29 +10139,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 208
+          "line": 207
         }
       ],
       "signature": "int db2_kb_service_collect_project_status ( const char * project , db2_kb_service_project_status_t * out )",
       "signature_sha256": "ae5670151c003545bcf84ddf9d0d02a281a278ce0cc0daa2f1d26aa55d3be84d",
       "status": "audit-pending",
       "symbol": "db2_kb_service_collect_project_status"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service_css.c",
-        "src/tests/test_assertion_transport.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 139
-        }
-      ],
-      "signature": "cJSON * db2_kb_service_css_conventions_json ( const char * project , int sync )",
-      "signature_sha256": "420fbc4d5835cbbd4b6f69789d4b2c888197628ff49ba016b919cc0479fc6e3f",
-      "status": "audit-pending",
-      "symbol": "db2_kb_service_css_conventions_json"
     },
     {
       "consumers": [
@@ -10527,7 +10499,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 213
+          "line": 212
         }
       ],
       "review": {
@@ -10547,7 +10519,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 212
+          "line": 211
         }
       ],
       "review": {
@@ -10604,7 +10576,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 214
+          "line": 213
         }
       ],
       "review": {
@@ -19942,13 +19914,13 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "f730a1a619a7e283c1f006af0ba5210d289a5e8aca7931e098d64114bb4a3553",
+  "fingerprint": "d33c16223167d4ad49637f0e92b0618704abb69b269d24a01b6562fef0222898",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 425,
-    "declarations": 1096,
-    "headers": 126,
+    "audit_pending": 424,
+    "declarations": 1095,
+    "headers": 125,
     "internal_unconsumed": 203,
     "private_test_only": 279,
     "reviewed": 189

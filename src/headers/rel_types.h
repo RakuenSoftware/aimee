@@ -23,7 +23,7 @@
 #define DEC_REL_TYPES_H 1
 
 #include <stddef.h>
-#include "modules/db2/c/graph_kinds.h"
+#include "aimee/db2/graph_kinds.h"
 
 #ifdef __cplusplus
 extern "C"

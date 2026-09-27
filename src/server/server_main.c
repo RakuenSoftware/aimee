@@ -12,6 +12,7 @@
 #include "modules/git/git_host_cred.h"
 #include "modules/git/git_host_resolve.h"
 #include "modules/git/git_forge_vault.h"
+#include "modules/git/mcp_git.h"
 #include <aimee/git/git_ops.h>
 #include "guardrails.h"
 #include <aimee/workspace/workspace.h>
@@ -277,6 +278,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * + editor) act on the SAME isolated worktree the session's agent edits, rather
     * than the shared project checkout (session_isolation_target, workspace.c). */
    git_ops_register_session_isolation(session_isolation_target);
+   worktree_register_git_runner(mcp_git_run);
 
    /* Fail closed on an undeclared tool BEFORE serving anything. The
     * externalization gate consults the egress declaration registry, so a

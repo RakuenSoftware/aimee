@@ -1175,7 +1175,7 @@
     "server-go/modules/memory/evidence_frozen_eval_test.go": "ee46e3723c8cc4763ca1cc4ca704e205814b9314de3ca68f7e7d480ffc3c6c6e",
     "server-go/modules/memory/evidence_lineage_store_test.go": "019d4179346f3d1524e0a8093777ff225b117bd6aa052ad3c10d98505c36d2df",
     "server-go/modules/memory/evidence_lineage_test.go": "a279bf4b46533795c7770a7c9302dd09aba4a3ce69d43cc46bdc495f076c9b8a",
-    "server-go/modules/memory/host_contract_test.go": "2a5d31be922f5bee3424afd47cbf03b9d07f5b75026db1e4be35cb951434f99d",
+    "server-go/modules/memory/host_contract_test.go": "d1b34948948fdfe5e0255100fb37783393df4b997b4b39697ed23aa716726ff6",
     "server-go/modules/memory/hygiene_preview_test.go": "3d800f1c48597d3e6d4119d8798c274a3302d41157a726b0fdd54e19f700aac1",
     "server-go/modules/memory/index_freshness_test.go": "043172cf8bad96ef9144ab29641fdb601ca7fa48bdee4a7756939d0a0ae7346f",
     "server-go/modules/memory/ingress_assembly_test.go": "86db8b0deaaab9a5e94db8d783f606137434601f149ac27d65542caf96f19217",

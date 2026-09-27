@@ -2286,8 +2286,22 @@ static void test_cli_v1_body_cap_matches_server(void)
           (int)CLI_V1_MAX_ROUNDTABLE_BODY);
 }
 
+static void test_git_explicit_repo_alias(void)
+{
+   char target[] = "repo=/other/repository";
+   char *argv[] = {"status", target};
+   cJSON *req = marshal_git_cli(2, argv);
+   assert(req);
+   const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "path")),
+                 "/other/repository") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "repo"));
+   cJSON_Delete(req);
+}
+
 int main(void)
 {
+   test_git_explicit_repo_alias();
    test_cli_v1_body_cap_matches_server();
    printf("test_cli_v1_delegate\n");
    test_remote_workspace_hidden_roots_are_rejected();

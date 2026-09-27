@@ -20,6 +20,8 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
     # read-modify-write that can lose an increment under concurrency and make an
     # assertion flaky. Guard every access with a lock.
     requests = 0
+    paths: list[str] = []
+    workspaces = ["/tmp"]
     _lock = threading.Lock()
 
     @classmethod
@@ -27,9 +29,15 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
         with cls._lock:
             return cls.requests
 
+    @classmethod
+    def paths_since(cls, start: int) -> list[str]:
+        with cls._lock:
+            return cls.paths[start:]
+
     def _respond(self) -> None:
         with type(self)._lock:
             type(self).requests += 1
+            type(self).paths.append(self.path)
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
@@ -48,9 +56,12 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
                         {"op": "agent.list", "verb": "GET", "path": "/v1/agents"},
                         {"op": "memory.search", "verb": "POST", "path": "/v1/memory/search"},
                         {"op": "config.show", "verb": "GET", "path": "/v1/config"},
+                        {"op": "workspace.list", "verb": "GET", "path": "/v1/workspaces"},
                     ],
                 }
             ).encode()
+        elif self.path == "/v1/workspaces":
+            body = json.dumps({"status": "ok", "workspaces": type(self).workspaces}).encode()
         else:
             body = json.dumps(
                 {"status": "ok", "agents": [], "any_delegate_available": False}
@@ -225,13 +236,6 @@ def main() -> int:
             reachable = (
                 ["hooks", "pre"],
                 ["hooks", "post"],
-                # session-start is deliberately NOT here. It no longer dispatches
-                # to the server: the launcher owns session id, worktree and cwd
-                # before the host starts, and session guidance is prepended at
-                # model ingress instead of being assembled per client. What is
-                # left is a local publish of the host session id, so "must reach
-                # the remote" no longer describes it. The exclusivity half still
-                # holds trivially -- it contacts nothing.
                 ["optimize", "points"],
                 ["optimize", "baseline", "--point", "router"],
             )
@@ -241,16 +245,19 @@ def main() -> int:
                 assert RemoteHandler.count() > before, (command, special.stderr)
                 assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
 
-            # Non-Git session-start without a harness identity is local-only:
-            # it must reach NEITHER the remote nor the local socket. A
-            # regression that reintroduced per-client assembly here would show
-            # up as a request to one of the two.
+            # SessionStart checks workspace registration on the selected remote.
+            # Outside registered workspaces it must not provision a session or
+            # assemble memory context, and must never fall back to the local UDS.
             before = RemoteHandler.count()
-            local_only = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["session-start"])
-            assert local_only.returncode == 0, (local_only.stdout, local_only.stderr)
-            assert RemoteHandler.count() == before, "session-start contacted the remote"
+            RemoteHandler.workspaces = []
+            scoped_start = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["session-start"])
+            assert scoped_start.returncode == 0, (scoped_start.stdout, scoped_start.stderr)
+            paths = RemoteHandler.paths_since(before)
+            assert "/v1/workspaces" in paths, paths
+            assert all(path in ("/v1/cli/manifest", "/v1/workspaces") for path in paths), paths
             assert sentinel.contacts_after_settle() == 0, "session-start contacted local UDS"
 
+            RemoteHandler.workspaces = ["/tmp"]
             for command in reachable:
                 failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)
                 # hooks intentionally fail open when the policy server is

@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "json_fluent.h"
-#include "modules/db2/c/kb_service_backend.h"
+#include "kb/kb_service_css.h"
 #include <assert.h>
 
 static int unavailable;

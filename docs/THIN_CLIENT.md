@@ -41,7 +41,11 @@ Connection precedence is:
 
 The client does not hold DB1, DB2, server vault keys, workflow state, or KB credentials.
 
-Git worktree isolation is enabled by default. Set `require_session_worktree` to
+Globally installed Aimee hooks apply repository policy only inside registered
+workspaces. Outside those workspaces, session startup, discovery, Git, and sub-agent
+hooks do not block ordinary tools or create a session worktree.
+
+Git worktree isolation is enabled by default within that scope. Set `require_session_worktree` to
 `false` in the instance settings to disable automatic worktree creation, hook path
 routing, and worktree write restrictions. Ordinary non-Git folders are writable
 with isolation enabled. A remote hook carries the client's filesystem scope check
@@ -59,6 +63,18 @@ aimee kb docs push ./docs/design.pdf
 
 The client reads and uploads bytes. The server records a detached workspace and sends content to the
 KB. It never tries to open `/path/to/project` on its own filesystem.
+
+For `aimee git`, an explicit `path=` (or `repo=` alias) selects the checkout and
+its detached runner, independently of the invoking directory or previous session
+worktree. Native hooks leave that Git request intact; the Git handler applies
+policy to the selected target. An unavailable explicit target fails without
+falling back to another checkout. An explicit tool `workdir` likewise takes
+precedence over the session's launch directory.
+
+New tmux-backed CLI sessions start non-login interactive Bash, which loads
+`~/.bashrc` without the login profile resetting the inherited executable search
+path. Existing login-shell sessions already load `.bashrc` through `.bash_profile`
+when configured there.
 
 Uploads are bounded and chunked where the operation permits it. A source change during an upload is
 detected through size/hash metadata rather than accepted as one coherent file.

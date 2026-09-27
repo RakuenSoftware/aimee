@@ -903,6 +903,58 @@ class LinkClosureTest(unittest.TestCase):
         )
 
 
+class MemoryGoOnlyComparisonTest(unittest.TestCase):
+    def setUp(self):
+        self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        self.previous = copy.deepcopy(self.current)
+        self.previous["fingerprint"] = checker.MEMORY_GO_ONLY_BASE
+        self.previous["translation_units"] += sorted(checker.MEMORY_GO_ONLY_RETIRED_UNITS)
+        self.previous["descriptor_support_units"].append(
+            {"path": "src/modules/db2/support/rel_enum_text_primitives.c"})
+        for row in self.previous["unresolved"]:
+            if row["symbol"] == "_GLOBAL_OFFSET_TABLE_":
+                row["references"] = [p for p in row["references"] if p not in {
+                    "src/modules/db2/c/demotion.c", "src/modules/db2/c/kb_service_backend.c",
+                }]
+
+    def compare(self):
+        def validated(root, contract, **kwargs):
+            return (contract["translation_units"], contract["descriptor_support_units"],
+                    {row["symbol"]: row for row in contract["unresolved"]})
+        with mock.patch.object(checker, "validate_contract", side_effect=validated):
+            checker.compare_contracts(REPO, self.previous, self.current)
+
+    def test_exact_go_only_retirement_passes(self):
+        self.compare()
+
+    def test_unreviewed_base_and_retirements_fail(self):
+        for mutation in ("base", "source", "support"):
+            with self.subTest(mutation=mutation):
+                self.setUp()
+                if mutation == "base":
+                    self.previous["fingerprint"] = "0" * 64
+                elif mutation == "source":
+                    self.previous["translation_units"].append("src/modules/db2/c/unreviewed.c")
+                else:
+                    self.previous["descriptor_support_units"].append(
+                        {"path": "src/modules/db2/support/unreviewed.c"})
+                with self.assertRaisesRegex(checker.ClosureError, "previous-.*-removal"):
+                    self.compare()
+
+    def test_unreviewed_got_reference_fails(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] == "_GLOBAL_OFFSET_TABLE_")
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
+
+    def test_unreviewed_support_change_fails(self):
+        row = next(r for r in self.current["descriptor_support_units"]
+                   if r["path"] not in checker.MEMORY_GO_ONLY_SUPPORT_UPDATES)
+        row["provenance"] = "unreviewed"
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-change"):
+            self.compare()
+
+
 class MemoryMigrationComparisonTest(unittest.TestCase):
     """Exercise the exact release admission independently of schema/probe tests."""
 

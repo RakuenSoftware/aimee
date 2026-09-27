@@ -481,6 +481,8 @@ static int format_codex_cli_skill(char *buf, size_t cap, const char *cli_only,
                        "---\n\n"
                        "# Aimee CLI\n\n"
                        "The registered executable is `%s`; do not assume `aimee` is on PATH. "
+                       "These requirements apply only inside an Aimee-registered workspace; "
+                       "outside one, use ordinary tools without Aimee gating. "
                        "REQUIRED FIRST STEP: before any repository read, search, edit, build, "
                        "or test, run `%s index investigate \"<plain-language summary of the "
                        "task>\"`. If it reports unavailable or has no answer, use `%s index "
@@ -1020,14 +1022,15 @@ static int format_codex_plugin_json(char *buf, size_t cap, int compat,
    const char *hooks_registration = compat ? "  \"hooks\": \"../hooks/codex-hooks.json\",\n"
                                            : "  \"hooks\": \"./hooks/codex-hooks.json\",\n";
    size_t prompt_cap = (cli_only_allowlist ? strlen(cli_only_allowlist) : 0) +
-                       (aimee_bin ? strlen(aimee_bin) : 0) + 1024;
+                       (aimee_bin ? strlen(aimee_bin) : 0) + 2048;
    char *cli_default_prompt = calloc(1, prompt_cap);
    if (!cli_default_prompt)
       return -1;
    if (plan.cli && cli_only_allowlist && cli_only_allowlist[0])
       snprintf(cli_default_prompt, prompt_cap,
                "    \"defaultPrompt\": [\n"
-               "      \"MCP is Aimee's preferred surface. REQUIRED FIRST STEP: before any "
+               "      \"Inside an Aimee-registered workspace, MCP is Aimee's preferred surface. "
+               "REQUIRED FIRST STEP: before any "
                "repository read, search, edit, build, or test, call Aimee MCP index with "
                "command `investigate` and a plain-language summary of the task. If unavailable, "
                "continue after the attempted call. The CLI is registered only for "
@@ -1041,7 +1044,8 @@ static int format_codex_plugin_json(char *buf, size_t cap, int compat,
    else if (plan.cli)
       snprintf(cli_default_prompt, prompt_cap,
                "    \"defaultPrompt\": [\n"
-               "      \"Aimee's CLI is registered. REQUIRED FIRST STEP: before any repository "
+               "      \"Inside an Aimee-registered workspace, Aimee's CLI is registered. REQUIRED "
+               "FIRST STEP: before any repository "
                "read, search, edit, build, or test, run `%s index investigate \\\"<plain-"
                "language summary of the task>\\\"`. If unavailable, continue after the "
                "attempt. Use the same exact executable for targeted index and memory commands "
@@ -1054,7 +1058,8 @@ static int format_codex_plugin_json(char *buf, size_t cap, int compat,
    else if (plan.mcp)
       snprintf(cli_default_prompt, prompt_cap,
                "    \"defaultPrompt\": [\n"
-               "      \"Aimee MCP is the registered repository-intelligence surface. REQUIRED "
+               "      \"Inside an Aimee-registered workspace, Aimee MCP is the registered "
+               "repository-intelligence surface. REQUIRED "
                "FIRST STEP: before any repository read, search, edit, build, or test, call its "
                "index capability with command `investigate` and a plain-language summary of "
                "the task. If unavailable, continue after the attempted call. For repairs, "
@@ -1573,36 +1578,6 @@ static void remove_aimee_event_hook(cJSON *hooks, const char *event, const char 
    }
 }
 
-/* Ensure root.permissions.deny[] contains `tool` (creating permissions/deny as
- * needed). Idempotent; sets *dirty on any change. */
-static void ensure_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
-{
-   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
-   if (!cJSON_IsObject(perms))
-   {
-      if (perms)
-         cJSON_DeleteItemFromObjectCaseSensitive(root, "permissions");
-      perms = cJSON_AddObjectToObject(root, "permissions");
-      *dirty = 1;
-   }
-   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
-   if (!cJSON_IsArray(deny))
-   {
-      if (deny)
-         cJSON_DeleteItemFromObjectCaseSensitive(perms, "deny");
-      deny = cJSON_AddArrayToObject(perms, "deny");
-      *dirty = 1;
-   }
-   for (int i = 0; i < cJSON_GetArraySize(deny); i++)
-   {
-      cJSON *e = cJSON_GetArrayItem(deny, i);
-      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
-         return; /* already denied */
-   }
-   cJSON_AddItemToArray(deny, cJSON_CreateString(tool));
-   *dirty = 1;
-}
-
 /* Remove `tool` from root.permissions.deny[] if present, leaving other entries
  * (and other permissions) intact. */
 static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
@@ -1628,14 +1603,32 @@ static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dir
  * The gate is evaluated ONCE here at client setup: config `subagent_ban_enabled`
  * (default on) AND the injected delegate probe reporting usable delegates. When
  * the gate holds we install a dedicated `subagent-guard` PreToolUse hook (carries
- * the actionable "use aimee delegate" message) PLUS a static permissions.deny
- * [Task, Agent] backstop that blocks the spawn even if the hook fails to run.
- * When the gate does not hold (config opt-out or no delegates) we remove both, so
+ * the actionable "use aimee delegate" message). Static global denies cannot
+ * follow workspace scope, so only the workspace-aware hook enforces the policy.
+ * When the gate does not hold (config opt-out or no delegates) we remove it, so
  * a config/delegate change un-installs on the next setup / session-start. A probe
- * result of "unknown" (server unreachable) leaves settings untouched — we neither
- * install nor tear down on a transient outage. */
+ * result of "unknown" (server unreachable) retains the hook. Migration of the
+ * old unscoped static denies is independent of delegate availability. */
 static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
 {
+   /* Migrate static denies only when the old Aimee guard is installed. Leave
+    * unrelated user permission rules untouched, even during a server outage. */
+   cJSON *entries = cJSON_GetObjectItemCaseSensitive(hooks, "PreToolUse");
+   cJSON *entry;
+   cJSON_ArrayForEach(entry, entries)
+   {
+      cJSON *list = cJSON_GetObjectItemCaseSensitive(entry, "hooks");
+      cJSON *hook;
+      cJSON_ArrayForEach(hook, list)
+      {
+         const char *cmd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "command"));
+         if (cmd && strstr(cmd, "aimee") && strstr(cmd, "subagent-guard"))
+         {
+            remove_permissions_deny_tool(root, "Task", dirty);
+            remove_permissions_deny_tool(root, "Agent", dirty);
+         }
+      }
+   }
    /* Config opt-out is checked FIRST through the server config contract. So
     * `subagent_ban_enabled: false` reliably tears the ban down even when the
     * server is unreachable, and we never probe when the operator has opted out. */
@@ -1652,13 +1645,9 @@ static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
       return; /* delegate availability unknown (server down / no probe): leave as-is */
    if (probe == 1)
    {
-      /* Matcher covers every tool client_tool_is_subagent recognizes, incl.
-       * RemoteTrigger. permissions.deny lists Task+Agent (the Claude-native
-       * spawns); the hook backstops the rest with the actionable message. */
+      /* The hook covers every provider-native sub-agent tool, within scope. */
       ensure_aimee_event_hook(hooks, "PreToolUse", "subagent-guard",
                               "Agent|Task|Subagent|spawn_agent|RemoteTrigger", dirty);
-      ensure_permissions_deny_tool(root, "Task", dirty);
-      ensure_permissions_deny_tool(root, "Agent", dirty);
    }
    else /* probe == 0: no usable delegate to redirect to -> don't ban */
    {

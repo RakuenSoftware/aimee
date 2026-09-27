@@ -82,7 +82,7 @@ Add an action class in `IR`, wire fixtures, normalization, policy evaluation, en
 and denial tests together. Removing a rule requires proving no caller depends on its reason semantics.
 Removing the module requires a reviewed replacement at every action seam; bypass is not a migration.
 
-## Exploration contract implementation status
+### Exploration contract implementation status
 
 The legacy tool seam reports source discovery as observe-only metadata when no
 host-authenticated contract is available. Baseline forbidden-command, path and

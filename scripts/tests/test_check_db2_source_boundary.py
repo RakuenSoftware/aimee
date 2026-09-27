@@ -357,6 +357,7 @@ class BoundaryTests(unittest.TestCase):
     def test_private_regression_admissions_are_exact_and_single_include(self) -> None:
         previous = {"consumers": []}
         admitted = (
+            ("src/tests/test_memory_reference_transport.c", "../modules/db2/c/demotion.c"),
             ("src/tests/test_fact_recall.c", "modules/db2/c/fact_recall.h"),
             ("src/tests/test_fact_recall.c", "modules/db2/include/aimee/db2/host_contracts.h"),
         )
@@ -365,6 +366,10 @@ class BoundaryTests(unittest.TestCase):
                 "path": source, "classification": "private-implementation-test",
                 "includes": [{"header": header, "count": 1}],
             }]}
+            if source == "src/tests/test_memory_reference_transport.c":
+                with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                    checker.enforce_shrink_only(previous, current)
+                current["source_files"] = {"c": ["src/modules/db2/c/demotion.c"]}
             checker.enforce_shrink_only(previous, current)
             for mutation in ("count", "classification", "source", "header"):
                 changed = json.loads(json.dumps(current))
@@ -380,6 +385,68 @@ class BoundaryTests(unittest.TestCase):
                 with self.subTest(source=source, header=header, mutation=mutation):
                     with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
                         checker.enforce_shrink_only(previous, changed)
+
+    def test_retired_memory_test_headers_are_replaced_without_growth(self) -> None:
+        for source, retired in checker.RETIRED_MEMORY_TEST_HEADERS.items():
+            previous = {"consumers": [{
+                "path": source, "classification": "private-implementation-test",
+                "includes": [{"header": retired, "count": 1}],
+            }]}
+            current = json.loads(json.dumps(previous))
+            current["consumers"][0]["includes"][0]["header"] = "../modules/db2/c/fact_mutation.h"
+            checker.enforce_shrink_only(previous, current)
+            for mutation in ("retained", "count", "source", "classification", "no-prior"):
+                changed = json.loads(json.dumps(current))
+                row = changed["consumers"][0]
+                base = previous
+                if mutation == "retained":
+                    row["includes"].append({"header": retired, "count": 1})
+                    row["includes"].sort(key=lambda item: item["header"])
+                elif mutation == "count":
+                    row["includes"][0]["count"] = 2
+                elif mutation == "source":
+                    row["path"] = "src/tests/test_unreviewed.c"
+                elif mutation == "classification":
+                    row["classification"] = "host-generated-client"
+                else:
+                    base = {"consumers": []}
+                with self.subTest(source=source, mutation=mutation):
+                    with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                        checker.enforce_shrink_only(base, changed)
+
+    def test_graph_codes_localization_requires_exact_prior_dependency(self) -> None:
+        for source in ("canonical_index.c", "code_projection.c"):
+            previous = {"consumers": [], "outbound_dependencies": [{
+                "source": f"src/modules/db2/c/{source}",
+                "header": "modules/memory/memory_ontology.h",
+                "resolved": "src/modules/memory/memory_ontology.h",
+                "classification": "module-private-api", "count": 1,
+            }]}
+            current = json.loads(json.dumps(previous))
+            row = current["outbound_dependencies"][0]
+            row.update(
+                header="aimee/db2/graph_kinds.h",
+                resolved="src/modules/db2/include/aimee/db2/graph_kinds.h",
+                classification="module-public-api",
+            )
+            checker.enforce_shrink_only(previous, current)
+            for field, value in (
+                ("source", "src/modules/db2/c/other.c"),
+                ("header", "modules/db2/include/aimee/db2/other.h"),
+                ("resolved", "src/modules/db2/c/graph_kinds.h"),
+                ("classification", "module-private-api"),
+                ("count", 2),
+            ):
+                changed = json.loads(json.dumps(current))
+                changed["outbound_dependencies"][0][field] = value
+                with self.subTest(source=source, field=field):
+                    with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                        checker.enforce_shrink_only(previous, changed)
+            for old_rows in ([], [{**previous["outbound_dependencies"][0],
+                                   "classification": "module-public-api"}]):
+                with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                    checker.enforce_shrink_only(
+                        {"consumers": [], "outbound_dependencies": old_rows}, current)
 
     def test_reviewed_allowlist_may_only_shrink(self) -> None:
         tmp = self.repo()

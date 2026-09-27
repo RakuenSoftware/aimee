@@ -3037,6 +3037,20 @@ static void test_file_content_hash_deterministic(void)
 
 /* --- Verify gate tests for bash git push / gh pr create --- */
 
+static void test_aimee_git_policy_uses_its_request_target(void)
+{
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   snprintf(state.session_mode, sizeof(state.session_mode), "implement");
+   char message[1024];
+   const char *input = "{\"command\":\"/home/user/.local/bin/aimee git push repo=/other/repo\"}";
+   assert(pre_tool_check("Bash", input, &state, MODE_APPROVE, "/stale/blog", message,
+                         sizeof(message)) == 0);
+   snprintf(state.session_mode, sizeof(state.session_mode), "%s", MODE_PLAN);
+   assert(pre_tool_check("Bash", "{\"command\":\"git push\"}", &state, MODE_APPROVE, "/stale/blog",
+                         message, sizeof(message)) == 2);
+}
+
 static void test_verify_gate_blocks_bash_git_push(void)
 {
    /* Set up a temp git repo with global project.yaml enforce: true
@@ -4061,6 +4075,7 @@ int main(void)
    test_file_contains_substring_basic();
    test_file_content_hash_deterministic();
    test_read_tracking_state_roundtrip();
+   test_aimee_git_policy_uses_its_request_target();
    test_verify_gate_blocks_bash_git_push();
    test_remote_push_probes_and_verify_gate();
    test_verify_gate_blocks_bash_gh_pr_create();

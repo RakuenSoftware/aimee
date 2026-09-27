@@ -149,6 +149,7 @@
   ],
   "public_headers": [
     "src/modules/db2/include/aimee/db2/client.h",
+    "src/modules/db2/include/aimee/db2/graph_kinds.h",
     "src/modules/db2/include/aimee/db2/host_contracts.h",
     "src/modules/db2/include/aimee/db2/module_api.h"
   ],
@@ -301,8 +302,7 @@
     "src/modules/db2/support/db2_runtime_config.h",
     "src/modules/db2/support/db2_text.h",
     "src/modules/db2/support/db2_time.h",
-    "src/modules/db2/support/sketch.h",
-    "src/modules/db2/c/graph_kinds.h"
+    "src/modules/db2/support/sketch.h"
   ],
   "tests": [
     "src/tests/test_bus_db2_module.c",

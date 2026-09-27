@@ -138,6 +138,10 @@ static int git_registered_workspace_path(const char *path, char *out, size_t out
          const char *configured = config_workspaces(i);
          if (!configured || configured[0] != '/')
             continue;
+         size_t configured_len = strlen(configured);
+         if (strncmp(path, configured, configured_len) != 0 ||
+             (path[configured_len] != '\0' && path[configured_len] != '/'))
+            continue;
          run_cmd_set_cwd(configured);
          int root_rc = -1;
          char *canonical_root = ws->exec_shell(ws, "pwd -P", &root_rc);
