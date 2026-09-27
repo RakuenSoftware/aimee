@@ -1,15 +1,28 @@
 {
-  "state": "candidate acceptance pending",
+  "state": "functional acceptance passed",
+  "candidate": "9c1242b1d",
+  "checks": 31,
   "files": {
     "db1-race.log": "d268f451cef21301f55c8f2f9f50d76215993ac4f010576d2a47811c8b4f1b1b",
     "final-envelope-owner.log": "1aecb9230e813ff81fc9769e93b0d1996d6b346299f8a8aa44a78d8aa90ec340",
+    "generated-docs.log": "6118faa34b94ee32960046f388c61830dfde49b589ca0fab351d47695464e978",
+    "image-identities.json": "9e329839cf36ef80c4aeaa4c21e1ddd21a2f733580e6b4a0789873c122f4e69c",
+    "initial-migration-images.json": "39bb2dd6ee32ad1dcab515c105141ca7487f477e89872614cb8b9bb86fe9b5be",
+    "initial-migration-snapshots.json": "acad4d56c863d8f7386ad40d9968726778dad570e75613a6220bf8a455ae298a",
+    "live-checks.json": "60ef9c4ed3877cc8bd16158fcebdeee48b45888d24aa0c9bc0f1babf0f1731f1",
+    "live-driver.log": "a841ff234ad6d77785ac010d6482cc2a48ad206197697963c9e1eb1044d87818",
+    "live-summary.json": "01c4b37ebcf2b9bea2ef80021a7fd62e4268d6472f58696a948fcfc5579ef8f6",
     "live_acceptance.py": "592b167b8e969ba51e35728afd824c78cc2476d92ad973eacb6f6a9df54ce103",
     "memory-race-and-export.log": "fa567bb6aee5efb3b3fdee10d18721f7827e6104c7f16875f2c7b5244db9cc01",
     "native-transport.log": "da539d8a6327200aba11e97f1efa8ca1e361a5456b39a09beecf01156f158e49",
     "process-clock-owner.log": "ceddcff66724cb3f66526716c99548ebe671d17334cf114aec3181a17f8f0899",
     "process-clock-promotion.log": "d439be7ad3a51024e8cd847f5aa0bed573c28babf71e2b5fa972623115550046",
+    "production-health.txt": "01c8baf3dc6d2bb5e7f310fe3ce710ba6f8cd8480cf94bef343f2567d6d7b1c8",
+    "snapshot-identities.json": "d7d3b5db1624d0f8d73c01fb87ca5b779c2da73ab88a0ead1408a193c1e27e83",
     "task-owner-final.log": "f578951f157787aae5f0f01450d7c7626248e3ab393ddc93de21dfe61895112d",
     "task-recovery.log": "7902027c08018c47d2512bf767ad1bfcaff6daa53b3f783fd1ec1a5524967395",
+    "test-registration.log": "198ed34cf02cffbd3415d1f1925e4b5ccfacd0a20897c89382ef88b4ba0d4929",
+    "upgrade-driver.log": "72518626a0b2c1518645986efbc734ed11a8f3ea442a8c50168d91d547c99b6a",
     "upgrade_candidate.py": "32bec33516c72cf0262bcd4edb86cea2186c54d037f77c214d3f322de907e680"
   }
 }

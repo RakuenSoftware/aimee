@@ -1,0 +1,16 @@
+[
+  {
+    "role": "server",
+    "previous_image": "sha256:139d2956cdab1bc707d1764ea3646cdddecdd4e29bc5d43abff70d6d3970c1dc",
+    "image": "sha256:74ebbb7aa27bfe20540b4207bdc3bcb96624dc823fbdfa935df2da18958b9691",
+    "configured_image": "aimee-pr2990:d76306e6e",
+    "healthy": true
+  },
+  {
+    "role": "kb",
+    "previous_image": "sha256:139d2956cdab1bc707d1764ea3646cdddecdd4e29bc5d43abff70d6d3970c1dc",
+    "image": "sha256:74ebbb7aa27bfe20540b4207bdc3bcb96624dc823fbdfa935df2da18958b9691",
+    "configured_image": "aimee-pr2990:d76306e6e",
+    "healthy": true
+  }
+]
