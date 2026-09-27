@@ -1,0 +1,13 @@
+PASS actual file survives server restart
+MR17_SESSION dc9c067a-2736-7c9b-ec45-65a3661bc521
+PASS after controlled native provider selected
+PASS after final provider request has durable receipt
+PASS after retained exact current controlled procedure
+PASS failed speculation absent from clean provider payload
+PASS replaced user constraints are absent
+PASS corrected procedure replaces prior source
+PASS bounded host summary preserves actual write receipt
+PASS retry verifies preserved file without repeating write
+PASS after host emits durable attempt identity
+PASS clean retry completes with a new attempt
+PASS clean retry never restores or repeats original write
