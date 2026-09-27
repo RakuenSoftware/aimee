@@ -296,7 +296,12 @@ static void tool_thread_drain(void)
 static void tool_execute_worker_pooled(void *arg)
 {
    int async_slot = ((compute_ctx_t *)arg)->async_slot;
+   /* The same authenticated session must reach both the pre-check and native
+    * dispatch. A worker's process-derived session is not this request's owner. */
+   const char *sid = json_string(((compute_ctx_t *)arg)->req, "session_id");
+   session_id_set_override(sid);
    tool_execute_worker(arg);
+   session_id_clear_override();
    async_slot_release(async_slot);
    tool_thread_release();
 }

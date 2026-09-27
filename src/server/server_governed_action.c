@@ -19,10 +19,12 @@ static __thread char action_principal[129];
 static __thread cJSON *action_intent;
 static __thread cJSON *action_verification_request;
 static __thread cJSON *action_existing_receipt;
+static __thread char action_refusal[128];
 
 void policy_action_attempt(const char *attempt)
 {
    snprintf(action_attempt, sizeof(action_attempt), "%s", attempt ? attempt : "");
+   action_refusal[0] = 0;
    cJSON_Delete(action_existing_receipt);
    action_existing_receipt = NULL;
    cJSON_Delete(action_intent);
@@ -127,11 +129,16 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
                         int authorized)
 {
    const request_context_t *ctx = request_context_get();
-   if (!ctx || !ctx->principal[0] || !ctx->request_id[0] || !sid || !sid[0] || !action_attempt[0] ||
-       (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) || action_intent)
+   snprintf(action_refusal, sizeof(action_refusal), "host_action_binding_unavailable");
+   if (!ctx || ctx->context_refused || !ctx->principal[0] || !ctx->request_id[0] || !sid ||
+       !sid[0] || !action_attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
+       action_intent)
       return -1;
    if (policy_action_inherit(sid) != 0)
+   {
+      snprintf(action_refusal, sizeof(action_refusal), "action_lineage_unavailable");
       return -1;
+   }
    int rc = -1;
    void *guard = NULL;
    cJSON *caller = cJSON_CreateObject(), *request = cJSON_CreateObject();
@@ -140,6 +147,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    cJSON_AddStringToObject(request, "tool", name);
    cJSON_AddStringToObject(request, "directory", cwd ? cwd : "");
    cJSON_AddItemToObject(request, "arguments", cJSON_Duplicate(*arguments, 1));
+   snprintf(action_refusal, sizeof(action_refusal), "exact_resource_adapter_unavailable");
    cJSON *resource = aimee_module_command_call_context(AIMEE_TOOLS_EVENT_ACTION_RESOURCE,
                                                        AIMEE_TOOLS_STAGE_ACTION_RESOURCE,
                                                        "describe", request, caller);
@@ -157,12 +165,14 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    *arguments = cJSON_Duplicate(effective, 1);
    char *wire = cJSON_PrintUnformatted(*arguments);
    char reason[256];
+   snprintf(action_refusal, sizeof(action_refusal), "current_operator_policy_refused");
    if (!wire || policy_recheck_action_tool(name, "filesystem", wire, reason, sizeof(reason)) != 0)
    {
       free(wire);
       goto done;
    }
    free(wire);
+   snprintf(action_refusal, sizeof(action_refusal), "current_memory_evidence_unavailable");
    evidence = action_evidence(ctx, &guard);
    if (!evidence)
       goto done;
@@ -190,12 +200,17 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    cJSON_AddStringToObject(request, "registry_class", action_text(resource, "class"));
    cJSON_AddItemToObject(request, "intent", intent);
    intent = NULL;
+   snprintf(action_refusal, sizeof(action_refusal), "action_owner_unavailable");
    decision = action_store(ctx->principal, sid, request);
    next = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(
                               cJSON_GetObjectItemCaseSensitive(decision, "receipt"), "intent"),
                           1);
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(decision, "allowed")) || !next)
+   {
+      if (action_text(decision, "reason")[0])
+         snprintf(action_refusal, sizeof(action_refusal), "%s", action_text(decision, "reason"));
       goto done;
+   }
    cJSON_ReplaceItemInObjectCaseSensitive(request, "intent", cJSON_Duplicate(next, 1));
    cJSON_AddBoolToObject(evidence, "authorized", 1);
    cJSON_AddStringToObject(evidence, "policy_generation", action_text(next, "policy_generation"));
@@ -211,6 +226,8 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       if (!cJSON_IsTrue(
               cJSON_GetObjectItemCaseSensitive(decision, i ? "dispatch_allowed" : "allowed")))
       {
+         if (action_text(decision, "reason")[0])
+            snprintf(action_refusal, sizeof(action_refusal), "%s", action_text(decision, "reason"));
          if (cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(decision, "receipt")))
             action_existing_receipt = cJSON_Duplicate(decision, 1);
          goto done;
@@ -229,6 +246,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    snprintf(action_session, sizeof(action_session), "%s", sid);
    snprintf(action_principal, sizeof(action_principal), "%s", ctx->principal);
    rc = 0;
+   action_refusal[0] = 0;
 done:
    ingress_preinject_release_send_guard(guard);
    cJSON_Delete(request);
@@ -244,6 +262,7 @@ char *policy_action_finish(const char *verdict, char *result)
 {
    if (action_existing_receipt)
    {
+      action_refusal[0] = 0;
       char *prior = cJSON_PrintUnformatted(action_existing_receipt);
       cJSON_Delete(action_existing_receipt);
       action_existing_receipt = NULL;
@@ -251,7 +270,19 @@ char *policy_action_finish(const char *verdict, char *result)
       return prior ? prior : safe_strdup("error: prior action receipt unavailable; do not replay");
    }
    if (!action_intent)
-      return result;
+   {
+      if (!action_refusal[0])
+         return result;
+      cJSON *refusal = cJSON_CreateObject();
+      cJSON_AddStringToObject(refusal, "status", "refused");
+      cJSON_AddStringToObject(refusal, "reason", action_refusal);
+      cJSON_AddBoolToObject(refusal, "dispatch_allowed", 0);
+      char *encoded = cJSON_PrintUnformatted(refusal);
+      cJSON_Delete(refusal);
+      action_refusal[0] = 0;
+      free(result);
+      return encoded ? encoded : safe_strdup("error: governed action refused");
+   }
    cJSON *request = cJSON_CreateObject(), *outcome = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "outcome");
    cJSON_AddStringToObject(request, "registry_class", action_text(action_intent, "action_class"));
