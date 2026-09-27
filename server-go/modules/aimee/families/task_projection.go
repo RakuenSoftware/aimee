@@ -104,8 +104,14 @@ func (state *taskProjectionState) releasePending() {
 }
 func taskProjectionReply(status, reason string, state *taskProjectionState) (uint32, []string, error) {
 	result := map[string]any{"status": status, "reason": reason, "class": "derived_non_authoritative", "independent_support": false}
+	if status == "error" {
+		result["kind"] = "invalid_argument"
+	}
 	if state != nil {
-		result["projection"] = state
+		copy := *state
+		copy.Items, copy.Prepared, copy.PendingPromotion = nil, nil, nil
+		copy.LastPromotion = taskPromotionReceipt(copy.LastPromotion)
+		result["projection"] = copy
 	}
 	raw, err := json.Marshal(result)
 	return store.StatusOK, []string{string(raw)}, err
@@ -212,6 +218,7 @@ func sessionTaskProjectionApply(ctx context.Context, q store.Queryer, f []string
 		copy.Items = nil
 		copy.Prepared = nil
 		copy.PendingPromotion = nil
+		copy.LastPromotion = taskPromotionReceipt(copy.LastPromotion)
 		return taskProjectionReply("ok", "binding_only", &copy)
 	}
 	revision := uint64(0)
@@ -230,7 +237,7 @@ func sessionTaskProjectionApply(ctx context.Context, q store.Queryer, f []string
 		if json.Unmarshal(state.PendingPromotion, &pending) != nil || pending["preview_digest"] != request.PreviewDigest || len(request.PromotionResult) == 0 {
 			return taskProjectionReply("conflict", "promotion_receipt_mismatch", nil)
 		}
-		state.LastPromotion = request.PromotionResult
+		state.LastPromotion = taskPromotionReceipt(request.PromotionResult)
 		state.PendingPromotion = nil
 		if err = save(); err != nil {
 			return 0, nil, err
@@ -380,8 +387,10 @@ func sessionTaskProjectionApply(ctx context.Context, q store.Queryer, f []string
 		gaps = append(gaps, "coherent_projection_exceeds_budget")
 	}
 	copy := state
+	copy.Items = nil
 	copy.Prepared = nil
 	copy.PendingPromotion = nil
+	copy.LastPromotion = taskPromotionReceipt(copy.LastPromotion)
 	response := map[string]any{"status": "ok", "projection": copy, "rendered_context": rendered, "omissions": gaps, "receipt": map[string]any{"projection_id": state.ID, "revision": state.Revision, "payload_sha256": taskDigest([]byte(rendered)), "payload_bytes": len(rendered), "sources": prepared.Receipt.Sources, "class": state.Class, "independent_support": false, "replay_availability": state.Replay}}
 	result, err := json.Marshal(response)
 	return store.StatusOK, []string{string(result)}, err

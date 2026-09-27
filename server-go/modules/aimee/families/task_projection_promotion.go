@@ -69,3 +69,33 @@ func taskProjectionPromotion(state *taskProjectionState, r taskProjectionRequest
 	reply, e := json.Marshal(map[string]any{"status": "ok", "admission": "review_required", "promotion": proof, "preview_digest": digest, "scope": state.Binding, "reviewer": "authenticated_owner_user"})
 	return 0, []string{string(reply)}, e
 }
+
+// Keep admission identity for reconciliation, never a second copy of a draft or
+// canonical text that could bypass fresh evidence checks or rendering budgets.
+func taskPromotionReceipt(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var source map[string]json.RawMessage
+	if json.Unmarshal(raw, &source) != nil {
+		return nil
+	}
+	out := map[string]json.RawMessage{}
+	for _, key := range []string{"status", "kind", "state", "preview_digest", "projection_id", "projection_revision"} {
+		if value := source[key]; len(value) > 0 {
+			out[key] = value
+		}
+	}
+	var proposal map[string]json.RawMessage
+	if json.Unmarshal(source["proposal"], &proposal) == nil {
+		ref := map[string]json.RawMessage{}
+		for _, key := range []string{"proposal_id", "payload_digest", "state", "decision_id", "review_commit_id"} {
+			if value := proposal[key]; len(value) > 0 {
+				ref[key] = value
+			}
+		}
+		out["proposal"], _ = json.Marshal(ref)
+	}
+	result, _ := json.Marshal(out)
+	return result
+}

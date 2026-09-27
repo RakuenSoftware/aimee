@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -120,7 +121,7 @@ func TestTaskProjectionAtomicOwnerPostgres(t *testing.T) {
 	}
 	zero := request("get", "")
 	zero["max_context_bytes"] = 0
-	if r := call("alice", 0, zero); r["rendered_context"] != "" {
+	if r := call("alice", 0, zero); r["rendered_context"] != "" || strings.Contains(fmt.Sprint(r), "may require a restart") || strings.Contains(fmt.Sprint(r), "edit config") {
 		t.Fatal("zero budget", r)
 	}
 	changed := request("get", "")
@@ -156,7 +157,7 @@ func TestTaskProjectionAtomicOwnerPostgres(t *testing.T) {
 		t.Fatal("changed event released", r)
 	}
 	exec(`UPDATE session_state SET active_task_id=2 WHERE session_id='session'`)
-	if r := call("alice", 0, request("get", "")); r["reason"] != "active_task_mismatch" {
+	if r := call("alice", 0, request("get", "")); r["reason"] != "active_task_mismatch" || r["kind"] != "invalid_argument" {
 		t.Fatal("task switch leaked old state", r)
 	}
 	switched := request("rebuild", "0")
@@ -246,5 +247,13 @@ func TestTaskProjectionAbandonedAdmissionRetainsDigestOnly(t *testing.T) {
 	state.releasePending()
 	if len(state.LastPromotion) == 0 {
 		t.Fatal("lost reconciliation receipt")
+	}
+}
+
+func TestTaskProjectionAdmissionReceiptHasNoDraftText(t *testing.T) {
+	raw := json.RawMessage(`{"status":"ok","projection_id":"task","proposal":{"proposal_id":"draft","payload_digest":"hash","draft":{"content":"revoked private source"}},"content":"unbounded"}`)
+	got := string(taskPromotionReceipt(raw))
+	if strings.Contains(got, "revoked") || strings.Contains(got, "unbounded") || !strings.Contains(got, `"proposal_id":"draft"`) {
+		t.Fatal(got)
 	}
 }

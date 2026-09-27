@@ -20,7 +20,7 @@ def recipe(info,image):
 prior={key:api('GET','/containers/'+names[key]+'/json') for key in ['server','kb']}
 for info in prior.values():
  assert info['Config']['Labels']['com.docker.compose.project'] in [names['project'],names['kb_project']]
- assert info['Config']['Image']=='aimee-pr2990:5d4bcab87'
+ assert info['Config']['Image']=='aimee-pr2990:400c8113c'
  assert not info['HostConfig'].get('PortBindings')
 # Keep both private PostgreSQL stores, workspaces, Vaults and enrolled identities.
 try:

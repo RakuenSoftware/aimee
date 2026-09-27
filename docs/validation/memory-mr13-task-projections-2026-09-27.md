@@ -45,3 +45,13 @@ Snapshots stay private on CT109; only hashes are retained as evidence. Image-onl
 rollback across this schema change is not supported.
 
 [Evidence manifest](memory-mr13-evidence-2026-09-27/manifest.json).
+
+Live probes on the clock-corrected candidate validated explicit promotion review,
+private hypothesis lineage, concurrent revisions, retirement invalidation and
+execution-event changes. They are not final acceptance: follow-up fixes remove
+working/draft text from response metadata and give task mismatch a valid HTTP
+error envelope. The initial review probe used the wrong route spelling; a later
+raw-SQL retirement fixture correctly failed the reviewed-record authority guard.
+The corrected fixture uses governed delete/review instead. A build exhausted
+canary disk space; inspected reclaimable build caches and recreatable committed
+source snapshots were removed before the successful rebuild.
