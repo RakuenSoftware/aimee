@@ -1040,3 +1040,5 @@
 {"learning.application", "{\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"event_json\",\"from\":\"flag\",\"flag\":\"event-json\",\"required\":true}]}"},
 
 {"learning.task_cost", "{\"fields\":[{\"json\":\"cost_json\",\"from\":\"flag\",\"flag\":\"cost-json\",\"required\":true}]}"},
+
+{"action.receipt", "{\"fields\":[{\"json\":\"operation\",\"from\":\"positional\",\"index\":0},{\"json\":\"session_id\",\"from\":\"flag\",\"flag\":\"session_id\"},{\"json\":\"action_id\",\"from\":\"flag\",\"flag\":\"action_id\"},{\"json\":\"directory\",\"from\":\"flag\",\"flag\":\"directory\"},{\"json\":\"arguments_json\",\"from\":\"flag\",\"flag\":\"arguments_json\"}]}"},

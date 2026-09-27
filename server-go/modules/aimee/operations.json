@@ -27717,6 +27717,58 @@
         ],
         "max_bytes": 262144
       }
+    },
+    {
+      "family": "guardrail_state",
+      "id": 10,
+      "name": "governed_action_apply",
+      "c_name": "db1_governed_action_apply",
+      "c_params": [
+        "principal",
+        "sid",
+        "request",
+        "reply",
+        "reply_len"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "session",
+      "transaction": "single",
+      "idempotency": "keyed",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "sid",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "reply",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
+      }
     }
   ]
 }

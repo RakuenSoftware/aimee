@@ -29,6 +29,7 @@
     {"memory", "get", "memory.get", NULL, NULL, 60000},
     {"memory", "evidence", "memory.evidence", NULL, NULL, 60000},
     {"memory", "serve", "memory.serve", NULL, NULL, 60000},
+    {"action", "receipt", "action.receipt", NULL, NULL, 60000},
     {"task", "projection", "task.projection", NULL, NULL, 60000},
     {"memory", "claim_card", "memory.claim_card", NULL, NULL, 60000},
     {"memory", "delete", "memory.delete", NULL, NULL, 60000},

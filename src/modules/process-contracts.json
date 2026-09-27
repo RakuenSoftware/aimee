@@ -400,6 +400,13 @@
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "action-resource",
+          "event_kind": 6914,
+          "durability": "capture",
+          "durability_reason": "host-only exact resource resolution; commitments persist at durable action admission"
         }
       ]
     },

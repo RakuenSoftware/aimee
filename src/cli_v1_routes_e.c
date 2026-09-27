@@ -1050,3 +1050,20 @@ cJSON *marshal_aux_test(int argc, char **argv)
       cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
    return req;
 }
+
+cJSON *marshal_action_receipt(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("action.receipt");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "operation", opts.positional[0]);
+   const char *fields[] = {"session_id", "action_id", "directory", "arguments_json", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   return req;
+}

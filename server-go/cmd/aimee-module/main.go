@@ -266,7 +266,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "tools":
 		config.ModuleName = name
 		config.PrincipalRef = 11
-		config.Stages = []bus.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}}
+		config.Stages = []bus.ModuleStage{{EventKind: moduletools.EventKind, StageID: moduletools.StageDispatch}, {EventKind: moduletools.EventActionResource, StageID: moduletools.StageActionResource}}
 		config.Handler = moduletools.Handle
 	case "workspace":
 		config.ModuleName = name

@@ -2060,7 +2060,7 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "b23a281fdf8d2aae7977d4c0ab0995a010905b1d57584f74e198e142659362df"
+      "sha256": "b5b2ffe86ff04fc6aea5cc2e30813d723fde00a946c719236d2d09c506099633"
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2107,7 +2107,7 @@
         "AIMEE_MEMORY_STAGE_DATA",
         "server_module_memory_data"
       ],
-      "sha256": "964546668ab8749469a727606a4fd81286adafa16ecca0e7cbf60f70df0515c7"
+      "sha256": "f11a70592526c17aa795300c3a24d64c71b4e771c116fdc3819e57d0c4644dbf"
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2138,7 +2138,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "3c9c339f36ec6ff83562968eb8e907a4cb68beb9b22118efb3b5b7ca8826ece0"
+      "sha256": "cff79409ad71f148416337d8a85265d1cb03370b06d42afdd4156f4ce8eaad03"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2159,7 +2159,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "b1dc589fe5936bf15e9b26cdf84ea7a6c03a178d25ea3205b753da2b2f3dfdac"
+      "sha256": "631594eda56266fda8d2e893d2992bd49d32baf8cab7ad77b0be75b7fedc1f95"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2604,10 +2604,10 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "47dd1735052ed906f522868233ebdeecd40ee7e9469948c9e72a6db282dc807a",
+      "sha256": "31994300e4efb8882209b37fbce637ac987d0c120807d2c06cd8635889db0054",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "7c12af2316ca7d6b5f12df603e585372249413fc82a16715c0dd8056b706b52e"
+        "api/openapi-server-v1.yaml": "b4898499551ddd0c5fd29daaed67811c63be2a8f0b233b2b825578dc0d0f534b"
       }
     }
   }

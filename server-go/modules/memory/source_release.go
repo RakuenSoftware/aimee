@@ -336,6 +336,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if entry == nil || entry.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "source release handle unavailable"))
 	}
+	if operation == "action-evidence" {
+		return s.actionEvidence(entry)
+	}
 	if operation == "exploration-owner-observe" {
 		return commandResult(map[string]any{"status": "ok", "memory_owner": s.receiptProducer,
 			"plan_digest": entry.assemblyDigest, "source_versions_digest": releaseDigest(json.RawMessage(entry.sources))})

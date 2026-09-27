@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 78
+Total commands: 79
 
 ## Core commands
 
@@ -326,6 +326,16 @@ Subcommands:
 ```
 
 ## Advanced commands
+
+### `aimee action`
+
+Durable action receipts.
+
+Subcommands:
+
+```
+  receipt <inspect|reconcile|cancel> --session_id ID --action_id ID
+```
 
 ### `aimee agent`
 

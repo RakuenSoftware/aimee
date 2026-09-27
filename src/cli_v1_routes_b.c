@@ -1465,6 +1465,7 @@ static const struct
     {"memory.get", marshal_memory_get},
     {"memory.evidence", marshal_memory_evidence},
     {"task.projection", marshal_task_projection},
+    {"action.receipt", marshal_action_receipt},
     {"memory.serve", marshal_memory_serve},
     {"memory.claim_card", marshal_memory_claim_card},
     {"memory.identity", marshal_memory_identity},

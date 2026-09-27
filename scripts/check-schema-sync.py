@@ -134,6 +134,9 @@ DB1_ONLY_TABLES = {
     "server_identity_jti",
     "server_management_jwks_cache",
     "session_state",
+    # Execution-policy receipts and inherited budgets survive prompt/session reset.
+    "governed_action_roots",
+    "governed_action_sessions",
     "user_memories",
     "user_memory_collection_generation",
     "user_memory_invalidation_outbox",

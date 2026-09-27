@@ -687,6 +687,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-server-task-projection \
+               $(TESTPREFIX)/unit-test-server-governed-action \
                $(TESTPREFIX)/unit-test-server-erasure-protocol \
                $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-memory-demotion-transport \
@@ -7968,4 +7969,7 @@ $(TESTPREFIX)/unit-test-server-task-projection: $(OBJDIR)/tests/test_server_task
 
 $(TESTPREFIX)/unit-test-learning-application: $(OBJDIR)/tests/test_learning_application.o \
                      $(OBJDIR)/server/server_state_audit.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-server-governed-action: $(OBJDIR)/tests/test_server_governed_action.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

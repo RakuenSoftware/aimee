@@ -181,9 +181,17 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    return valid ? (permit ? 0 : -1) : 1;
 }
 
+int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
+                               char *reason, size_t reason_len)
+{
+   int discovery = 0;
+   return policy_baseline(tool, effect, arguments, reason, reason_len, &discovery);
+}
+
 int policy_check_tool_attempt(const char *tool, const char *effect, const char *args,
                               const char *attempt, char *reason, size_t reason_len)
 {
+   policy_action_attempt(attempt);
    /* Baseline authorization always runs, including computer-use restrictions. */
    int discovery = 0;
    if (policy_baseline(tool, effect, args, reason, reason_len, &discovery) != 0)
@@ -275,6 +283,8 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
                                const char *project)
 {
    const request_context_t *ctx = request_context_get();
+   if (policy_action_inherit(session) != 0)
+      return -1;
    char budget_task[129] = "";
    cJSON *parent = ctx ? cJSON_Parse(ctx->exploration_binding) : NULL;
    const char *parent_session =
@@ -362,6 +372,7 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len)
 {
+   policy_action_attempt(attempt);
    int discovery = 0;
    if (policy_baseline(tool, "filesystem", arguments, reason, reason_len, &discovery) != 0)
       return -1;
@@ -503,6 +514,8 @@ void policy_complete_exploration_turn(int turn)
  * boundary. Client JSON supplies no binding, allowance or observed outcome. */
 int policy_bind_session_exploration(const char *session)
 {
+   if (policy_action_inherit(session) != 0)
+      return -1;
    (void)request_context_set_exploration_binding("");
    const request_context_t *ctx = request_context_get();
    if (!ctx || !ctx->principal[0] || !session || !session[0] || !policy_worktree_on_host())

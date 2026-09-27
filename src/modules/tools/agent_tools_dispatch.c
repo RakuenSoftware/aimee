@@ -2061,6 +2061,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
    agent_tools_effect_finish(g_td_verdict, g_td_reason);
+   result = agent_tools_effect_receipt(g_td_verdict, result);
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2291,8 +2292,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    /* Contract the effective call only after mechanical policy rewrites have
     * settled its target and arguments, and always before the side effect. */
    int effect_classification = agent_tools_effect_classification(name, g_tool_classifier);
-   agent_tools_effect_propose(name, args, effect_classification);
-   if (agent_tools_effect_validate_and_execute(name, args, effect_classification) != 0)
+   if (agent_tools_effect_admit(name, &args, dispatch_cwd, dispatch_sid, effect_classification) !=
+       0)
    {
       cJSON_Delete(args);
       td_outcome_set("refused", "effect_contract");

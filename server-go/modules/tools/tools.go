@@ -71,6 +71,9 @@ func classify(name string) uint32 {
 
 // Handle classifies a tool name without dispatching the tool itself.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if invocation.StageID == StageActionResource {
+		return handleActionResource(invocation, request)
+	}
 	if invocation.StageID != StageDispatch || len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
 		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > nameMax {

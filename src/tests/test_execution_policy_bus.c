@@ -12,6 +12,16 @@
 #include "modules/workspace/workspace_provider.h"
 #include <stdlib.h>
 
+void policy_action_attempt(const char *attempt)
+{
+   (void)attempt;
+}
+int policy_action_inherit(const char *session)
+{
+   (void)session;
+   return 0;
+}
+
 static int g_available;
 static const char *g_reply;
 static aimee_module_call_result_t g_result;

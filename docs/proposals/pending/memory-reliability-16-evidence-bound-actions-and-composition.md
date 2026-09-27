@@ -1,10 +1,12 @@
 # MR-16: Evidence-bound actions, idempotent receipts and composition policy
 
-- **State:** Proposed
+- **State:** Implementation in validation; live upgrade and release closeout pending
 - **Priority:** P1 where memory informs external effects; composition extensions follow separately
 - **Owner:** Execution policy, action runtime and audit
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)
 - **Delivery:** Four implementation slices
+
+Operator contract and current adapter scope: [Governed action receipts](../../action-receipts.md).
 
 ## Problem and intended result
 

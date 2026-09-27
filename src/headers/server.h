@@ -716,6 +716,8 @@ int handle_toolset_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* Host bridge to the task state and memory owners. */
+cJSON *action_receipt_command(cJSON *input);
+int handle_action_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 cJSON *task_projection_command(cJSON *input);
 cJSON *memory_task_promotion_command(const cJSON *req);
 int handle_task_projection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

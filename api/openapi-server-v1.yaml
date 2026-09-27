@@ -4295,6 +4295,33 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /action/receipt:
+    post:
+      summary: Inspect or reconcile an owned durable action receipt
+      description: >-
+        Requires tool-execution capability and ownership of the session lineage.
+        Reconciliation verifies the original destination and payload through the
+        tool owner. Supplied outcome assertions never count as verification.
+        Currently exact postcondition verification supports local write_file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, session_id, action_id]
+              properties:
+                operation: {type: string, enum: [inspect, reconcile, cancel]}
+                session_id: {type: string}
+                action_id: {type: string}
+                directory: {type: string, description: Original absolute host directory}
+                arguments_json: {type: string, description: Original effective tool arguments for owner verification}
+      responses:
+        '200':
+          description: Owned receipt or an explicit unavailable or unverified result
+          content:
+            application/json:
+              schema: {type: object}
   /task/projection:
     post:
       summary: Operate on disposable state for the owned session's active task

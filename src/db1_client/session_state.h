@@ -25,6 +25,9 @@ extern "C"
    int db1_session_state_save(const char *sid, const session_state_t *in);
 
    /* Private host-only operation; the state owner verifies session ownership. */
+   int db1_governed_action_apply(const char *principal, const char *sid, const char *request,
+                                 char *reply, size_t reply_len);
+
    int db1_session_task_projection_apply(const char *principal, const char *sid,
                                          const char *request, char *reply, size_t reply_len);
    int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,

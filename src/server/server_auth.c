@@ -78,6 +78,7 @@ const method_policy_t method_registry[] = {
     {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"learning.task_cost", CAP_MEMORY_READ, "report declared task costs without policy promotion"},
+    {"action.receipt", CAP_TOOL_EXECUTE, "inspect and reconcile owned action receipts"},
     {"learning.application", CAP_MEMORY_WRITE, "record receipt-bound user procedure feedback"},
     {"memory.receipt_forget", CAP_MEMORY_WRITE, "remove owned encrypted receipt replay payloads"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},

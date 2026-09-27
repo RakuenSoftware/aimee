@@ -412,6 +412,7 @@
 #define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
 #define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY  8u
 #define AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY 9u
+#define AIMEE_DB1_OP_GOVERNED_ACTION_APPLY         10u
 
 /* Family 10: multi-agent ensemble runs: one table holding a run's state, plus
  * the template interpretation and prompt building that only the run itself

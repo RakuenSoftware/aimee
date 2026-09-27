@@ -24,10 +24,14 @@
     "src/modules/tools/module_adapter.c"
   ],
   "go_sources": [
-    "server-go/modules/tools/tools.go"
+    "server-go/modules/tools/tools.go",
+    "server-go/modules/tools/action_resource.go",
+    "server-go/modules/tools/action_contract.go",
+    "server-go/modules/tools/action_verify.go"
   ],
   "go_tests": [
-    "server-go/modules/tools/tools_test.go"
+    "server-go/modules/tools/tools_test.go",
+    "server-go/modules/tools/action_resource_test.go"
   ],
   "public_headers": [
     "src/modules/tools/include/aimee/tools/agent_tools.h",

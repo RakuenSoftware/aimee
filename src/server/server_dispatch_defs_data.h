@@ -86,6 +86,7 @@
     {"memory.get", handle_memory_get},
     {"memory.evidence", handle_memory_evidence},
     {"task.projection", handle_task_projection},
+    {"action.receipt", handle_action_receipt},
     {"memory.serve", handle_memory_serve},
     {"memory.claim_card", handle_memory_claim_card},
     {"memory.delete", handle_memory_delete},

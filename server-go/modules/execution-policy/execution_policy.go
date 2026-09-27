@@ -45,11 +45,12 @@ type toolRule struct {
 }
 
 type operatorPolicy struct {
-	AdaptiveExploration explorationLimits `json:"adaptive_exploration"`
-	Exploration         explorationLimits `json:"exploration"`
-	ForbiddenCommands   []string          `json:"forbidden_commands"`
-	ToolRules           []toolRule        `json:"tool_rules"`
-	ApprovalLevels      map[string]string `json:"approval_levels"`
+	Actions             ActionCompositionPolicy `json:"actions"`
+	AdaptiveExploration explorationLimits       `json:"adaptive_exploration"`
+	Exploration         explorationLimits       `json:"exploration"`
+	ForbiddenCommands   []string                `json:"forbidden_commands"`
+	ToolRules           []toolRule              `json:"tool_rules"`
+	ApprovalLevels      map[string]string       `json:"approval_levels"`
 }
 
 type policyLoader func() (*operatorPolicy, error)

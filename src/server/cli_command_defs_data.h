@@ -28,6 +28,8 @@
      "  trust             Pin the configured server certificate again\n"
      "  status             Show the resolved transport and a health probe\n"
      "  clear              Revert to the local Unix socket\n"},
+    {"action", "Durable action receipts", AIMEE_CMD_TIER_ADVANCED, 0,
+     "  receipt <inspect|reconcile|cancel> --session_id ID --action_id ID\n"},
     {"task", "Owned disposable task projections", AIMEE_CMD_TIER_ADVANCED, 0,
      "  projection <operation> --session_id ID --task_id ID  Read or revise working state\n"
      "  Operations: describe, rebuild, get, discard, promotion_preview, promote\n"

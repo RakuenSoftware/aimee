@@ -12,6 +12,9 @@
 struct cJSON;
 
 void agent_tools_effect_reset(void);
+int agent_tools_effect_admit(const char *name, struct cJSON **args, const char *cwd,
+                             const char *sid, int classification);
+char *agent_tools_effect_receipt(const char *verdict, char *result);
 int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *));
 int agent_tools_effect_mcp_failure_is_timeout(const char *error);
 void agent_tools_effect_propose(const char *name, struct cJSON *args, int classification);

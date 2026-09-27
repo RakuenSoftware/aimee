@@ -259,6 +259,13 @@ int policy_bind_session_exploration(const char *session);
 char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
                               char *result);
 int policy_load(void);
+void policy_action_attempt(const char *attempt);
+int policy_action_inherit(const char *session);
+int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
+                               char *reason, size_t reason_len);
+int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
+                        int authorized);
+char *policy_action_finish(const char *verdict, char *result);
 struct cJSON;
 int policy_prepare_exploration(const struct cJSON *offer, const char *session,
                                const char *workspace, const char *project);

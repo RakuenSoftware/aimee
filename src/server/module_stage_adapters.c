@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "module_stage_adapters.h"
+#include "agent_exec.h"
 #include "module_commands.h"
 
 #include <aimee/tools/agent_tools.h>
@@ -1105,6 +1106,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_drift_provider(delegate_drift);
    delegate_register_permissions_provider(delegate_permissions);
    agent_tools_register_classifier(tool_classify);
+   agent_tools_register_action_owner(policy_action_begin, policy_action_finish);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path
     * component, and workspace owns what a reference may be. One registration
