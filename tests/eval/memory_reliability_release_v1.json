@@ -1177,7 +1177,7 @@
     "server-go/modules/memory/evidence_lineage_test.go": "a279bf4b46533795c7770a7c9302dd09aba4a3ce69d43cc46bdc495f076c9b8a",
     "server-go/modules/memory/host_contract_test.go": "d1b34948948fdfe5e0255100fb37783393df4b997b4b39697ed23aa716726ff6",
     "server-go/modules/memory/hygiene_preview_test.go": "3d800f1c48597d3e6d4119d8798c274a3302d41157a726b0fdd54e19f700aac1",
-    "server-go/modules/memory/index_freshness_test.go": "043172cf8bad96ef9144ab29641fdb601ca7fa48bdee4a7756939d0a0ae7346f",
+    "server-go/modules/memory/index_freshness_test.go": "8e7123eba5bdbaeaca9caeca2f82efd9e88878802053b8c6cf5d03fc0e76797a",
     "server-go/modules/memory/ingress_assembly_test.go": "86db8b0deaaab9a5e94db8d783f606137434601f149ac27d65542caf96f19217",
     "server-go/modules/memory/mutation_retry_test.go": "9b9a3273ad8d8350ad453574a7ec244f96379e62dddb9c7f7ee1c1a83233ffe6",
     "server-go/modules/memory/personal_admission_test.go": "23905ae4c084084cdb4f575491f9d904212b6dfd9e5265478994d5d7a790dde3",

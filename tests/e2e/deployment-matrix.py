@@ -34,6 +34,9 @@ def command(*argv, env=None, data=None, timeout=300):
                       'invalid mount', 'invalid spec', 'address already in use',
                       'not found', 'unhealthy', 'operation not permitted')
         reason = next((value for value in categories if value in result.stderr.lower()), 'unclassified')
+        state = re.search(r'^ERROR:\s+([0-9A-Z]{5})\s*$', result.stderr, re.MULTILINE)
+        if state:
+            reason = 'sqlstate_' + state.group(1)
         # Command shape and fixed categories reveal the failing phase without
         # emitting potentially credential-bearing arguments or Docker output.
         operation = next((value for value in argv[1:]
@@ -141,7 +144,7 @@ def graph_intermediate_scope_gate(kb, check):
     key = 'mr01-bridge-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     sql(f"""BEGIN;
       INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
         ('L2','fact','{key}-visible','visible graph evidence','project','{key}'),
@@ -180,7 +183,7 @@ def legacy_query_eligibility_gate(kb, check):
     key = 'legacy-current-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     sql(f"""BEGIN;
       INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,confidence,use_count)
         SELECT '{key}-'||name,'{key} current source','L2','fact','project','{key}',1,1000000
@@ -255,7 +258,7 @@ def _preview_source_version_gate(kb, check):
     summary_id = 9007199254740993 + uuid.uuid4().int % 1000000000
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     fixture = json.loads(sql(f"""BEGIN;
         INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
           ('L2','fact','{key}-headline','canonical content','project','{key}'),
@@ -387,7 +390,7 @@ def linked_relation_input_checks(kb, check):
     key = 'linked-input-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     fixture = json.loads(sql(f"""BEGIN;
         INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
           ('L2','fact','{key}-parent','parent','project','{key}'),
@@ -444,7 +447,7 @@ def relation_consumer_rebuild_gate(kb, check):
     key = 'relation-rebuild-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     def copied(text):
         return sql(f"""SELECT count(*) FROM memory_relations r JOIN memories p ON p.id=r.memory_id
             WHERE p.key='{key}-parent' AND r.fact_text LIKE '%{text}%' AND EXISTS(
@@ -500,7 +503,7 @@ def future_index_admission_gate(kb, check):
     key = 'future-index-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     mid = int(sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from)
         VALUES('L2','fact','{key}','I ride my bicycle to the office every morning.',
           'project','{key}',(clock_timestamp()+interval '45 seconds')::text) RETURNING id"""))
@@ -585,7 +588,7 @@ def typed_source_version_gate(kb, check):
     key = 'typed-version-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     fixture = json.loads(sql(f"""BEGIN;
         INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status)
         VALUES('{key}','assert','test:typed-version','system',100,'open');
@@ -860,7 +863,10 @@ def typed_source_version_gate(kb, check):
                  revalidation=dict(schema_version=1, check_id=uuid.uuid4().hex, sources=observed_refs)))
         check('Previously retained generated episode fails release after parent edit', code == 200 and refused.get('eligible') is False)
     finally:
-        sql(f"""BEGIN; UPDATE entity_edges SET lifecycle_state='invalidated',version=version+1 WHERE commit_id='{key}';
+        # Canonical/index workers lock a memory before enqueueing its assertion.
+        # Cleanup must use the same order before it owns the assertion job row.
+        sql(f"""BEGIN; SELECT id FROM memories WHERE key='{key}-parent' FOR UPDATE;
+            UPDATE entity_edges SET lifecycle_state='invalidated',version=version+1 WHERE commit_id='{key}';
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
               before_version,after_version,after_lifecycle,after_confidence,after_authority_rank)
             SELECT '{key}',id,'retire',1,1,version-1,version,lifecycle_state,confidence,authority_rank
@@ -1036,7 +1042,7 @@ def lineage_release_gate(kb, check):
     scope = 'mr04-lineage-' + uuid.uuid4().hex
     def sql(query):
         return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=sqlstate', '-c', query)
     def evidence(identity):
         code, body = kb.kb_request('/v1/actions/memory.evidence', dict(id=str(identity), project=scope, scope_context=True))
         check('MR-04 evidence reaches the shipping scoped owner', code == 200 and body.get('schema_version') == 1)

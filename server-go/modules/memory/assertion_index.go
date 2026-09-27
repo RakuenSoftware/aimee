@@ -66,7 +66,12 @@ func (s *postgresDataStore) assertionReembedPoint(ctx context.Context, trace uin
 
 		// Stabilize canonical memory parents before disclosing assertion text to the
 		// model route. Source release still rechecks current authority independently.
-		rows, err := bound.db.Query(ctx, `SELECT m.id FROM memories m WHERE EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=$1 AND f.source_kind='memory' AND f.source_id='memory:'||m.id::text AND f.invalidated_at='') ORDER BY m.id FOR SHARE`, id)
+		// A parent mutation enqueues assertion work while holding that parent.
+		// The queue worker already owns the job row, so waiting here would invert
+		// those locks. Abort this attempt instead; rollback preserves pending work
+		// and releases the job before the canonical writer needs it. Never skip a
+		// busy parent and embed only the remaining, incompletely locked inputs.
+		rows, err := bound.db.Query(ctx, `SELECT m.id FROM memories m WHERE EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=$1 AND f.source_kind='memory' AND f.source_id='memory:'||m.id::text AND f.invalidated_at='') ORDER BY m.id FOR SHARE NOWAIT`, id)
 		if err != nil {
 			return err
 		}

@@ -2,11 +2,14 @@ package memory
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestMemoryIndexRebuildCannotBlockRecallPostgres(t *testing.T) {
@@ -102,5 +105,110 @@ func TestAssertionGenerationCleanupIgnoresTempShadowPostgres(t *testing.T) {
 	var actual, shadow int
 	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM public.memory_assertion_embedding_versions WHERE assertion_id=$1),(SELECT count(*) FROM pg_temp.memory_assertion_embedding_versions WHERE assertion_id=$1)`, id).Scan(&actual, &shadow); err != nil || actual != 0 || shadow != 1 {
 		t.Fatal("cleanup resolved caller temporary relation", actual, shadow, err)
+	}
+}
+
+// A canonical edit owns its parent before its dependency trigger enqueues the
+// assertion. The index worker already owns that job when it stabilizes parents.
+// It must yield on a busy parent, without model work or losing queued work.
+func TestAssertionIndexYieldsToParentMutationPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("AIMEE_DB2_REPLAY_URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	writer, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close(context.Background())
+	worker, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close(context.Background())
+	key := fmt.Sprintf("assertion-lock-%d", time.Now().UnixNano())
+	var parent, assertion int64
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := writer.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`INSERT INTO memory_embedder_versions(version,command,dimension) VALUES($1,'http://assertion-fixture',3)`, key)
+	defer func() {
+		_, _ = writer.Exec(context.Background(), "ROLLBACK")
+		_, _ = worker.Exec(context.Background(), "ROLLBACK")
+		_, e := writer.Exec(context.Background(), `DELETE FROM fact_evidence WHERE assertion_id=$1`, assertion)
+		if e != nil {
+			t.Error(e)
+		}
+		_, e = writer.Exec(context.Background(), `DELETE FROM entity_edges WHERE id=$1`, assertion)
+		if e != nil {
+			t.Error(e)
+		}
+		_, e = writer.Exec(context.Background(), `DELETE FROM memories WHERE id=$1`, parent)
+		if e != nil {
+			t.Error(e)
+		}
+		_, e = writer.Exec(context.Background(), `DELETE FROM kb_async_jobs WHERE (kind='memory_assertion_index' AND document_id=$1) OR (kind IN ('memory_index','memory_facts','memory_cognify') AND document_id=$2)`, assertion, parent)
+		if e != nil {
+			t.Error(e)
+		}
+		_, e = writer.Exec(context.Background(), `DELETE FROM memory_embedder_versions WHERE version=$1`, key)
+		if e != nil {
+			t.Error(e)
+		}
+	}()
+	if err = writer.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content) VALUES('L2','fact',$1,'before') RETURNING id`, key).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	// A code edge suffices for the common dependency-lock path and permits fixture
+	// cleanup without manufacturing an irreversible semantic erasure commit.
+	if err = writer.QueryRow(ctx, `INSERT INTO entity_edges(source,relation,target) VALUES($1,'uses','fixture') RETURNING id`, key).Scan(&assertion); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance) VALUES($1,'memory','memory:'||$2::bigint::text,'supports')`, assertion, parent)
+	exec(`BEGIN`)
+	exec(`SELECT id FROM memories WHERE id=$1 FOR NO KEY UPDATE`, parent)
+	tx, err := worker.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce the production queue claim before assertionReembedPoint.
+	if _, err = tx.Exec(ctx, `SELECT id FROM entity_edges WHERE id=$1 FOR UPDATE`, assertion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT id FROM kb_async_jobs WHERE kind='memory_assertion_index' AND document_id=$1 FOR UPDATE`, assertion); err != nil {
+		t.Fatal(err)
+	}
+	data, err := NewPostgresDataStore(evalQueryer{tx}, PlacementKB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &assertionEgressFixture{dim: 3}
+	bounded, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	response, err := data.(*postgresDataStore).assertionReembedPoint(bounded, 0, executor, key, assertion)
+	var pgerr *pgconn.PgError
+	if !errors.As(err, &pgerr) || pgerr.Code != "55P03" {
+		t.Fatalf("busy parent must yield before waiting on the writer: %v", err)
+	}
+	if response.Embedded || len(executor.seen) != 0 {
+		t.Fatal("busy parent disclosed assertion text")
+	}
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE memories SET content='after' WHERE id=$1`, parent)
+	exec(`COMMIT`)
+	var pending bool
+	if err = writer.QueryRow(ctx, `SELECT status='pending' AND generation>1 FROM kb_async_jobs WHERE kind='memory_assertion_index' AND document_id=$1`, assertion).Scan(&pending); err != nil || !pending {
+		t.Fatal("parent mutation lost retry work", pending, err)
 	}
 }
