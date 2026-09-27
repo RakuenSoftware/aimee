@@ -732,6 +732,9 @@ void config_secret_writer_set(config_secret_writer_fn writer)
 
 int config_secret_store(const char *name, const char *value)
 {
+   /* Retired credentials remain classified for redaction, never provisioned. */
+   if (name && strcmp(name, "AIMEE_DB2_URL") == 0)
+      return -1;
    return g_secret_writer ? g_secret_writer(name, value) : -1;
 }
 
@@ -806,14 +809,6 @@ const char *config_default_db1_path(void)
    static _Thread_local char path[MAX_PATH_LEN];
    snprintf(path, sizeof(path), "%s/aimee.db", config_default_dir());
    return path;
-}
-
-int config_db2_url_effective(char *out, size_t n)
-{
-   if (!out || n == 0)
-      return 0;
-   out[0] = 0;
-   return runtime_secret_get("AIMEE_DB2_URL", out, n) && out[0];
 }
 
 int config_embedder_dims_default(void)

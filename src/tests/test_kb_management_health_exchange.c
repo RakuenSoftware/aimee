@@ -20,7 +20,7 @@ typedef struct
 
 static kb_management_health_result_t snapshot(void *opaque, const kb_principal_t *actor,
                                               int64_t team, const char *id,
-                                              db2_server_snapshot_t *out)
+                                              kb_store_server_snapshot_t *out)
 {
    fixture_t *f = opaque;
    assert(actor && team == 7 && !strcmp(id, "srv-1"));
@@ -69,7 +69,7 @@ static void bundle_clear(void *opaque, kb_management_cert_bundle_t *b)
 }
 
 static kb_management_health_result_t server_open(void *opaque,
-                                                 const db2_server_snapshot_t *snapshot,
+                                                 const kb_store_server_snapshot_t *snapshot,
                                                  const kb_management_cert_bundle_t *bundle,
                                                  uint64_t deadline, void **out)
 {
@@ -186,18 +186,18 @@ static kb_management_health_result_t run(fixture_t *f, const unsigned char pk[32
 }
 
 /* Link-only stubs for production adapters; this test exercises injected seams. */
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t team)
 {
    return -1;
 }
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    return -1;
 }
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
 }
-int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapshot_t *out)
+int kb_store_server_registry_snapshot(int64_t team, const char *id, kb_store_server_snapshot_t *out)
 {
    return -1;
 }

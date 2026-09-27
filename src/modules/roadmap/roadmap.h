@@ -2,7 +2,7 @@
  *
  * A roadmap decomposes one goal into a dependency-aware tree of milestones,
  * slices, and leaf tasks. Durable `roadmap` / `plan_unit` artifacts live in
- * DB2 (see db2/roadmap.sql); single-host runtime dispatch state lives in DB1
+ * KB_STORE (see kb_store/roadmap.sql); single-host runtime dispatch state lives in DB1
  * (see db1/roadmap_runtime.sql). Leaf tasks are executed by delegating to the
  * existing delegate / coord-job substrate; the loop only decomposes, selects,
  * gates, and advances.

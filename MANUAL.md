@@ -441,7 +441,7 @@ deployments. Preserve the first error and the operation ID; later failures are o
 <workspace>/aimee.workspace.yaml
 ```
 
-DB1 and DB2 data lives outside the config directory in PostgreSQL. DB1 is served through the
+DB1 and KB_STORE data lives outside the config directory in PostgreSQL. DB1 is served through the
 `aimee` and `postgres` modules; workflow lifecycle rows use that same store contract even though the
 Go control plane owns their behavior.
 
@@ -453,7 +453,7 @@ Go control plane owns their behavior.
 | delegate | a policy-controlled agent doing a bounded task |
 | persona | a named perspective and instruction set |
 | DB1 | local server PostgreSQL state served by the store modules |
-| DB2 | KB PostgreSQL and pgvector state |
+| KB_STORE | KB PostgreSQL and pgvector state |
 | event bus | intra-daemon typed shared-memory transport |
 | capture | ordered observational bus record; never automatic execution replay |
 | worktree | isolated git checkout assigned to a session or work item |

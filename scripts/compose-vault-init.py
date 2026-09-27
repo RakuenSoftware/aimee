@@ -58,7 +58,6 @@ def payloads(model):
     }
     owner = owners[0]
     if owner == 'aimee-kb':
-        values['AIMEE_DB2_URL'] = values['AIMEE_STORE_MIGRATION_URL']
         bearer = bootstrap_env.get('AIMEE_KB_API_BEARER_TOKEN')
         if not isinstance(bearer, str) or not bearer or '\0' in bearer:
             raise ValueError('KB authority bootstrap credential is required')

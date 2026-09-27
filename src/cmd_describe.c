@@ -543,7 +543,7 @@ void cmd_describe(app_ctx_t *ctx, int argc, char **argv)
    int retry_count = opt_get_int(&opts, "retry", 0);
    const char *target = opt_pos(&opts, 0);
 
-   /* Get indexed projects from DB2's canonical index. */
+   /* Get indexed projects from KB_STORE's canonical index. */
    project_info_t all_projects[256];
    int pcount = kb_client_index_list(all_projects, 256);
 

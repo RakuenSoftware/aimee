@@ -94,7 +94,7 @@ func exerciseSessionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler
 }
 
 func TestFoldOriginsRevocationAndErase(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("requires packaged PostgreSQL")
 	}
@@ -117,7 +117,7 @@ func TestFoldOriginsRevocationAndErase(t *testing.T) {
 	}
 	exec(`SET LOCAL jit=off; SELECT set_config('aimee.memory_scope_all','1',true)`)
 	exec(`CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
-	schema, e := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, e := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if e != nil {
 		t.Fatal(e)
 	}

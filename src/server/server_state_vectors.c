@@ -172,7 +172,7 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_Delete(begin);
       char msg[192];
-      snprintf(msg, sizeof(msg), "DB2 erasure failed; retry request_id=%s", request_id);
+      snprintf(msg, sizeof(msg), "KB_STORE erasure failed; retry request_id=%s", request_id);
       return server_send_error(conn, msg, NULL);
    }
 

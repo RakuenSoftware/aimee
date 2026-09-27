@@ -1737,7 +1737,7 @@ paths:
         duplicate-selectors, unresolved, migrate-enumerate, migrate-list,
         rules-doc. Read ops return {results, count}; migrate-enumerate returns
         {units}; rules-doc returns {rules_doc}. Requires css_style_graph_enabled
-        and a re-index to populate the graph; proxied to aimee-kb (DB2-side).
+        and a re-index to populate the graph; proxied to aimee-kb (KB_STORE-side).
       requestBody:
         required: true
         content:
@@ -3419,7 +3419,7 @@ paths:
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /kb/erase-subject:
     post:
-      summary: Erase one data subject from mutable DB1 and DB2 stores
+      summary: Erase one data subject from mutable DB1 and KB_STORE stores
       description: >-
         Owner-only, idempotent two-phase erasure. The server derives affected
         sessions, commits mutable deletion in both stores, reconciles orphaned

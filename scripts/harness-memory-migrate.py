@@ -6,7 +6,7 @@ SAFE by construction, per the migration design roundtable:
   - Every .md memory is imported to db1 with kind='archive' (tier L1) via the
     `aimee memory archive` command. kind='archive'/tier-L1 are outside the
     L2/fact|preference recall selectors, so nothing pollutes structured recall.
-  - NOTHING is written to db2 (org). Defaulting all to db1/private means no
+  - NOTHING is written to kb_store (org). Defaulting all to db1/private means no
     private note can leak org-wide — the operator promotes to org/structured
     later, from the archive, deliberately.
   - The .md source and the harness_memory table are RETAINED (this tool never
@@ -64,7 +64,7 @@ def main():
     mode = "APPLY" if a.apply else "DRY-RUN"
     print(f"=== .md -> db1 archive migration ({mode}) — {len(items)} memories ===")
     print("destination: db1 user_memories, kind='archive', tier L1 (NON-recallable, private).")
-    print("db2 (org): nothing. source .md / harness_memory: RETAINED (no deletion).\n")
+    print("kb_store (org): nothing. source .md / harness_memory: RETAINED (no deletion).\n")
 
     ok = fail = 0
     for name, body in items:

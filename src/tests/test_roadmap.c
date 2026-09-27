@@ -22,21 +22,21 @@
 #include <sys/stat.h>
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "roadmap.h"
-#include "../modules/db2/c/artifacts.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/artifacts.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* A well-formed decomposition: m1 -> s1 -> {t1, t2}, t2 depends on t1. */
@@ -125,15 +125,15 @@ static void test_create_commits(void)
    assert(rid[0] != '\0');
 
    /* roadmap artifact landed, kind=roadmap, state=committed */
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   rc = db2_artifact_read(rid, &row, NULL, 0, &cc);
+   rc = kb_store_artifact_read(rid, &row, NULL, 0, &cc);
    assert(rc == 0);
    assert(strcmp(row.kind, "roadmap") == 0);
    assert(strcmp(row.state, "committed") == 0);
 
    /* the four plan_units landed, scoped to the roadmap, all committed */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
    char err[256] = "";
    aimee_pg_stmt_t *st =

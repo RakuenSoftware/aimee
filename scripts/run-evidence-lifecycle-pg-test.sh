@@ -22,6 +22,6 @@ admin_base="${AIMEE_TEST_PG_ADMIN%/*}"
 db_url="$admin_base/$db"
 psql "$db_url" -v ON_ERROR_STOP=1 -q -c 'CREATE EXTENSION IF NOT EXISTS vector'
 sed "s/__EMBED_DIM__/${AIMEE_TEST_EMBED_DIM:-768}/g" \
-  src/modules/db2/c/schema.sql >"$schema_rendered"
+  src/modules/kb/c/schema.sql >"$schema_rendered"
 psql "$db_url" -v ON_ERROR_STOP=1 -q -f "$schema_rendered"
 psql "$db_url" -v ON_ERROR_STOP=1 -f scripts/evidence-lifecycle-pg-test.sql

@@ -45,7 +45,7 @@ record envelopes, preserving exact int64 IDs, complete content and explicit owne
 refusals. Native adapters retain host authorization and transport duties.
 
 The [G0 closeout](proposals/pending/memory-reliability-g0-closeout.md) records
-file/API dispositions and validation. Complete DB2 retirement is a
+file/API dispositions and validation. Complete KB_STORE retirement is a
 [future proposal TODO](proposals/pending/db2-as-a-go-module.md#future-proposal-todo-retire-db2-completely),
 separate from the memory language boundary.
 
@@ -290,7 +290,7 @@ database lifecycle and the same SQL client/provider wire used by production.
 Seeding, searches, context construction, diagnostics and scoring within one
 process therefore share one store. Each new process starts with an empty store.
 
-Set `AIMEE_DB2_EVAL_URL` to an explicit disposable PostgreSQL admin DSN with
+Set `AIMEE_KB_STORE_EVAL_URL` to an explicit disposable PostgreSQL admin DSN with
 database-creation rights. There is no fallback to live store configuration.
 The provider creates a random database from `template0`, applies the supplied
 packaged schema there, and drops that database at EOF, on protocol failure or
@@ -302,7 +302,7 @@ From `server-go`, with the environment variable already set:
 
 ```sh
 go run ./modules/memory/cmd/aimee-memory-eval \
-  -schema ../src/modules/db2/c/schema.sql -embedding-dim 1024 <<'JSONL'
+  -schema ../src/modules/kb/c/schema.sql -embedding-dim 1024 <<'JSONL'
 {"stage":"data","body":{"operation":"insert-epistemic","tier":"L2","kind":"fact","key":"eval-fixture","content":"eval-fixture content","confidence":0.9,"project":"evaluation"}}
 {"stage":"data","body":{"operation":"search","query":"eval-fixture","project":"evaluation","limit":10}}
 {"stage":"command","command":"runtime","body":{"operation":"benchmark-context","query":"eval-fixture","project":"evaluation"}}

@@ -55,8 +55,8 @@ digest, and server version before recovery.
 2. If `kb=fail`, verify `aimee-kb` liveness and network/DNS reachability. Recover KB;
    do not repeatedly restart the server. The breaker permits one half-open probe after
    `retry_after_ms`.
-3. If `retrieval=fail` with `kb=ok`, inspect KB health fields (`db2_ok`,
-   `db2_kb_tables_ok`, `pgvec_ok`, `pgvec_collection_ok`, `embed_ok`). Repair the named
+3. If `retrieval=fail` with `kb=ok`, inspect KB health fields (`postgres_ok`,
+   `knowledge_tables_ok`, `pgvec_ok`, `pgvec_collection_ok`, `embed_ok`). Repair the named
    store/embedder dependency. Never clear or recreate vector data merely to make the
    probe green.
 4. If queue depth is growing, stop new ingest, retain failed-job evidence, repair the

@@ -89,7 +89,7 @@
       "event_kind": 11780,
       "active": true,
       "doc": "queued agent work: logs, coordination jobs and the cron that drives them.",
-      "client_doc": "Background work queues: the cognify queue's claim/mark bookkeeping is machine-local runtime state, which is why it is DB1's even when the memory it points at lives in DB2.",
+      "client_doc": "Background work queues: the cognify queue's claim/mark bookkeeping is machine-local runtime state, which is why it is DB1's even when the memory it points at lives in KB_STORE.",
       "covers": "agent_log, coord_jobs, cognify_jobs, db1_cron_jobs, db1_trigger",
       "sources": [
         "agent_log",

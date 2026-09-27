@@ -1,7 +1,7 @@
 /* roadmap_auto.c: deterministic spec-driven roadmap dispatch loop.
  *
  * The loop is the primary orchestrator: it selects the next ready leaf-task
- * unit from the DB1 runtime state, builds a delegate work packet from the DB2
+ * unit from the DB1 runtime state, builds a delegate work packet from the KB_STORE
  * plan_unit artifact, dispatches it via delegate_launch_coord_job, runs the
  * unit's verification commands as a gate, and persists the result. No LLM
  * component makes state-transition decisions.
@@ -22,9 +22,9 @@
 #include "headers/util.h"
 #include "headers/agent_config.h"
 #include "headers/agent_exec.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "cJSON.h"
 
 /* Maximum bytes captured from a verification command. */
@@ -72,14 +72,14 @@ static int rdm_run_cmd(const char *cmd)
    return rc;
 }
 
-/* Load the plan_unit DB2 artifact payload for unit_id. Caller frees. */
+/* Load the plan_unit KB_STORE artifact payload for unit_id. Caller frees. */
 static cJSON *load_unit_payload(const char *unit_id)
 {
    if (!unit_id || !unit_id[0])
       return NULL;
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   if (db2_artifact_read(unit_id, &row, NULL, 0, &cc) != 0)
+   if (kb_store_artifact_read(unit_id, &row, NULL, 0, &cc) != 0)
       return NULL;
    return cJSON_Parse(row.payload_json);
 }
@@ -201,10 +201,10 @@ static int verify_unit(cJSON *payload)
 }
 
 /* Ensure all plan_unit rows for a roadmap exist in rdm_unit_dispatch.
- * Queries DB2 for plan_unit artifacts scoped to roadmap_id and upserts. */
+ * Queries KB_STORE for plan_unit artifacts scoped to roadmap_id and upserts. */
 static int sync_units_to_dispatch(const char *roadmap_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -293,7 +293,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
    if (sync_units_to_dispatch(roadmap_id) != 0)
    {
       write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_ERROR);
-      db1_roadmap_dispatch_set_status(roadmap_id, "error", "failed to sync units from DB2");
+      db1_roadmap_dispatch_set_status(roadmap_id, "error", "failed to sync units from KB_STORE");
       return -1;
    }
 
@@ -390,7 +390,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
          return 0;
       }
 
-      /* 5. Load the DB2 plan_unit artifact. */
+      /* 5. Load the KB_STORE plan_unit artifact. */
       cJSON *payload = load_unit_payload(unit_id);
       if (!payload)
       {

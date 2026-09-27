@@ -58,7 +58,7 @@ typedef struct
    char resolution[64];
 } conflict_t;
 
-/* anti_pattern_t lives in db2/anti_patterns.h. The -Idb2 search path
+/* anti_pattern_t lives in kb_store/anti_patterns.h. The -Ikb_store search path
  * (set in the project Makefile) resolves the unqualified include. */
 #include "anti_patterns.h"
 
@@ -231,8 +231,8 @@ typedef struct
    double demotion_resistance;
 } kind_lifecycle_t;
 
-/* Kind lifecycle configuration is owned by DB2; include db2/kind_lifecycle.h
- * for db2_kind_lifecycle_load. */
+/* Kind lifecycle configuration is owned by KB_STORE; include kb_store/kind_lifecycle.h
+ * for kb_store_kind_lifecycle_load. */
 
 /* --- Write Quality Gates --- */
 
@@ -665,7 +665,7 @@ int memory_resolve_conflict(int64_t conflict_id, const char *resolution);
 
 /* --- Anti-Patterns ---
  * Storage primitives (insert/list/check/bump/delete/exists_*) live in
- * db2/anti_patterns.{h,c} as db2_anti_pattern_*. The high-level extraction
+ * kb_store/anti_patterns.{h,c} as kb_store_anti_pattern_*. The high-level extraction
  * and escalation passes below are implemented in memory_advanced.c. */
 
 /* Escalate high-hit anti-patterns to hard directive rules. */

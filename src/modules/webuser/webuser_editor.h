@@ -68,7 +68,7 @@ int webuser_editor_available(void);
  * HOME=<userroot> + the user's vault-backed git env (GH_TOKEN/GIT_ASKPASS/
  * SSH_AUTH_SOCK when present) + git's on-disk credential cache disabled. It NEVER
  * contains the server's own environment, so the editor's terminal/extensions
- * cannot read server secrets (AIMEE_DB2_URL, AIMEE_SERVER_TOKEN, provider keys).
+ * cannot read server secrets (AIMEE_STORE_URL, AIMEE_SERVER_TOKEN, provider keys).
  * Returns a malloc'd NULL-terminated array (free with webuser_editor_free_env),
  * or NULL on error. Exposed for the WP-K editor-env leak tests. */
 /* Build the editor's environment. FD MODE: any vaulted git token rides an

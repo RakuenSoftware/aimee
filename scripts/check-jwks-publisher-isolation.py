@@ -14,7 +14,7 @@ MAIN = ROOT / "src" / "kb" / "kb_mgmt_jwks_publish_main.c"
 PRIVATE = {
     "kb/kb_mgmt_jwks_publish_main.o",
     "kb/kb_mgmt_jwks_publication.o",
-    "modules/db2/c/management_jwks_publication.o",
+    "modules/kb/c/management_jwks_publication.o",
 }
 SHARED_OFFLINE = {
     "kb/kb_mgmt_offline_hardening.o",
@@ -50,7 +50,7 @@ def check(extra: str = "") -> list[str]:
         failures.append(f"publisher closure omits {obj}")
     for variable in (
         "KB_OBJS",
-        "KB_DB2_OBJS",
+        "KB_KB_STORE_OBJS",
         "SERVER_OBJS",
         "STATUS_AUTHORITY_OBJS",
         "STATUS_PROVISIONER_OBJS",

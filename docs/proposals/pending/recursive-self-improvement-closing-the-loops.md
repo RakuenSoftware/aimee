@@ -18,7 +18,7 @@
   `agent_eval_load_tasks` (`src/modules/benchmarks/agent_eval.c`,
   `src/posix/agent_runtime_support.c`); `kb_bandit_sample` / `kb_bandit_reward`
   (`src/kb_bandit.h`, `src/kb/kb_bandit.c`); `db2_anti_pattern_*`,
-  `db2_agent_outcome_*`, `db2_curiosity_*` (`src/modules/db2/c/`); the graph
+  `db2_agent_outcome_*`, `db2_curiosity_*` (`src/modules/kb/c/`); the graph
   self-audit (`GET /v1/code/graph/audit`).
 
 ## Problem and boundary
@@ -53,7 +53,7 @@ constants outside every loop.
 
 **4. Findings are produced and never consumed; negative knowledge is lexical.** The
 graph self-audit emits unverified inferred edges, orphans, and low-cohesion
-communities. The curiosity backlog (`src/modules/db2/c/curiosity.h`) records
+communities. The curiosity backlog (`src/modules/kb/c/curiosity.h`) records
 `missing_fact`, `contradiction`, `stale_fact`, `weak_coverage`,
 `unverified_assumption`. Both require a human to act, so both accumulate. The
 `anti_patterns` catalog is real but **lexical**: it matches word-bounded phrases in
@@ -481,7 +481,7 @@ own instructions is a different and much larger proposal.
 
 | Piece | Where |
 | --- | --- |
-| Provenance grouping SQL | `db2_learning_committed_source_counts` (`src/modules/db2/c/learning.c`, `db2_learning.h`) |
+| Provenance grouping SQL | `db2_learning_committed_source_counts` (`src/modules/kb/c/learning.c`, `db2_learning.h`) |
 | Classifier, metrics, gate | `src/modules/learning/learning_endogeneity.c`; public API in `include/aimee/learning/learning.h` |
 | Synthesis policy (pure) | `src/modules/learning/learning_eval_synthesis.c`; public API in `include/aimee/learning/eval_synthesis.h` |
 | Candidate ledger | `eval_candidates` in `src/modules/db1/schema.sql`; `db1_eval_candidate_*` in `src/modules/db1/eval.c` |

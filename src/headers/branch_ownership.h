@@ -2,7 +2,7 @@
  *
  * Records which session created or claimed a branch so concurrent sessions
  * cannot stomp on each other's in-flight work. Storage lives behind the
- * DB2 git ownership API; this header exposes the operations and the guard
+ * KB_STORE git ownership API; this header exposes the operations and the guard
  * helpers used by mcp_git_*. */
 #ifndef DEC_BRANCH_OWNERSHIP_H
 #define DEC_BRANCH_OWNERSHIP_H 1

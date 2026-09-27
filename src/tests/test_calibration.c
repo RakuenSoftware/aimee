@@ -1,11 +1,11 @@
-/* test_calibration.c — unit tests for the calibration_profile DB2 module.
+/* test_calibration.c — unit tests for the calibration_profile KB_STORE module.
  *
  * Tests:
- *   1. db2_calibration_profile_write: writes a calibration_profile artifact.
- *   2. db2_calibration_profile_read: reads back the profile payload.
+ *   1. kb_store_calibration_profile_write: writes a calibration_profile artifact.
+ *   2. kb_store_calibration_profile_read: reads back the profile payload.
  *   3. narrowest-scope fallback: exact > scope-kind > global.
- *   4. db2_calibration_audit_stats: returns 0 buckets when table is empty.
- *   5. db2_calibration_surfaces_with_data: returns 0 when audit_events is empty.
+ *   4. kb_store_calibration_audit_stats: returns 0 buckets when table is empty.
+ *   5. kb_store_calibration_surfaces_with_data: returns 0 when audit_events is empty.
  *   6. config: calibration defaults are sane.
  *   7. kb_calibrate_run: high-confidence-only audit rows still fit a profile.
  *   8. calibration sidecar: fixture request returns conformal profile payload.
@@ -18,8 +18,8 @@
 #include <string.h>
 #include "calibration.h"
 #include "artifacts.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "db_postgres.h"
 #include "config.h"
 #include "kb_calibrate.h"
@@ -29,18 +29,18 @@
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 static void set_audit_verdict(const char *audit_id, const char *verdict)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn != NULL);
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
@@ -56,10 +56,10 @@ static void write_audit_fixture(const char *artifact_id, const char *audit_id, c
                                 const char *surface, const char *scope_kind, const char *scope_id,
                                 double confidence, const char *verdict)
 {
-   assert(db2_artifact_write(artifact_id, kind, "committed", scope_kind, scope_id, "", confidence,
-                             "{}") == 0);
-   assert(db2_audit_event_write(audit_id, artifact_id, surface, "target", "", scope_kind, scope_id,
-                                confidence, 0, "{}", "{}") == 0);
+   assert(kb_store_artifact_write(artifact_id, kind, "committed", scope_kind, scope_id, "",
+                                  confidence, "{}") == 0);
+   assert(kb_store_audit_event_write(audit_id, artifact_id, surface, "target", "", scope_kind,
+                                     scope_id, confidence, 0, "{}", "{}") == 0);
    set_audit_verdict(audit_id, verdict);
 }
 
@@ -69,8 +69,8 @@ static void test_profile_write(void)
    open_db();
 
    char id_out[64];
-   int rc = db2_calibration_profile_write("memory", "preference", "user", "jbailes", "v1",
-                                          "{\"buckets\":[]}", id_out, sizeof(id_out));
+   int rc = kb_store_calibration_profile_write("memory", "preference", "user", "jbailes", "v1",
+                                               "{\"buckets\":[]}", id_out, sizeof(id_out));
    assert(rc == 0);
    assert(strlen(id_out) == 36);
 
@@ -85,12 +85,12 @@ static void test_profile_read(void)
 
    const char *payload = "{\"target_surface\":\"memory\",\"kind\":\"preference\"}";
    char id_out[64];
-   assert(db2_calibration_profile_write("memory", "preference", "user", "jbailes", "v1", payload,
-                                        id_out, sizeof(id_out)) == 0);
+   assert(kb_store_calibration_profile_write("memory", "preference", "user", "jbailes", "v1",
+                                             payload, id_out, sizeof(id_out)) == 0);
 
    char buf[1024];
-   int rc =
-       db2_calibration_profile_read("memory", "preference", "user", "jbailes", buf, sizeof(buf));
+   int rc = kb_store_calibration_profile_read("memory", "preference", "user", "jbailes", buf,
+                                              sizeof(buf));
    assert(rc == 0);
    assert(strstr(buf, "memory") != NULL);
 
@@ -104,25 +104,26 @@ static void test_scope_fallback(void)
    open_db();
 
    /* Write a global profile */
-   assert(db2_calibration_profile_write("memory", "fact", "global", "", "v1",
-                                        "{\"scope\":\"global\"}", NULL, 0) == 0);
+   assert(kb_store_calibration_profile_write("memory", "fact", "global", "", "v1",
+                                             "{\"scope\":\"global\"}", NULL, 0) == 0);
 
    /* Read with an exact scope that doesn't exist — should fall back to global */
    char buf[256];
-   int rc =
-       db2_calibration_profile_read("memory", "fact", "user", "someone-else", buf, sizeof(buf));
+   int rc = kb_store_calibration_profile_read("memory", "fact", "user", "someone-else", buf,
+                                              sizeof(buf));
    assert(rc == 0);
    assert(strstr(buf, "global") != NULL);
 
    /* Write a user-scoped profile — exact match should win */
-   assert(db2_calibration_profile_write("memory", "fact", "user", "someone-else", "v1",
-                                        "{\"scope\":\"exact\"}", NULL, 0) == 0);
-   rc = db2_calibration_profile_read("memory", "fact", "user", "someone-else", buf, sizeof(buf));
+   assert(kb_store_calibration_profile_write("memory", "fact", "user", "someone-else", "v1",
+                                             "{\"scope\":\"exact\"}", NULL, 0) == 0);
+   rc = kb_store_calibration_profile_read("memory", "fact", "user", "someone-else", buf,
+                                          sizeof(buf));
    assert(rc == 0);
    assert(strstr(buf, "exact") != NULL);
 
    /* Unknown scope — global fallback */
-   rc = db2_calibration_profile_read("memory", "fact", "project", "other", buf, sizeof(buf));
+   rc = kb_store_calibration_profile_read("memory", "fact", "project", "other", buf, sizeof(buf));
    assert(rc == 0);
    assert(strstr(buf, "global") != NULL);
 
@@ -135,9 +136,9 @@ static void test_audit_stats_empty(void)
 {
    open_db();
 
-   db2_calibration_bucket_t buckets[DB2_CALIBRATION_BUCKETS];
-   int n = db2_calibration_audit_stats("memory", "preference", NULL, NULL, 500, buckets,
-                                       DB2_CALIBRATION_BUCKETS);
+   kb_store_calibration_bucket_t buckets[KB_STORE_CALIBRATION_BUCKETS];
+   int n = kb_store_calibration_audit_stats("memory", "preference", NULL, NULL, 500, buckets,
+                                            KB_STORE_CALIBRATION_BUCKETS);
    /* Empty table → 0 buckets filled */
    assert(n == 0);
 
@@ -159,16 +160,16 @@ static void test_audit_stats_bucket_and_scope(void)
                        "00000000-0000-0000-0000-000000000203", "preference", "memory", "user",
                        "bob", 0.91, "rejected");
 
-   db2_calibration_bucket_t buckets[DB2_CALIBRATION_BUCKETS];
-   int n = db2_calibration_audit_stats("memory", "preference", "user", "alice", 500, buckets,
-                                       DB2_CALIBRATION_BUCKETS);
+   kb_store_calibration_bucket_t buckets[KB_STORE_CALIBRATION_BUCKETS];
+   int n = kb_store_calibration_audit_stats("memory", "preference", "user", "alice", 500, buckets,
+                                            KB_STORE_CALIBRATION_BUCKETS);
    assert(n == 1);
    assert(buckets[9].sample_n == 2);
    assert(fabs(buckets[9].alpha - 1.0) < 1e-9);
    assert(fabs(buckets[9].beta - 1.0) < 1e-9);
 
-   n = db2_calibration_audit_stats("memory", "preference", "user", "bob", 500, buckets,
-                                   DB2_CALIBRATION_BUCKETS);
+   n = kb_store_calibration_audit_stats("memory", "preference", "user", "bob", 500, buckets,
+                                        KB_STORE_CALIBRATION_BUCKETS);
    assert(n == 1);
    assert(buckets[9].sample_n == 1);
    assert(fabs(buckets[9].alpha - 0.0) < 1e-9);
@@ -189,8 +190,9 @@ static void test_conformal_window(void)
                        "00000000-0000-0000-0000-000000000402", "fact", "memory", "project", "aimee",
                        0.82, "accepted");
 
-   db2_calibration_conformal_row_t rows[4];
-   int n = db2_calibration_conformal_window("memory", "fact", "project", "aimee", 500, rows, 4);
+   kb_store_calibration_conformal_row_t rows[4];
+   int n =
+       kb_store_calibration_conformal_window("memory", "fact", "project", "aimee", 500, rows, 4);
    assert(n == 2);
    assert((strcmp(rows[0].verdict, "accepted") == 0 || strcmp(rows[0].verdict, "rejected") == 0));
    assert(rows[0].applied_confidence >= 0.0);
@@ -205,7 +207,7 @@ static void test_surfaces_empty(void)
 {
    open_db();
 
-   int n = db2_calibration_surfaces_with_data(1);
+   int n = kb_store_calibration_surfaces_with_data(1);
    assert(n == 0);
 
    close_db();
@@ -226,8 +228,8 @@ static void test_surface_list_discovers_audit_tuples(void)
                           0.91, "accepted");
    }
 
-   db2_calibration_surface_t rows[4];
-   int n = db2_calibration_surface_list(3, rows, 4);
+   kb_store_calibration_surface_t rows[4];
+   int n = kb_store_calibration_surface_list(3, rows, 4);
    assert(n == 1);
    assert(strcmp(rows[0].target_surface, "novel_surface") == 0);
    assert(strcmp(rows[0].kind, "novel_kind") == 0);
@@ -307,7 +309,7 @@ static void test_threshold_from_profile_json(void)
                          "{\"range\":[0.6,0.8],\"lower_credible_bound\":0.85}],"
                          "\"conformal\":{\"reject_below\":0.65}}";
    double threshold = 0.0;
-   assert(db2_calibration_threshold_from_profile_json(profile, 0.80, &threshold) == 0);
+   assert(kb_store_calibration_threshold_from_profile_json(profile, 0.80, &threshold) == 0);
    assert(fabs(threshold - 0.65) < 1e-9);
 
    printf("  threshold_from_profile_json: ok\n");
@@ -333,8 +335,8 @@ static void test_kb_calibrate_run_high_bucket(void)
    assert(written == 1);
 
    char buf[256];
-   assert(db2_calibration_profile_read("memory", "preference", "global", "", buf, sizeof(buf)) ==
-          0);
+   assert(kb_store_calibration_profile_read("memory", "preference", "global", "", buf,
+                                            sizeof(buf)) == 0);
    assert(strcmp(buf, "{}") == 0);
 
    close_db();
@@ -361,8 +363,8 @@ static void test_kb_calibrate_run_discovers_dynamic_surface(void)
    assert(written == 1);
 
    char buf[256];
-   assert(db2_calibration_profile_read("novel_surface", "novel_kind", "global", "", buf,
-                                       sizeof(buf)) == 0);
+   assert(kb_store_calibration_profile_read("novel_surface", "novel_kind", "global", "", buf,
+                                            sizeof(buf)) == 0);
 
    close_db();
    printf("  kb_calibrate_run_discovers_dynamic_surface: ok\n");

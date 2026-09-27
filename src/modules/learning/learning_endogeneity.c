@@ -12,7 +12,7 @@
 
 #include <aimee/learning/learning.h>
 
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/kb_store_learning.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -75,9 +75,9 @@ int learning_metrics_endogeneity_for_sink(int window_days, const char *sink,
    memset(out, 0, sizeof(*out));
    out->window_days = window_days;
 
-   db2_learning_source_count_t groups[LEARNING_ENDOGENEITY_MAX_GROUPS];
-   int n = db2_learning_committed_source_counts(window_days, sink, groups,
-                                                LEARNING_ENDOGENEITY_MAX_GROUPS);
+   kb_store_learning_source_count_t groups[LEARNING_ENDOGENEITY_MAX_GROUPS];
+   int n = kb_store_learning_committed_source_counts(window_days, sink, groups,
+                                                     LEARNING_ENDOGENEITY_MAX_GROUPS);
    if (n < 0)
       return -1;
 

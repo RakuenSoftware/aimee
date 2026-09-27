@@ -20,7 +20,7 @@
 #    to /dev/null, so the refusals were invisible and the script reported success
 #    while changing nothing.
 #
-# 2. authority_rank, not confidence_class, is what db2_fact_mutation_invalidate
+# 2. authority_rank, not confidence_class, is what kb_store_fact_mutation_invalidate
 #    actually gates on (`if (actor->rank < rows[i].authority_rank) continue`).
 #    Seeding 'A' without the matching rank leaves a row that LOOKS Class A and
 #    is retractable by anyone -- a test that passes while protecting nothing.

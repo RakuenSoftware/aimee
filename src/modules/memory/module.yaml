@@ -234,7 +234,8 @@
     "server-go/modules/memory/task_promotion.go",
     "server-go/modules/memory/hygiene_run.go",
     "server-go/modules/memory/procedure_exposure.go",
-    "server-go/modules/memory/action_evidence.go"
+    "server-go/modules/memory/action_evidence.go",
+    "server-go/modules/memory/fidelity.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -418,7 +419,8 @@
     "server-go/modules/memory/action_evidence_test.go",
     "server-go/modules/memory/ranking_policy_test.go",
     "server-go/modules/memory/selection_policy_test.go",
-    "server-go/modules/memory/fair_retrieval_test.go"
+    "server-go/modules/memory/fair_retrieval_test.go",
+    "server-go/modules/memory/fidelity_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

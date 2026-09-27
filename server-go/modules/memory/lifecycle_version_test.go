@@ -108,9 +108,9 @@ func exerciseLifecycleVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 }
 
 func TestLifecycleVersionWaitsForConcurrentCorrection(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

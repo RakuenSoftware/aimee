@@ -3,18 +3,18 @@
 #include <stdio.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/code_index_ops.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/code_index.h"
+#include "../modules/kb/c/code_index_ops.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 /* Count files rows for (project, path) over the shim. -1 on DB/step failure. */
 static int file_count_path(const char *project, const char *path)
 {
    char e[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT count(*) FROM files f JOIN projects p ON p.id=f.project_id "
                         "WHERE p.name = ?1 AND f.path = ?2",
                         e, sizeof e);
@@ -31,7 +31,7 @@ static int file_count_path_generation(const char *project, const char *path, int
 {
    char e[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT count(*) FROM files f JOIN projects p ON p.id=f.project_id"
                         " WHERE p.name=?1 AND f.path=?2 AND f.generation=?3",
                         e, sizeof e);
@@ -47,16 +47,16 @@ static int file_count_path_generation(const char *project, const char *path, int
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
-   db2_code_index_ops_summary_t sum;
+   kb_store_code_index_ops_summary_t sum;
    /* ok embed recorded */
-   db2_code_index_op_record(1, "proj", "file:src/a.c", "src/a.c", 1, NULL);
+   kb_store_code_index_op_record(1, "proj", "file:src/a.c", "src/a.c", 1, NULL);
    /* a failing embed, recorded twice → attempts climbs */
-   db2_code_index_op_record(2, "proj", "file:src/b.c", "src/b.c", 0, "boom");
-   db2_code_index_op_record(2, "proj", "file:src/b.c", "src/b.c", 0, "boom");
+   kb_store_code_index_op_record(2, "proj", "file:src/b.c", "src/b.c", 0, "boom");
+   kb_store_code_index_op_record(2, "proj", "file:src/b.c", "src/b.c", 0, "boom");
 
-   assert(db2_code_index_ops_summary(2, &sum) == 0);
+   assert(kb_store_code_index_ops_summary(2, &sum) == 0);
    assert(sum.ok_ops == 1);
    assert(sum.failed_ops == 1);
    assert(sum.stuck_ops == 1); /* point 2 has attempts >= 2 */
@@ -64,9 +64,9 @@ int main(void)
           (long long)sum.ok_ops, (long long)sum.failed_ops, (long long)sum.stuck_ops);
 
    /* reset-stuck clears the stuck failed row's attempts */
-   int reset = db2_code_index_ops_reset_stuck(2);
+   int reset = kb_store_code_index_ops_reset_stuck(2);
    assert(reset == 1);
-   assert(db2_code_index_ops_summary(2, &sum) == 0);
+   assert(kb_store_code_index_ops_summary(2, &sum) == 0);
    assert(sum.stuck_ops == 0);  /* no longer stuck */
    assert(sum.failed_ops == 1); /* still failed, but retryable */
    printf("  reset-stuck retries a stuck code embed OK\n");
@@ -82,7 +82,7 @@ int main(void)
     *    because the hashes match EVEN THOUGH it was re-scanned after the embed
     *    (staleness alone would false-positive). */
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       char e[256] = "";
       assert(aimee_pg_exec(
                  conn, "INSERT INTO projects (name, root, scanned_at) VALUES ('dproj','/x','x')", e,
@@ -135,14 +135,14 @@ int main(void)
                            " source_hash, updated_at) VALUES"
                            " (104,'dproj','src/same.c','n4','hX','2026-06-01 00:00:00')",
                            e, sizeof e) == 0);
-      int64_t drift = db2_code_index_drift_candidates();
+      int64_t drift = kb_store_code_index_drift_candidates();
       assert(drift == 2); /* src/stale.c (staleness) + src/changed.c (hash); fresh+same excluded */
       printf("  drift detector flags staleness + precise hash drift (got %lld) OK\n",
              (long long)drift);
 
       /* D7 requeue: the one drifted project ('dproj') gets enqueued for re-ingest
        * with force, deduped — a second call enqueues nothing (already pending). */
-      int q1 = db2_code_index_requeue_drifted();
+      int q1 = kb_store_code_index_requeue_drifted();
       assert(q1 == 1);
       aimee_pg_stmt_t *qs = aimee_pg_prepare(conn,
                                              "SELECT COUNT(*), MAX(force) FROM kb_ingest_queue"
@@ -154,7 +154,7 @@ int main(void)
       assert(aimee_pg_column_int64(qs, 1) == 1); /* force=1 so the drain re-embeds */
       aimee_pg_finalize(qs);
 
-      int q2 = db2_code_index_requeue_drifted();
+      int q2 = kb_store_code_index_requeue_drifted();
       assert(q2 == 0); /* dedup: dproj already pending, not re-enqueued */
       printf("  drift requeue enqueues drifted project once, dedups (q1=%d q2=%d) OK\n", q1, q2);
 
@@ -179,7 +179,7 @@ int main(void)
                   200 + k, k);
          assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
       }
-      int q3 = db2_code_index_requeue_drifted();
+      int q3 = kb_store_code_index_requeue_drifted();
       assert(q3 == 2); /* dproj2 + dproj3 new; dproj already pending (deduped) */
       printf("  drift requeue enqueues multiple distinct drifted projects (q3=%d) OK\n", q3);
    }
@@ -190,7 +190,7 @@ int main(void)
     * (ingest never admits that). Covers the per-project purge used by
     * ci_purge_hidden_paths and the cross-project startup purge_hidden_pollution. */
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       char e[256] = "";
       const char *spared[] = {".gitmodules",      "sub/.gitmodules", "a/b/.gitmodules",
                               ".travis.yml",      ".eslintrc.json",  "sub/.hidden.c",
@@ -245,7 +245,7 @@ int main(void)
          aimee_pg_finalize(st);
       }
       /* per-project purge on hp only (hp2 left intact to prove the cross-project purge). */
-      (void)db2_code_index_purge_hidden_except_manifests(pid);
+      (void)kb_store_code_index_purge_hidden_except_manifests(pid);
       for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
          assert(file_count_path("hp", spared[i]) == 1);
       assert(file_count_path("hp", "src/a.c") == 1);
@@ -254,7 +254,7 @@ int main(void)
 
       /* cross-project pollution purge: same contract, and hp2 still has hidden rows
        * to actually delete (proving DELETE, not a no-op). */
-      (void)db2_code_index_purge_hidden_pollution();
+      (void)kb_store_code_index_purge_hidden_pollution();
       for (size_t pj = 0; pj < 2; pj++)
       {
          for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
@@ -270,7 +270,7 @@ int main(void)
     * generations must survive even when the same hidden path is polluted in the
     * active generation. */
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       char e[256] = "";
       assert(aimee_pg_exec(conn,
                            "INSERT INTO projects(name,root,scanned_at,current_generation)"
@@ -283,14 +283,14 @@ int main(void)
                            " ((SELECT id FROM projects WHERE name='historical-hidden'),2,"
                            " '.bashrc','new','t')",
                            e, sizeof e) == 0);
-      (void)db2_code_index_purge_hidden_pollution();
+      (void)kb_store_code_index_purge_hidden_pollution();
       assert(file_count_path_generation("historical-hidden", ".bashrc", 1) == 1);
       assert(file_count_path_generation("historical-hidden", ".bashrc", 2) == 0);
       assert(file_count_path("historical-hidden", ".bashrc") == 1);
       printf("  startup hidden cleanup preserves retained generations OK\n");
    }
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("code_index_ops: all tests passed\n");
    return 0;
 }

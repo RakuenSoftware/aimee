@@ -13,7 +13,7 @@
 #include "agent_config.h"
 
 /* Build the reassessment prompt for a roadmap. Loads the roadmap goal
- * and all milestone acceptance criteria from DB2. Returns heap string
+ * and all milestone acceptance criteria from KB_STORE. Returns heap string
  * (caller frees), or NULL on error. */
 char *roadmap_reassess_build_prompt(const char *roadmap_id);
 

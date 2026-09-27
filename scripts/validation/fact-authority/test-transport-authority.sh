@@ -54,7 +54,7 @@ q "delete from entity_edges where source='user' and relation='$REL'" >/dev/null
 # entity_edges has no created_at/updated_at: the typed-fact layer stamps
 # asserted_at (and superseded_at on correction). Naming the wrong columns fails
 # the insert, and with psql errors suppressed that reads as "nothing to retract".
-# authority_rank 30 (FACT_ACTOR_USER) is what db2_fact_mutation_invalidate
+# authority_rank 30 (FACT_ACTOR_USER) is what kb_store_fact_mutation_invalidate
 # gates on -- confidence_class 'A' alone leaves a row anyone may retract, so the
 # test would protect nothing while looking correct.
 q "insert into entity_edges (source,relation,target,edge_class,confidence_class,confidence,

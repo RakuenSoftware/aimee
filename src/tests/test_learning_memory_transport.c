@@ -27,7 +27,7 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    }
    return 1;
 }
-int db2_collab_rules_propose(const char *text, const char *reason, const char *source)
+int kb_store_collab_rules_propose(const char *text, const char *reason, const char *source)
 {
    (void)text;
    (void)reason;
@@ -35,9 +35,9 @@ int db2_collab_rules_propose(const char *text, const char *reason, const char *s
    assert(0);
    return -1;
 }
-int db2_artifact_write(const char *id, const char *kind, const char *state, const char *scope_kind,
-                       const char *scope_id, const char *operator_id, double confidence,
-                       const char *payload_json)
+int kb_store_artifact_write(const char *id, const char *kind, const char *state,
+                            const char *scope_kind, const char *scope_id, const char *operator_id,
+                            double confidence, const char *payload_json)
 {
    (void)id;
    (void)kind;

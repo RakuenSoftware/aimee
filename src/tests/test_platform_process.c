@@ -106,7 +106,7 @@ static void test_exec_pipe_child_exits_without_reading(void)
  * it. Every platform_exec_pipe caller is a sidecar in a request path, so a
  * thread lost here is a server thread lost permanently.
  *
- * Production: a kb whose embedder was unreachable pinned a DB2 pool lease for
+ * Production: a kb whose embedder was unreachable pinned a KB_STORE pool lease for
  * 21.8 hours -- one thread parked in this function's read() -- and the pool
  * reaper logged "missed lease_end?" 3895 times, unable to reclaim a connection a
  * live thread might still use. Reproduced from a clean container: six concurrent

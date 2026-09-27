@@ -5,8 +5,8 @@
 #include "json_fluent.h"
 #include "cJSON.h"
 #include "config.h"
-#include "modules/db2/c/bandit.h"
-#include "modules/db2/c/calibration.h"
+#include "modules/kb/c/bandit.h"
+#include "modules/kb/c/calibration.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_intel_payload.h"
@@ -20,7 +20,7 @@
 cJSON *kb_intel_calibrate_readiness_response(void)
 {
    int min_rows = 200;
-   int n = db2_calibration_surfaces_with_data(min_rows);
+   int n = kb_store_calibration_surfaces_with_data(min_rows);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -70,8 +70,8 @@ static cJSON *intel_bandit_point_obj(const char *decision_point)
    if (buf)
    {
       buf[0] = '\0';
-      db2_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
-                                  KB_INTEL_BANDIT_EXPORT_BUFSZ);
+      kb_store_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
+                                       KB_INTEL_BANDIT_EXPORT_BUFSZ);
       decisions = cJSON_ParseWithLength(buf, strlen(buf));
       free(buf);
    }
@@ -81,7 +81,7 @@ static cJSON *intel_bandit_point_obj(const char *decision_point)
    cJSON *arm_stats_arr = cJSON_CreateArray();
    char arms_buf[8192];
    arms_buf[0] = '\0';
-   db2_bandit_arms_list(decision_point, arms_buf, sizeof(arms_buf));
+   kb_store_bandit_arms_list(decision_point, arms_buf, sizeof(arms_buf));
    cJSON *arms = cJSON_ParseWithLength(arms_buf, strlen(arms_buf));
    if (cJSON_IsArray(arms))
    {
@@ -90,9 +90,9 @@ static cJSON *intel_bandit_point_obj(const char *decision_point)
       {
          if (!cJSON_IsString(arm) || !arm->valuestring[0])
             continue;
-         db2_bandit_arm_stats_t stats;
+         kb_store_bandit_arm_stats_t stats;
          memset(&stats, 0, sizeof(stats));
-         db2_bandit_arm_stats_read(decision_point, arm->valuestring, &stats);
+         kb_store_bandit_arm_stats_read(decision_point, arm->valuestring, &stats);
 
          cJSON *entry = cJSON_CreateObject();
          cJSON_AddStringToObject(entry, "arm_id", arm->valuestring);
@@ -139,7 +139,7 @@ static cJSON *intel_bandit_registry_array(void)
 /* Export bandit state for every decision point that has logged decisions.
  *
  * Data-driven: the set of points and their arms is read from the decision log
- * (db2_bandit_decision_points_list / db2_bandit_arms_list), not hard-coded, so
+ * (kb_store_bandit_decision_points_list / kb_store_bandit_arms_list), not hard-coded, so
  * introspection reflects what is actually sampled at runtime.  The top-level
  * `decision_point` mirrors the primary (most-recent) point for backward
  * compatibility; `points` carries the full per-point breakdown; `registry`
@@ -148,7 +148,7 @@ cJSON *kb_intel_bandit_export_response(void)
 {
    char points_buf[8192];
    points_buf[0] = '\0';
-   db2_bandit_decision_points_list(points_buf, sizeof(points_buf));
+   kb_store_bandit_decision_points_list(points_buf, sizeof(points_buf));
    cJSON *names = cJSON_ParseWithLength(points_buf, strlen(points_buf));
 
    cJSON *resp = cJSON_CreateObject();
@@ -292,7 +292,7 @@ static int intel_bandit_emit_http(cJSON *resp, char *out_buf, int out_cap)
 
 /* bandit.sample: select an arm for a decision point (Thompson via the optimize
  * sidecar), log the decision, and return {arm, decision_id}. Server-side
- * decision points (e.g. delegate_routing) reach the DB2 bandit through this. */
+ * decision points (e.g. delegate_routing) reach the KB_STORE bandit through this. */
 cJSON *kb_intel_bandit_sample_response(const char *body_json, int body_len)
 {
    if (!body_json || body_len <= 0)
@@ -423,8 +423,8 @@ cJSON *kb_intel_bandit_promote_response(const char *body_json, int body_len)
    }
 
    char rollback[KB_BANDIT_MAX_ARM_ID] = "";
-   db2_bandit_promotion_get(dp, rollback, sizeof(rollback)); /* prior default, if any */
-   int rc = db2_bandit_promotion_set(dp, arm, rollback);
+   kb_store_bandit_promotion_get(dp, rollback, sizeof(rollback)); /* prior default, if any */
+   int rc = kb_store_bandit_promotion_set(dp, arm, rollback);
    cJSON_Delete(body);
 
    cJSON *resp = cJSON_CreateObject();

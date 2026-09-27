@@ -10,7 +10,7 @@
  *
  * This module is the crypto core: CA generation, client-cert issuance, the CA
  * fingerprint, and chain verification. All values are PEM strings so the caller
- * owns persistence (proposal invariant 3 — CA + issued certs live on the DB2 /
+ * owns persistence (proposal invariant 3 — CA + issued certs live on the KB_STORE /
  * data volume; wiring that persistence is a follow-up).
  *
  * Security model: keys are RSA-2048; the CA private key never leaves the

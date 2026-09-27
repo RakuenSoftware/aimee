@@ -218,27 +218,27 @@
           "sha256": "ab123966ef59e963b2155b31ba084e1be8272a349fd969c60a5dc2cf4d8af0a1"
         },
         {
-          "path": "src/modules/db2/c/cases.sql",
+          "path": "src/modules/kb/c/cases.sql",
           "sha256": "43e8e695d2d113f0759edf1176ecd74496b68b2da78a1e245d9d033bc60e187c"
         },
         {
-          "path": "src/modules/db2/c/roadmap.sql",
+          "path": "src/modules/kb/c/roadmap.sql",
           "sha256": "56b5a63d9ea9f04e8069fd69632b24980d48373ef61f0da0ca740b138427b243"
         },
         {
-          "path": "src/modules/db2/c/schema.sql",
+          "path": "src/modules/kb/c/schema.sql",
           "sha256": "ab3b3e738a84a6fa84c340ac227f4eab8010caea33fa06870e3211b04449c735"
         },
         {
-          "path": "src/modules/db2/c/schema_grants.sql",
+          "path": "src/modules/kb/c/schema_grants.sql",
           "sha256": "17d92a08425610fadcb465b834919fdf6029184bde998655d2b70818316e9918"
         },
         {
-          "path": "src/modules/db2/c/schema_roles.sql",
+          "path": "src/modules/kb/c/schema_roles.sql",
           "sha256": "81eab0ac292bb95a308f6f84f49d5c571e172df66acaa6a9d2204b1b51b0d910"
         },
         {
-          "path": "src/modules/db2/c/schema_sqlite.sql",
+          "path": "src/modules/kb/c/schema_sqlite.sql",
           "sha256": "6241722db33b81c95bf9c07f16a9212657206b0f449ba7ecb064911fdd4a0d1e"
         }
       ]
@@ -1714,19 +1714,19 @@
           "sha256": "0f6b1ce53168c73ed5b0cbbd151849eb146b93d485d1f2cf856468bf6cca11bf"
         },
         {
-          "path": "src/modules/db2/include/aimee/db2/client.h",
+          "path": "src/modules/kb/include/aimee/db2/client.h",
           "sha256": "13344154234375bf55304bbd9301f71018f3c6c2a1f4a5ac578d7e727e661eaa"
         },
         {
-          "path": "src/modules/db2/include/aimee/db2/graph_kinds.h",
+          "path": "src/modules/kb/include/aimee/kb/graph_kinds.h",
           "sha256": "2c4a4c818c0d9e5bc838782f9a1f26d31127d2a951667bd5c3cfc8a8f273d782"
         },
         {
-          "path": "src/modules/db2/include/aimee/db2/host_contracts.h",
+          "path": "src/modules/kb/include/aimee/kb/host_contracts.h",
           "sha256": "912ef81be4b7f42093eb56067f0339ad088552d2795c880a415e64205855d886"
         },
         {
-          "path": "src/modules/db2/include/aimee/db2/module_api.h",
+          "path": "src/modules/kb/include/aimee/db2/module_api.h",
           "sha256": "99cd1e0dc5a4f63f217a0c3ad68ca65f0570abe0c0d4374a2fd1882d358604b5"
         },
         {

@@ -189,7 +189,7 @@ int main(int argc, char **argv)
 
    int exit_code = 0, saved_stderr = -1, db_open = 0, stderr_silenced = 0;
    int custody_unsealed = 0;
-   db2_management_token_roots_ctx_t db_ctx;
+   kb_store_management_token_roots_ctx_t db_ctx;
    kb_mgmt_roots_db_t db;
    kb_mgmt_roots_config_t config;
    char bundle[KB_MGMT_PUBLIC_BUNDLE_MAX];
@@ -245,14 +245,14 @@ int main(int argc, char **argv)
    }
    stderr_silenced = 1;
    char db_error[256] = "";
-   if (db2_management_token_roots_open(&db_ctx, db_url, db_error, sizeof(db_error)) != 0)
+   if (kb_store_management_token_roots_open(&db_ctx, db_url, db_error, sizeof(db_error)) != 0)
    {
       OPENSSL_cleanse(db_error, sizeof(db_error));
       exit_code = EXIT_DATABASE;
       goto provider_done;
    }
    db_open = 1;
-   if (db2_management_token_roots_bind(&db_ctx, &db) != 0)
+   if (kb_store_management_token_roots_bind(&db_ctx, &db) != 0)
    {
       OPENSSL_cleanse(db_error, sizeof(db_error));
       exit_code = EXIT_DATABASE;
@@ -318,7 +318,7 @@ provider_done:
    if (custody_unsealed && vault_seal() != 0)
       exit_code = EXIT_CUSTODY;
    if (db_open)
-      db2_management_token_roots_close(&db_ctx);
+      kb_store_management_token_roots_close(&db_ctx);
    if (stderr_silenced && restore_stderr(&saved_stderr) != 0)
       exit_code = EXIT_HARDENING;
    if (exit_code)

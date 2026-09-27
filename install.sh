@@ -424,7 +424,7 @@ else
 fi
 
 # Postgres database setup runs in install-deps.sh (it needs sudo). The aimee-kb
-# daemon's startup auto-bootstrap (kb_bootstrap_db2_resolve) also retries those
+# daemon's startup auto-bootstrap (kb_bootstrap_kb_store_resolve) also retries those
 # steps the first time it launches, so a user who skipped install-deps.sh still
 # converges once a reachable PostgreSQL exists.
 

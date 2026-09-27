@@ -15,8 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "modules/db2/c/org_telemetry_fmt.h"
-#include "schema_data.h" /* AIMEE_DB2_SCHEMA_SQL (generated) */
+#include "modules/kb/c/org_telemetry_fmt.h"
+#include "schema_data.h" /* AIMEE_KB_STORE_SCHEMA_SQL (generated) */
 
 /* ---- 1. metric_name validation (^[a-zA-Z0-9_:]{1,128}$) ---- */
 static void test_metric_name_valid(void)
@@ -159,7 +159,7 @@ static void test_token(void)
 /* ---- 5. structural: org_telemetry is content-free by construction ---- */
 static void test_no_content_column(void)
 {
-   const char *sql = AIMEE_DB2_SCHEMA_SQL;
+   const char *sql = AIMEE_KB_STORE_SCHEMA_SQL;
    /* Isolate the CREATE TABLE ... org_telemetry ( ... ) body. */
    const char *decl = strstr(sql, "CREATE TABLE IF NOT EXISTS org_telemetry (");
    assert(decl != NULL);

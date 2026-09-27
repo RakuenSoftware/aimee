@@ -1875,7 +1875,7 @@ void print_server_health(cJSON *resp)
           * the health port, so its diagnosis never reaches this response and
           * exists only in the container log. Measured: booting a 768-dimension
           * embedder over a corpus recorded at 384 logs the width, both sides, and
-          * the remedy, then holds DB2 unready until the container crashloops --
+          * the remedy, then holds KB_STORE unready until the container crashloops --
           * and every operator-facing surface said "unreachable", pointing away
           * from the one place that already knew the answer. Name that place. */
          printf("  if it never became healthy, the reason is in its own log and not\n");

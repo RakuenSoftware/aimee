@@ -280,7 +280,7 @@ func TestSharedDatabaseSchemaLockCancellation(t *testing.T) {
 func TestSharedDatabaseNativeAndGoBootstrapShareLock(t *testing.T) {
 	pool := sharedTestDatabase(t)
 	ctx := context.Background()
-	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	body, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

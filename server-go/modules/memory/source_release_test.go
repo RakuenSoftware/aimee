@@ -379,9 +379,9 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 }
 
 func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL for structured source observations")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL for structured source observations")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -533,7 +533,7 @@ func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
 // The shipping storage barrier is tested independently of the HTTP guard. A
 // passing result here is not evidence that provider call sites hold a lease.
 func TestSourceSendStorageBarrierPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("packaged PostgreSQL required")
 	}
@@ -561,16 +561,25 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	}
 	exec(admin, "CREATE SCHEMA "+quoted)
 	exec(admin, "CREATE ROLE "+qrole+" NOLOGIN NOSUPERUSER NOBYPASSRLS")
+	var database string
+	if err := admin.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	qdatabase := pgx.Identifier{database}.Sanitize()
 	defer func() {
-		_, _ = admin.Exec(context.Background(), "ROLLBACK; RESET ROLE; DROP SCHEMA "+quoted+" CASCADE; DROP ROLE "+qrole)
+		_, _ = admin.Exec(context.Background(), "ROLLBACK; RESET ROLE; DROP SCHEMA "+quoted+" CASCADE; REVOKE TEMPORARY ON DATABASE "+qdatabase+" FROM "+qrole+"; DROP ROLE "+qrole)
 	}()
+	// The shipping schema revokes PUBLIC temporary-table authority. Give only
+	// this disposable adversarial role the ability needed to try shadowing the
+	// send barrier; the guard must still refuse the mutation.
+	exec(admin, "GRANT TEMPORARY ON DATABASE "+qdatabase+" TO "+qrole)
 	exec(admin, "SET search_path="+quoted+",public")
 	exec(other, "SET search_path="+quoted+",public")
 	names := []string{"memory_links", "memory_scopes", "learning_observations", "learning_proposals", "memory_relations", "rules", "memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
 	for _, name := range names {
 		exec(admin, "CREATE TABLE "+name+"(id integer PRIMARY KEY,value integer NOT NULL DEFAULT 0,use_count integer NOT NULL DEFAULT 0)")
 	}
-	raw, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	raw, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,9 +768,9 @@ func TestSourceSendCompletionNeedsOnlyOpaqueToken(t *testing.T) {
 }
 
 func TestHardRuleSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -856,9 +865,9 @@ func TestHardRuleSourceObservationsPostgres(t *testing.T) {
 }
 
 func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -935,9 +944,9 @@ func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
 }
 
 func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -1275,9 +1284,9 @@ func TestExplorationIndexGenerationFollowsRetainedParts(t *testing.T) {
 // Model a memory owner disappearing after its release statement, before COMMIT.
 // The store process (and its transaction) survives that owner independently.
 func TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

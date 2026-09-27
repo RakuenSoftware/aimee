@@ -493,13 +493,13 @@ static void test_strip_ai_attribution(void)
    assert(strcmp(buf, "line one\nline two") == 0);
 }
 
-/* parse_utc_ts must read BOTH spellings, because one DB2 column holds both: C
+/* parse_utc_ts must read BOTH spellings, because one KB_STORE column holds both: C
  * writes ISO via now_utc(), SQL writes the canonical text form via
  * pg_now_text(), and which one a row carries depends on the code path that last
  * touched it.
  *
  * The failure this guards is silent. Two copies of this parser used to exist
- * with OPPOSITE assumptions -- db2/demotion.c matched only the space form,
+ * with OPPOSITE assumptions -- kb_store/demotion.c matched only the space form,
  * modules/memory/memory_conflict.c only the ISO form -- and each returned 0 for
  * the spelling it did not know. 0 is not an error here, it is the epoch: a real
  * and very old time. In demotion that fed a recency decay, so a memory used

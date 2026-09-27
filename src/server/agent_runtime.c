@@ -14,11 +14,11 @@
 #include <aimee/delegates/delegate_launch_args.h>
 #include "role_templates.h"
 #include "provider_catalog.h"
-#include "modules/db2/c/agent_hints.h"
-#include "modules/db2/c/agent_outcomes.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/rules.h"
-#include "modules/db2/c/tasks.h"
+#include "modules/kb/c/agent_hints.h"
+#include "modules/kb/c/agent_outcomes.h"
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/rules.h"
+#include "modules/kb/c/tasks.h"
 #include "kb_client.h"
 #include "agent.h"
 #include "agent_protocol.h"
@@ -1782,7 +1782,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
     * subsequent native blocks in this build add their retained proofs. */
    int native_started = 0;
 
-   /* Rules (budget: procedures) — DB2 lives in aimee-kb. */
+   /* Rules (budget: procedures) — KB_STORE lives in aimee-kb. */
 
    char *rules = NULL;
    if (!skip_kb_client)

@@ -16,23 +16,23 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb_planner.h"
-#include "../modules/db2/c/artifacts.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/artifacts.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 #include "config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* ---- 1. config_planner_defaults ---- */
@@ -156,7 +156,7 @@ static void test_planner_artifact_write(void)
    assert(id_template[0] != '\0');
 
    /* Verify both rows landed with the right kind and scope_kind. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(

@@ -118,10 +118,10 @@ sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
 cat > "$SERVICE_BIN_DIR/aimee-kb" <<'EOF'
 #!/bin/sh
 case "$1" in
-  --bootstrap-db2)
-    printf '%s\n' '{"status":"ok","bootstrapped":true,"db2_url_saved":true}'
+  --bootstrap-postgres)
+    printf '%s\n' '{"status":"ok","bootstrapped":true,"store_url_saved":true}'
     ;;
-  --migrate-db2-from-sqlite)
+  --migrate-kb_store-from-sqlite)
     printf '{"status":"ok","source":"%s","tables_found":1,"source_rows":2,' "$2"
     printf '"rows_copied":2,"rows_skipped":0,"table_errors":0,'
     printf '"row_count_regressions":0,"backup_path":"%s.pre1"}\n' "$2"
@@ -169,9 +169,9 @@ LEGACY_SHARED="$HOME/legacy-shared.db"
 : > "$LEGACY_SHARED"
 
 # The /v1/rpc bridge is retired: there is no generic dispatch entry point, so the
-# unexposed migrate aliases (migrate.db2_to_postgres / migrate.v2) are unreachable
+# unexposed migrate aliases (migrate.kb_store_to_postgres / migrate.v2) are unreachable
 # by construction. Assert the bridge itself is gone — the path now 404s.
-STATUS=$(srv_status /v1/rpc '{"method":"migrate.db2_to_postgres","source_path":"legacy-shared.db"}')
+STATUS=$(srv_status /v1/rpc '{"method":"migrate.kb_store_to_postgres","source_path":"legacy-shared.db"}')
 check_output "/v1/rpc bridge is retired (404)" '404' echo "$STATUS"
 
 STATUS=$(srv_status /v1/rpc '{"method":"migrate.v2","source_path":"legacy-shared.db"}')

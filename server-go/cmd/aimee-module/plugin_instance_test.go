@@ -71,7 +71,7 @@ func TestMCPInstanceRefusesToStartWithoutAProvisionedPrincipal(t *testing.T) {
 func TestMCPInstanceRefusesARefOutsideTheReservedBand(t *testing.T) {
 	// Kinds are derived from the ref, so a ref outside the band derives kinds
 	// inside some canonical module's 256-kind block. 28, 29 and 30 are postgres,
-	// db2 and db1 -- the three the retired 11264 range actually collided with.
+	// kb_store and db1 -- the three the retired 11264 range actually collided with.
 	// One kind has exactly one serving slot (bus_route.c:109), so the loser is
 	// refused at attach, silently from the operator's side. Fail closed here.
 	for _, bad := range []string{"1", "28", "29", "30", "101", "199", "456", "1000"} {
@@ -85,7 +85,7 @@ func TestMCPInstanceRefusesARefOutsideTheReservedBand(t *testing.T) {
 func TestMCPInstanceRefusesAStaleEventBase(t *testing.T) {
 	// AIMEE_MODULE_EVENT_BASE is retired. A deployment provisioned under the old
 	// scheme still has it set AND a .grant naming the old kinds -- which live in
-	// postgres's, db2's or db1's block. Ignoring it would leave that grant in
+	// postgres's, kb_store's or db1's block. Ignoring it would leave that grant in
 	// place, so an instance carrying a base that disagrees with the derivation
 	// must refuse and say to re-provision.
 	t.Setenv("AIMEE_MODULE_PRINCIPAL_REF", testRef)

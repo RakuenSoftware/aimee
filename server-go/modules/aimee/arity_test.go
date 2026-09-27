@@ -33,7 +33,7 @@ import (
 // assumed, it holds for db1's 463 as well -- every one declares a fixed
 // request.fields list.
 //
-// It is known false elsewhere. db2's owner reports five variadic operations
+// It is known false elsewhere. kb_store's owner reports five variadic operations
 // there, where the dispatcher deliberately skips the width check and each
 // operation validates its own shape. Reported to me rather than measured by me,
 // and worth keeping those apart: widening this guard across modules would refuse

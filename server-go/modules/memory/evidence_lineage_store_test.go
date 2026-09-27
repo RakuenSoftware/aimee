@@ -52,7 +52,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY fixture_scope ON memories USING(scope_value='visible');
  GRANT SELECT ON memories,memory_units,memory_lineage,memory_collection_owner,memory_collection_generations,memory_projection_generations,memory_evidence_events TO evidence_projection_test`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

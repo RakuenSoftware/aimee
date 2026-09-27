@@ -1,5 +1,5 @@
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/org_model_catalog.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/org_model_catalog.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,21 +15,21 @@ static struct aimee_pg_stmt g_stmt;
 static int g_prepare_ok = 1, g_bind_fail, g_step_mode;
 static const char *g_cols[10];
 
-int db2_tenant_require_pg(void)
+int kb_store_tenant_require_pg(void)
 {
    return 0;
 }
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return &g_stmt;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
 aimee_pg_stmt_t *aimee_pg_prepare(void *conn, const char *sql, char *err, size_t errlen)
 {
@@ -81,18 +81,18 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int col)
    return g_cols[col];
 }
 
-static db2_bedrock_target_row_t foundation_row(void)
+static kb_store_bedrock_target_row_t foundation_row(void)
 {
-   db2_bedrock_target_row_t row = {.model_id = "model",
-                                   .bedrock_api = "converse",
-                                   .model_family = "anthropic",
-                                   .target_type = "foundation",
-                                   .partition = "aws",
-                                   .account = "",
-                                   .invoke_region = "us-west-2",
-                                   .regions_json = "[\"us-west-2\"]",
-                                   .underlying_json = "[]",
-                                   .endpoint = ""};
+   kb_store_bedrock_target_row_t row = {.model_id = "model",
+                                        .bedrock_api = "converse",
+                                        .model_family = "anthropic",
+                                        .target_type = "foundation",
+                                        .partition = "aws",
+                                        .account = "",
+                                        .invoke_region = "us-west-2",
+                                        .regions_json = "[\"us-west-2\"]",
+                                        .underlying_json = "[]",
+                                        .endpoint = ""};
    return row;
 }
 
@@ -107,9 +107,9 @@ static int all_zero(const void *p, size_t n)
 
 static void decode_hostile_rows(void)
 {
-   db2_bedrock_target_t out;
-   db2_bedrock_target_row_t row = foundation_row();
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_OK);
+   kb_store_bedrock_target_t out;
+   kb_store_bedrock_target_row_t row = foundation_row();
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_OK);
    assert(out.n_regions == 1 && strcmp(out.invoke_region, "us-west-2") == 0);
 
    const char *bad_json[] = {
@@ -120,46 +120,47 @@ static void decode_hostile_rows(void)
       row = foundation_row();
       row.regions_json = bad_json[i];
       memset(&out, 0xa5, sizeof(out));
-      assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+      assert(kb_store_model_bedrock_target_decode_row(&row, &out) ==
+             KB_STORE_BEDROCK_TARGET_INVALID);
       assert(all_zero(&out, sizeof(out)));
    }
 
    char many[1024] = "[";
-   for (int i = 0; i < DB2_BEDROCK_ARRAY_MAX + 1; i++)
+   for (int i = 0; i < KB_STORE_BEDROCK_ARRAY_MAX + 1; i++)
       snprintf(many + strlen(many), sizeof(many) - strlen(many), "%s\"r%d\"", i ? "," : "", i);
    strncat(many, "]", sizeof(many) - strlen(many) - 1);
    row = foundation_row();
    row.regions_json = many;
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
 
    char oversized[208];
    memset(oversized, 'x', sizeof(oversized) - 1);
    oversized[sizeof(oversized) - 1] = 0;
    row = foundation_row();
    row.model_id = oversized;
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
 
    row = foundation_row();
    row.invoke_region = NULL;
    memset(&out, 0xa5, sizeof(out));
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
 
    row = foundation_row();
    row.model_family = "unknown-family";
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
 
    row = foundation_row();
    row.regions_json = "[\"us-west-2\",\"us-west-2\"]";
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
 
-   char *huge = malloc(DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4096);
+   char *huge = malloc(KB_STORE_BEDROCK_ARRAY_MAX * KB_STORE_BEDROCK_ARN_CAP + 4096);
    assert(huge != NULL);
-   memset(huge, ' ', DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4094);
-   huge[DB2_BEDROCK_ARRAY_MAX * DB2_BEDROCK_ARN_CAP + 4094] = 0;
+   memset(huge, ' ', KB_STORE_BEDROCK_ARRAY_MAX * KB_STORE_BEDROCK_ARN_CAP + 4094);
+   huge[KB_STORE_BEDROCK_ARRAY_MAX * KB_STORE_BEDROCK_ARN_CAP + 4094] = 0;
    row = foundation_row();
    row.underlying_json = huge;
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
    free(huge);
 
    row = foundation_row();
@@ -169,48 +170,56 @@ static void decode_hostile_rows(void)
    row.regions_json = "[\"us-east-1\",\"us-west-2\"]";
    row.underlying_json = "[\"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude\","
                          "\"arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude\"]";
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_OK);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_OK);
    row.underlying_json = "[\"arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude\"]";
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
    row.underlying_json = "[\"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude\"]";
-   assert(db2_model_bedrock_target_decode_row(&row, &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_decode_row(&row, &out) == KB_STORE_BEDROCK_TARGET_INVALID);
 }
 
 static void resolver_result_mapping(void)
 {
-   db2_bedrock_target_t out;
-   db2_bedrock_target_row_t row = foundation_row();
+   kb_store_bedrock_target_t out;
+   kb_store_bedrock_target_row_t row = foundation_row();
    const char *values[] = {
        row.model_id, row.bedrock_api,   row.model_family, row.target_type,     row.partition,
        row.account,  row.invoke_region, row.regions_json, row.underlying_json, row.endpoint};
    memcpy(g_cols, values, sizeof(values));
 
    g_prepare_ok = 0;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_ERROR);
    g_prepare_ok = 1;
    g_bind_fail = 1;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_ERROR);
    g_bind_fail = 0;
    g_step_mode = 0;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_UNAVAILABLE);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_UNAVAILABLE);
    g_step_mode = 2;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_ERROR);
    g_step_mode = 1;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_OK);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) == KB_STORE_BEDROCK_TARGET_OK);
    g_cols[0] = "different-model";
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
    g_cols[0] = row.model_id;
    g_cols[7] = "{}";
    memset(&out, 0xa5, sizeof(out));
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
    g_cols[7] = row.regions_json;
    g_step_mode = 4;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_ERROR);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_ERROR);
    assert(all_zero(&out, sizeof(out)));
    g_step_mode = 3;
-   assert(db2_model_bedrock_target_resolve(42, "model", &out) == DB2_BEDROCK_TARGET_INVALID);
+   assert(kb_store_model_bedrock_target_resolve(42, "model", &out) ==
+          KB_STORE_BEDROCK_TARGET_INVALID);
    assert(all_zero(&out, sizeof(out)));
 }
 

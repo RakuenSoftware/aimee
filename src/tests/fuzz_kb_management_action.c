@@ -12,7 +12,7 @@ static void fuzz_one(const unsigned char *data, size_t size)
       return;
    kb_management_action_body_t body;
    (void)kb_management_action_body_parse((const char *)data, size, &body);
-   db2_management_action_outcome_operation_t outcome = {0};
+   kb_store_management_action_outcome_operation_t outcome = {0};
    int status = size ? 100 + data[0] % 500 : 200;
    (void)kb_management_action_response_parse((const char *)data, size, status, &outcome);
 }

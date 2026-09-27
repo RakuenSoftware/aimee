@@ -1,12 +1,12 @@
 /* code_audit_graph.h: pure graph-derived code-health audit algorithms.
  *
  * These operate on already-fetched edge/key arrays (no DB, no I/O) so they are
- * unit-testable in isolation; the kb-side db2 layer (db2/code_audit.c) fetches
+ * unit-testable in isolation; the kb-side kb_store layer (kb_store/code_audit.c) fetches
  * the rows from entity_edges / code_embeddings and calls these. Two checks live
  * here — dead exports and import cycles; clone grouping is a trivial sort-group
  * done in the assemble layer.
  *
- * Edge-key formats (from db2/code_projection.c):
+ * Edge-key formats (from kb_store/code_projection.c):
  *   exports edge target: "export:<proj>:<name>"
  *   imports edge target: "import:<proj>:<name>"
  *   references edge target: "reference:<proj>:<name>"

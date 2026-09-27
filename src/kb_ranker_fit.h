@@ -26,7 +26,7 @@ extern "C"
                             char *id_out, int id_out_len);
 
    /* Record one outcome verdict for a surfaced doc_id, tied to event_id, as a
-    * `ranker_outcome` artifact. verdict per db2/demotion.h (accepted = positive).
+    * `ranker_outcome` artifact. verdict per kb_store/demotion.h (accepted = positive).
     * 0 on success, -1 on error. */
    int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *verdict,
                                double weight);

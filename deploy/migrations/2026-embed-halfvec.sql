@@ -14,7 +14,7 @@
 -- REQUIRES pgvector >= 0.7.0 (halfvec type + halfvec_cosine_ops). Verify with
 --   SELECT extversion FROM pg_extension WHERE extname='vector';
 -- A fresh schema apply already creates halfvec columns; this migrates an existing
--- vector(N) database. Back up DB2 first.
+-- vector(N) database. Back up KB_STORE first.
 --
 -- AFTER RUNNING: restart aimee-server/kb so schema.sql recreates the HNSW indexes
 -- with halfvec_cosine_ops (CREATE INDEX IF NOT EXISTS). Until then vector search

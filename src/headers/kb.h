@@ -102,13 +102,13 @@ int kb_update(const char *root_path, const char *project, const char *embedding_
 
 /* General document-ingest entry point: chunk one document's text into kb_documents
  * and embed each chunk under `project`, keyed by `source_path`. Source-agnostic
- * (workspace files via DB2 file_contents today; PDFs-as-text etc. in future).
+ * (workspace files via KB_STORE file_contents today; PDFs-as-text etc. in future).
  * Skips unchanged content. Returns chunks embedded, or -1 on error. */
 int kb_ingest_doc_content(const char *project, const char *source_path, const char *content,
                           size_t len, const char *embedding_cmd);
 
 /* Background driver: ingest indexed prose/doc files for `project` that aren't in
- * the KB-docs layer yet, sourcing content from DB2 file_contents (no disk).
+ * the KB-docs layer yet, sourcing content from KB_STORE file_contents (no disk).
  * Bounded by `max_docs`. Returns chunks embedded. Replaces the old `kb build`
  * command — doc ingestion now happens automatically during workspace ingest. */
 int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs);
@@ -120,7 +120,7 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
 /* Search the knowledge base.
  *
  * Returns a heap-allocated formatted string of results (caller must free).
- * Uses hybrid retrieval (DB2 lexical + pgvector dense search) with RRF fusion.
+ * Uses hybrid retrieval (KB_STORE lexical + pgvector dense search) with RRF fusion.
  * max_results is clamped to cfg->kb_search_max_results (default 50).
  * Returns an `error: ...` string when query embedding or the documentation
  * index is unavailable. */

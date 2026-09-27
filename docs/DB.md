@@ -89,26 +89,18 @@ admin DSN in `AIMEE_TEST_STORE_URL`; missing binaries or configuration fail the
 gate. Each fixture creates its own schema and authenticated runtime role, passes
 the same explicit namespace to both credentials, and cleans up its own objects.
 
-## Remaining consolidation
+## PostgreSQL provider ownership
 
-These repository changes do **not** merge existing databases or rewrite deployment
-credentials. The tree still has legacy paths and contracts named `db1` and `db2`,
-separate schema bootstrap paths, and separate configuration surfaces:
-`AIMEE_STORE_URL` / `AIMEE_STORE_MIGRATION_URL` and the KB's vaulted
-`AIMEE_DB2_URL`. The KB also retains native PostgreSQL ownership during its
-remaining implementation migration.
+Both application roles now use the Go PostgreSQL module. The KB_STORE process and
+native libpq driver/pool are removed. KB owns knowledge schema and algorithms;
+its native callers use PostgreSQL session capabilities for SQL and transactions.
+`AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` are the runtime and migration
+profiles. Migration authority stays on the bootstrap thread and closes before
+normal serving. The WORM worker uses a separate restricted
+`AIMEE_WORM_POSTGRES_URL` through the same provider implementation.
 
-The next cuts must:
-
-1. Extend the shared-schema proof to deployment-role upgrades and independent
-   server identities before changing existing installations' database targets.
-   Preserve domain migration histories, RLS, and runtime grants.
-2. Consolidate connection/bootstrap configuration and migration ordering without
-   exposing vaulted credentials or granting runtime roles DDL authority.
-3. Retire the numbered client/provider names with their generators, descriptors,
-   deployment scripts, and tests together. Preserve wire IDs and recorded migration
-   history unless a separately tested protocol/data migration replaces them.
-
-Do not point two existing installations at one DSN as a substitute for this migration.
-No database contents, volumes, certificates, or production credentials are removed
-by the shared-contract extraction.
+Existing domain names, wire identities and SQL migration history are preserved.
+This does not merge installations or change their database targets. Preserve
+schema histories, RLS, runtime grants, Vault custody and matching database/home
+backups when upgrading. Do not point separate installations at one DSN as a
+substitute for a data migration.

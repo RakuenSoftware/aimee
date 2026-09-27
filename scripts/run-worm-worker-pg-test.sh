@@ -27,17 +27,17 @@ fi
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $TESTDB" >/dev/null
 psql -v ON_ERROR_STOP=1 "$DB_URL" \
   -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_roles.sql" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/kb/c/schema_roles.sql" >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/kb/c/schema.sql" |
   psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/db2/c/schema_grants.sql" >/dev/null
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/src/modules/kb/c/schema_grants.sql" >/dev/null
 
 scalar() { psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c "$1"; }
 worm_scalar() { sqlite3 "$WORM_DB" "$1"; }
 worker() {
   PGOPTIONS='-c role=aimee_kb_worm_worker' \
     AIMEE_HOME="$WORM_STATE" AIMEE_WORM_PATH="$WORM_DB" \
-    AIMEE_WORM_DB2_URL="$DB_URL" "$ROOT/aimee-kb-worm" --once --batch=1000
+    AIMEE_WORM_POSTGRES_URL="$DB_URL" "$ROOT/aimee-kb-worm" --once --batch=1000
 }
 
 psql -v ON_ERROR_STOP=1 "$DB_URL" >/dev/null <<'SQL'
@@ -77,7 +77,7 @@ END $$;
 RESET ROLE;
 SQL
 [ "$(scalar "SELECT count(*) FROM kb_audit_outbox")" = 1 ]
-if AIMEE_HOME="$WORM_STATE" AIMEE_WORM_PATH="$WORM_DB" AIMEE_WORM_DB2_URL="$DB_URL" \
+if AIMEE_HOME="$WORM_STATE" AIMEE_WORM_PATH="$WORM_DB" AIMEE_WORM_POSTGRES_URL="$DB_URL" \
   "$ROOT/aimee-kb-worm" --once >/dev/null 2>&1; then
   echo "WORM worker accepted the producer/admin principal" >&2
   exit 1

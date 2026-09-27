@@ -60,7 +60,7 @@ static void test_editor_env_leak(void)
 
    /* Secrets the live server may legitimately hold in its own environment — the
     * editor (terminal + extensions) must never see any of them. */
-   setenv("AIMEE_DB2_URL", "postgres://u:SUPERSECRETPW@db/aimee", 1);
+   setenv("AIMEE_STORE_URL", "postgres://u:SUPERSECRETPW@db/aimee", 1);
    setenv("AIMEE_SERVER_TOKEN", "tok-LEAKME-123", 1);
    setenv("ANTHROPIC_API_KEY", "sk-ant-LEAKME", 1);
 
@@ -92,7 +92,7 @@ static void test_editor_env_leak(void)
 
    webuser_editor_free_env(env);
 
-   unsetenv("AIMEE_DB2_URL");
+   unsetenv("AIMEE_STORE_URL");
    unsetenv("AIMEE_SERVER_TOKEN");
    unsetenv("ANTHROPIC_API_KEY");
 }

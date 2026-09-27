@@ -1,10 +1,10 @@
 #ifndef DEC_LEARNING_H
 #define DEC_LEARNING_H 1
 
-/* Ensemble-learning signal/proposal types. The DB2 SQL layer that persists these
- * lives in db2/db2_learning.h (formerly db2/learning.h; renamed to remove the
+/* Ensemble-learning signal/proposal types. The KB_STORE SQL layer that persists these
+ * lives in kb_store/kb_store_learning.h (formerly kb_store/learning.h; renamed to remove the
  * basename collision with this header, so -Imodules/learning no longer needs a
- * special position relative to -Idb1/-Idb2). */
+ * special position relative to -Idb1/-Ikb_store). */
 
 #include <stdint.h>
 
@@ -188,8 +188,8 @@ typedef enum
    /* Observed a large enough sample and the exogenous share is under the
     * floor: the loop is feeding on itself. Gated promotions must refuse. */
    LEARNING_GATE_CLOSED_ENDOGENOUS = 1,
-   /* The share could not be computed (DB2 configured but erroring). Distinct
-    * from CLOSED so the caller can decide; a build with DB2 compiled out
+   /* The share could not be computed (KB_STORE configured but erroring). Distinct
+    * from CLOSED so the caller can decide; a build with KB_STORE compiled out
     * reports OPEN instead, since no learning is being persisted there. */
    LEARNING_GATE_UNAVAILABLE = 2,
 } learning_gate_state_t;
@@ -231,9 +231,9 @@ int learning_fate_record(int proposal_id, const char *fate, const char *reason);
 typedef struct
 {
    char signal_type[32];
-   int64_t committed; /* committed in the window */
-   int64_t settled;   /* of those, with a fate recorded */
-   int64_t regret;    /* of those settled, a fate that did not hold */
+   int64_t committed;  /* committed in the window */
+   int64_t settled;    /* of those, with a fate recorded */
+   int64_t regret;     /* of those settled, a fate that did not hold */
    double regret_rate; /* regret / max(1, settled); 0 when settled == 0 */
 } learning_detector_regret_t;
 

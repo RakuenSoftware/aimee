@@ -1,7 +1,7 @@
 /* kb_http_budget.c: /v1/budget routes (P4a budget reservation core).
  *
  * The authenticated actor comes from kb_reqctx (set by the router after verification);
- * every op runs inside a tenant scope (db2_tenant_scope_begin sets aimee.principal), so
+ * every op runs inside a tenant scope (kb_store_tenant_scope_begin sets aimee.principal), so
  * the admin gate for POST /v1/budget/set and the admin-OR-team-lead gate for GET
  * /v1/budget/show are enforced at the DB layer inside the SECURITY DEFINER functions —
  * a non-authorized caller surfaces here as 403. Money (limit/soft/spend/reserved) is a
@@ -11,7 +11,7 @@
 #include "kb_http_budget.h"
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_reqctx.h"
 #include "org_budget.h"
 
@@ -40,14 +40,14 @@ static int err(char *out, int cap, int status, const char *msg)
    return status;
 }
 
-/* Map a tenant-scope/db2 return into an HTTP status. */
+/* Map a tenant-scope/kb_store return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return 503;
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return 401;
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return 403;
    return 500;
 }
@@ -138,7 +138,7 @@ static int begin_actor_scope(char *out, int cap, int *http_out)
       *http_out = err(out, cap, 401, "authentication required");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(actor, 0);
+   int rc = kb_store_tenant_scope_begin(actor, 0);
    if (rc != 0)
    {
       *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
@@ -215,20 +215,20 @@ static int handle_set(const char *method, const char *body, char *out, int cap)
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    int64_t id = 0;
-   int rc = db2_org_budget_set(team, has_project, project, period, limit_usd,
-                               soft_usd[0] ? soft_usd : NULL, &id);
+   int rc = kb_store_org_budget_set(team, has_project, project, period, limit_usd,
+                                    soft_usd[0] ? soft_usd : NULL, &id);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
-      if (rc == DB2_BUDGET_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (rc == KB_STORE_BUDGET_ERR_DENIED)
          return err(out, cap, 403, "not authorized to set budgets (org-admin required)");
-      if (rc == DB2_BUDGET_ERR_RETRO)
+      if (rc == KB_STORE_BUDGET_ERR_RETRO)
          return err(
              out, cap, 409,
              "retroactive reduction: limit below the current period's committed spend+reserved");
       return err(out, cap, 500, "budget set failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddNumberToObject(o, "id", (double)id);
@@ -256,17 +256,17 @@ static int handle_show(const char *method, const char *qs, char *out, int cap)
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
-   db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
-   int n =
-       db2_org_budget_show(team, has_project, project, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+   kb_store_org_budget_row_t rows[KB_STORE_BUDGET_MAX_ROWS];
+   int n = kb_store_org_budget_show(team, has_project, project, rows,
+                                    (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
    {
-      db2_tenant_scope_rollback();
-      if (n == DB2_BUDGET_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (n == KB_STORE_BUDGET_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin or team-lead required)");
       return err(out, cap, 500, "budget show failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
 
    cJSON *root = cJSON_CreateObject();

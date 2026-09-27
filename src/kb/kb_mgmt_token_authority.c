@@ -202,7 +202,7 @@ static int canonical_subject(const char *s)
    if (!fixed_text(s, 577, 1, 576, 0))
       return 0;
    /* The bare PAM form. This is the FOURTH copy of the data-plane subject grammar
-    * — the others are the CHECK in db2/schema.sql, db2_intent_canonical_actor and
+    * — the others are the CHECK in kb_store/schema.sql, kb_store_intent_canonical_actor and
     * server_identity_subject_valid — and it is the one that bit: it rejected a
     * bare name the database had already admitted, so the authority refused to mint
     * with INTEGRITY after all eleven gates had passed. All four are now held to

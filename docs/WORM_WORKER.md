@@ -51,10 +51,10 @@ status-function privileges. Conversely, `aimee_kb_runtime` may execute
 `kb_audit_worm_submit(...)` but cannot manipulate either ledger or invoke the
 worker API. PostgreSQL no longer creates or owns a KB WORM chain table.
 
-Give the worker a credential distinct from `AIMEE_DB2_URL`:
+Give the worker a credential distinct from the application runtime `AIMEE_STORE_URL`:
 
 ```sh
-AIMEE_WORM_DB2_URL='postgresql://aimee_kb_worm_worker:...@db/aimee' \
+AIMEE_WORM_POSTGRES_URL='postgresql://aimee_kb_worm_worker:...@db/aimee' \
   AIMEE_HOME=/var/lib/aimee-worm \
   AIMEE_WORM_PATH=/var/lib/aimee-worm/audit/kb-worm-live.db \
   aimee-kb-worm

@@ -33,7 +33,7 @@
  * ref is the single allocation authority; nothing else picks a kind.
  *
  * Plugin instances previously drew from a separate range at 11264, which is
- * exactly postgres's block (4096 + 28*256) and overlapped db2 and db1 as well.
+ * exactly postgres's block (4096 + 28*256) and overlapped kb_store and db1 as well.
  * Deriving from the ref makes that class of collision impossible. */
 #define AIMEE_PLUGIN_KIND(ref, stage) (4096u + (uint32_t)(ref) * 256u + (uint32_t)(stage))
 

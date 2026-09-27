@@ -145,9 +145,9 @@ func TestTraceBatchValidation(t *testing.T) {
 }
 
 func TestTraceStoreConcurrentPostgres(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL to packaged-schema PostgreSQL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL to packaged-schema PostgreSQL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

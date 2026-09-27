@@ -8,20 +8,20 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "support/json_canonical.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/db2_tenant.h"
-#include "../modules/db2/c/artifacts.h"
-#include "../modules/db2/c/kb_payload.h"
-#include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/pgvec_kb_service.h"
-#include "../modules/db2/c/sketch.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/kb_store_tenant.h"
+#include "../modules/kb/c/artifacts.h"
+#include "../modules/kb/c/kb_payload.h"
+#include "../modules/kb/c/code_index.h"
+#include "../modules/kb/c/lifecycle.h"
+#include "../modules/kb/c/pgvec_kb_service.h"
+#include "../modules/kb/c/sketch.h"
 #include "kb_service_backend.h"
-#include "../modules/db2/c/kb_vectors.h"
+#include "../modules/kb/c/kb_vectors.h"
 #include "kb.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -33,8 +33,8 @@
 /* Test utilities                                                       */
 /* ------------------------------------------------------------------ */
 
-static int test_db2_embed_provider(const char *text, const char *command, int input_type,
-                                   float *out, int max_dim)
+static int test_kb_store_embed_provider(const char *text, const char *command, int input_type,
+                                        float *out, int max_dim)
 {
    if (strcmp(command, "test-invalid-dim") == 0)
       return max_dim + 1;
@@ -50,23 +50,25 @@ static int test_db2_embed_provider(const char *text, const char *command, int in
    return max_dim;
 }
 
-static void test_db2_embed_contract(void)
+static void test_kb_store_embed_contract(void)
 {
    float vec[8] = {0};
-   aimee_db2_register_embed_provider(NULL);
-   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) == 0);
-   aimee_db2_register_embed_provider(test_db2_embed_provider);
-   assert(db2_kb_embed_text("hello", "test-invalid-dim", DB2_EMBED_QUERY, vec, 8) == 0);
-   assert(db2_kb_embed_text("hello", "test-nonfinite", DB2_EMBED_QUERY, vec, 8) == 0);
-   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, -1, vec, 8) == 0);
-   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) > 0);
-   printf("  PASS: DB2 embedding contract fails closed on unavailable or malformed answers\n");
+   aimee_kb_store_register_embed_provider(NULL);
+   assert(kb_store_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, KB_STORE_EMBED_QUERY, vec,
+                                 8) == 0);
+   aimee_kb_store_register_embed_provider(test_kb_store_embed_provider);
+   assert(kb_store_kb_embed_text("hello", "test-invalid-dim", KB_STORE_EMBED_QUERY, vec, 8) == 0);
+   assert(kb_store_kb_embed_text("hello", "test-nonfinite", KB_STORE_EMBED_QUERY, vec, 8) == 0);
+   assert(kb_store_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, -1, vec, 8) == 0);
+   assert(kb_store_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, KB_STORE_EMBED_QUERY, vec, 8) >
+          0);
+   printf("  PASS: KB_STORE embedding contract fails closed on unavailable or malformed answers\n");
 }
 
 static int test_identity_key_mode;
 
-static int test_db2_identity_key_provider(int kind, const char *issuer, const char *subject,
-                                          int authenticated, char *out, size_t cap)
+static int test_kb_store_identity_key_provider(int kind, const char *issuer, const char *subject,
+                                               int authenticated, char *out, size_t cap)
 {
    if (test_identity_key_mode == 1)
       return -1;
@@ -89,32 +91,32 @@ static int test_db2_identity_key_provider(int kind, const char *issuer, const ch
    return kb_identity_key(&principal, out, cap);
 }
 
-static void test_db2_identity_key_contract(void)
+static void test_kb_store_identity_key_contract(void)
 {
    kb_principal_t principal = {.kind = KB_PRIN_OIDC, .authenticated = 1};
    snprintf(principal.issuer, sizeof(principal.issuer), "%s", "https://idp.example/tenant:a");
    snprintf(principal.subject, sizeof(principal.subject), "%s", "subject%42");
    char key[576] = "not-cleared";
 
-   aimee_db2_register_identity_key_provider(NULL);
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
-   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
+   aimee_kb_store_register_identity_key_provider(NULL);
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_kb_store_register_identity_key_provider(test_kb_store_identity_key_provider);
    test_identity_key_mode = 1;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
    test_identity_key_mode = 2;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
    test_identity_key_mode = 3;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
    test_identity_key_mode = 0;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == 0);
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == 0);
    assert(strcmp(key, "oidc:https%3A//idp.example/tenant%3Aa:subject%2542") == 0);
    principal.authenticated = 0;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
    principal.authenticated = 1;
    principal.kind = KB_PRIN_NONE;
-   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
-   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
-   printf("  PASS: DB2 identity-key contract rejects unavailable or malformed answers\n");
+   assert(kb_store_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_kb_store_register_identity_key_provider(test_kb_store_identity_key_provider);
+   printf("  PASS: KB_STORE identity-key contract rejects unavailable or malformed answers\n");
 }
 
 static int test_kb_vector_upsert_document(int64_t document_id, const float *vec, int dim,
@@ -124,7 +126,7 @@ static int test_kb_vector_upsert_document(int64_t document_id, const float *vec,
    return pgvec_kb_service_upsert_document_point(document_id, vec, dim, payload_json);
 }
 
-/* The DB2 backing handle is owned by db2_test_shim_open(); these
+/* The KB_STORE backing handle is owned by kb_store_test_shim_open(); these
  * helpers wrap that lifecycle plus a legacy HTTP /points/search mock
  * left over from the pre-pgvector era. The mock is harmless under the
  * pgvector path (it simply isn't hit) but is kept so we don't have to
@@ -195,7 +197,7 @@ static int kb_test_vector_post_handler(const char *url, const char *auth_header,
       char kb_err[128] = "";
       static const char *sql =
           "SELECT id FROM kb_documents WHERE project = ?1 ORDER BY id DESC LIMIT 50";
-      aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, kb_err, sizeof(kb_err));
+      aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, kb_err, sizeof(kb_err));
       if (st)
       {
          aimee_pg_bind_text(st, "?1", project);
@@ -227,7 +229,7 @@ static int kb_test_vector_post_handler(const char *url, const char *auth_header,
 
 static void open_test_db(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    /* Legacy /points/search HTTP route — kept harmless for any test path
     * that still POSTs to a vector endpoint. Resets to default on close. */
    mock_agent_http_set_post_handler(kb_test_vector_post_handler);
@@ -236,7 +238,7 @@ static void open_test_db(void)
 static void close_test_db(void)
 {
    mock_agent_http_reset();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* Write text to a file. */
@@ -301,8 +303,8 @@ static void test_build_empty_dir(void)
    assert(stats.files_indexed == 0);
    assert(stats.chunks_added == 0);
 
-   db2_kb_service_project_status_t status;
-   assert(db2_kb_service_collect_project_status("test_empty", &status) == 0);
+   kb_store_kb_service_project_status_t status;
+   assert(kb_store_kb_service_collect_project_status("test_empty", &status) == 0);
    assert(strcmp(status.project, "test_empty") == 0);
    assert(status.files == 0);
 
@@ -344,8 +346,8 @@ static void test_build_single_file(void)
    free(result);
 
    /* Build, search, and status must describe the same active corpus. */
-   db2_kb_service_project_status_t status;
-   assert(db2_kb_service_collect_project_status("test_single", &status) == 0);
+   kb_store_kb_service_project_status_t status;
+   assert(kb_store_kb_service_collect_project_status("test_single", &status) == 0);
    assert(status.chunks > 0);
    assert(status.chunks == stats.chunks_added);
 
@@ -376,7 +378,7 @@ static void test_build_sanitizes_malformed_utf8(void)
    assert(stats.files_indexed == 1);
    assert(stats.chunks_added > 0);
 
-   char *stored = db2_kb_file_index_get_content("test_utf8", "legacy.md");
+   char *stored = kb_store_kb_file_index_get_content("test_utf8", "legacy.md");
    assert(stored != NULL);
    assert(strcmp(stored, "# Legacy\n\nA ?quoted? CP-1252 phrase.\n") == 0);
    free(stored);
@@ -394,14 +396,14 @@ static void test_build_sanitizes_malformed_utf8(void)
 static void test_chunk_insert_sanitizes_replayed_malformed_utf8(void)
 {
    open_test_db();
-   assert(db2_code_index_project_upsert("test_utf8_boundary", "/test/utf8-boundary") > 0);
+   assert(kb_store_code_index_project_upsert("test_utf8_boundary", "/test/utf8-boundary") > 0);
    const char replayed[] = "durable \x92queue\x94 payload \xed\xa0\x80";
-   int64_t id = db2_kb_documents_insert_chunk("test_utf8_boundary", "legacy.md", "hash", 0, "", 1,
-                                              1, replayed, 4);
+   int64_t id = kb_store_kb_documents_insert_chunk("test_utf8_boundary", "legacy.md", "hash", 0, "",
+                                                   1, 1, replayed, 4);
    assert(id > 0);
 
-   db2_kb_document_row_t row;
-   assert(db2_kb_document_fetch(id, "test_utf8_boundary", &row) == 1);
+   kb_store_kb_document_row_t row;
+   assert(kb_store_kb_document_fetch(id, "test_utf8_boundary", &row) == 1);
    assert(strcmp(row.content, "durable ?queue? payload ???") == 0);
    /* The persistence adapter must not mutate caller-owned data. */
    assert((unsigned char)replayed[8] == 0x92);
@@ -478,9 +480,10 @@ static void test_bloom_dedupe_skips_duplicate_content(void)
    assert(stats2.files_indexed == 0);
    assert(stats2.files_skipped >= 1);
    int64_t stale_ids[4];
-   assert(db2_kb_documents_list_chunk_ids_for_file("test_bloom_dup", "b.md", stale_ids, 4) == 0);
-   db2_sketch_minhash_row_t dup_sig;
-   assert(db2_sketch_minhash_signature_get("test_bloom_dup", "b.md", &dup_sig) == 1);
+   assert(kb_store_kb_documents_list_chunk_ids_for_file("test_bloom_dup", "b.md", stale_ids, 4) ==
+          0);
+   kb_store_sketch_minhash_row_t dup_sig;
+   assert(kb_store_sketch_minhash_signature_get("test_bloom_dup", "b.md", &dup_sig) == 1);
 
    close_test_db();
    unlink(a_path);
@@ -519,10 +522,11 @@ static void test_minhash_shadow_signatures_persist(void)
    assert(stats2.files_indexed == 0);
    assert(stats2.files_skipped >= 1);
    int64_t skipped_ids[4];
-   assert(db2_kb_documents_list_chunk_ids_for_file("test_lsh_shadow", "b.md", skipped_ids, 4) == 0);
+   assert(kb_store_kb_documents_list_chunk_ids_for_file("test_lsh_shadow", "b.md", skipped_ids,
+                                                        4) == 0);
 
-   db2_sketch_minhash_row_t rows[4];
-   int n = db2_sketch_minhash_signature_list("test_lsh_shadow", rows, 4);
+   kb_store_sketch_minhash_row_t rows[4];
+   int n = kb_store_sketch_minhash_signature_list("test_lsh_shadow", rows, 4);
    assert(n >= 2);
    double best = 0.0;
    for (int i = 0; i < n; i++)
@@ -534,8 +538,8 @@ static void test_minhash_shadow_signatures_persist(void)
       }
    assert(best >= 0.92);
 
-   db2_artifact_proposed_t proposed[4];
-   int pn = db2_artifact_list_proposed(NULL, 10, proposed, 4);
+   kb_store_artifact_proposed_t proposed[4];
+   int pn = kb_store_artifact_list_proposed(NULL, 10, proposed, 4);
    int saw_supersedes = 0;
    for (int i = 0; i < pn; i++)
       if (strcmp(proposed[i].kind, "kb_near_duplicate") == 0 &&
@@ -543,8 +547,9 @@ static void test_minhash_shadow_signatures_persist(void)
          saw_supersedes = 1;
    assert(saw_supersedes);
 
-   db2_sketch_minhash_row_t candidates[4];
-   int c = db2_sketch_minhash_candidate_list("test_lsh_shadow", &rows[0].signature, candidates, 4);
+   kb_store_sketch_minhash_row_t candidates[4];
+   int c =
+       kb_store_sketch_minhash_candidate_list("test_lsh_shadow", &rows[0].signature, candidates, 4);
    assert(c >= 2);
    best = 0.0;
    for (int i = 0; i < c; i++)
@@ -568,10 +573,10 @@ static void test_async_embedding_queue_and_drain(void)
 {
    char oversized_identity[128];
    memset(oversized_identity, 'x', sizeof(oversized_identity));
-   assert(db2_kb_service_async_queue_drain(NULL, NULL, 0, NULL, NULL, NULL, NULL) == -1);
-   assert(db2_kb_service_async_queue_drain("", NULL, 0, NULL, NULL, NULL, NULL) == -1);
-   assert(db2_kb_service_async_queue_drain(oversized_identity, NULL, 0, NULL, NULL, NULL, NULL) ==
-          -1);
+   assert(kb_store_kb_service_async_queue_drain(NULL, NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(kb_store_kb_service_async_queue_drain("", NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(kb_store_kb_service_async_queue_drain(oversized_identity, NULL, 0, NULL, NULL, NULL,
+                                                NULL) == -1);
 
    char tmpdir[256];
    snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_async_XXXXXX", platform_tmpdir());
@@ -591,22 +596,23 @@ static void test_async_embedding_queue_and_drain(void)
    assert(stats.chunks_added > 0);
    assert(stats.embeddings_added == 0);
 
-   db2_kb_service_async_queue_stats_t qstats;
-   assert(db2_kb_service_async_queue_status(&qstats) == 0);
+   kb_store_kb_service_async_queue_stats_t qstats;
+   assert(kb_store_kb_service_async_queue_status(&qstats) == 0);
    assert(qstats.pending > 0);
 
    const char *vector_count_sql = "SELECT COUNT(*) FROM vector_index_ops"
                                   " WHERE collection = 'kb_embeddings' AND status = 'ok'";
    char vc_err[128] = "";
-   aimee_pg_stmt_t *vc_st = aimee_pg_prepare(db2_conn(), vector_count_sql, vc_err, sizeof(vc_err));
+   aimee_pg_stmt_t *vc_st =
+       aimee_pg_prepare(kb_store_conn(), vector_count_sql, vc_err, sizeof(vc_err));
    assert(vc_st != NULL);
    assert(aimee_pg_step(vc_st, vc_err, sizeof(vc_err)) == AIMEE_PG_ROW);
    assert(aimee_pg_column_int(vc_st, 0) == 0);
    aimee_pg_finalize(vc_st);
 
-   assert(db2_kb_service_async_queue_drain("test-async-drain", MEMORY_EMBED_TEST_FIXTURE, 5,
-                                           pgvec_kb_vector_collection_name(),
-                                           test_kb_vector_upsert_document, NULL, &qstats) == 0);
+   assert(kb_store_kb_service_async_queue_drain(
+              "test-async-drain", MEMORY_EMBED_TEST_FIXTURE, 5, pgvec_kb_vector_collection_name(),
+              test_kb_vector_upsert_document, NULL, &qstats) == 0);
    assert(qstats.pending == 0);
    assert(qstats.running == 0);
    assert(qstats.failed == 0);
@@ -614,7 +620,7 @@ static void test_async_embedding_queue_and_drain(void)
 
    char claim_err[128] = "";
    aimee_pg_stmt_t *claim_st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT COUNT(*) FROM kb_async_jobs WHERE claimed_by = 'test-async-drain'"
                         " AND status = 'done'",
                         claim_err, sizeof(claim_err));
@@ -623,7 +629,7 @@ static void test_async_embedding_queue_and_drain(void)
    assert(aimee_pg_column_int(claim_st, 0) > 0);
    aimee_pg_finalize(claim_st);
 
-   vc_st = aimee_pg_prepare(db2_conn(), vector_count_sql, vc_err, sizeof(vc_err));
+   vc_st = aimee_pg_prepare(kb_store_conn(), vector_count_sql, vc_err, sizeof(vc_err));
    assert(vc_st != NULL);
    assert(aimee_pg_step(vc_st, vc_err, sizeof(vc_err)) == AIMEE_PG_ROW);
    assert(aimee_pg_column_int(vc_st, 0) > 0);
@@ -639,7 +645,7 @@ static void test_async_embedding_queue_and_drain(void)
 /* ------------------------------------------------------------------ */
 /* Characterization tests for the kb_build_or_update per-file loop.    */
 /* These pin every observable mutation it makes — the kb_stats_t       */
-/* counters, the DB2 rows, and the pgvector op records — so the loop   */
+/* counters, the KB_STORE rows, and the pgvector op records — so the loop   */
 /* can later be disentangled with no behavior change.                  */
 /* ------------------------------------------------------------------ */
 
@@ -655,7 +661,7 @@ static int kb_count_vector_ops(const char *collection, const char *status)
       snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM vector_index_ops WHERE collection = '%s'",
                collection);
    char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
       return -1;
    int n = -1;
@@ -1031,7 +1037,7 @@ static void test_search_max_cap_above_legacy_limit(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Tests: DB2-owned clear helpers                                      */
+/* Tests: KB_STORE-owned clear helpers                                      */
 /* ------------------------------------------------------------------ */
 
 static void test_clear(void)
@@ -1050,7 +1056,7 @@ static void test_clear(void)
    kb_build(tmpdir, "test_clear", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
    assert(stats.chunks_added > 0);
 
-   int deleted = db2_kb_service_clear_project("test_clear");
+   int deleted = kb_store_kb_service_clear_project("test_clear");
    assert(deleted > 0);
 
    /* Search should now return nothing */
@@ -1088,15 +1094,16 @@ static void test_purge_fence_blocks_ingest(void)
    open_test_db();
 
    /* No fence yet. */
-   assert(db2_kb_purge_fence_active("fence_proj") == 0);
-   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
+   assert(kb_store_kb_purge_fence_active("fence_proj") == 0);
+   assert(kb_store_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
 
    /* Write, then read back generation/purge_id + liveness. */
-   assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
-   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   assert(kb_store_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+   assert(kb_store_kb_purge_fence_active("fence_proj") == 1);
    char gen[64] = "", pid[64] = "";
    int live = 0;
-   assert(db2_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) == 1);
+   assert(kb_store_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) ==
+          1);
    assert(strcmp(gen, "gen-1") == 0);
    assert(strcmp(pid, "pid-1") == 0);
    assert(live == 1);
@@ -1108,56 +1115,58 @@ static void test_purge_fence_blocks_ingest(void)
    assert(kb_build(other_tmpdir, "other_proj", MEMORY_EMBED_TEST_FIXTURE, 0, &stats) == 0);
 
    /* Heartbeat: displaced ids no-op, matching ids refresh. */
-   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
-   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
+   assert(kb_store_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-1") == 0);
+   assert(kb_store_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
 
    /* Atomic acquire: a LIVE foreign fence is refused without takeover (the
     * current owner's ids are returned), displaced with takeover:true. */
    {
       char cg[64] = "", cp[64] = "";
       int replaced = -1;
-      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 0, cg, sizeof(cg), cp,
-                                        sizeof(cp), &replaced) == 0);
+      assert(kb_store_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 0, cg, sizeof(cg), cp,
+                                             sizeof(cp), &replaced) == 0);
       assert(strcmp(cg, "gen-1") == 0);
       assert(strcmp(cp, "pid-1") == 0);
       assert(replaced == 0);
       /* Same-owner re-acquire is idempotent (no refusal, not a replace). */
-      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-1", "pid-1", 0, cg, sizeof(cg), cp,
-                                        sizeof(cp), &replaced) == 1);
+      assert(kb_store_kb_purge_fence_acquire("fence_proj", "gen-1", "pid-1", 0, cg, sizeof(cg), cp,
+                                             sizeof(cp), &replaced) == 1);
       assert(replaced == 0);
       /* Takeover displaces the live owner and reports the displaced ids. */
-      assert(db2_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 1, cg, sizeof(cg), cp,
-                                        sizeof(cp), &replaced) == 1);
+      assert(kb_store_kb_purge_fence_acquire("fence_proj", "gen-2", "pid-2", 1, cg, sizeof(cg), cp,
+                                             sizeof(cp), &replaced) == 1);
       assert(replaced == 1);
       assert(strcmp(cg, "gen-1") == 0);
       assert(strcmp(cp, "pid-1") == 0);
       /* Restore the gen-1 owner for the remaining assertions. */
-      assert(db2_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
+      assert(kb_store_kb_purge_fence_write("fence_proj", "gen-1", "pid-1") == 0);
    }
 
    /* Fail closed: an identity row WITHOUT a heartbeat row is ACTIVE (cannot
     * arise from a torn write — the publish transaction writes ts first). */
-   assert(db2_kb_runtime_state_delete("project_purging_ts:fence_proj") == 0);
-   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   assert(kb_store_kb_runtime_state_delete("project_purging_ts:fence_proj") == 0);
+   assert(kb_store_kb_purge_fence_active("fence_proj") == 1);
    /* A displaced owner still no-ops against the identity-only fence... */
-   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-0") == 0);
+   assert(kb_store_kb_purge_fence_heartbeat("fence_proj", "gen-0", "pid-0") == 0);
    /* ...while the matching owner's heartbeat repairs the missing ts row. */
-   assert(db2_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
-   assert(db2_kb_purge_fence_active("fence_proj") == 1);
+   assert(kb_store_kb_purge_fence_heartbeat("fence_proj", "gen-1", "pid-1") == 1);
+   assert(kb_store_kb_purge_fence_active("fence_proj") == 1);
 
    /* A stale heartbeat makes the fence absent for writers (TTL expiry), while
     * the fence row itself remains readable (live=0). */
-   assert(db2_kb_runtime_state_set("project_purging_ts:fence_proj", "2000-01-01 00:00:00") == 0);
-   assert(db2_kb_purge_fence_active("fence_proj") == 0);
+   assert(kb_store_kb_runtime_state_set("project_purging_ts:fence_proj", "2000-01-01 00:00:00") ==
+          0);
+   assert(kb_store_kb_purge_fence_active("fence_proj") == 0);
    live = 1;
-   assert(db2_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) == 1);
+   assert(kb_store_kb_purge_fence_read("fence_proj", gen, sizeof(gen), pid, sizeof(pid), &live) ==
+          1);
    assert(live == 0);
 
    /* Clear: displaced ids no-op, matching ids drop both rows. */
-   assert(db2_kb_purge_fence_clear("fence_proj", "gen-1", "pid-0") == 0);
-   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 1);
-   assert(db2_kb_purge_fence_clear("fence_proj", "gen-1", "pid-1") == 1);
-   assert(db2_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
+   assert(kb_store_kb_purge_fence_clear("fence_proj", "gen-1", "pid-0") == 0);
+   assert(kb_store_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 1);
+   assert(kb_store_kb_purge_fence_clear("fence_proj", "gen-1", "pid-1") == 1);
+   assert(kb_store_kb_purge_fence_read("fence_proj", NULL, 0, NULL, 0, NULL) == 0);
 
    /* Unfenced: the ingest goes through again. */
    assert(kb_build(tmpdir, "fence_proj", MEMORY_EMBED_TEST_FIXTURE, 0, &stats) == 0);
@@ -1207,7 +1216,7 @@ static void test_project_isolation(void)
    free(r2);
 
    /* Clear one project, verify other is unaffected */
-   db2_kb_service_clear_project("proj_alpha");
+   kb_store_kb_service_clear_project("proj_alpha");
    char *r3 = kb_search("proj_beta", "beta features", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(r3 != NULL);
    /* proj_beta should still have results */
@@ -1222,7 +1231,7 @@ static void test_project_isolation(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Tests: DB2-owned status helpers                                     */
+/* Tests: KB_STORE-owned status helpers                                     */
 /* ------------------------------------------------------------------ */
 
 static void test_status_format(void)
@@ -1238,8 +1247,8 @@ static void test_status_format(void)
    open_test_db();
    kb_build(tmpdir, "status_test", MEMORY_EMBED_TEST_FIXTURE, 1, NULL);
 
-   db2_kb_service_project_status_t status;
-   assert(db2_kb_service_collect_project_status("status_test", &status) == 0);
+   kb_store_kb_service_project_status_t status;
+   assert(kb_store_kb_service_collect_project_status("status_test", &status) == 0);
    assert(strcmp(status.project, "status_test") == 0);
    assert(status.files > 0);
    assert(status.chunks > 0);
@@ -1247,7 +1256,7 @@ static void test_status_format(void)
    /* The operator-wide detailed health probe has no active project. It must
     * aggregate current generations explicitly, never infer a checkout basename. */
    memset(&status, 0, sizeof(status));
-   assert(db2_kb_service_collect_project_status(NULL, &status) == 0);
+   assert(kb_store_kb_service_collect_project_status(NULL, &status) == 0);
    assert(status.project[0] == '\0');
    assert(status.files > 0);
    assert(status.chunks > 0);
@@ -1307,8 +1316,8 @@ int main(void)
 {
    printf("test_kb:\n");
 
-   test_db2_embed_contract();
-   test_db2_identity_key_contract();
+   test_kb_store_embed_contract();
+   test_kb_store_identity_key_contract();
 
    /* kb_resolve_project tests */
    test_resolve_project_explicit();

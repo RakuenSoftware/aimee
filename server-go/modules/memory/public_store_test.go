@@ -514,9 +514,9 @@ SET LOCAL ROLE memory_store_test;`)
 // An insert conflict must wait for the actual uncommitted identity lock, then
 // admit against the committed author's authority rather than overwrite it.
 func TestSameKeyMutationConcurrency(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

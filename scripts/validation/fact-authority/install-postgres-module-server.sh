@@ -35,7 +35,6 @@ pkill -f "aimee-module-postgres $SOCK" 2>/dev/null
 sleep 1
 cd /root
 AIMEE_HOME="$CONF" \
-AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared}" \
 AIMEE_STORE_URL="${AIMEE_STORE_URL:-postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared}" \
   AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-postgresql://aimee_migrator:aimee-migrate-e2e@127.0.0.1:5432/aimee_shared}" \
   nohup "$BIN" "$SOCK" >/root/postgres-module-server.log 2>&1 &

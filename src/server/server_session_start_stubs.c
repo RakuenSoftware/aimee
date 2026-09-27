@@ -5,7 +5,7 @@
  * The daemon links cmd_session_lifecycle.c so it can run hooks.session_start
  * in-process, but we deliberately do NOT pull in cmd_capabilities.c — it drags
  * in the legacy cmd dispatch table (commands[], subcmd_dispatch, all sibling
- * cmd_*.c files) and direct DB2 calls, which the daemon must not link in the
+ * cmd_*.c files) and direct KB_STORE calls, which the daemon must not link in the
  * typed-RPC architecture.
  *
  * The contribution is advisory, not load-bearing: build_capabilities_text adds

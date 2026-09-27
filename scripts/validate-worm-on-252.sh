@@ -40,8 +40,8 @@ python3 "$ROOT/scripts/export_c_repositories.py" \
 tar -C "$ROOT" -czf "$LOCAL_STAGE/payload.tgz" \
   aimee-server aimee-kb aimee-kb-worm \
   scripts/run-worm-worker-pg-test.sh scripts/validate-worm-fresh-guest.sh \
-  src/modules/db2/c/schema_roles.sql src/modules/db2/c/schema.sql \
-  src/modules/db2/c/schema_grants.sql src/build/obj/aimee-module-config \
+  src/modules/kb/c/schema_roles.sql src/modules/kb/c/schema.sql \
+  src/modules/kb/c/schema_grants.sql src/build/obj/aimee-module-config \
   -C "$LOCAL_STAGE" module-runtime
 cp /home/virant/.ssh/id_ed25519.pub "$LOCAL_STAGE/validation.pub"
 ssh "$HOST" "install -d -m 0700 '$REMOTE_DIR'"

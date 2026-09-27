@@ -18,8 +18,8 @@ import (
 // The store module records (owner, version, checksum) and refuses a version
 // whose checksum has changed since it ran, a version applied out of order, and
 // a partially applied migration. aimee owns the content; the module owns only the
-// fact that it ran. Namespaced by owner because aimee's and db2's histories are
-// independent -- aimee at 19 and db2 at 31 is a normal state.
+// fact that it ran. Namespaced by owner because aimee's and kb_store's histories are
+// independent -- aimee at 19 and kb_store at 31 is a normal state.
 //
 // VERSIONS ARE EXPLICIT, NOT DERIVED. Numbering them by sorted filename would
 // be stable only until someone adds a family whose name sorts in the middle,
@@ -29,7 +29,7 @@ import (
 // migration is a line appended to the end.
 
 // SchemaOwner names aimee's schema history in the store's version table. Its own
-// namespace: db2 keeps a separate one, and the two move independently.
+// namespace: kb_store keeps a separate one, and the two move independently.
 //
 // STILL "db1" AFTER THE MODULE BECAME "aimee", deliberately. This string is not
 // a label, it is the key the store has recorded against every migration it has
@@ -89,7 +89,7 @@ var schemaHistory = []struct {
 	// candidates and approach memory landed there with no Go equivalent, and
 	// src/db1_client already calls all ten of their operations.
 	{22, "schema_eval_candidates.sql"},
-	// Privacy erasure spans DB2 and DB1.  Persist the DB1 result by request id
+	// Privacy erasure spans KB_STORE and DB1.  Persist the DB1 result by request id
 	// so a completion retry carries the original count rather than zero.
 	{23, "schema_subject_erasure.sql"},
 	// Review convergence previously recognized only byte-identical artifact and

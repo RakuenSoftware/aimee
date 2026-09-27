@@ -3,7 +3,7 @@
  *
  * These primitives are shared VERBATIM by the aimee-server SQLite store
  * (modules/audit/audit_worm.c) and the aimee-kb Postgres store
- * (db2/kb_audit_worm.c), so both must produce byte-identical row hashes and
+ * (kb_store/kb_audit_worm.c), so both must produce byte-identical row hashes and
  * checkpoint MACs. This test is the single source of truth for that cross-engine
  * contract: it pins the canonical hash of a known row (the same literal asserted
  * from each store's side in test_audit_worm.c / test_kb_audit_worm.c) and locks

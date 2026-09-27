@@ -17,8 +17,8 @@
 /src/modules/vault/ @JBailes
 /src/modules/workspace/ @JBailes
 /src/modules/tools/ @JBailes
-/src/modules/db2/c/schema.sql @JBailes
-/src/modules/db2/c/schema_grants.sql @JBailes
+/src/modules/kb/c/schema.sql @JBailes
+/src/modules/kb/c/schema_grants.sql @JBailes
 /src/kb/http/ @JBailes
 /src/kb/kb_egress_admission.c @JBailes
 /control-web/ @JBailes

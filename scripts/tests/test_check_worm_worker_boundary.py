@@ -17,11 +17,11 @@ SPEC.loader.exec_module(CHECK)
 
 def sources() -> dict[str, str]:
     paths = {
-        "schema": "src/modules/db2/c/schema.sql",
-        "grants": "src/modules/db2/c/schema_grants.sql",
-        "roles": "src/modules/db2/c/schema_roles.sql",
-        "c_appender": "src/modules/db2/c/kb_audit_worm.c",
-        "fact_mutation": "src/modules/db2/c/fact_mutation.c",
+        "schema": "src/modules/kb/c/schema.sql",
+        "grants": "src/modules/kb/c/schema_grants.sql",
+        "roles": "src/modules/kb/c/schema_roles.sql",
+        "c_appender": "src/modules/kb/c/kb_audit_worm.c",
+        "fact_mutation": "src/modules/kb/c/fact_mutation.c",
         "worker": "src/kb/kb_worm_worker_main.c",
         "server": "src/server/server_main.c",
         "worm_store": "src/modules/audit/audit_worm.c",
@@ -59,8 +59,8 @@ class WormWorkerBoundaryTest(unittest.TestCase):
     def test_foreground_chain_builder_is_rejected(self) -> None:
         data = sources()
         data["c_appender"] = data["c_appender"].replace(
-            "#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM",
-            '#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM\n'
+            "#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM",
+            '#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM\n'
             '   const char *bad = "INSERT INTO kb_audit_event";\n'
             "   (void)bad;",
             1,
@@ -90,7 +90,7 @@ class WormWorkerBoundaryTest(unittest.TestCase):
         data = sources()
         data["makefile"] = data["makefile"].replace(
             "$(KB_WORM): $(KB_WORM_OBJS)",
-            "$(KB_WORM): $(KB_WORM_OBJS) $(KB_DB2_OBJS)",
+            "$(KB_WORM): $(KB_WORM_OBJS) $(KB_KB_STORE_OBJS)",
             1,
         )
         self.assertIn(
@@ -120,15 +120,11 @@ class WormWorkerBoundaryTest(unittest.TestCase):
             "roles: missing worker membership-edge repair", CHECK.audit(**data)
         )
 
-    def test_embedded_worker_public_inheritance_is_rejected(self) -> None:
+    def test_embedded_database_startup_is_rejected(self) -> None:
         data = sources()
-        data["entrypoint"] = data["entrypoint"].replace(
-            "REVOKE USAGE ON SCHEMA public FROM PUBLIC;",
-            "REVOKE USAGE ON SCHEMA public FROM aimee_kb_worm_worker;",
-            1,
-        )
+        data["entrypoint"] += "\npg_ctl start\n"
         self.assertIn(
-            "entrypoint: embedded worker inherits public schema access",
+            "entrypoint: retired embedded database startup returned",
             CHECK.audit(**data),
         )
 

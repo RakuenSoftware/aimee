@@ -68,12 +68,12 @@ func (db runtimeRoleDB) Begin(ctx context.Context) (store.Tx, error) {
 }
 
 func TestMemoryRuntimeRoleReplay(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
 		if os.Getenv("AIMEE_MEMORY_REPLAY_REQUIRED") == "1" {
-			t.Fatal("AIMEE_DB2_REPLAY_URL required")
+			t.Fatal("AIMEE_KB_STORE_REPLAY_URL required")
 		}
-		t.Skip("set AIMEE_DB2_REPLAY_URL to the packaged DB2 replay database")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL to the packaged KB_STORE replay database")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, url)
@@ -96,7 +96,7 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 		t.Fatal(err)
 	}
 	// Run the actual migration grant block, including the upgrade/reapply path.
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

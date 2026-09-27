@@ -325,12 +325,12 @@ def placed_modules(bundle: Path, placement: str) -> set[str]:
 
     The grants directory is the authority, not <placement>.modules: the latter
     lists what the image STARTS, while a grant is what the image may run at all.
-    A module that is granted but not started by default (db2 in kb) still needs
+    A module that is granted but not started by default (an optional module) still needs
     its binary present, or the supervisor comes up unhealthy.
 
     An image must compile only its own placement. Building another placement's
     process drags that process's build dependencies into an image with no reason
-    to carry them -- kb has no sqlite, server has no need of db2 -- and leaves an
+    to carry them -- each application has its own grants -- and leaves an
     executable in an image that is never allowed to run it.
     """
     if not MODULE_ID.fullmatch(placement):

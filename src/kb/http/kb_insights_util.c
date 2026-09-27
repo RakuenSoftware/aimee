@@ -1,9 +1,9 @@
 /* kb_insights_util.c: pure helpers for /v1/insights/spend (P3b). See kb_insights_util.h.
- * No db2/tenant/router deps — only cJSON — so it links into a small unit test.
+ * No kb_store/tenant/router deps — only cJSON — so it links into a small unit test.
  *
- * The row count is bounded upstream: db2_org_spend_query returns DB2_SPEND_ERR_TOOBIG
- * (never a truncated set) once the grouped result would exceed DB2_SPEND_MAX_ROWS, so by
- * the time rows reach here n is a complete set (n <= DB2_SPEND_MAX_ROWS). The grouping
+ * The row count is bounded upstream: kb_store_org_spend_query returns KB_STORE_SPEND_ERR_TOOBIG
+ * (never a truncated set) once the grouped result would exceed KB_STORE_SPEND_MAX_ROWS, so by
+ * the time rows reach here n is a complete set (n <= KB_STORE_SPEND_MAX_ROWS). The grouping
  * scratch buffers are therefore sized to n (heap, freed here) rather than a fixed cap
  * that could silently drop groups — total/by_team/by_model/by_project ALWAYS reconcile. */
 
@@ -109,7 +109,7 @@ void kb_insights_cost_sum(const char *const *costs, int n, char *out, size_t cap
  * [0..k) when idx==NULL. Emits an object with the standard field set; cost_usd is a JSON
  * STRING (numeric), never a float. Cost is summed inline (incremental accumulator) so no
  * per-group array is needed. team_key/proj_key/label_key add the group's key field. */
-static cJSON *agg_object(const db2_org_spend_row_t *rows, const int *idx, int k,
+static cJSON *agg_object(const kb_store_org_spend_row_t *rows, const int *idx, int k,
                          const char *label_key, const char *label_val, const char *proj_key,
                          int proj_has, long long proj_id, const char *team_key, long long team_val)
 {
@@ -120,7 +120,7 @@ static cJSON *agg_object(const db2_org_spend_row_t *rows, const int *idx, int k,
    long long whole_acc = 0, frac_acc = 0;
    for (int i = 0; i < k; ++i)
    {
-      const db2_org_spend_row_t *r = &rows[idx ? idx[i] : i];
+      const kb_store_org_spend_row_t *r = &rows[idx ? idx[i] : i];
       pt += r->prompt_tokens;
       ct += r->completion_tokens;
       crt += r->cache_read_tokens;
@@ -131,7 +131,7 @@ static cJSON *agg_object(const db2_org_spend_row_t *rows, const int *idx, int k,
       whole_acc += w;
       frac_acc += f;
    }
-   char cost[DB2_SPEND_COST_CAP];
+   char cost[KB_STORE_SPEND_COST_CAP];
    cost_format(whole_acc, frac_acc, cost, sizeof(cost));
    if (team_key)
       cJSON_AddNumberToObject(o, team_key, (double)team_val);
@@ -162,7 +162,8 @@ typedef enum
 } group_kind_t;
 
 /* Do rows a and b belong to the same group for this kind? */
-static int same_group(const db2_org_spend_row_t *a, const db2_org_spend_row_t *b, group_kind_t kind)
+static int same_group(const kb_store_org_spend_row_t *a, const kb_store_org_spend_row_t *b,
+                      group_kind_t kind)
 {
    switch (kind)
    {
@@ -180,7 +181,7 @@ static int same_group(const db2_org_spend_row_t *a, const db2_org_spend_row_t *b
 /* Build a by_<kind> array over rows[0..n), reusing the caller-provided scratch buffers
  * (grp: n ints, done: n bytes — both sized to n upstream, so no group is ever dropped).
  * Returns a new cJSON array (caller owns), or NULL on OOM. */
-static cJSON *group_array(const db2_org_spend_row_t *rows, int n, group_kind_t kind, int *grp,
+static cJSON *group_array(const kb_store_org_spend_row_t *rows, int n, group_kind_t kind, int *grp,
                           char *done)
 {
    cJSON *arr = cJSON_CreateArray();
@@ -215,8 +216,8 @@ static cJSON *group_array(const db2_org_spend_row_t *rows, int n, group_kind_t k
 }
 
 char *kb_insights_spend_json(int has_team, long long team, int has_project, long long project,
-                             const char *since, const char *until, const db2_org_spend_row_t *rows,
-                             int n)
+                             const char *since, const char *until,
+                             const kb_store_org_spend_row_t *rows, int n)
 {
    if (n < 0)
       n = 0;
@@ -236,7 +237,7 @@ char *kb_insights_spend_json(int has_team, long long team, int has_project, long
    cJSON_AddItemToObject(root, "total", agg_object(rows, NULL, n, NULL, NULL, NULL, 0, 0, NULL, 0));
 
    /* Scratch for the three groupings, sized to n (never a fixed cap → no dropped group).
-    * n is bounded to DB2_SPEND_MAX_ROWS upstream (a larger report is a TOOBIG error). */
+    * n is bounded to KB_STORE_SPEND_MAX_ROWS upstream (a larger report is a TOOBIG error). */
    int *grp = NULL;
    char *done = NULL;
    if (n > 0)

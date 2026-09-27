@@ -6,22 +6,22 @@
 #include "config.h"
 #include "kb_curator_queue.h"
 #include "cJSON.h"
-#include "modules/db2/c/canonical_index.h"
-#include "modules/db2/c/cross_repo_classify.h" /* xrepo_tier_name */
-#include "modules/db2/c/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
-#include "modules/db2/c/cross_repo_review.h"   /* db2_cross_repo_review_list */
-#include "modules/db2/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
-#include "modules/db2/c/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
-#include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/code_projection.h"
-#include "modules/db2/c/code_project_lifecycle.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/pgvec_transport.h"
-#include "code_collect.h"                   /* §6 live: git_resolve_default_sha + change gate */
-#include "modules/db2/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
+#include "modules/kb/c/canonical_index.h"
+#include "modules/kb/c/cross_repo_classify.h" /* xrepo_tier_name */
+#include "modules/kb/c/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
+#include "modules/kb/c/cross_repo_review.h"   /* kb_store_cross_repo_review_list */
+#include "modules/kb/c/cross_repo_stats.h" /* kb_store_cross_repo_set_trust, recompute_blocked_symbols */
+#include "modules/kb/c/kb_service_backend.h" /* kb_store_kb_ingest_queue_enqueue */
+#include "modules/kb/c/lifecycle.h"
+#include "modules/kb/c/code_projection.h"
+#include "modules/kb/c/code_project_lifecycle.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/pgvec_transport.h"
+#include "code_collect.h"                  /* §6 live: git_resolve_default_sha + change gate */
+#include "modules/kb/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
 #include "kb_rrf.h"
-#include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
-#include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
+#include "modules/kb/c/lessons.h" /* §3 actuation: earned-trust tie-break */
+#include "kb/lessons_reflect.h"   /* reflect the ledger into per-node trust */
 #include "kb_reqctx.h"
 #include "kb_scope.h"
 #include <time.h>
@@ -189,7 +189,7 @@ validate_generation:
       }
    }
    int64_t current = 0;
-   int grc = db2_code_index_project_current_generation(project, &current);
+   int grc = kb_store_code_index_project_current_generation(project, &current);
    if (grc == -2)
    {
       snprintf(out_buf, (size_t)out_cap,
@@ -763,7 +763,7 @@ static int handle_get_code_cross_repo_review(const char *project, char *out_buf,
       return 500;
    }
    int64_t dropped = 0;
-   int n = db2_cross_repo_review_list(project, "open", rows, MAXR, &dropped);
+   int n = kb_store_cross_repo_review_list(project, "open", rows, MAXR, &dropped);
    if (n < 0)
    {
       free(rows);
@@ -1008,14 +1008,14 @@ static int hybrid_fetch_trust(const char *project, kb_rrf_trust_t *out, int max)
 {
    if (!project || !project[0] || !out || max <= 0)
       return 0;
-   int64_t gen = db2_code_projection_visible_id(project);
-   db2_lessons_outcome_row_t *rows = calloc((size_t)max, sizeof(*rows));
+   int64_t gen = kb_store_code_projection_visible_id(project);
+   kb_store_lessons_outcome_row_t *rows = calloc((size_t)max, sizeof(*rows));
    lessons_reflect_input_t *inp = calloc((size_t)max, sizeof(*inp));
    lessons_reflect_entry_t *ent = calloc((size_t)max, sizeof(*ent));
    int nt = 0;
    if (rows && inp && ent)
    {
-      int nr = db2_lessons_list_outcomes(project, gen > 0 ? gen : 0, rows, max);
+      int nr = kb_store_lessons_list_outcomes(project, gen > 0 ? gen : 0, rows, max);
       if (nr < 0)
          nr = 0;
       for (int i = 0; i < nr; i++)
@@ -1069,7 +1069,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    if (max_r > 100)
       max_r = 100;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -1165,7 +1165,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
 
    /* Signal C — vector similarity (key = file_path; §5). Embed the query and
     * pgvec-search code_embeddings. Gated on a real embedder whose output dim
-    * matches the corpus (db2_embedding_dim): on a dim mismatch (e.g. the 384-dim
+    * matches the corpus (kb_store_embedding_dim): on a dim mismatch (e.g. the 384-dim
     * builtin vs a 2560-dim corpus) or a down/unconfigured embedder the leg is
     * simply empty and the route degrades to code+graph. w_vector<=0 disables it. */
    int nv = 0;
@@ -1190,7 +1190,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       int embed_unauthorized =
           cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "unauthorized"));
       cJSON_Delete(embed_0_reply);
-      if (qdim > 0 && qdim == db2_embedding_dim())
+      if (qdim > 0 && qdim == kb_store_embedding_dim())
       {
          int vector_rc =
              pgvec_code_search_paths(proj, qvec, qdim, HYBRID_PER_SIGNAL, (char *)vpaths,
@@ -1210,7 +1210,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
          kb_code_vector_status_store(&vector_status, vector_rc, nv);
       }
       else
-         kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, db2_embedding_dim(),
+         kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, kb_store_embedding_dim(),
                                      embed_unauthorized);
    }
    /* The shared Go memory owner selects scoped graph files and why records. */
@@ -1439,7 +1439,7 @@ int handle_get_code_hybrid_route(const char *method, const char *query_string, c
  * Graph analytics (proposal §4): rank a project's most-connected symbols by
  * degree centrality over the visible code projection graph — a refactor-risk
  * signal ("editing this touches a lot"). Reads the published generation's edges
- * (db2_code_projection_list_edges), computes hubs with the pure kb_graph_hubs,
+ * (kb_store_code_projection_list_edges), computes hubs with the pure kb_graph_hubs,
  * and returns the top N with in/out/weighted degree. Read-only. */
 #define HUBS_MAX_EDGES 10000
 
@@ -1460,7 +1460,7 @@ int handle_get_code_graph_hubs(const char *query_string, char *out_buf, int out_
    if (max_r > 200)
       max_r = 200;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -1478,7 +1478,7 @@ int handle_get_code_graph_hubs(const char *query_string, char *out_buf, int out_
       return 500;
    }
 
-   int ne = db2_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
+   int ne = kb_store_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
    if (ne < 0)
    {
       free(edges);
@@ -1560,7 +1560,7 @@ int handle_get_code_graph_hubs(const char *query_string, char *out_buf, int out_
  * edges of `node` — its callers/callees/containers/etc — each with the relation,
  * direction (out = node→neighbor, in = neighbor→node, self = recursive edge),
  * structural-trust weight, and the §3 provenance tag. Backs the webchat graph
- * view; not on the agent hot path. Reuses db2_code_projection_list_edges (the
+ * view; not on the agent hot path. Reuses kb_store_code_projection_list_edges (the
  * published generation's edges, capped at HUBS_MAX_EDGES) and
  * kb_graph_edge_provenance. Emits `neighbor_count` (rows returned), `match_count`
  * (total incident, pre-cap), and `truncated` (page cap hit OR scan window full). */
@@ -1584,7 +1584,7 @@ int handle_get_code_graph(const char *query_string, char *out_buf, int out_cap)
    if (max_r > 200)
       max_r = 200;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -1597,7 +1597,7 @@ int handle_get_code_graph(const char *query_string, char *out_buf, int out_cap)
       return 500;
    }
 
-   int ne = db2_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
+   int ne = kb_store_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
    if (ne < 0)
    {
       free(edges);
@@ -1730,10 +1730,10 @@ static void surprising_stats_get(const char *project, int *judged, int *confirme
    *judged = 0;
    *confirmed = 0;
    snprintf(key, sizeof(key), "surprising_judged:%s", project);
-   if (db2_kb_runtime_state_get(key, val, sizeof(val)) == 0)
+   if (kb_store_kb_runtime_state_get(key, val, sizeof(val)) == 0)
       *judged = atoi(val);
    snprintf(key, sizeof(key), "surprising_confirmed:%s", project);
-   if (db2_kb_runtime_state_get(key, val, sizeof(val)) == 0)
+   if (kb_store_kb_runtime_state_get(key, val, sizeof(val)) == 0)
       *confirmed = atoi(val);
 }
 
@@ -1755,10 +1755,10 @@ static void surprising_stats_add(const char *project, int dj, int dc)
    char key[320], val[32];
    snprintf(key, sizeof(key), "surprising_judged:%s", project);
    snprintf(val, sizeof(val), "%d", judged);
-   db2_kb_runtime_state_set(key, val);
+   kb_store_kb_runtime_state_set(key, val);
    snprintf(key, sizeof(key), "surprising_confirmed:%s", project);
    snprintf(val, sizeof(val), "%d", confirmed);
-   db2_kb_runtime_state_set(key, val);
+   kb_store_kb_runtime_state_set(key, val);
 }
 
 int handle_get_code_graph_surprising(const char *query_string, char *out_buf, int out_cap)
@@ -1812,7 +1812,7 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
    if (code_qparam(query_string, "judge", tmp, sizeof(tmp)))
       judge = (strcmp(tmp, "true") == 0 || strcmp(tmp, "1") == 0);
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -1841,7 +1841,7 @@ int handle_get_code_graph_surprising(const char *query_string, char *out_buf, in
       return 500;
    }
 
-   int ne = db2_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
+   int ne = kb_store_code_projection_list_edges(project, edges, HUBS_MAX_EDGES);
    if (ne < 0)
    {
       free(edges);
@@ -2091,7 +2091,7 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
    char sha_now[128] = ""; /* §6: default-branch SHA, tracked across the local-scan path */
    char sha_key[320] = "";
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       cJSON_Delete(root);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"failed to open knowledge service store\"}");
@@ -2154,7 +2154,7 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       {
          char stored[128] = "";
          snprintf(sha_key, sizeof(sha_key), "code_scan_sha:%s", project);
-         db2_kb_runtime_state_get(sha_key, stored, sizeof(stored));
+         kb_store_kb_runtime_state_get(sha_key, stored, sizeof(stored));
          if (!code_default_branch_changed(stored, sha_now))
          {
             snprintf(out_buf, (size_t)out_cap,
@@ -2168,7 +2168,7 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       /* Hand the walk to the ingest queue instead of running it on this request
        * thread. The contract this route owes a caller is "the files are queued
        * and ready to be ingested", not "the index is built": a canonical scan of
-       * a large checkout runs for minutes, and doing it inline pinned a db2
+       * a large checkout runs for minutes, and doing it inline pinned a kb_store
        * connection for that whole time (the >300s lease warnings) while the
        * caller sat on a timeout it had no way to size. Worse, the caller's
        * timeout was then recorded as the KB being unreachable, which tripped the
@@ -2177,8 +2177,8 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
        * aimee-kb already owns this queue and the workers that claim off it, so
        * this is the existing asynchronous path, not a new one. Enqueue is a
        * single insert: it answers in milliseconds or it honestly failed. */
-      int queued = db2_kb_ingest_queue_enqueue(project, root_path, "", force,
-                                               DB2_KB_INGEST_PRIO_INTERACTIVE);
+      int queued = kb_store_kb_ingest_queue_enqueue(project, root_path, "", force,
+                                                    KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
       if (queued < 0)
       {
          cJSON_Delete(root);
@@ -2224,7 +2224,7 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
    if (sha_now[0])
    {
       snprintf(sha_key, sizeof(sha_key), "code_scan_sha:%s", project);
-      db2_kb_runtime_state_set(sha_key, sha_now);
+      kb_store_kb_runtime_state_set(sha_key, sha_now);
    }
 
    /* §6 live (opt-in): install the post-merge reindex hook so future pulls keep the

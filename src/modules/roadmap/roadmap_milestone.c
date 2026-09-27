@@ -6,9 +6,9 @@
 #include "aimee.h"
 #include "roadmap_milestone.h"
 #include "db1_client/roadmap_runtime.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "headers/agent_exec.h"
 #include "headers/agent_config.h"
 #include "headers/dstr.h"
@@ -62,7 +62,7 @@ const char *roadmap_milestone_parse_verdict(const char *review_text)
 
 int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, const char *level)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -140,10 +140,10 @@ int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, co
 
 char *roadmap_milestone_review_prompt(const char *roadmap_id, const char *milestone_id)
 {
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    memset(&row, 0, sizeof(row));
 
-   if (db2_artifact_read(milestone_id, &row, NULL, 0, NULL) != 0)
+   if (kb_store_artifact_read(milestone_id, &row, NULL, 0, NULL) != 0)
       return NULL;
 
    cJSON *payload = cJSON_Parse(row.payload_json);

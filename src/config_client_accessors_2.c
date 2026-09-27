@@ -745,7 +745,7 @@ size_t config_computer_use_default_navigation_copy(char *out, size_t n)
 
 const char *config_kb_client_url(void)
 {
-   static _Thread_local char value[CONFIG_DB2_URL_LEN];
+   static _Thread_local char value[CONFIG_KB_CLIENT_URL_LEN];
    (void)config_client_read_string("kb_client_url", value, sizeof(value));
    return value;
 }
@@ -757,7 +757,7 @@ int config_set_kb_client_url(const char *value)
 
 size_t config_kb_client_url_copy(char *out, size_t n)
 {
-   char value[CONFIG_DB2_URL_LEN];
+   char value[CONFIG_KB_CLIENT_URL_LEN];
    if (!out || n == 0)
       return 0;
    (void)config_client_read_string("kb_client_url", value, sizeof(value));
@@ -849,28 +849,6 @@ size_t config_kb_curator_custom_stages_copy(char *out, size_t n)
    if (!out || n == 0)
       return 0;
    (void)config_client_read_string("kb_curator_custom_stages", value, sizeof(value));
-   snprintf(out, n, "%s", value);
-   return sizeof(value);
-}
-
-const char *config_db2_vector_corpus_index(void)
-{
-   static _Thread_local char value[16];
-   (void)config_client_read_string("db2_vector_corpus_index", value, sizeof(value));
-   return value;
-}
-
-int config_set_db2_vector_corpus_index(const char *value)
-{
-   return config_client_set_string("db2_vector_corpus_index", value);
-}
-
-size_t config_db2_vector_corpus_index_copy(char *out, size_t n)
-{
-   char value[16];
-   if (!out || n == 0)
-      return 0;
-   (void)config_client_read_string("db2_vector_corpus_index", value, sizeof(value));
    snprintf(out, n, "%s", value);
    return sizeof(value);
 }

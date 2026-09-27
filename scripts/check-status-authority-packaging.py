@@ -9,6 +9,7 @@ import sys
 def main() -> int:
     text = Path("Dockerfile.status-authority").read_text(encoding="utf-8")
     required = {
+        "PostgreSQL authority provider": r"COPY --from=postgres-provider /out/aimee-module-postgres /usr/local/libexec/aimee-modules/aimee-module-postgres",
         "dedicated build": r"make -C src status-authority-core",
         "scratch runtime": r"(?m)^FROM scratch\s*$",
         "allowlisted copy": r"COPY --from=build /runtime /",

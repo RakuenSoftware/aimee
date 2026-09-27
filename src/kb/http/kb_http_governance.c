@@ -8,9 +8,9 @@
 #include "kb_blob_reconcile.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
-#include "modules/db2/c/artifacts.h"    /* db2_audit_event_* */
-#include "modules/db2/c/decision_log.h" /* db2_decision_log_* */
-#include "modules/db2/c/kb_payload.h"
+#include "modules/kb/c/artifacts.h"    /* kb_store_audit_event_* */
+#include "modules/kb/c/decision_log.h" /* kb_store_decision_log_* */
+#include "modules/kb/c/kb_payload.h"
 #include "log.h"
 
 #include <math.h>
@@ -66,18 +66,18 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
       char *sessions = cJSON_PrintUnformatted(jids);
       int64_t memories = 0, documents = 0;
       int already = 0;
-      int rc = sessions ? db2_subject_erasure_begin(jr->valuestring, js->valuestring, sessions,
-                                                    &memories, &documents, &already)
+      int rc = sessions ? kb_store_subject_erasure_begin(jr->valuestring, js->valuestring, sessions,
+                                                         &memories, &documents, &already)
                         : -1;
       free(sessions);
       if (rc != 0)
       {
          cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"DB2 erasure failed\"}");
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"KB_STORE erasure failed\"}");
          return 500;
       }
       cJSON *resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "status", "db2_done");
+      cJSON_AddStringToObject(resp, "status", "knowledge_done");
       cJSON_AddStringToObject(resp, "request_id", jr->valuestring);
       cJSON_AddNumberToObject(resp, "memory_count", (double)memories);
       cJSON_AddNumberToObject(resp, "document_count", (double)documents);
@@ -124,7 +124,8 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
    }
    int event_created = 0, coverage_complete = 0;
    int64_t pending_owners = 0;
-   int rc = db2_subject_erasure_ack(jr->valuestring, actor_key, transport, (int64_t)jc->valuedouble,
+   int rc =
+       kb_store_subject_erasure_ack(jr->valuestring, actor_key, transport, (int64_t)jc->valuedouble,
                                     &event_created, &coverage_complete, &pending_owners);
    cJSON_Delete(req);
    if (rc != 0)
@@ -198,7 +199,7 @@ static int emit(cJSON *root, char *out_buf, int out_cap, int status)
    return status;
 }
 
-static cJSON *decision_to_json(const db2_decision_log_row_t *d)
+static cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON_AddNumberToObject(o, "id", (double)d->id);
@@ -224,9 +225,9 @@ static int list_decisions(const char *qs, char *out_buf, int out_cap)
    qparam(qs, "status", status, sizeof(status));
    qparam(qs, "limit", limit_s, sizeof(limit_s));
    int limit = limit_s[0] ? atoi(limit_s) : 50;
-   db2_decision_log_row_t rows[DECISION_LIST_MAX];
-   int n = db2_decision_log_list_scoped(subject[0] ? subject : NULL, status[0] ? status : NULL,
-                                        limit, rows, DECISION_LIST_MAX);
+   kb_store_decision_log_row_t rows[DECISION_LIST_MAX];
+   int n = kb_store_decision_log_list_scoped(subject[0] ? subject : NULL, status[0] ? status : NULL,
+                                             limit, rows, DECISION_LIST_MAX);
    if (n < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"decisions unavailable\"}");
@@ -243,8 +244,8 @@ static int list_decisions(const char *qs, char *out_buf, int out_cap)
 /* GET /v1/decisions/{id} — the decision plus its supersede chain (older first). */
 static int get_decision(int64_t id, char *out_buf, int out_cap)
 {
-   db2_decision_log_row_t d;
-   if (db2_decision_log_get(id, &d) != 0)
+   kb_store_decision_log_row_t d;
+   if (kb_store_decision_log_get(id, &d) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"decision not found\"}");
       return 404;
@@ -255,8 +256,8 @@ static int get_decision(int64_t id, char *out_buf, int out_cap)
    int guard = 0;
    while (prev > 0 && guard++ < 64)
    {
-      db2_decision_log_row_t p;
-      if (db2_decision_log_get(prev, &p) != 0)
+      kb_store_decision_log_row_t p;
+      if (kb_store_decision_log_get(prev, &p) != 0)
          break;
       cJSON_AddItemToArray(chain, decision_to_json(&p));
       prev = p.supersedes_id;
@@ -291,7 +292,7 @@ static int create_decision(const char *body, char *out_buf, int out_cap)
     * linked policy is not falsely rejected. The DB index remains authoritative. */
    if (supersedes_id == 0)
    {
-      int64_t active = db2_decision_log_active_id(subject, linked_policy_id);
+      int64_t active = kb_store_decision_log_active_id(subject, linked_policy_id);
       if (active > 0)
       {
          cJSON_Delete(req);
@@ -303,17 +304,17 @@ static int create_decision(const char *body, char *out_buf, int out_cap)
       }
    }
 
-   db2_decision_log_row_t out;
-   int rc = db2_decision_log_record(subject, options, chosen, rationale ? rationale : "",
-                                    author ? author : "", linked_policy_id, revisit ? revisit : "",
-                                    supersedes_id, &out);
+   kb_store_decision_log_row_t out;
+   int rc = kb_store_decision_log_record(subject, options, chosen, rationale ? rationale : "",
+                                         author ? author : "", linked_policy_id,
+                                         revisit ? revisit : "", supersedes_id, &out);
    cJSON_Delete(req);
    if (rc != 0)
    {
       /* record() can fail from: a race that filled the scope after the pre-check
        * (=> genuine 409), a stale/wrong-scope supersedes_id (=> 400), or a store
        * error (=> 503). Re-check the scope to pick the accurate code. */
-      if (supersedes_id == 0 && db2_decision_log_active_id(subject, linked_policy_id) > 0)
+      if (supersedes_id == 0 && kb_store_decision_log_active_id(subject, linked_policy_id) > 0)
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"conflict: an active decision already exists for this scope\"}");
@@ -366,11 +367,11 @@ static int update_decision(int64_t id, const char *action, const char *body, cha
    }
    int rc;
    if (strcmp(action, "outcome") == 0)
-      rc = db2_decision_log_set_outcome(id, val);
+      rc = kb_store_decision_log_set_outcome(id, val);
    else if (strcmp(action, "status") == 0)
-      rc = db2_decision_log_set_status(id, val);
+      rc = kb_store_decision_log_set_status(id, val);
    else
-      rc = db2_decision_log_set_revisit(id, val);
+      rc = kb_store_decision_log_set_revisit(id, val);
    cJSON_Delete(req);
    if (rc != 0)
    {
@@ -378,8 +379,8 @@ static int update_decision(int64_t id, const char *action, const char *body, cha
       return 404;
    }
    audit_log("console_decision_update", "id=%lld field=%s", (long long)id, action);
-   db2_decision_log_row_t d;
-   if (db2_decision_log_get(id, &d) == 0)
+   kb_store_decision_log_row_t d;
+   if (kb_store_decision_log_get(id, &d) == 0)
       return emit(decision_to_json(&d), out_buf, out_cap, 200);
    snprintf(out_buf, (size_t)out_cap, "{\"ok\":true}");
    return 200;
@@ -416,9 +417,9 @@ static int list_audit(const char *qs, char *out_buf, int out_cap)
       return 400;
    }
    int limit = limit_s[0] ? atoi(limit_s) : 100;
-   db2_audit_event_row_t rows[AUDIT_LIST_MAX];
-   int n = db2_audit_event_list(since, until[0] ? until : NULL, scope[0] ? scope : NULL, limit,
-                                rows, AUDIT_LIST_MAX);
+   kb_store_audit_event_row_t rows[AUDIT_LIST_MAX];
+   int n = kb_store_audit_event_list(since, until[0] ? until : NULL, scope[0] ? scope : NULL, limit,
+                                     rows, AUDIT_LIST_MAX);
    if (n < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"audit unavailable\"}");

@@ -1,6 +1,6 @@
 /* lessons_capture.c: see lessons_capture.h. The cite-emit hook substrate. */
 #include "lessons_capture.h"
-#include "modules/db2/c/lessons.h"
+#include "modules/kb/c/lessons.h"
 
 int lessons_capture_turn(lessons_cite_tracker_t *tracker, const char *session_id,
                          const char *turn_id, int turn, const char *project_id,
@@ -23,11 +23,11 @@ int lessons_capture_turn(lessons_cite_tracker_t *tracker, const char *session_id
       /* Cite-again fired → this source earned an auto-`useful`. Agent-sourced +
        * unconfirmed: it influences nothing until S3c's actor model accepts it, per
        * the correction-authority model. Best-effort: a DB failure is not fatal. */
-      int64_t oid = db2_lessons_record_outcome(session_id, turn_id, project_id, generation_id,
-                                               "useful", "", "", "", "agent", 0);
+      int64_t oid = kb_store_lessons_record_outcome(session_id, turn_id, project_id, generation_id,
+                                                    "useful", "", "", "", "agent", 0);
       /* Count only a COMPLETE record (outcome + its citation), so `recorded` never
        * overstates what is actually visible in the ledger. */
-      if (oid > 0 && db2_lessons_record_citation(oid, node, "useful") == 0)
+      if (oid > 0 && kb_store_lessons_record_citation(oid, node, "useful") == 0)
          recorded++;
    }
    return recorded;

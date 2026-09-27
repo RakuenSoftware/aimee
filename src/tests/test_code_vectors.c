@@ -9,12 +9,12 @@
 
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "platform_test_util.h"
 #include "../kb/kb_service_code_embed.h"
-#include "../modules/db2/c/pgvec_kb_service.h"
-#include "../modules/db2/c/entity_nodes.h"
+#include "../modules/kb/c/pgvec_kb_service.h"
+#include "../modules/kb/c/entity_nodes.h"
 
 static char g_db_path[512];
 
@@ -39,12 +39,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   db2_test_shim_open_path(g_db_path);
+   kb_store_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }

@@ -21,9 +21,9 @@ func (s recoverySlowReader) Query(ctx context.Context, _ string, _ ...any) (stor
 }
 
 func TestEvidenceRecoveryDurableRoundPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

@@ -609,7 +609,7 @@ cJSON *marshal_memory_prefer(int argc, char **argv)
 /* `aimee memory archive <name> <body>` — preserve a memory in db1 as a private,
  * NON-RECALLABLE archival row (kind='archive' + tier L1 both keep it out of the
  * L2/fact|preference recall selectors). The .md-retirement migration writes here
- * so nothing is lost and nothing leaks to org (db2) before operator
+ * so nothing is lost and nothing leaks to org (kb_store) before operator
  * classification. */
 cJSON *marshal_memory_archive(int argc, char **argv)
 {

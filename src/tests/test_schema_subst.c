@@ -1,4 +1,4 @@
-/* test_schema_subst.c: the DB2 schema is shipped with a __EMBED_DIM__
+/* test_schema_subst.c: the KB_STORE schema is shipped with a __EMBED_DIM__
  * placeholder in its vector embedding columns so a deployment can run a single
  * embedder at its own dimension (384 for the active contract; migrated
  * deployments may retain another recorded width until they are re-embedded).
@@ -12,8 +12,8 @@
 #include <string.h>
 
 #include "aimee.h" /* EMBED_MAX_DIM — the upper bound an unusable width is judged against */
-#include "modules/db2/c/db_schema.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db_schema.h"
+#include "modules/kb/c/db_postgres.h"
 
 /* Capture the SQL db_apply_schema_postgres() hands to Postgres. */
 static char *g_captured_sql = NULL;

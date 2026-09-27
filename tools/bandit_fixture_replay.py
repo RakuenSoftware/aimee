@@ -2,7 +2,7 @@
 """Fixture replay harness for the contextual-bandit substrate.
 
 Exercises all fixture kinds in benchmarks/bandit/queries.json without
-requiring a live DB2 or network access.
+requiring a live KB_STORE or network access.
 
 Usage:
     python3 tools/bandit_fixture_replay.py [queries.json]

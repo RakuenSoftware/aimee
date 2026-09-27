@@ -4,15 +4,15 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "dashboard.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "platform_test_util.h"
 #include <aimee/workspace/workspace.h>
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_query.h"
-#include "../modules/db2/c/memory_relations.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/lifecycle.h"
+#include "../modules/kb/c/memory_query.h"
+#include "../modules/kb/c/memory_relations.h"
 
 static char tmpdir[64];
 
@@ -23,7 +23,7 @@ static char tmpdir[64];
 static int count_for_memory(const char *sql, int64_t memory_id)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    aimee_pg_bind_int64(st, "?1", memory_id);
    int v = 0;
@@ -37,7 +37,7 @@ static int count_for_memory(const char *sql, int64_t memory_id)
 static int count_for_key(const char *sql, const char *key)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    aimee_pg_bind_text(st, "?1", key);
    int v = 0;
@@ -51,7 +51,7 @@ static void insert_memory_entity(int64_t memory_id, const char *entity)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "INSERT INTO memory_entities(memory_id, entity) VALUES (?1, ?2)", err,
+       kb_store_conn(), "INSERT INTO memory_entities(memory_id, entity) VALUES (?1, ?2)", err,
        sizeof(err));
    assert(st != NULL);
    assert(aimee_pg_bind_int64(st, "?1", memory_id) == 0);
@@ -67,12 +67,12 @@ static void setup(void)
    assert(platform_mkdtemp(tmpdir) != NULL);
    platform_setenv("HOME", tmpdir);
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    char cmd[256];
    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
    (void)system(cmd);
@@ -87,8 +87,8 @@ static int seed_workspace_scope(int64_t id, const char *workspace)
    /* Fixture setup only: scope mutation policy is exercised in Go. */
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "UPDATE memories SET scope_type='workspace',scope_value=?2 WHERE id=?1", err,
-       sizeof(err));
+       kb_store_conn(), "UPDATE memories SET scope_type='workspace',scope_value=?2 WHERE id=?1",
+       err, sizeof(err));
    assert(st);
    assert(aimee_pg_bind_int64(st, "?1", id) == 0);
    assert(aimee_pg_bind_text(st, "?2", workspace) == 0);
@@ -206,8 +206,9 @@ static void test_auto_tag_shared_keywords(void)
    /* auto_tag was called during insert, check for _shared tag */
    char ws_err[128] = "";
    aimee_pg_stmt_t *ws_st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2",
-       ws_err, sizeof(ws_err));
+       kb_store_conn(),
+       "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2", ws_err,
+       sizeof(ws_err));
    assert(ws_st != NULL);
    aimee_pg_bind_int64(ws_st, "?1", m.id);
    aimee_pg_bind_text(ws_st, "?2", SHARED_WORKSPACE);
@@ -229,8 +230,9 @@ static void test_auto_tag_shared_keywords(void)
                         &long_memory) == 0);
 
    ws_st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2",
-       ws_err, sizeof(ws_err));
+       kb_store_conn(),
+       "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2", ws_err,
+       sizeof(ws_err));
    assert(ws_st != NULL);
    aimee_pg_bind_int64(ws_st, "?1", long_memory.id);
    aimee_pg_bind_text(ws_st, "?2", SHARED_WORKSPACE);
@@ -343,7 +345,7 @@ static void test_api_memory_stats_includes_scope_counts(void)
 
    char conf_err[128] = "";
    aimee_pg_stmt_t *conf_st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "INSERT INTO memory_conflicts (memory_a, memory_b, detected_at, resolved)"
                         " VALUES (?1, ?2, pg_now_text(), 0)",
                         conf_err, sizeof(conf_err));
@@ -432,14 +434,14 @@ static void test_indexed_lexical_recall_and_substring_compatibility(void)
 
    memory_t rows[8];
    aimee_pg_test_stmt_count_reset();
-   int n = db2_memory_find_facts_fts("performance", 8, rows, 8);
+   int n = kb_store_memory_find_facts_fts("performance", 8, rows, 8);
    assert(n >= 1);
    assert(rows[0].id == indexed.id);
    assert(aimee_pg_test_stmt_count() == 1);
 
    /* FTS is word based, so an infix-only legacy match deliberately misses the
     * index and must still be recovered by the lexical compatibility fallback. */
-   assert(db2_memory_find_facts_fts("candidate", 8, rows, 8) == 0);
+   assert(kb_store_memory_find_facts_fts("candidate", 8, rows, 8) == 0);
    n = memory_find_facts_lexical_fallback("candidate", NULL, NULL, 8, rows, 8);
    assert(n >= 1);
    int found = 0;
@@ -465,7 +467,7 @@ static void test_memory_link_batch_matches_single_query_surface(void)
    int64_t ids[] = {a.id, c.id};
    memory_link_t rows[8];
    aimee_pg_test_stmt_count_reset();
-   int n = db2_memory_link_query_many(ids, 2, rows, 8);
+   int n = kb_store_memory_link_query_many(ids, 2, rows, 8);
    assert(aimee_pg_test_stmt_count() == 1);
    assert(n == 2);
    int saw_depends = 0, saw_related = 0;

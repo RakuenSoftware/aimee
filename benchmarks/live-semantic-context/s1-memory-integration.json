@@ -119,6 +119,10 @@
     {
       "release_text": "    {\"memory_get\", mcph_memory_get, NULL},\n    {\"list_facts\", mcph_list_facts, NULL},\n    {\"memory_briefing\", mcph_memory_briefing, NULL},\n    {\"memory_serve\", mcph_memory_serve, \"core,review_indexed\"},\n    {\"task_projection\", mcph_task_projection, \"core,review_indexed\"},\n    {\"memory_hygiene\", mcph_memory_hygiene, \"core,review_indexed\"},\n    {\"memory_claim_card\", mcph_memory_claim_card, \"core,review_indexed\"},\n    {\"get_identity\", mcph_get_identity, NULL},\n    {\"list_curiosity_items\", mcph_list_curiosity_items, NULL},\n    {\"create_prospective_memory\", mcph_create_prospective_memory, NULL},\n",
       "frozen_text": "    {\"memory_get\", mcph_memory_get, NULL},\n    {\"list_facts\", mcph_list_facts, NULL},\n    {\"memory_briefing\", mcph_memory_briefing, NULL},\n    {\"get_identity\", mcph_get_identity, NULL},\n    {\"list_curiosity_items\", mcph_list_curiosity_items, NULL},\n    {\"create_prospective_memory\", mcph_create_prospective_memory, NULL},\n"
+    },
+    {
+      "release_text": "#include \"modules/kb/c/curiosity.h\"",
+      "frozen_text": "#include \"modules/db2/c/curiosity.h\""
     }
   ],
   "src/modules/protocols/mcp/mcp_tools_extended.c": [

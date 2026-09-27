@@ -1,7 +1,7 @@
 # Curator pipeline
 
 The curator turns committed source into reviewed, linked knowledge in the background. It runs inside
-`aimee-kb`; DB2 is the queue and source of truth.
+`aimee-kb`; KB_STORE is the queue and source of truth.
 
 ## Lanes
 

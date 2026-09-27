@@ -38,8 +38,8 @@ flowchart LR
     E -->|yes| I[bounded in-process inspection<br/>HTML, DOCX, PPTX, XLSX, or plain]
     I --> D{disposition}
     D -->|clean| N
-    D -->|review, reject, invalid,<br/>unsupported, or resource limit| STOP[stop before conversion<br/>and before any DB2 row]
-    PDF --> S[(store source and<br/>lexical evidence in DB2)]
+    D -->|review, reject, invalid,<br/>unsupported, or resource limit| STOP[stop before conversion<br/>and before any KB_STORE row]
+    PDF --> S[(store source and<br/>lexical evidence in KB_STORE)]
     N --> S
     S --> C[chunk and index]
     C --> X[extract candidates]
@@ -50,7 +50,7 @@ flowchart LR
 ```
 
 The fast path commits usable source and lexical evidence. Background workers add embeddings, typed
-artifacts, links, contradiction checks, and synthesis. Workers claim durable DB2 queue rows, so a
+artifacts, links, contradiction checks, and synthesis. Workers claim durable KB_STORE queue rows, so a
 restart or second KB process does not duplicate the same unit.
 
 When structural inspection is enabled, it runs on raw non-PDF bytes before a
@@ -143,7 +143,7 @@ stays opt-in. See the
 
 ## Memory lifecycle
 
-Session context begins as local DB1 evidence. Durable, shareable knowledge belongs in DB2 after the
+Session context begins as local DB1 evidence. Durable, shareable knowledge belongs in KB_STORE after the
 owning write or promotion contract accepts it. Useful records strengthen through recall and feedback;
 stale or contradicted records can decay without deleting their history.
 

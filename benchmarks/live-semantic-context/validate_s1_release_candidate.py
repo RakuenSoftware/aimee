@@ -74,6 +74,15 @@ def build_plan(makefile: str, rules: str) -> list[str]:
                 for line in result.stdout.splitlines() if line.strip()]
 
 
+def knowledge_namespace(text: str) -> str:
+    """Normalize only the reviewed domain rename, preserving frozen evidence."""
+    text = text.replace("modules/db2/c", "modules/kb/c")
+    text = re.sub(r"(?<![A-Za-z0-9])db2(?=[_/.-]|$)", "kb_store", text)
+    text = re.sub(r"(?<![A-Za-z0-9])DB2(?=[_]|$)", "KB_STORE", text)
+    return text.replace("unit-test-kb_store", "unit-test-kb-store").replace(
+        "kb_store-test-template", "kb-store-test-template")
+
+
 def build_files_match(candidate_commit: str) -> bool:
     candidate = [git_output("show", f"{candidate_commit}:{path}") for path in BUILD_PATHS]
     current = [(ROOT / path).read_text() for path in BUILD_PATHS]
@@ -83,7 +92,18 @@ def build_files_match(candidate_commit: str) -> bool:
     if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
         return False
     candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
-    return build_plan(*candidate) == build_plan(*current)
+    # KB_STORE retirement relocates the same knowledge headers and removes libpq
+    # from native linking. This SQLite-backed probe has no PostgreSQL calls.
+    # Normalize only those two reviewed changes; retain every other build input.
+    if (ROOT / "src/modules/db2").exists():
+        return False
+    candidate = [knowledge_namespace(text) for text in candidate]
+    # Remove the reviewed Make variable before expansion: pkg-config may add
+    # a platform-specific -L directory as well as -lpq. Do not discard other
+    # linker directories or libraries from either expanded command.
+    candidate[0] = candidate[0].replace(" $(PQ_LIB)", "")
+    frozen_plan = build_plan(*candidate)
+    return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.
@@ -124,10 +144,14 @@ def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
     integrations = REVIEWED_MEMORY_INTEGRATIONS.get(path)
     if not integrations:
         return False
+    current = knowledge_namespace(current)
+    frozen = knowledge_namespace(frozen)
     for block in integrations:
-        if current.count(block["release_text"]) != 1:
+        release_text = knowledge_namespace(block["release_text"])
+        frozen_text = knowledge_namespace(block["frozen_text"])
+        if current.count(release_text) != 1:
             return False
-        current = current.replace(block["release_text"], block["frozen_text"], 1)
+        current = current.replace(release_text, frozen_text, 1)
     return current.strip() == frozen.strip()
 
 

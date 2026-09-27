@@ -173,7 +173,7 @@ static struct
    char capture_session[128];
    durable_pending_t *durable_head;
    durable_pending_t *durable_tail;
-   uint32_t durable_pending_count;
+   atomic_uint durable_pending_count;
    uint64_t durable_retry_after_ns;
    module_fragment_tracker_t module_fragments[AB_MODULE_FRAGMENT_TRACKERS];
    int started;
@@ -205,6 +205,8 @@ static struct
 /* Guards start/stop transitions and the started/terminated fields. Separate from
  * g.pub_lock (which serializes producers) and never held across a producer wait. */
 static pthread_mutex_t start_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Capture can enqueue before the writer starts. Never hold this across a sink call. */
+static pthread_mutex_t durable_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Service-owned sinks live outside `g` because start_locked() resets the bus
  * runtime. Configuration is immutable while the bus is running, guarded by
@@ -405,8 +407,6 @@ static int persist_durable(const char *action, const char *subject, const char *
 static int queue_durable(const char *action, const char *subject, const char *verdict,
                          const char *detail)
 {
-   if (g.durable_pending_count >= AB_DUR_PENDING_MAX)
-      return 0;
    durable_pending_t *p = calloc(1, sizeof *p);
    if (!p)
       return 0;
@@ -414,12 +414,20 @@ static int queue_durable(const char *action, const char *subject, const char *ve
    snprintf(p->subject, sizeof p->subject, "%s", subject ? subject : "");
    snprintf(p->verdict, sizeof p->verdict, "%s", verdict ? verdict : "");
    snprintf(p->detail, sizeof p->detail, "%s", detail ? detail : "");
+   pthread_mutex_lock(&durable_lock);
+   if (atomic_load(&g.durable_pending_count) >= AB_DUR_PENDING_MAX)
+   {
+      pthread_mutex_unlock(&durable_lock);
+      free(p);
+      return 0;
+   }
    if (g.durable_tail)
       g.durable_tail->next = p;
    else
       g.durable_head = p;
    g.durable_tail = p;
-   g.durable_pending_count++;
+   atomic_fetch_add(&g.durable_pending_count, 1);
+   pthread_mutex_unlock(&durable_lock);
    return 1;
 }
 
@@ -434,8 +442,7 @@ static int persist_or_queue_durable(const char *action, const char *subject, con
     * start; without one there is nowhere honest to claim the row is durable. */
    if (!sinks.durable)
       return 0;
-   if (persist_durable(action, subject, verdict, detail))
-      return 1;
+   /* The consumer routes PostgreSQL replies; calling the sink here deadlocks it. */
    if (queue_durable(action, subject, verdict, detail))
       return -1;
    atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
@@ -459,12 +466,14 @@ static void discard_pending_durable(void)
 static uint32_t flush_pending_durable(void)
 {
    uint64_t now = bus_runtime_monotonic_ns();
-   if (g.durable_head && now < g.durable_retry_after_ns)
+   if (atomic_load(&g.durable_pending_count) && now < g.durable_retry_after_ns)
       return 0;
    uint32_t n = 0;
-   while (g.durable_head)
+   while (atomic_load(&g.durable_pending_count))
    {
+      pthread_mutex_lock(&durable_lock);
       durable_pending_t *p = g.durable_head;
+      pthread_mutex_unlock(&durable_lock);
       if (!persist_durable(p->action, p->subject, p->verdict, p->detail))
       {
          /* PostgreSQL may not be ready when the KB daemon starts. Retry the
@@ -472,15 +481,17 @@ static uint32_t flush_pending_durable(void)
          g.durable_retry_after_ns = now + 1000000000ull;
          break;
       }
+      pthread_mutex_lock(&durable_lock);
       g.durable_head = p->next;
       if (!g.durable_head)
          g.durable_tail = NULL;
-      g.durable_pending_count--;
+      atomic_fetch_sub(&g.durable_pending_count, 1);
+      pthread_mutex_unlock(&durable_lock);
       free(p);
       atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
       n++;
    }
-   if (!g.durable_head)
+   if (!atomic_load(&g.durable_pending_count))
       g.durable_retry_after_ns = 0;
    return n;
 }
@@ -536,44 +547,63 @@ static int guardrail_enqueue(const uint8_t *payload, uint32_t len)
  * the host, so a call from there waits for a reply it is itself responsible for
  * routing. Any thread that is not the consumer will do; this one is dedicated so
  * a slow store cannot delay the ring. */
+/* Both store-backed sinks run here, including retries of startup audit rows. */
 static void *guardrail_writer_main(void *arg)
 {
    (void)arg;
    for (;;)
    {
       pthread_mutex_lock(&g.writer_lock);
-      while (g.writer_count == 0 && !atomic_load_explicit(&g.writer_finish, memory_order_acquire))
-         pthread_cond_wait(&g.writer_ready, &g.writer_lock);
-      if (g.writer_count == 0)
+      if (g.writer_count == 0 && !atomic_load(&g.writer_finish))
       {
-         pthread_mutex_unlock(&g.writer_lock);
-         break; /* asked to finish, and nothing left */
+         /* A timed wait also services capture rows queued before writer startup
+          * and retries an unavailable store without blocking the bus consumer. */
+         struct timespec wake;
+         clock_gettime(CLOCK_REALTIME, &wake);
+         wake.tv_nsec += 100000000;
+         if (wake.tv_nsec >= 1000000000)
+         {
+            wake.tv_sec++;
+            wake.tv_nsec -= 1000000000;
+         }
+         pthread_cond_timedwait(&g.writer_ready, &g.writer_lock, &wake);
       }
       uint8_t payload[AB_GUARDRAIL_MAX];
-      uint32_t len = g.writer_q[g.writer_head].len;
-      memcpy(payload, g.writer_q[g.writer_head].payload, len);
-      g.writer_head = (g.writer_head + 1) % AB_WRITER_QUEUE;
-      g.writer_count--;
+      uint32_t len = 0;
+      if (g.writer_count)
+      {
+         len = g.writer_q[g.writer_head].len;
+         memcpy(payload, g.writer_q[g.writer_head].payload, len);
+         g.writer_head = (g.writer_head + 1) % AB_WRITER_QUEUE;
+         g.writer_count--;
+      }
+      int finishing = atomic_load(&g.writer_finish);
       g.writer_busy = 1;
       pthread_mutex_unlock(&g.writer_lock);
 
-      /* Outside the lock: this is the call that can take milliseconds, and
-       * holding the queue lock across it would stall the consumer's handoff. */
-      if (write_guardrail(payload, len))
-         atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
-      else
-         atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      if (len)
+      {
+         if (write_guardrail(payload, len))
+            atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+         else
+            atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      }
+      if (finishing)
+         g.durable_retry_after_ns = 0;
+      (void)flush_pending_durable();
+      /* Release this writer's provider lease, never the consumer's lease. */
+      if (sinks.sink_idle)
+         sinks.sink_idle(sinks.sink_idle_ctx);
 
       pthread_mutex_lock(&g.writer_lock);
       g.writer_busy = 0;
+      int done = finishing && g.writer_count == 0;
       if (g.writer_count == 0)
          pthread_cond_broadcast(&g.writer_drained);
       pthread_mutex_unlock(&g.writer_lock);
+      if (done)
+         break;
    }
-   pthread_mutex_lock(&g.writer_lock);
-   g.writer_busy = 0;
-   pthread_cond_broadcast(&g.writer_drained);
-   pthread_mutex_unlock(&g.writer_lock);
    return NULL;
 }
 
@@ -901,7 +931,6 @@ static void *consumer_main(void *arg)
       uint32_t routed = bus_host_pump(&g.host);
       pthread_mutex_unlock(&g.host_lock);
       uint32_t n = drain();
-      n += flush_pending_durable();
       /* Flush the capture stream on the threshold (bound memory during a burst)
        * or when the flow goes idle (so a recorded row is not stranded in memory
        * waiting for more traffic). */
@@ -909,15 +938,6 @@ static void *consumer_main(void *arg)
          capture_flush();
       if (n == 0 && routed == 0)
       {
-         /* Idle: let the sink drop anything it is holding per-thread before we
-          * sleep. The KB's WORM append leases a pooled DB2 connection lazily and
-          * nothing in this loop ever ends a unit of work, so without this the
-          * consumer pinned one pool member from its first durable row until
-          * process exit -- the pool reaper reported it as a stuck lease held for
-          * the whole uptime. Only on the idle path: during a burst the lease is
-          * worth keeping, and this is exactly where the burst has ended. */
-         if (sinks.sink_idle)
-            sinks.sink_idle(sinks.sink_idle_ctx);
          struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
          nanosleep(&nap, NULL);
          if (nap_ns < nap_max_ns)
@@ -941,9 +961,7 @@ static void *consumer_main(void *arg)
       pthread_mutex_unlock(&g.host_lock);
       empty = (drain() == 0) ? empty + 1 : 0;
    }
-   capture_flush();              /* persist whatever the final drain recorded */
-   g.durable_retry_after_ns = 0; /* make one final attempt regardless of cadence */
-   (void)flush_pending_durable();
+   capture_flush(); /* persist whatever the final drain recorded */
 
    /* The ring is empty and everything on it has been handed to a sink. Say so,
     * because stop cannot finish the writer until this is true -- doing it
@@ -1136,6 +1154,9 @@ static int start_locked(void)
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
+   pthread_mutex_init(&g.writer_lock, NULL);
+   pthread_cond_init(&g.writer_ready, NULL);
+   pthread_cond_init(&g.writer_drained, NULL);
    capture_open();
    bus_host_set_tap(&g.host, governance_tap, NULL);
 
@@ -1166,9 +1187,6 @@ static int start_locked(void)
 
    /* The writer first, so a guardrail event handed off by the consumer's very
     * first drain has somewhere to go. */
-   pthread_mutex_init(&g.writer_lock, NULL);
-   pthread_cond_init(&g.writer_ready, NULL);
-   pthread_cond_init(&g.writer_drained, NULL);
    g.writer_head = 0;
    g.writer_count = 0;
    atomic_store(&g.writer_finish, 0);
@@ -1177,16 +1195,7 @@ static int start_locked(void)
    if (pthread_create(&g.writer, NULL, guardrail_writer_main, NULL) != 0)
    {
       aimee_log(LOG_ERROR, "obs_bus", "guardrail writer thread failed; events will not be stored");
-      pthread_cond_destroy(&g.writer_drained);
-      pthread_cond_destroy(&g.writer_ready);
-      pthread_mutex_destroy(&g.writer_lock);
-      module_clients_destroy();
-      bus_client_detach(&g.consumer);
-      bus_client_detach(&g.producer);
-      bus_host_destroy(&g.host);
-      pthread_mutex_destroy(&g.host_lock);
-      pthread_mutex_destroy(&g.pub_lock);
-      return -1;
+      goto start_fail;
    }
    g.writer_running = 1;
 
@@ -1202,6 +1211,7 @@ static int start_locked(void)
    return 0;
 
 start_fail:
+   guardrail_writer_finish();
    bus_runtime_stop(&g.runtime);
    bus_runtime_policy_free(&g.runtime_policy);
    if (g.cap_fd >= 0)
@@ -1356,14 +1366,6 @@ static const struct
     {10754u, "sandbox.sandbox-learned-load"},
     {10755u, "sandbox.sandbox-proxy-request-policy"},
     {10756u, "sandbox.sandbox-proxy-address-policy"},
-    {11521u, "db2.db2-lifecycle"},
-    {11522u, "db2.db2-tenancy"},
-    {11523u, "db2.db2-memory"},
-    {11524u, "db2.db2-index"},
-    {11525u, "db2.db2-learning"},
-    {11526u, "db2.db2-organization"},
-    {11527u, "db2.db2-custody"},
-    {11528u, "db2.db2-maintenance"},
     {11777u, "aimee.aimee-economizer-state"},
     {11778u, "aimee.aimee-git-ownership"},
     {11779u, "aimee.aimee-conversation"},
@@ -2052,6 +2054,9 @@ void obs_bus_stop(void)
                 (unsigned long long)pending);
       discard_pending_durable();
    }
+   pthread_cond_destroy(&g.writer_drained);
+   pthread_cond_destroy(&g.writer_ready);
+   pthread_mutex_destroy(&g.writer_lock);
    pthread_mutex_destroy(&g.host_lock);
    pthread_mutex_destroy(&g.pub_lock);
    g.started = 0;
@@ -2092,7 +2097,8 @@ void obs_bus_flush(void)
     * Bounded like the first loop, and against the SAME budget rather than a
     * fresh one, so a flush cannot take twice as long as its documented cap. */
    pthread_mutex_lock(&g.writer_lock);
-   while (i < 50000 && (g.writer_count > 0 || g.writer_busy))
+   while (i < 50000 &&
+          (g.writer_count > 0 || g.writer_busy || atomic_load(&g.durable_pending_count)))
    {
       struct timespec deadline;
       clock_gettime(CLOCK_REALTIME, &deadline);

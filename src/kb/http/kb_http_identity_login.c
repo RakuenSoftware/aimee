@@ -4,8 +4,8 @@
 
 #include "cJSON.h"
 #include "pam_auth.h" /* pam_check_credentials — the one PAM policy, shared with the dashboard */
-#include "modules/db2/c/management_identity_journal.h"
-#include "modules/db2/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+#include "modules/kb/c/management_identity_journal.h"
+#include "modules/kb/c/management_intent_fields.h" /* kb_store_intent_bare_username (header-only) */
 #include "kb_auth_oidc.h"
 #include "kb/kb_login_throttle.h" /* the pre-auth brute-force budget */
 #include "kb_oidc_login.h"
@@ -207,7 +207,7 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
 
 /* How long a minted write token lives. Short by policy: a token is consumed on
  * first use anyway, so this only bounds how long an unused one stays mintable.
- * DB2_IDENTITY_TTL_MAX_SECONDS is the ceiling the schema enforces. */
+ * KB_STORE_IDENTITY_TTL_MAX_SECONDS is the ceiling the schema enforces. */
 #define IDENTITY_INTENT_TTL_SECONDS 300
 
 /* File the identity intent for an authenticated principal and render the result.
@@ -217,39 +217,40 @@ static int post_login_start(const char *body, int64_t now, char *out_buf, int ou
  * stops being true one mode acquires an authorization step the other lacks.
  *
  * kid and installation_id are READ here, never taken from the caller — see
- * db2_identity_login_context. Failures are mapped to the same generic answer the
+ * kb_store_identity_login_context. Failures are mapped to the same generic answer the
  * calling route uses for an authentication failure, because "you are who you say
  * but have no grant on that server" is not something to spell out to a caller that
  * has just proved only its own identity. */
 static int file_intent(const kb_principal_t *principal, const char *subject, int64_t team_id,
-                       const char *server_id, db2_identity_auth_mode_t mode, const char *log_domain,
-                       char *out_buf, int out_cap)
+                       const char *server_id, kb_store_identity_auth_mode_t mode,
+                       const char *log_domain, char *out_buf, int out_cap)
 {
-   char installation_id[33] = "", kid[DB2_IDENTITY_KID_MAX + 1] = "";
-   db2_management_action_result_t rc =
-       db2_identity_login_context(principal, team_id, installation_id, kid);
-   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   char installation_id[33] = "", kid[KB_STORE_IDENTITY_KID_MAX + 1] = "";
+   kb_store_management_action_result_t rc =
+       kb_store_identity_login_context(principal, team_id, installation_id, kid);
+   if (rc != KB_STORE_MANAGEMENT_ACTION_OK)
    {
       LOG_WARN(log_domain, "no identity login context for team %lld (rc=%d)", (long long)team_id,
                (int)rc);
-      return json_error(out_buf, out_cap, rc == DB2_MANAGEMENT_ACTION_DENIED ? 403 : 503,
-                        rc == DB2_MANAGEMENT_ACTION_DENIED
+      return json_error(out_buf, out_cap, rc == KB_STORE_MANAGEMENT_ACTION_DENIED ? 403 : 503,
+                        rc == KB_STORE_MANAGEMENT_ACTION_DENIED
                             ? "not a member of that team"
                             : "this kb cannot issue write tokens right now");
    }
 
-   db2_identity_intent_operation_t op;
-   rc = db2_identity_intent_operation_init(team_id, server_id, mode, IDENTITY_INTENT_TOKEN_ISSUER,
-                                           kid, IDENTITY_INTENT_TTL_SECONDS, installation_id, &op);
-   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   kb_store_identity_intent_operation_t op;
+   rc = kb_store_identity_intent_operation_init(team_id, server_id, mode,
+                                                IDENTITY_INTENT_TOKEN_ISSUER, kid,
+                                                IDENTITY_INTENT_TTL_SECONDS, installation_id, &op);
+   if (rc != KB_STORE_MANAGEMENT_ACTION_OK)
    {
       LOG_ERROR(log_domain, "could not prepare an identity intent (rc=%d)", (int)rc);
       return json_error(out_buf, out_cap, 503, "this kb cannot issue write tokens right now");
    }
 
-   db2_identity_intent_t intent;
-   rc = db2_identity_intent_start(principal, &op, &intent);
-   if (rc != DB2_MANAGEMENT_ACTION_OK)
+   kb_store_identity_intent_t intent;
+   rc = kb_store_identity_intent_start(principal, &op, &intent);
+   if (rc != KB_STORE_MANAGEMENT_ACTION_OK)
    {
       /* DENIED is the common and expected case: authenticated, but with no live
        * write-tier grant on that server. It is reported as its own 403 rather than
@@ -258,8 +259,8 @@ static int file_intent(const kb_principal_t *principal, const char *subject, int
        * by asking an operator, and hiding it would make the flow undebuggable. */
       LOG_WARN(log_domain, "identity intent refused for %s on %s (rc=%d)", subject, server_id,
                (int)rc);
-      return json_error(out_buf, out_cap, rc == DB2_MANAGEMENT_ACTION_DENIED ? 403 : 503,
-                        rc == DB2_MANAGEMENT_ACTION_DENIED
+      return json_error(out_buf, out_cap, rc == KB_STORE_MANAGEMENT_ACTION_DENIED ? 403 : 503,
+                        rc == KB_STORE_MANAGEMENT_ACTION_DENIED
                             ? "no write-tier grant for that subject on that server"
                             : "this kb cannot issue write tokens right now");
    }
@@ -426,7 +427,7 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
     * unauthenticated principal, so this is also the last check that step 7
     * actually produced one. */
    /* 576 is the width of the identity tables' subject column
-    * (DB2_IDENTITY_SUBJECT_MAX), matching kb_vault_key_use.c. Not the db2 header,
+    * (KB_STORE_IDENTITY_SUBJECT_MAX), matching kb_vault_key_use.c. Not the kb_store header,
     * because this unit has no other reason to depend on it. */
    char subject[576] = "";
    if (kb_identity_key(&principal, subject, sizeof(subject)) != 0)
@@ -434,7 +435,7 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
       OPENSSL_cleanse(&principal, sizeof(principal));
       return json_error(out_buf, out_cap, 401, "the login could not be completed");
    }
-   /* The intent writer needs the PRINCIPAL, not the derived key: db2_tenant_scope
+   /* The intent writer needs the PRINCIPAL, not the derived key: kb_store_tenant_scope
     * sets aimee.principal from it, and the SQL reads the subject from there. Kept
     * as its own copy so the ordering below stays explicit about when it dies. */
    kb_principal_t principal_copy = principal;
@@ -445,7 +446,7 @@ static int get_login_callback(const char *query_string, int64_t now, char *out_b
     * query: taking either from the query would let a forged callback point a
     * completed login at a different server or team. */
    int status = file_intent(&principal_copy, subject, team_id, server_id,
-                            DB2_IDENTITY_AUTH_MODE_OIDC, "kb.oidc.login", out_buf, out_cap);
+                            KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb.oidc.login", out_buf, out_cap);
    OPENSSL_cleanse(&principal_copy, sizeof(principal_copy));
    return status;
 }
@@ -574,7 +575,7 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
    /* The subject grammar and the reserved name are checked BEFORE PAM, so an
     * unusable username never reaches the host's authentication stack — and so a
     * refusal here costs no PAM round trip that could be timed. */
-   int usable = fits && db2_intent_bare_username(username) && strcmp(username, "owner") != 0;
+   int usable = fits && kb_store_intent_bare_username(username) && strcmp(username, "owner") != 0;
    int ok = usable && pam_check_credentials(username, password);
    OPENSSL_cleanse(password, sizeof(password));
 
@@ -603,8 +604,8 @@ static int post_login_pam(const char *body, char *out_buf, int out_cap)
       LOG_ERROR("kb.pam.login", "authenticated %s but could not build a principal", username);
       return json_error(out_buf, out_cap, 401, "authentication failed");
    }
-   int status = file_intent(&principal, username, team_id, server_id, DB2_IDENTITY_AUTH_MODE_PAM,
-                            "kb.pam.login", out_buf, out_cap);
+   int status = file_intent(&principal, username, team_id, server_id,
+                            KB_STORE_IDENTITY_AUTH_MODE_PAM, "kb.pam.login", out_buf, out_cap);
    OPENSSL_cleanse(&principal, sizeof(principal));
    return status;
 }

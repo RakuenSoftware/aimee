@@ -21,10 +21,10 @@
 #include "config.h"
 #include "log.h"
 #include "memory.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/pgvec_transport.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/pgvec_transport.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +75,7 @@ static int try_link(const char *code_id, const char *entity_id, linked_set_t *se
          return 0;
    if (seen->n < LINK_MAX_LINKED)
       snprintf(seen->ids[seen->n++], 64, "%s", entity_id);
-   return db2_artifact_link(code_id, entity_id, "mentions") == 0 ? 1 : 0;
+   return kb_store_artifact_link(code_id, entity_id, "mentions") == 0 ? 1 : 0;
 }
 
 /* Link the code_unit to every committed entity whose payload name matches
@@ -175,7 +175,7 @@ static int link_concept_semantic(const char *code_id, const char *concept, const
 int kb_curator_link_artifacts_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -231,7 +231,7 @@ int kb_curator_link_artifacts_one(const kb_curator_extract_opts_t *opts)
 
    /* Stamp processed so the code_unit is not re-scanned (idempotent links mean
     * re-runs would be harmless but wasteful). */
-   db2_artifact_stamp_reflected(id);
+   kb_store_artifact_stamp_reflected(id);
    if (total > 0)
       aimee_log(LOG_INFO, "kb.curator.link", "linked code_unit %s to %d entity mention(s)", id,
                 total);

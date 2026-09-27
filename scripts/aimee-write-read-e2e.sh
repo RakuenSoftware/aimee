@@ -8,7 +8,7 @@
 #   2. POST /v1/memory/list    — the stored content + key come back verbatim
 #   3. POST /v1/memory/search  — keyword retrieval surfaces the same fact
 #
-# This exercises the server→kb mutation path + DB2 persistence + retrieval, the
+# This exercises the server→kb mutation path + KB_STORE persistence + retrieval, the
 # core of aimee that a deploy-only smoke never touches.
 #
 # PREREQUISITE: this direct-curl harness runs as the first wizard user and must

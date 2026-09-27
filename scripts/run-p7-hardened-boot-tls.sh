@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# P7/db2: full HARDENED-tier boot validation. Proves a real aimee-kb daemon connecting
+# P7/kb_store: full HARDENED-tier boot validation. Proves a real aimee-kb daemon connecting
 # as a NON-owner runtime login role over verify-full TLS against an owner-migrated
-# schema boots via db2_verify_pre_provisioned (presence-check, NOT apply) and runs the
+# schema boots via kb_store_verify_pre_provisioned (presence-check, NOT apply) and runs the
 # witness cadence as the restricted role. This is the end-to-end proof of the
 # hardened bootstrap fix (approach C).
 #
@@ -15,7 +15,7 @@ HBA="${PGHBA:-/etc/postgresql/17/main/pg_hba.conf}"
 DBHOST="${DBHOST:-aimee-test.bailes.us}"
 CACERT="${CACERT:-/etc/ssl/certs/ssl-cert-snakeoil.pem}"
 KB="${KB:-/tmp/gate/aimee-kb}"
-SRC="${SRC:-/tmp/gate/src/modules/db2/c}"
+SRC="${SRC:-/tmp/gate/src/modules/kb/c}"
 CONN_CIDR="${CONN_CIDR:-192.168.1.103/32}"
 DB=aimee_hardened_boot
 RTLOGIN=rt_hardened_login
@@ -46,13 +46,13 @@ su - postgres -c "psql -qtA -c \"SELECT pg_reload_conf()\"" >/dev/null
 echo "=== boot aimee-kb HARDENED as the runtime role over verify-full TLS ==="
 H=$(mktemp -d)
 DSN="postgresql://$RTLOGIN@$DBHOST:5432/$DB?sslmode=verify-full&sslrootcert=$CACERT"
-AIMEE_KB_HARDENED=1 AIMEE_DB2_URL="$DSN" AIMEE_HOME=$H AIMEE_WITNESS_CADENCE_TEST_S=2 \
+AIMEE_KB_HARDENED=1 AIMEE_STORE_URL="$DSN" AIMEE_HOME=$H AIMEE_WITNESS_CADENCE_TEST_S=2 \
   $KB --http-port=18795 --log-level=info >/tmp/hf.out 2>/tmp/hf.err &
 KBPID=$!
 sleep 8
 echo "--- alive? ---"; kill -0 $KBPID 2>/dev/null && echo kb-ALIVE || echo kb-EXITED
-echo "--- db2_init / hardening / verify outcome ---"
-grep -iE "hardened|schema apply|permission denied|verify|db2_init|runtime-role" /tmp/hf.err | head -8
+echo "--- kb_store_init / hardening / verify outcome ---"
+grep -iE "hardened|schema apply|permission denied|verify|kb_store_init|runtime-role" /tmp/hf.err | head -8
 echo "--- witness cadence (as runtime, hardened) ---"
 grep -iE "kb.witness|checkpoint" /tmp/hf.err | head -4
 echo "--- checkpoints produced ---"
@@ -70,17 +70,17 @@ echo "hostssl $NDB $RTLOGIN $CONN_CIDR trust $MARK" >> "$HBA"
 su - postgres -c "psql -qtA -c \"SELECT pg_reload_conf()\"" >/dev/null
 NH=$(mktemp -d)
 NDSN="postgresql://$RTLOGIN@$DBHOST:5432/$NDB?sslmode=verify-full&sslrootcert=$CACERT"
-AIMEE_KB_HARDENED=1 AIMEE_DB2_URL="$NDSN" AIMEE_HOME=$NH /tmp/gate/aimee-kb --http-port=18796 --log-level=info >/tmp/hfn.out 2>/tmp/hfn.err &
+AIMEE_KB_HARDENED=1 AIMEE_STORE_URL="$NDSN" AIMEE_HOME=$NH /tmp/gate/aimee-kb --http-port=18796 --log-level=info >/tmp/hfn.out 2>/tmp/hfn.err &
 NPID=$!
 sleep 6
-# kb_main RETRIES db2_init on failure (process stays alive), so refusal is proven by
-# db2 never connecting + the fail-closed message — NOT by the process exiting.
+# kb_main RETRIES kb_store_init on failure (process stays alive), so refusal is proven by
+# kb_store never connecting + the fail-closed message — NOT by the process exiting.
 if grep -aqE "hardened schema verification failed" /tmp/hfn.err; then
   echo "NEG OK: hardened kb refused (fail-closed) against an un-migrated schema. Reason:"
   grep -aoE "hardened schema verification failed: [^\"]*" /tmp/hfn.err | head -1
-  # and db2 must NOT be serving
-  if curl -s http://localhost:18796/v1/health 2>/dev/null | grep -q '"db2_ok":true'; then
-    echo "NEG FAIL: db2 reported connected despite the verification failure"
+  # and kb_store must NOT be serving
+  if curl -s http://localhost:18796/v1/health 2>/dev/null | grep -q '"postgres_ok":true'; then
+    echo "NEG FAIL: kb_store reported connected despite the verification failure"
   fi
 else
   echo "NEG FAIL: hardened kb did NOT emit the fail-closed verification refusal"; tail -5 /tmp/hfn.err

@@ -12,7 +12,7 @@ in the vector migration.
 
 1. Record the current model, serving identity, dimension, source-row count, vector-row count, and
    representative retrieval queries.
-2. Back up DB2 and restore that backup into a disposable deployment.
+2. Back up KB_STORE and restore that backup into a disposable deployment.
 3. Run the candidate with its production pooling and prefixes.
 4. Compare recall, rank agreement, latency, and memory use against the recorded baseline.
 5. Stop the candidate and confirm the KB reports the dependency failure instead of silently changing
@@ -28,9 +28,9 @@ derived vector tables only when the target dimension differs from the recorded d
 same-dimension model, pooling, or prefix change, it prints `No dim change needed` and does not reset
 the corpus or replace its recorded serving identity.
 
-For a same-dimension change, provision a fresh DB2, configure the candidate before first ingest,
+For a same-dimension change, provision a fresh KB_STORE, configure the candidate before first ingest,
 re-ingest the authoritative document, code, memory, curator, and evidence sources, validate the new
-store, then cut traffic over. Keep the old DB2 unchanged until the new store passes verification.
+store, then cut traffic over. Keep the old KB_STORE unchanged until the new store passes verification.
 There is no supported in-place whole-corpus reset for this case in the current release.
 
 ## Change dimensions with the guarded reset
