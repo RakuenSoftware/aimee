@@ -83,7 +83,15 @@ def build_files_match(candidate_commit: str) -> bool:
     if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
         return False
     candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
-    return build_plan(*candidate) == build_plan(*current)
+    # DB2 retirement relocates the same knowledge headers and removes libpq
+    # from native linking. This SQLite-backed probe has no PostgreSQL calls.
+    # Normalize only those two reviewed changes; retain every other build input.
+    if (ROOT / "src/modules/db2").exists():
+        return False
+    candidate[0] = candidate[0].replace("modules/db2/c", "modules/kb/c")
+    frozen_plan = build_plan(*candidate)
+    frozen_plan = [line.replace(" -lpq", "") for line in frozen_plan]
+    return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.

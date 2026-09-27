@@ -22,9 +22,11 @@ const (
 	StageSession uint32 = 3
 )
 
-// Native schema batches exceed a result cell's 1 MiB bound. The request still
-// fits the 16 MiB bus frame; parameter and result cells retain their own limits.
+// Native schema batches and serialized sketches exceed the ordinary SQL
+// stage's 1 MiB bound. Session cells and statements remain independently bounded
+// within the 16 MiB frame; ordinary typed SQL keeps its original limits.
 const maxSessionStatementBytes = 8 << 20
+const maxSessionCellBytes = 8 << 20
 
 const (
 	sessionAcquire uint32 = 1
@@ -252,7 +254,7 @@ func (h *sessionHandler) handle(inv bus.ModuleInvocation, body []byte) ([]byte, 
 	if inv.StageID != StageSession || inv.PrincipalRef != 0 || len(body) > int(bus.ModuleMessageMaxBody) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	r := &reader{buf: body}
+	r := &reader{buf: body, cellLimit: maxSessionCellBytes}
 	op, err := r.u32()
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -441,7 +443,7 @@ func (s *postgresSession) resultPage() ([]byte, bool, error) {
 		}
 		rowSize := 0
 		for _, value := range values {
-			if len(value) > maxCellBytes {
+			if len(value) > maxSessionCellBytes {
 				return nil, false, errResultTooLarge
 			}
 			rowSize += 4 + len(value)

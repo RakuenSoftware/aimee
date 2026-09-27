@@ -374,6 +374,12 @@ DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 # --- Layer 0c: DB2 (shared knowledge tier) ---
 POSTGRES_CLIENT_SRCS = modules/postgres/client/session.c modules/postgres/client/local_session.c
 POSTGRES_CLIENT_OBJS = $(POSTGRES_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
+# Offline authorities have no bus host. Compile out that transport explicitly;
+# a weak reference can become strong when LTO merges another caller's declaration.
+POSTGRES_LOCAL_CLIENT_OBJS = $(OBJDIR)/postgres-local/session.o $(OBJDIR)/modules/postgres/client/local_session.o
+$(OBJDIR)/postgres-local/session.o: modules/postgres/client/session.c
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -DAIMEE_POSTGRES_LOCAL_ONLY=1 -c -o $@ $<
 DB2_PG_SRCS = modules/kb/c/db_postgres.c
 DB2_PG_OBJS = $(DB2_PG_SRCS:modules/kb/c/%.c=$(OBJDIR)/db2/%.o) $(POSTGRES_CLIENT_OBJS)
 DB2_SRCS = modules/kb/c/db2_init.c modules/kb/c/db2_reembed.c modules/kb/c/agent_hints.c modules/kb/c/agent_outcomes.c modules/kb/c/canonical_index.c modules/kb/c/canonical_index_query.c modules/kb/c/anti_patterns.c modules/kb/c/workflow_patterns.c modules/kb/c/evidence_vectors.c modules/kb/c/learning_synth_ops.c modules/kb/c/collab_rules.c modules/kb/c/curiosity.c modules/kb/c/decision_log.c modules/kb/c/kb_audit_worm.c modules/kb/c/enrollments.c modules/kb/c/db2_tenant.c modules/kb/c/db2_hardening.c modules/kb/c/team.c modules/kb/c/project.c modules/kb/c/membership.c modules/kb/c/admin_grant.c modules/kb/c/write_tier_grant.c modules/kb/c/oidc_jwks.c modules/kb/c/entity_edges.c modules/kb/c/fact_identity.c modules/kb/c/fact_identity_unicode.c modules/kb/c/fact_mutation.c modules/kb/c/evidence_lifecycle.c modules/kb/c/entity_nodes.c modules/kb/c/code_projection.c modules/kb/c/lessons.c modules/kb/c/shadow_delta.c modules/kb/c/entity_profiles.c modules/kb/c/failed_queries.c modules/kb/c/feedback.c modules/kb/c/notes.c modules/kb/c/rules.c modules/kb/c/stopwords.c modules/kb/c/tasks.c modules/kb/c/tool_registry.c modules/kb/c/kind_lifecycle.c modules/kb/c/kb_payload.c modules/kb/c/kb_runtime_state.c modules/kb/c/kb_service_backend.c modules/kb/c/kb_service_backend_ingest.c modules/kb/c/vector_index_ops.c modules/kb/c/code_index_ops.c modules/kb/c/learning.c modules/kb/c/code_index.c modules/kb/c/code_project_lifecycle.c modules/kb/c/css_graph.c modules/kb/c/css_migration.c modules/kb/c/css_render.c modules/kb/c/css_insights.c modules/kb/c/db_schema.c modules/kb/c/sketch.c modules/kb/c/artifacts.c modules/kb/c/corpus_structural.c modules/kb/c/corpus_jobs.c modules/kb/c/mining.c modules/kb/c/calibration.c modules/kb/c/demotion.c modules/kb/c/feature_rows.c modules/kb/c/report_enrichments.c modules/kb/c/bandit.c modules/kb/c/kb_maintenance.c modules/kb/c/kb_docs.c modules/kb/c/kb_releases.c modules/kb/c/code_audit.c \
@@ -704,7 +710,7 @@ STATUS_AUTHORITY_SRCS = kb/kb_mgmt_status_authority_main.c \
                         kb/kb_mgmt_status.c kb/kb_vault_protected_use.c \
                         modules/kb/c/management_status_key.c modules/kb/c/management_status_runtime.c \
                         modules/kb/c/db_postgres.c
-STATUS_AUTHORITY_OBJS = $(STATUS_AUTHORITY_SRCS:%.c=$(OBJDIR)/%.o) $(POSTGRES_CLIENT_OBJS)
+STATUS_AUTHORITY_OBJS = $(STATUS_AUTHORITY_SRCS:%.c=$(OBJDIR)/%.o) $(POSTGRES_LOCAL_CLIENT_OBJS)
 STATUS_AUTHORITY_VAULT_OBJS = $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_hwm.o \
@@ -727,7 +733,7 @@ TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
                        $(OBJDIR)/server/oauth_pkce.o \
                        $(OBJDIR)/kb/kb_mgmt_token_public.o \
                        $(OBJDIR)/modules/kb/c/management_token_authority.o \
-                       $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_CLIENT_OBJS)
+                       $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_LOCAL_CLIENT_OBJS)
 TOKEN_AUTHORITY_VAULT_OBJS = $(STATUS_AUTHORITY_VAULT_OBJS)
 .PHONY: status-authority-core status-authority-package-check
 status-authority-package-check:
@@ -740,7 +746,7 @@ status-authority-core: status-authority-package-check $(KB_STATUS_AUTHORITY)
 STATUS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_status_provision_main.o \
                           $(OBJDIR)/kb/kb_mgmt_status_provision.o \
                           $(OBJDIR)/modules/kb/c/management_status_provision.o \
-                          $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_CLIENT_OBJS)
+                          $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_LOCAL_CLIENT_OBJS)
 STATUS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                                 $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                                 $(OBJDIR)/kb/modules/vault/vault_hwm.o \
@@ -758,7 +764,7 @@ TOKEN_ROOTS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_token_roots_provision_main.o
                                $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                                $(OBJDIR)/kb/kb_mgmt_token_public.o \
                                $(OBJDIR)/modules/kb/c/management_token_roots.o \
-                               $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_CLIENT_OBJS)
+                               $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_LOCAL_CLIENT_OBJS)
 TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                                      $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                                      $(OBJDIR)/kb/modules/vault/vault_hwm.o \
@@ -774,7 +780,7 @@ JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                       $(OBJDIR)/kb/kb_mgmt_token_public.o \
                       $(OBJDIR)/modules/kb/c/management_jwks_publication.o \
-                      $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_CLIENT_OBJS)
+                      $(OBJDIR)/modules/kb/c/db_postgres.o $(POSTGRES_LOCAL_CLIENT_OBJS)
 JWKS_PUBLISHER_VAULT_OBJS = $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS)
 KB_OBJS = $(KB_SRCS:%.c=$(OBJDIR)/%.o)
 # MCP-plugin adapter hosted on aimee-kb (config install: kb). Reuses the shared
@@ -1435,8 +1441,8 @@ test-transport-artifact:
 	@python3 ../tests/test_transport_artifact.py
 
 .PHONY: memory-owner-replay-check
-# Reuse the packaged DB2 module replay database; do not invent a memory scratch
-# store. Missing runtime-role or evaluator DSNs must fail rather than skip CI.
+# Reuse the isolated PostgreSQL replay database. Missing runtime-role or
+# evaluator DSNs must fail rather than skip CI.
 memory-owner-replay-check:
 	@test -n "$$AIMEE_DB2_REPLAY_URL" || (echo "memory-owner-replay-check requires AIMEE_DB2_REPLAY_URL for a disposable PostgreSQL database" >&2; exit 2)
 	@test -n "$$AIMEE_MEMORY_EVAL_URL" || (echo "memory-owner-replay-check requires AIMEE_MEMORY_EVAL_URL for a separate disposable scratch database" >&2; exit 2)
@@ -1524,10 +1530,10 @@ $(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
 # Dedicated WORM consumer. It links the exact SQLite WORM implementation used
-# by aimee-server plus only its leaf crypto/JSON helpers and libpq for the
-# transactionally durable KB outbox. Request handlers, mutation code, providers,
+# by aimee-server plus its leaf crypto/JSON helpers and private PostgreSQL
+# provider client for the transactionally durable KB outbox. Request handlers, mutation code, providers,
 # vault code, and the ordinary runtime credential cannot enter this process.
-KB_WORM_OBJS = $(OBJDIR)/kb/kb_worm_worker_main.o $(POSTGRES_CLIENT_OBJS) \
+KB_WORM_OBJS = $(OBJDIR)/kb/kb_worm_worker_main.o $(POSTGRES_LOCAL_CLIENT_OBJS) \
                $(OBJDIR)/modules/audit/audit_worm.o \
                $(OBJDIR)/modules/audit/audit_worm_chain.o \
                $(OBJDIR)/aimee_home.o $(OBJDIR)/aimee_sha256.o \
@@ -1684,7 +1690,7 @@ oidc-login-live: ../oidc-login-live
                             $(PLATFORM_BASIC_OBJS) \
                             $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/aimee_sha256.o \
                             $(OBS_BUS_RUNTIME_OBJ) $(CORE_EVENT_BUS_LIB)
-	$(CC) -o $@ $^ $(L_SERVER)
+	$(CC) -o $@ $^ $(L_SERVER) $(PQ_LIB)
 
 .PHONY: write-tier-enforce-live
 write-tier-enforce-live: ../write-tier-enforce-live

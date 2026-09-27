@@ -965,6 +965,12 @@ jobs:
           echo "Postgres did not become ready in time"
           docker logs aimee-postgres-pg || true
           exit 1
+      - name: Initialize the isolated knowledge replay schema
+        run: |
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
+          sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f -
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
       - name: Replay memory ownership and PostgreSQL sessions
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
       - name: Replay Go memory ownership and isolated evaluator contracts
@@ -1181,6 +1187,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+      - name: Build the private PostgreSQL provider
+        run: cd server-go && CGO_ENABLED=0 go build -trimpath -o ../src/build/obj/aimee-module ./cmd/aimee-module
       - name: Start Postgres (pgvector) with pull retry
         # Same image and retry rationale as unit-tests: the schema needs the vector
         # and pg_trgm extensions, which the runner's preinstalled Postgres does not
@@ -1234,6 +1245,7 @@ jobs:
           # shipped binary.
           make -j"$(nproc)" ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish \
                             identity-mint-live
+          install -D -m 0755 build/obj/aimee-module /usr/local/libexec/aimee-modules/aimee-module-postgres
           cd /src
           exec scripts/run-identity-mint-e2e.sh
           JOB

@@ -1077,8 +1077,16 @@ func (w *writer) value(v any) error {
 }
 
 type reader struct {
-	buf []byte
-	at  int
+	buf       []byte
+	at        int
+	cellLimit int // zero keeps the ordinary SQL stage limit
+}
+
+func (r *reader) cellBytes() int {
+	if r.cellLimit > 0 {
+		return r.cellLimit
+	}
+	return maxCellBytes
 }
 
 var errShort = errors.New("the frame ended early")
@@ -1111,7 +1119,7 @@ func (r *reader) byte1() (uint8, error) {
 }
 
 func (r *reader) str() (string, error) {
-	return r.strLimit(maxCellBytes)
+	return r.strLimit(r.cellBytes())
 }
 
 func (r *reader) strLimit(limit int) (string, error) {
@@ -1132,7 +1140,7 @@ func (r *reader) blob() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if int(n) > maxCellBytes || r.at+int(n) > len(r.buf) {
+	if uint64(n) > uint64(r.cellBytes()) || uint64(r.at)+uint64(n) > uint64(len(r.buf)) {
 		return nil, errShort
 	}
 	b := make([]byte, n)

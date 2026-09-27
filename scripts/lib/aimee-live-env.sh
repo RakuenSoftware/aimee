@@ -316,6 +316,11 @@ live_env_pg_create() {
    export LIVE_KB_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
    export AIMEE_STORE_URL="$LIVE_KB_STORE_URL?search_path=aimee_private"
    export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL?search_path=aimee_private"
+   # The legacy knowledge SECURITY DEFINER functions require this fixed owner.
+   # The login remains the separate migrator, with explicitly granted membership;
+   # only its KB bootstrap session assumes the schema-owner role.
+   export LIVE_KB_STORE_URL="$LIVE_KB_STORE_URL?search_path=public&options=-c%20role%3Daimee_kb_owner"
+   export LIVE_KB_MIGRATION_URL="$LIVE_KB_MIGRATION_URL?search_path=public&options=-c%20role%3Daimee_kb_owner"
    pg_admin "GRANT $LIVE_OWNER TO $LIVE_MIGRATOR" >/dev/null
    pg_db -c "GRANT USAGE, CREATE ON SCHEMA public TO $LIVE_MIGRATOR; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO $LIVE_OWNER" >/dev/null || exit 2
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
@@ -465,6 +470,8 @@ live_env_remove_host_accounts() {
 }
 
 live_env_write_config() {
+   # Keep the fixture setting authoritative over an inherited image default.
+   export AIMEE_API_REMOTE_WRITES="${LIVE_REMOTE_WRITES:-off}"
    cat >"$AIMEE_HOME/aimee.yaml" <<YAML
 embedding_dim: 1024
 kb:
@@ -567,6 +574,14 @@ live_env_prepare_modules() {
    # Native bootstrap and operator tools invoke this fixed provider executable.
    # These rigs run as root on disposable hosts; refuse to replace an installed
    # provider from a different build.
+   # The provider resolves sealed credentials through this fixed Vault resource
+   # after the daemon removes credential environment variables and re-execs.
+   local vault_resource=/usr/local/bin/aimee-server
+   if [ -e "$vault_resource" ] && ! cmp -s ./aimee-server "$vault_resource"; then
+      echo "$LIVE_NAME: installed Vault resource differs from this test build" >&2
+      exit 2
+   fi
+   [ -e "$vault_resource" ] || install -D -m 0755 ./aimee-server "$vault_resource" || exit 2
    local provider=/usr/local/libexec/aimee-modules/aimee-module-postgres
    if [ -e "$provider" ] && ! cmp -s "$multicall" "$provider"; then
       echo "$LIVE_NAME: installed PostgreSQL provider differs from this test build" >&2

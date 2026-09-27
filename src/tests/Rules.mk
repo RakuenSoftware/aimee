@@ -7840,7 +7840,7 @@ $(TESTPREFIX)/unit-test-fidelity-transport: $(OBJDIR)/tests/test_fidelity_transp
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-postgres-session-transport: $(OBJDIR)/tests/test_postgres_session_transport.o $(OBJDIR)/modules/postgres/client/session.o $(OBJDIR)/modules/postgres/client/local_session.o
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 .PHONY: test-postgres-session-transport
 test-postgres-session-transport: $(TESTPREFIX)/unit-test-postgres-session-transport

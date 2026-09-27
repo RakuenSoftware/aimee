@@ -149,6 +149,19 @@ int main(void)
    assert(aimee_pg_column_int64(statement, 0) == INT64_MIN);
    assert(aimee_pg_column_blob(statement, 1) && !aimee_pg_column_bytes(statement, 1));
    aimee_pg_finalize(statement);
+   /* A count-min sketch contains 1 MiB of counters. Its bytea text encoding
+    * exceeds 2 MiB, so both parameter and result bounds must preserve it. */
+   size_t sketch_size = 1024u * 1024u;
+   unsigned char *sketch = malloc(sketch_size);
+   assert(sketch);
+   memset(sketch, 0xa5, sketch_size);
+   statement = aimee_pg_prepare(connection, "SELECT :data::bytea", error, sizeof(error));
+   assert(statement && !aimee_pg_bind_blob(statement, "data", sketch, (int)sketch_size));
+   assert(aimee_pg_step(statement, error, sizeof(error)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_bytes(statement, 0) == (int)sketch_size);
+   assert(!memcmp(aimee_pg_column_blob(statement, 0), sketch, sketch_size));
+   aimee_pg_finalize(statement);
+   free(sketch);
    statement =
        aimee_pg_prepare(connection, "SELECT generate_series(1,10001)", error, sizeof(error));
    assert(statement);

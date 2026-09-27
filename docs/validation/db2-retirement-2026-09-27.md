@@ -54,6 +54,15 @@ through the real bus.
   writes were observed in PostgreSQL; daemon linkage contains no libpq.
 - Live KB authorization (40 checks) and mTLS scope enforcement (5 checks) passed
   with no skips against the PostgreSQL provider on CT109.
+- Published 0.4.1 KB upgrade and rollback passed all 12 checks on CT109,
+  including retained authority, new writes, recreation, byte-identical original
+  cluster and rollback canaries. Exact historical PostgreSQL grants gain the
+  session stage; recorded operator restrictions and other policy edits survive.
+- Live PAM, authorization residual and identity-mint gates passed on CT109.
+  Offline authorities also linked with GCC 13/LTO using the private transport.
+- A 1 MiB sketch round-trip passed through the native provider with ASan/UBSan;
+  the real-PostgreSQL native feature suite passed. Native session cells have an
+  8 MiB limit inside a 16 MiB frame; ordinary SQL stage limits are unchanged.
 - The full WORM worker PostgreSQL gate passed on CT109: isolated claim/ack
   privileges, refusal of producer/admin authority, crash retry without duplicate
   events, three delivered events and zero broken audit-chain links.

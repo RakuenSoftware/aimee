@@ -12,6 +12,7 @@
 #include <time.h>
 
 /* Offline tools link only the private provider transport. */
+#ifndef AIMEE_POSTGRES_LOCAL_ONLY
 #pragma weak obs_bus_module_call
 static uint64_t deadline_ns(const aimee_postgres_session_t *session)
 {
@@ -24,9 +25,11 @@ static uint64_t deadline_ns(const aimee_postgres_session_t *session)
                                                                         : cap;
 }
 
+#endif
+
 #define FRAME_MAX     (16u * 1024u * 1024u)
 #define STATEMENT_MAX (8u * 1024u * 1024u)
-#define CELL_MAX      (1024u * 1024u)
+#define CELL_MAX      (8u * 1024u * 1024u)
 #define ARG_MAXIMUM   4096u
 struct cell
 {
@@ -263,12 +266,17 @@ static unsigned char *call(aimee_postgres_session_t *session, uint32_t operation
                                          (uint32_t)reply_cap, &length) == 0
                ? AIMEE_MODULE_CALL_OK
                : AIMEE_MODULE_CALL_TRANSPORT;
+#ifdef AIMEE_POSTGRES_LOCAL_ONLY
+   else
+      rc = AIMEE_MODULE_CALL_TRANSPORT;
+#else
    else if ((session && session->channel == -2) || !obs_bus_module_call)
       rc = AIMEE_MODULE_CALL_TRANSPORT;
    else
       rc = obs_bus_module_call(AIMEE_POSTGRES_EVENT_SESSION, AIMEE_POSTGRES_STAGE_SESSION, 0,
                                deadline_ns(session), request.bytes, (uint32_t)request.used, reply,
                                (uint32_t)reply_cap, &length, NULL, NULL);
+#endif
    free(request.bytes);
    if (rc != AIMEE_MODULE_CALL_OK || length > reply_cap)
    {
