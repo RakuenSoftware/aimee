@@ -669,6 +669,7 @@ static const struct
     {"collab_rules.inject", kb_handle_collab_rules_inject},
     {"learning.propose_signal", kb_handle_learning_propose_signal},
     {"learning.record_application", kb_handle_learning_record_application},
+    {"learning.record_governed_application", kb_handle_learning_record_application},
     {"agent.outcome_record", kb_handle_agent_outcome_record},
     {"agent.hint_consume", kb_handle_agent_hint_consume},
 

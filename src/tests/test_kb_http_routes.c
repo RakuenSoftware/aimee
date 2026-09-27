@@ -2989,7 +2989,8 @@ static void test_intelligence_bandit_export(void)
     * kb_fusion_mode is now a registered point, so it appears here (not as a
     * phantom with fabricated arm stats). */
    assert(strstr(buf, "\"registry\":[") != NULL);
-   assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
+   assert(strstr(buf, "\"reward_fn\":\"verified_task_outcome_pending_v1\"") != NULL);
+   assert(strstr(buf, "\"status\":\"observe\"") != NULL);
    assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
 }
 
@@ -3445,16 +3446,16 @@ static void test_mtls_serve(void)
                     resp, sizeof(resp));
    assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
 
-   /* Content reads have no service-only/background bypass. Until the separate
-    * background-reader policy is decided, a fully authenticated service with
-    * an exact server/team binding but no caller still fails closed. */
+   /* This shim fixture has no authoritative PostgreSQL tenant scope. Service
+    * registry lookup therefore refuses before the missing-caller check; it
+    * must not turn an unavailable identity owner into content access. */
    mtls_request_raw(sctx, cctx,
                     "POST /v1/search HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "X-Aimee-Server-ID: srv-a\r\nX-Aimee-Team-ID: 1\r\n"
                     "Content-Length: 2\r\nConnection: close\r\n\r\n{}",
                     resp, sizeof(resp));
-   assert(strstr(resp, "403 Forbidden") &&
-          strstr(resp, "an authenticated content caller is required"));
+   assert(strstr(resp, "503 Service Unavailable") &&
+          strstr(resp, "server identity authority unavailable"));
    assert(!strstr(resp, "results"));
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
@@ -4343,7 +4344,7 @@ static void test_mtls_listener(void)
                                              &managed_team) == 1);
       assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
       r = kb_client_mtls_request("POST", "/v1/search", "{}", &st2);
-      assert(st2 == 403 && r && strstr(r, "an authenticated content caller is required"));
+      assert(st2 == 503 && r && strstr(r, "server identity authority unavailable"));
       free(r);
       g_rotation_test_ca = &ca;
       kb_client_mtls_set_renew_for_test(test_kb_client_renew);
@@ -7756,6 +7757,8 @@ static void test_maintenance_repair_queues_too(void)
 
 static void test_content_read_identity_boundary(void)
 {
+   assert(kb_http_is_content_read("POST", "/v1/actions/learning.record_governed_application"));
+   assert(!kb_http_is_content_read("GET", "/v1/actions/learning.record_governed_application"));
    assert(kb_http_is_content_read("POST", "/v1/search"));
    assert(kb_http_is_content_read("GET", "/v1/artifacts/a"));
    assert(kb_http_is_content_read("GET", "/v1/code/context"));

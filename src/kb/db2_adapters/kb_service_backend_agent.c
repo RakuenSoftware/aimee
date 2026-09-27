@@ -557,7 +557,8 @@ static int kbs_propose_unstable_procedure(const learning_application_event_t *ap
 }
 
 /* The only v2 writer accepts receipt-reader attestations from an authenticated
- * Server transport. Public bearer requests cannot manufacture host exposure.
+ * Server service/caller membership intersection. The mTLS listener supplies
+ * this resolved context; public bearer requests cannot manufacture exposure.
  * The Server endpoint constructs exposure itself; no generic public forwarding
  * surface publishes this internal envelope. */
 static cJSON *kbs_governed_application(const cJSON *req)
@@ -570,13 +571,20 @@ static cJSON *kbs_governed_application(const cJSON *req)
    void *conn = db2_conn();
    char err[256] = "";
    int begun = 0;
+   const char *reason = "trusted_transport_required";
    aimee_pg_stmt_t *st = NULL;
    char *raw = NULL, *cohort = NULL, *projection = NULL;
    const char *actor = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "principal"));
-   if (!resolved || !resolved->has_transport || resolved->transport.kind != KB_PRIN_CERT ||
-       !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")) || !actor ||
-       !cJSON_IsObject(event) || !cJSON_IsObject(exposure) || !conn || aimee_pg_is_shim() ||
+   if (!resolved || !resolved->has_transport || !resolved->transport.authenticated ||
+       !resolved->has_actor || !resolved->actor.authenticated || resolved->billing_team <= 0)
+      goto done;
+   reason = "user_feedback_authority_required";
+   if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")) || !actor ||
+       !cJSON_IsObject(event) || !cJSON_IsObject(exposure) ||
        strcmp(kbs_req_string(event, "authority"), "user_feedback"))
+      goto done;
+   reason = "postgres_learning_store_required";
+   if (!conn || aimee_pg_is_shim())
       goto done;
    /* Attribution is to the verified caller, never a JSON actor or host claim. */
    cJSON_DeleteItemFromObjectCaseSensitive(event, "actor");
@@ -586,13 +594,16 @@ static cJSON *kbs_governed_application(const cJSON *req)
    args = cJSON_CreateObject();
    cJSON_AddItemToObject(args, "event", cJSON_Duplicate(event, 1));
    cJSON_AddItemToObject(args, "exposure", cJSON_Duplicate(exposure, 1));
+   reason = "learning_admission_refused";
    admitted = aimee_module_command_call_context(
        AIMEE_LEARNING_EVENT_EXPERIENCE, AIMEE_LEARNING_STAGE_EXPERIENCE, "admit", args, context);
    if (!cJSON_IsObject(admitted))
       goto done;
+   reason = "learning_ledger_read_unavailable";
    raw = cJSON_PrintUnformatted(admitted);
    cohort = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(admitted, "procedure"));
-   if (!raw || !cohort || aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+   if (!raw || !cohort ||
+       (!aimee_pg_in_transaction(conn) && aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0))
       goto done;
    begun = 1;
    st = aimee_pg_prepare(
@@ -636,10 +647,12 @@ static cJSON *kbs_governed_application(const cJSON *req)
    st = NULL;
    if (!duplicate)
       cJSON_AddItemToArray(events, cJSON_Duplicate(admitted, 1));
+   reason = "learning_projection_refused";
    projected = aimee_module_command_call_context(
        AIMEE_LEARNING_EVENT_EXPERIENCE, AIMEE_LEARNING_STAGE_EXPERIENCE, "project", args, context);
    if (!cJSON_IsArray(projected))
       goto done;
+   reason = "learning_ledger_write_refused";
    projection = cJSON_PrintUnformatted(projected);
    if (!projection)
       goto done;
@@ -684,6 +697,7 @@ done:
       reply = cJSON_CreateObject();
       cJSON_AddStringToObject(reply, "status", "error");
       cJSON_AddStringToObject(reply, "message", "governed application unavailable or conflicting");
+      cJSON_AddStringToObject(reply, "reason", reason);
    }
    return reply;
 }

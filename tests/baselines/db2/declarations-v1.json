@@ -2034,6 +2034,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_pool.c",
@@ -2048,7 +2049,7 @@
       ],
       "signature": "int aimee_pg_in_transaction ( void * pg_conn )",
       "signature_sha256": "d9d93de05a65097affa59c15311a02b7cd17b0b15e0e8f79f0ea64b71e4806a0",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_pg_in_transaction"
     },
     {
@@ -19941,15 +19942,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ebd97c4d99f440887150461758df128a229ed8700709d50c3e9864e3efbd913e",
+  "fingerprint": "f730a1a619a7e283c1f006af0ba5210d289a5e8aca7931e098d64114bb4a3553",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 424,
+    "audit_pending": 425,
     "declarations": 1096,
     "headers": 126,
     "internal_unconsumed": 203,
-    "private_test_only": 280,
+    "private_test_only": 279,
     "reviewed": 189
   }
 }

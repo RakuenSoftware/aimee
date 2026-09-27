@@ -1871,7 +1871,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "f964694427ab1d72a0035cdb37058e0fcb6d0bf8a8b7c5063d623273eab01c35"
+      "sha256": "a5db146689d00f3ad8f3aa7ed2688c511c6717387d696682d00375f064b067a7"
     },
     "src/modules/benchmarks/agent_eval_memory_transport.c": {
       "disposition": "benchmark-transport",
@@ -1963,7 +1963,7 @@
         "kb_client_memory_scan_conversations",
         "memory_learn_style"
       ],
-      "sha256": "e5fe546970eb9036b8f81c21309479b15bcc2833b4f217917ed2fbecfa201c36"
+      "sha256": "2788507f5c4f95651789de76eaf9ee610be5bb99f37c9c07b61278f3d4b4c46b"
     },
     "src/modules/kb_client/kb_client_dashboard.c": {
       "disposition": "kb-client",

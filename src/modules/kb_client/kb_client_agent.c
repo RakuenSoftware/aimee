@@ -826,5 +826,5 @@ int kb_client_anti_pattern_bump(int64_t id)
 
 char *kb_client_learning_application_json(cJSON *request)
 {
-   return kb_v1_action_request("learning.record_application", request);
+   return kb_v1_action_request("learning.record_governed_application", request);
 }
