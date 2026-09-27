@@ -471,7 +471,7 @@ live_env_remove_host_accounts() {
 
 live_env_write_config() {
    # Keep the fixture setting authoritative over an inherited image default.
-   export AIMEE_API_REMOTE_WRITES="${LIVE_REMOTE_WRITES:-off}"
+   export AIMEE_API_REMOTE_WRITES="${LIVE_REMOTE_WRITES:-${AIMEE_API_REMOTE_WRITES:-off}}"
    cat >"$AIMEE_HOME/aimee.yaml" <<YAML
 embedding_dim: 1024
 kb:
@@ -479,7 +479,7 @@ kb:
 aimee:
   api:
     http_port: $LIVE_SRV_PORT
-    remote_writes: ${LIVE_REMOTE_WRITES:-off}
+    remote_writes: $AIMEE_API_REMOTE_WRITES
 YAML
 }
 

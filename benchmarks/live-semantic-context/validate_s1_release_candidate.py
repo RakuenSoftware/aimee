@@ -89,8 +89,11 @@ def build_files_match(candidate_commit: str) -> bool:
     if (ROOT / "src/modules/db2").exists():
         return False
     candidate[0] = candidate[0].replace("modules/db2/c", "modules/kb/c")
+    # Remove the reviewed Make variable before expansion: pkg-config may add
+    # a platform-specific -L directory as well as -lpq. Do not discard other
+    # linker directories or libraries from either expanded command.
+    candidate[0] = candidate[0].replace(" $(PQ_LIB)", "")
     frozen_plan = build_plan(*candidate)
-    frozen_plan = [line.replace(" -lpq", "") for line in frozen_plan]
     return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:

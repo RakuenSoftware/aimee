@@ -1192,7 +1192,7 @@
     "server-go/modules/memory/scope_pool_test.go": "60f3729a7fc1b9d855c9bf9d6843f2bc67cb7402c1da1c8ff22b998a6385a51a",
     "server-go/modules/memory/selection_policy_test.go": "7e522461b92c585204962cd78d2fb682f2754923bcbf215ad2f0d6c433f54ce5",
     "server-go/modules/memory/served_view_test.go": "b31f8223d77b5c293a51821352bb3496bb8503dfbc2e175f7e7e43263e5a6207",
-    "server-go/modules/memory/source_release_test.go": "6ee05f6c24210017230649023cad5bd24f975b25a2cb66b3c9f48ccd8dbccf30",
+    "server-go/modules/memory/source_release_test.go": "e49e24c69ae442562140ab8db1ab09536d45bd700124ee0cccce9132c2c26c75",
     "server-go/modules/memory/typed_context_test.go": "7bc35b6f870fb77898898bdfd7bf6101df79587e59c1ce48f5d742f357228072",
     "server-go/modules/memory/unit_recall_test.go": "c1f3eec7be014314621eb99cedd95464813b4288843ea919025883220933f62b",
     "server-go/modules/memory/utility_horizon_test.go": "7ede02cedb85f2dbc5207233997f81b90d223b1fd7399e91cd05ff87500d377c",
@@ -1225,6 +1225,7 @@
       "server-go/modules/memory/runtime_role_test.go",
       "server-go/modules/memory/served_view_test.go",
       "server-go/modules/memory/source_release_test.go"
-    ]
+    ],
+    "source_send_fixture": "The disposable shadow-table adversary explicitly receives TEMPORARY on its isolated replay database and revokes it during cleanup, because shipping schema grants revoke PUBLIC TEMPORARY. The production grants and all send-barrier assertions remain unchanged."
   }
 }

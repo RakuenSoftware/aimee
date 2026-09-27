@@ -561,9 +561,18 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	}
 	exec(admin, "CREATE SCHEMA "+quoted)
 	exec(admin, "CREATE ROLE "+qrole+" NOLOGIN NOSUPERUSER NOBYPASSRLS")
+	var database string
+	if err := admin.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	qdatabase := pgx.Identifier{database}.Sanitize()
 	defer func() {
-		_, _ = admin.Exec(context.Background(), "ROLLBACK; RESET ROLE; DROP SCHEMA "+quoted+" CASCADE; DROP ROLE "+qrole)
+		_, _ = admin.Exec(context.Background(), "ROLLBACK; RESET ROLE; DROP SCHEMA "+quoted+" CASCADE; REVOKE TEMPORARY ON DATABASE "+qdatabase+" FROM "+qrole+"; DROP ROLE "+qrole)
 	}()
+	// The shipping schema revokes PUBLIC temporary-table authority. Give only
+	// this disposable adversarial role the ability needed to try shadowing the
+	// send barrier; the guard must still refuse the mutation.
+	exec(admin, "GRANT TEMPORARY ON DATABASE "+qdatabase+" TO "+qrole)
 	exec(admin, "SET search_path="+quoted+",public")
 	exec(other, "SET search_path="+quoted+",public")
 	names := []string{"memory_links", "memory_scopes", "learning_observations", "learning_proposals", "memory_relations", "rules", "memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
