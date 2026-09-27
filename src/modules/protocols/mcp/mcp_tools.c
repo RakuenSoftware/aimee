@@ -335,12 +335,33 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       for (int i = 0; i < 3; i++)
          cJSON_AddItemToArray(required, cJSON_CreateString(strings[i]));
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("task_projection",
-                              "Rebuild, get, describe, discard, promotion_preview or promote "
-                              "disposable state for the active task and owned session. "
-                              "Requires expected_revision for changes; hypotheses and plans remain "
-                              "non-authoritative.",
-                              schema));
+          tools,
+          mcp_tool_new(
+              "task_projection",
+              "Rebuild, get, describe, discard, cleanup_expired, promotion_preview or promote "
+              "disposable state for the active task and owned session. "
+              "Requires expected_revision for changes; hypotheses and plans remain "
+              "non-authoritative.",
+              schema));
+   }
+
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "scope"), "type", "object");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "dry_run"), "type", "boolean");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "cursor"), "type", "string");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_rows"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_content_bytes"), "type",
+                              "integer");
+      cJSON_AddItemToArray(cJSON_AddArrayToObject(schema, "required"), cJSON_CreateString("scope"));
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("memory_hygiene",
+                                        "Inspect bounded findings in one explicit shared scope. "
+                                        "Dry runs are read-only; normal runs queue version-bound "
+                                        "review proposals and never auto-apply canonical changes.",
+                                        schema));
    }
 
    /* Explicit served views and canonical claim cards share the HTTP/CLI owner. */

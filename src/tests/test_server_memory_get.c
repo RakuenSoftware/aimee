@@ -639,6 +639,10 @@ static void test_hygiene_owner_transport(void)
    assert(cJSON_Compare(expected, hygiene_request, 1));
    assert(cJSON_HasObjectItem(request, "method"));
    cJSON_Delete(expected);
+   hygiene_reply = "{\"status\":\"ok\",\"dry_run\":false,\"findings\":[],\"proposal_writes\":1,"
+                   "\"canonical_writes\":0}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
    /* Unknown/mutation arguments reach the owner and its refusal reaches HTTP. */
    hygiene_reply = "{\"status\":\"error\",\"kind\":\"invalid_argument\"}";
    handle_memory_hygiene(NULL, NULL, request);

@@ -176,15 +176,45 @@ func sessionTaskProjectionApply(ctx context.Context, q store.Queryer, f []string
 		return 0, nil, err
 	}
 	now := time.UnixMicro(nowMicros).UTC()
-	if active != task {
-		return taskProjectionReply("error", "active_task_mismatch", nil)
-	}
 	state := taskProjectionState{}
 	if raw != "" && json.Unmarshal([]byte(raw), &state) != nil {
 		return 0, nil, fmt.Errorf("invalid stored task projection")
 	}
 	if state.ID != "" && (state.Principal != principal || state.Session != sid) {
 		return store.StatusInvalid, nil, nil
+	}
+	// Cleanup names the retained projection, even after the session switches
+	// tasks. It cannot erase a live TTL/lease or another principal's state.
+	if request.Operation == "cleanup_expired" {
+		if state.ID == "" || state.TaskID != request.TaskID {
+			return taskProjectionReply("missing", "projection_unavailable", nil)
+		}
+		if state.Revision != request.Expected {
+			return taskProjectionReply("conflict", "expected_revision_mismatch", nil)
+		}
+		var leased bool
+		if err = q.QueryRow(ctx, `SELECT COALESCE((SELECT lease_expiry>clock_timestamp() FROM workflow_binding WHERE aimee_session_id=$1 FOR UPDATE),false)`, sid).Scan(&leased); err != nil {
+			return 0, nil, err
+		}
+		if now.Before(state.ExpiresAt) || leased {
+			return taskProjectionReply("blocked", "projection_retention_or_active_lease", nil)
+		}
+		state.releasePending()
+		state.Items = nil
+		state.Prepared = nil
+		state.State = "expired"
+		state.Replay = "digest_only_projection_not_retained"
+		encoded, e := json.Marshal(state)
+		if e != nil {
+			return 0, nil, e
+		}
+		if _, e = q.Exec(ctx, `UPDATE session_state SET task_projection_state=$2,updated_at=now() WHERE session_id=$1`, sid, string(encoded)); e != nil {
+			return 0, nil, e
+		}
+		return taskProjectionReply("ok", "expired_derived_state_cleaned", &state)
+	}
+	if active != task {
+		return taskProjectionReply("error", "active_task_mismatch", nil)
 	}
 	if state.TaskID != request.TaskID {
 		state = taskProjectionState{}

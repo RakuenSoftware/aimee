@@ -381,6 +381,7 @@ cJSON *marshal_memory_hygiene(int argc, char **argv)
       const char *value = strchr(arg, '=');
       size_t length = value ? (size_t)(value - arg) : strlen(arg);
       const char *field = length == 7 && !strncmp(arg, "--scope", length)       ? "scope"
+                          : length == 8 && !strncmp(arg, "--cursor", length)    ? "cursor"
                           : length == 10 && !strncmp(arg, "--max-rows", length) ? "max_rows"
                           : length == 19 && !strncmp(arg, "--max-content-bytes", length)
                               ? "max_content_bytes"
@@ -406,6 +407,8 @@ cJSON *marshal_memory_hygiene(int argc, char **argv)
          cJSON_AddStringToObject(scope, "value", colon + 1);
          free(type);
       }
+      else if (!strcmp(field, "cursor"))
+         cJSON_AddStringToObject(req, "cursor", value);
       else
       {
          cJSON *number = cJSON_ParseWithOpts(value, NULL, 1);
@@ -417,12 +420,16 @@ cJSON *marshal_memory_hygiene(int argc, char **argv)
          cJSON_AddItemToObject(req, field, number);
       }
    }
-   if (cJSON_HasObjectItem(req, "scope") && cJSON_HasObjectItem(req, "dry_run"))
+   if (cJSON_HasObjectItem(req, "scope"))
+   {
+      if (!cJSON_HasObjectItem(req, "dry_run"))
+         cJSON_AddBoolToObject(req, "dry_run", 0);
       return req;
+   }
 invalid:
    cJSON_Delete(req);
-   fprintf(stderr, "aimee: usage: aimee memory hygiene --scope <type:value> --dry-run "
-                   "[--max-rows N] [--max-content-bytes N] [--json]\n");
+   fprintf(stderr, "aimee: usage: aimee memory hygiene --scope <type:value> [--dry-run] "
+                   "[--cursor TOKEN] [--max-rows N] [--max-content-bytes N] [--json]\n");
    return NULL;
 }
 

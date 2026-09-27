@@ -1506,7 +1506,10 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		var preview hygienePreview
-		preview, err = backend.previewHygiene(ctx, scope, request.HygienePreview)
+		if !request.HygienePreview.DryRun && (invocation.PrincipalRef != 0 || !verifiedRetryCaller(options.commandContext)) {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		preview, err = backend.hygieneWithWorker(ctx, scope, request.HygienePreview)
 		if err == nil {
 			response.Payload, err = json.Marshal(preview)
 		}

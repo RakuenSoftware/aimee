@@ -16150,7 +16150,7 @@ CREATE OR REPLACE VIEW operator_review_items AS
         'computed','computed',priority
    FROM epistemic_directives WHERE state='open'
  UNION ALL
- SELECT 'learning_proposal:'||id,'learning_proposal','memory',target_memory_id::text,
+ SELECT 'learning_proposal:'||id,'learning_proposal',CASE WHEN sink='memory_hygiene' THEN 'derived' ELSE 'memory' END,target_memory_id::text,
         COALESCE((SELECT epistemic_kind FROM memories WHERE id=target_memory_id),'world_fact'),
         state,CASE WHEN evidence_refs<>'[]' THEN 'computed' ELSE 'not-computed' END,
         'computed','not-computed',LEAST(100,corroboration_count*5)::bigint
@@ -19468,3 +19468,189 @@ CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DEL
 DROP TRIGGER IF EXISTS memory_assertion_dependency_enqueue ON fact_evidence;
 CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DELETE ON fact_evidence
  FOR EACH ROW EXECUTE FUNCTION memory_assertion_dependency_enqueue();
+
+-- MR14: a proposal-only worker and the existing learning owner's narrow inbox.
+-- This role can inspect the same RLS-bound evidence as memory, but has no direct
+-- canonical writes or learning review privileges.
+DO $hygiene_worker$
+DECLARE r RECORD; cols TEXT;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene') THEN
+  CREATE ROLE aimee_memory_hygiene NOLOGIN NOINHERIT NOBYPASSRLS;
+ END IF;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene' AND
+   (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolcanlogin)) THEN
+  RAISE EXCEPTION 'unsafe hygiene worker role';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN RETURN; END IF;
+ GRANT USAGE ON SCHEMA public TO aimee_memory_hygiene;
+ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_memory_hygiene;
+ FOR r IN SELECT c.oid,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname='public' AND c.relkind IN ('r','p','v') LOOP
+  IF has_table_privilege('aimee_store_runtime',r.oid,'SELECT') THEN
+   EXECUTE format('GRANT SELECT ON public.%I TO aimee_memory_hygiene',r.relname);
+  ELSE
+   SELECT string_agg(quote_ident(a.attname),',') INTO cols FROM pg_attribute a
+    WHERE a.attrelid=r.oid AND a.attnum>0 AND NOT a.attisdropped
+    AND has_column_privilege('aimee_store_runtime',r.oid,a.attnum,'SELECT');
+   IF cols IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT(%s) ON public.%I TO aimee_memory_hygiene',cols,r.relname);
+   END IF;
+  END IF;
+ END LOOP;
+ GRANT aimee_memory_hygiene TO aimee_store_runtime;
+END $hygiene_worker$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS learning_hygiene_finding_identity
+ ON learning_proposals(target_key) WHERE sink='memory_hygiene';
+
+CREATE OR REPLACE FUNCTION learning_hygiene_check_versions(p JSONB) RETURNS VOID
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+DECLARE v JSONB; m RECORD; seen BIGINT[]='{}'; identity BIGINT;
+BEGIN
+ IF p->>'policy' IS DISTINCT FROM 'bounded-proposal-hygiene-v1' OR
+    p->>'owner_id' IS DISTINCT FROM (SELECT owner_id::text FROM memory_collection_owner WHERE id=1) OR
+    jsonb_typeof(p->'finding'->'expected_versions') IS DISTINCT FROM 'array' OR
+    jsonb_array_length(p->'finding'->'expected_versions') NOT BETWEEN 1 AND 128 THEN
+  RAISE EXCEPTION 'invalid hygiene proof';
+ END IF;
+ FOR v IN SELECT value FROM jsonb_array_elements(p->'finding'->'expected_versions') LOOP
+  IF v->>'schema_version' IS DISTINCT FROM '1' OR v->>'owner_id' IS DISTINCT FROM p->>'owner_id' OR
+     COALESCE(v->>'record_id','') !~ '^[1-9][0-9]{0,18}$' OR
+     COALESCE(v->>'record_revision','') !~ '^[1-9][0-9]{0,18}$' THEN
+   RAISE EXCEPTION 'invalid hygiene source version';
+  END IF;
+  identity:=(v->>'record_id')::bigint;
+  IF identity=ANY(seen) THEN RAISE EXCEPTION 'duplicate hygiene source version'; END IF;
+  seen:=array_append(seen,identity);
+  SELECT record_revision,scope_type,scope_value,lifecycle_state INTO m FROM memories
+   WHERE id=identity FOR SHARE;
+  IF NOT FOUND OR m.record_revision::text<>v->>'record_revision' OR
+     m.scope_type IS DISTINCT FROM p->'scope'->>'type' OR
+     m.scope_value IS DISTINCT FROM p->'scope'->>'value' OR
+     m.lifecycle_state NOT IN ('active','archived','retired','superseded') THEN
+   RAISE EXCEPTION 'hygiene source changed; recompute and review';
+  END IF;
+ END LOOP;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_check_versions(JSONB) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION learning_hygiene_queue(p JSONB) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE existing RECORD; signal BIGINT; proposed BIGINT; f JSONB; key TEXT; actor TEXT;
+BEGIN
+ f:=p->'finding'; key:=f->>'finding_id';
+ actor:=NULLIF(current_setting('aimee.principal',true),'');
+ IF octet_length(p::text)>65536 OR actor IS NULL OR
+    p->'scope'->>'type' IS DISTINCT FROM current_setting('aimee.memory_scope_type',true) OR
+    p->'scope'->>'value' IS DISTINCT FROM current_setting('aimee.memory_scope_value',true) OR
+    NOT memory_row_scope_visible(p->'scope'->>'type',p->'scope'->>'value') OR
+    COALESCE(key,'') !~ '^[a-f0-9]{64}$' OR
+    COALESCE(f->>'type','') NOT IN ('possible_duplicate_cluster','possible_contradiction',
+      'obsolete_assertion_candidate','broken_correction_chain','missing_dependency',
+      'unreferenced_observation','over_exposed_memory','low_trust_high_fanout') OR
+    COALESCE(f->>'proposed_action','') NOT IN ('review_duplicate','review_evidence','review_lifecycle') THEN
+  RAISE EXCEPTION 'invalid scoped hygiene admission';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('learning-hygiene:'||key,0));
+ PERFORM learning_hygiene_check_versions(p);
+ SELECT id,state INTO existing FROM learning_proposals WHERE sink='memory_hygiene' AND target_key=key;
+ IF FOUND THEN
+  RETURN jsonb_build_object('proposal_id',existing.id::text,'state',existing.state,'created',false);
+ END IF;
+ INSERT INTO learning_signals(signal_type,title,target_key,target_memory_id,evidence_refs,source_session)
+ VALUES('memory_hygiene',f->>'type',key,(f->'expected_versions'->0->>'record_id')::bigint,
+  (f->'expected_versions')::text,actor) RETURNING id INTO signal;
+ INSERT INTO learning_proposals(signal_id,sink,target_key,target_memory_id,action_json,evidence_refs,expires_at)
+ VALUES(signal,'memory_hygiene',key,(f->'expected_versions'->0->>'record_id')::bigint,p::text,
+  (f->'expected_versions')::text,(CURRENT_TIMESTAMP+interval '30 days')::text) RETURNING id INTO proposed;
+ RETURN jsonb_build_object('proposal_id',proposed::text,'state','pending','created',true);
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_queue(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_queue(JSONB) TO aimee_memory_hygiene;
+
+CREATE OR REPLACE FUNCTION learning_hygiene_review_guard() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF OLD.sink<>'memory_hygiene' THEN RETURN NEW; END IF;
+ IF (NEW.sink,NEW.target_key,NEW.target_memory_id,NEW.action_json,NEW.evidence_refs,NEW.signal_id)
+    IS DISTINCT FROM (OLD.sink,OLD.target_key,OLD.target_memory_id,OLD.action_json,OLD.evidence_refs,OLD.signal_id) THEN
+  RAISE EXCEPTION 'hygiene proposal preview is immutable';
+ END IF;
+ IF OLD.state IN ('archived','rejected','committed') AND NEW.state<>OLD.state THEN
+  RAISE EXCEPTION 'settled hygiene proposal cannot reopen';
+ END IF;
+ IF NEW.state='committed' AND OLD.state<>'committed' THEN
+  IF NULLIF(OLD.expires_at,'')::timestamptz<=CURRENT_TIMESTAMP THEN RAISE EXCEPTION 'hygiene proposal expired'; END IF;
+  PERFORM learning_hygiene_check_versions(OLD.action_json::jsonb);
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_review_guard() FROM PUBLIC;
+DROP TRIGGER IF EXISTS learning_hygiene_review_guard ON learning_proposals;
+CREATE TRIGGER learning_hygiene_review_guard BEFORE UPDATE ON learning_proposals
+ FOR EACH ROW EXECUTE FUNCTION learning_hygiene_review_guard();
+
+-- Equality lookup supports bounded cross-page duplicate clusters.
+CREATE INDEX IF NOT EXISTS memory_hygiene_content_lookup ON memories(scope_type,scope_value,md5(content),id);
+
+-- One bounded hygiene page is an idempotent job in the existing work queue.
+-- Only metadata is retained here; review payloads remain in learning_proposals.
+CREATE TABLE IF NOT EXISTS memory_hygiene_runs (
+ id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+ run_key TEXT NOT NULL UNIQUE,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,
+ owner_id TEXT NOT NULL,generation TEXT NOT NULL,policy TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('running','complete','partial')),
+ resume_cursor TEXT NOT NULL DEFAULT '',rows_inspected BIGINT NOT NULL DEFAULT 0,
+ proposal_writes BIGINT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+ finished_at TIMESTAMPTZ
+);
+REVOKE ALL ON memory_hygiene_runs FROM PUBLIC,aimee_memory_hygiene;
+CREATE OR REPLACE FUNCTION learning_hygiene_job(p JSONB) RETURNS TEXT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE run BIGINT; v_scope_type TEXT; v_scope_value TEXT; key TEXT;
+BEGIN
+ v_scope_type:=p->'scope'->>'type';v_scope_value:=p->'scope'->>'value';key:=p->>'run_key';
+ IF octet_length(p::text)>8192 OR COALESCE(key,'') !~ '^[a-f0-9]{64}$'
+ OR NULLIF(current_setting('aimee.principal',true),'') IS NULL
+ OR v_scope_type IS DISTINCT FROM current_setting('aimee.memory_scope_type',true)
+ OR v_scope_value IS DISTINCT FROM current_setting('aimee.memory_scope_value',true)
+ OR NOT memory_row_scope_visible(v_scope_type,v_scope_value)
+ OR p->>'policy' IS DISTINCT FROM 'bounded-proposal-hygiene-v1'
+ OR p->>'owner_id' IS DISTINCT FROM (SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+ OR p->>'generation' IS DISTINCT FROM (SELECT COALESCE((SELECT g.generation FROM memory_collection_generations g
+   WHERE g.scope_type=v_scope_type AND g.scope_value=v_scope_value),0)::text)
+ THEN RAISE EXCEPTION 'invalid hygiene job binding'; END IF;
+ IF NOT pg_try_advisory_xact_lock(hashtextextended('hygiene-run:'||key,0)) THEN
+  RAISE EXCEPTION 'hygiene job already claimed';
+ END IF;
+ INSERT INTO memory_hygiene_runs(run_key,scope_type,scope_value,owner_id,generation,policy,state)
+ VALUES(key,v_scope_type,v_scope_value,p->>'owner_id',p->>'generation',p->>'policy','running')
+ ON CONFLICT(run_key) DO NOTHING;
+ SELECT id INTO run FROM memory_hygiene_runs r WHERE r.run_key=key AND r.scope_type=v_scope_type
+ AND r.scope_value=v_scope_value FOR UPDATE;
+ IF run IS NULL THEN RAISE EXCEPTION 'hygiene job identity collision'; END IF;
+ INSERT INTO kb_async_jobs(kind,document_id,project,status,claimed_by,claimed_at)
+ VALUES('memory_hygiene',run,v_scope_type||':'||v_scope_value,'running',current_setting('aimee.principal',true),clock_timestamp()::text)
+ ON CONFLICT(kind,document_id) DO UPDATE SET status='running',claimed_by=EXCLUDED.claimed_by,claimed_at=EXCLUDED.claimed_at;
+ RETURN run::text;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_job(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_job(JSONB) TO aimee_memory_hygiene;
+CREATE OR REPLACE FUNCTION learning_hygiene_finish(p_id BIGINT,p_partial BOOLEAN,p_cursor TEXT,p_rows BIGINT,p_writes BIGINT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF p_partial IS NULL OR octet_length(p_cursor)>4096 OR p_rows NOT BETWEEN 0 AND 128
+ OR p_writes NOT BETWEEN 0 AND 2048 THEN RAISE EXCEPTION 'invalid hygiene completion'; END IF;
+ UPDATE memory_hygiene_runs SET state=CASE WHEN p_partial THEN 'partial' ELSE 'complete' END,
+ resume_cursor=p_cursor,rows_inspected=p_rows,proposal_writes=p_writes,finished_at=clock_timestamp()
+ WHERE id=p_id AND scope_type=current_setting('aimee.memory_scope_type',true)
+ AND scope_value=current_setting('aimee.memory_scope_value',true)
+ AND EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_hygiene' AND j.document_id=p_id
+  AND j.status='running' AND j.claimed_by=current_setting('aimee.principal',true));
+ IF NOT FOUND THEN RAISE EXCEPTION 'hygiene claim unavailable'; END IF;
+ UPDATE kb_async_jobs SET status='done',updated_at=clock_timestamp()::text,claimed_by='',claimed_at=''
+ WHERE kind='memory_hygiene' AND document_id=p_id;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) TO aimee_memory_hygiene;

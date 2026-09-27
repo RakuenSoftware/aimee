@@ -1,6 +1,6 @@
 # MR-14: Proposal-only memory hygiene and bounded maintenance
 
-- **State:** Proposed
+- **State:** In progress — bounded detector, scoped resume and governed proposal admission
 - **Priority:** P2: operational maintenance
 - **Owner:** Go memory maintenance/proposal generation, with the reviewed-learning owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-08](memory-reliability-08-retrieval-health-telemetry.md), [MR-13](memory-reliability-13-disposable-task-projections.md)

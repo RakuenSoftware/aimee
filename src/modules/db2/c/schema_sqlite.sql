@@ -969,3 +969,14 @@ CREATE TABLE IF NOT EXISTS memory_evidence_recovery (
  outcome TEXT NOT NULL DEFAULT '{"state":"pending"}',
  PRIMARY KEY(actor_principal,task_hash)
 );
+
+-- Metadata mirror of the PostgreSQL-owned bounded hygiene job receipts.
+CREATE TABLE IF NOT EXISTS memory_hygiene_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_key TEXT NOT NULL UNIQUE,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,
+ owner_id TEXT NOT NULL,generation TEXT NOT NULL,policy TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('running','complete','partial')),
+ resume_cursor TEXT NOT NULL DEFAULT '',rows_inspected INTEGER NOT NULL DEFAULT 0,
+ proposal_writes INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ finished_at TEXT
+);

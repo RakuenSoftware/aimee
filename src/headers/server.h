@@ -460,6 +460,7 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_user_mcp_supersede_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
+cJSON *memory_hygiene_command(cJSON *req);
 cJSON *memory_evidence_command(cJSON *req);
 cJSON *memory_serve_command(cJSON *req);
 cJSON *memory_claim_card_command(cJSON *req);

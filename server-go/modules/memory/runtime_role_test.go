@@ -106,6 +106,12 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 		t.Fatal("memory runtime grant migration missing")
 	}
 	grants := string(schema[start : end+len("END\n$memory_store_grants$;")])
+	workerStart := strings.Index(string(schema), "DO $hygiene_worker$")
+	workerEnd := strings.Index(string(schema), "END $hygiene_worker$;")
+	if workerStart < 0 || workerEnd < workerStart {
+		t.Fatal("hygiene role migration missing")
+	}
+	grants += "\n" + string(schema[workerStart:workerEnd+len("END $hygiene_worker$;")])
 	for i := 0; i < 2; i++ {
 		if _, err := tx.Exec(ctx, grants); err != nil {
 			t.Fatal(err)

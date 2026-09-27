@@ -3738,9 +3738,9 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/hygiene:
     post:
-      summary: Preview exact-content duplicate candidates in one shared scope
+      summary: Inspect bounded hygiene findings and queue review proposals
       description: >-
-        Read-only preview. Creates no proposals and changes no canonical records.
+        Dry runs create no proposals. Normal runs queue immutable, version-bound learning proposals; neither mode changes canonical memory.
         Row and content limits bound the compared window; partial coverage and
         unvisited content are explicit. Findings carry expected source versions
         and remain candidates requiring review. No auto-apply mode is available.
@@ -3751,9 +3751,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [dry_run, scope]
+              required: [scope]
               properties:
-                dry_run: { type: boolean, enum: [true] }
+                dry_run: { type: boolean, default: false }
+                cursor: { type: string, maxLength: 4096, description: "Owner/scope/generation-bound continuation; changed evidence requires restarting the scan." }
                 scope:
                   type: object
                   required: [type, value]
@@ -3764,7 +3765,7 @@ paths:
                 max_content_bytes: { type: integer, minimum: 1, maximum: 32768, default: 16384 }
       responses:
         "200":
-          description: Bounded read-only findings with scope, revisions, budgets and coverage
+          description: Bounded findings with scope, revisions, budgets, coverage and proposal receipts
           content:
             application/json:
               schema: { type: object }
@@ -4263,7 +4264,7 @@ paths:
               properties:
                 operation:
                   type: string
-                  enum: [describe, rebuild, get, discard, promotion_preview, promote]
+                  enum: [describe, rebuild, get, discard, cleanup_expired, promotion_preview, promote]
                 session_id: {type: string}
                 task_id: {type: string, pattern: '^[1-9][0-9]*$'}
                 expected_revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}

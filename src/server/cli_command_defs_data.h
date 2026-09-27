@@ -55,13 +55,14 @@
      "  remove <path>    Unregister a workspace\n"
      "  serve <id>       Run the authorized remote-workspace request loop\n"},
     {"memory", "Stored memory", AIMEE_CMD_TIER_CORE, 0,
-     "  hygiene          Preview duplicate candidates (--scope type:value --dry-run)\n"
+     "  hygiene          Queue hygiene proposals (--scope type:value; --dry-run previews)\n"
      "  search           Search stored memory\n"
      "  store            Store a memory\n"
      "  list             List memories\n"
      "  get              Read a memory by id (--as-of <ts>: was it in force then?)\n"
      "  evidence <id>    Inspect authorized evidence lineage (--json)\n"
-     "  health           Receipt-backed health (--window 24h --project P --workspace W --traces --json)\n"
+     "  health           Receipt-backed health (--window 24h --project P --workspace W --traces "
+     "--json)\n"
      "  receipt <request-id>  Inspect durable provider attempts (--json)\n"
      "  read             Assemble current memory context\n"},
     {"economizer", "Economizer telemetry", AIMEE_CMD_TIER_ADVANCED, 0,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -87,7 +89,30 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		return value
 	}
 	before := digest()
-	full := preview(128, 32768)
+	duplicates := func(result hygienePreview) hygienePreview {
+		filtered := []hygieneFinding{}
+		for _, f := range result.Findings {
+			if f.Type == "possible_duplicate_cluster" {
+				filtered = append(filtered, f)
+			}
+		}
+		result.Findings = filtered
+		return result
+	}
+	inspection := preview(128, 32768)
+	if inspection.RowsInspected != 6 || len(inspection.Findings) != 2 {
+		t.Fatalf("retained inspection: %+v", inspection)
+	}
+	foundExpired := false
+	for _, f := range inspection.Findings {
+		if f.Type == "obsolete_assertion_candidate" && len(f.Targets) == 1 && f.Targets[0].RecordID == fmt.Sprint(ids[4]) {
+			foundExpired = true
+		}
+	}
+	if !foundExpired {
+		t.Fatal("expired assertion omitted")
+	}
+	full := duplicates(inspection)
 	if full.Partial || full.RowsConsidered != 4 || full.RowsCompared != 4 || len(full.Findings) != 1 || len(full.Findings[0].Targets) != 3 || !full.DryRun || full.CanonicalWrites != 0 || full.ProposalWrites != 0 {
 		t.Fatalf("full preview: %+v", full)
 	}
@@ -96,12 +121,12 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 			t.Fatal("hidden/ineligible source leaked", version)
 		}
 	}
-	repeated := preview(128, 32768)
+	repeated := duplicates(preview(128, 32768))
 	if repeated.Findings[0].ID != full.Findings[0].ID || repeated.Generation != full.Generation {
 		t.Fatal("identical preview changed identity")
 	}
 	limited := preview(2, 32768)
-	if !limited.Partial || limited.Unvisited != "remaining_eligible_content_unknown" || limited.ResumeAvailable || len(limited.Findings) != 1 || len(limited.Findings[0].Targets) != 2 {
+	if !limited.Partial || limited.Unvisited != "remaining_retained_rows_or_content_unknown" || !limited.ResumeAvailable || limited.ResumeCursor == "" || len(limited.Findings) != 1 || len(limited.Findings[0].Targets) != 3 {
 		t.Fatalf("bounded rows: %+v", limited)
 	}
 	tiny := preview(128, 1)
@@ -111,9 +136,152 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if digest() != before {
 		t.Fatal("hygiene preview changed canonical rows")
 	}
+	cursor := limited.ResumeCursor
+	inspected := limited.RowsInspected
+	for page := 0; page < 4 && cursor != ""; page++ {
+		raw, e := client.Command(ctx, 73, "hygiene", json.RawMessage(fmt.Sprintf(`{"dry_run":true,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":2,"max_content_bytes":32768,"cursor":%q}`, cursor)))
+		var next hygienePreview
+		if e != nil || json.Unmarshal(raw, &next) != nil || next.Status != "ok" {
+			t.Fatalf("resume: %s %v", raw, e)
+		}
+		inspected += next.RowsInspected
+		if next.ResumeCursor == cursor {
+			t.Fatal("cursor did not advance")
+		}
+		cursor = next.ResumeCursor
+		if cursor == "" && next.Partial {
+			t.Fatal("complete bounded fixture still partial", next)
+		}
+	}
+	if cursor != "" || inspected != 6 {
+		t.Fatal("resume did not cover retained rows", inspected)
+	}
+
+	caller := bus.CommandContext{Authenticated: true, Principal: "model:hygiene", TransportIdentity: "cert:hygiene", ScopeKind: ScopeProject, ScopeID: "hygiene-visible"}
+	queue := func() hygienePreview {
+		t.Helper()
+		result, status := invokeContextCommand(t, handler, 0, caller, "hygiene", `{"dry_run":false,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":128,"max_content_bytes":32768}`)
+		body, _ := json.Marshal(result)
+		var out hygienePreview
+		if status != bus.ModuleStatusOK || json.Unmarshal(body, &out) != nil || out.Status != "ok" || len(out.Findings) != 2 {
+			t.Fatalf("hygiene admission %s %v", body, status)
+		}
+		return duplicates(out)
+	}
+	admitted := queue()
+	if admitted.DryRun || admitted.CanonicalWrites != 0 || admitted.ProposalWrites != 2 || admitted.Findings[0].ProposalID == "" || admitted.JobID == "" || admitted.RunID == "" || !admitted.TelemetryWrites {
+		t.Fatal(admitted)
+	}
+	repeatedAdmission := queue()
+	if repeatedAdmission.JobID != admitted.JobID || repeatedAdmission.RunID != admitted.RunID || repeatedAdmission.ProposalWrites != 0 || repeatedAdmission.Findings[0].ProposalID != admitted.Findings[0].ProposalID {
+		t.Fatal("retry duplicated proposal", repeatedAdmission)
+	}
+	exec("SET LOCAL ROLE aimee_memory_hygiene")
+	var canMutate bool
+	if err := tx.QueryRow(ctx, `SELECT has_table_privilege(current_user,'memories','UPDATE') OR has_table_privilege(current_user,'memories','DELETE') OR has_table_privilege(current_user,'learning_proposals','UPDATE') OR has_table_privilege(current_user,'learning_proposals','INSERT')`).Scan(&canMutate); err != nil || canMutate {
+		t.Fatal("worker acquired canonical/review writes", err, canMutate)
+	}
+	exec("SET LOCAL ROLE NONE")
+	exec(`UPDATE learning_proposals SET state='archived',archive_reason='review_rejected' WHERE id=$1`, admitted.Findings[0].ProposalID)
+	exec("SET LOCAL ROLE aimee_store_runtime")
+	rejectedRetry := queue()
+	if rejectedRetry.ProposalWrites != 0 || rejectedRetry.Findings[0].ProposalID != admitted.Findings[0].ProposalID || rejectedRetry.Findings[0].ProposalState != "archived" {
+		t.Fatal("rejection repeated", rejectedRetry)
+	}
+	if digest() != before {
+		t.Fatal("hygiene admission or rejection mutated canonical state")
+	}
 	exec("UPDATE memories SET content='changed canonical evidence' WHERE id=$1", ids[0])
-	changed := preview(128, 32768)
+	changed := duplicates(preview(128, 32768))
 	if len(changed.Findings) != 1 || changed.Findings[0].ID == full.Findings[0].ID || changed.Generation == full.Generation {
 		t.Fatal("changed targets reused old preview identity")
 	}
+
+	renewed := queue()
+	if renewed.Findings[0].ProposalID == admitted.Findings[0].ProposalID || renewed.ProposalWrites != 1 {
+		t.Fatal("meaningful new evidence did not reconsider", renewed)
+	}
+	exec("UPDATE memories SET content='concurrent evidence change' WHERE id=$1", ids[1])
+	exec("SET LOCAL ROLE NONE")
+	exec("SAVEPOINT hygiene_stale_review")
+	if _, err := tx.Exec(ctx, `UPDATE learning_proposals SET state='committed' WHERE id=$1`, renewed.Findings[0].ProposalID); err == nil {
+		t.Fatal("stale review accepted")
+	}
+	exec("ROLLBACK TO SAVEPOINT hygiene_stale_review; RELEASE SAVEPOINT hygiene_stale_review")
+	exec("SET LOCAL ROLE aimee_store_runtime")
+	exec("UPDATE memories SET merged_into=$2 WHERE id=$1", ids[2], ids[6])
+	exec("UPDATE memories SET kind='observation' WHERE id=$1", ids[0])
+	exec("INSERT INTO memory_conflicts(memory_a,memory_b,detected_at) VALUES($1,$2,CURRENT_TIMESTAMP::text),($1,$3,CURRENT_TIMESTAMP::text)", ids[1], ids[3], ids[6])
+	diagnostics := preview(128, 32768)
+	types := map[string]int{}
+	for _, finding := range diagnostics.Findings {
+		types[finding.Type]++
+		for _, target := range finding.Targets {
+			if target.RecordID == fmt.Sprint(ids[6]) {
+				t.Fatal("diagnostic leaked hidden target")
+			}
+		}
+	}
+	if types["broken_correction_chain"] != 1 || types["unreferenced_observation"] != 1 || types["possible_contradiction"] != 1 || types["obsolete_assertion_candidate"] != 1 {
+		t.Fatal("diagnostic coverage", types)
+	}
+}
+
+func TestHygieneCursorBindsScopeAndSnapshotIdentity(t *testing.T) {
+	scope := Scope{Type: ScopeProject, Value: "one"}
+	raw := encodeHygieneCursor("owner", scope, "12", 42)
+	got, id, err := decodeHygieneCursor(raw, scope)
+	if err != nil || id != 42 || got.Owner != "owner" || got.Generation != "12" {
+		t.Fatal(got, id, err)
+	}
+	if _, _, err = decodeHygieneCursor(raw, Scope{Type: ScopeProject, Value: "other"}); err == nil {
+		t.Fatal("cursor widened scope")
+	}
+	if _, _, err = decodeHygieneCursor("forged", scope); err == nil {
+		t.Fatal("malformed cursor accepted")
+	}
+}
+
+func TestHygieneGovernedPostgres(t *testing.T) {
+	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if url == "" {
+		t.Skip("PostgreSQL replay fixture required")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, markers := range [][2]string{{"DO $memory_store_grants$", "END\n$memory_store_grants$;"}, {"DO $hygiene_worker$", "END $hygiene_worker$;"}} {
+		first, last := strings.Index(string(schema), markers[0]), strings.Index(string(schema), markers[1])
+		if first < 0 || last < first {
+			t.Fatal("role grant block missing")
+		}
+		if _, err = tx.Exec(ctx, string(schema[first:last+len(markers[1])])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = tx.Exec(ctx, `SET LOCAL ROLE aimee_store_runtime; SELECT set_config('aimee.principal','model:hygiene',true),set_config('aimee.authority','model',true),set_config('aimee.transport_identity','cert:hygiene',true)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementKB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exerciseHygienePreviewReplay(t, ctx, tx, NewHandler(nil, WithDataStore(PlacementKB, backend)))
 }

@@ -2041,7 +2041,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "5079c6d61c7ff7493807cb7096ee146ac57a2e0889253a8ade9da181557d19df"
+      "sha256": "0762ddf6824dc312581908dfbcd5ae44b4bde4daea6258c6a1f6d9d8b24abe5e"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2184,7 +2184,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "1076673305587b51d686bfd0d158f89c94be2b49ca50957bc71a904c5963c2e8"
+      "sha256": "42d69d7ee18608c04778b73a824066e6c85c712f5d8dae70e76212b28416ee20"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2193,7 +2193,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "96fd04117d9a0021134a0c96911d688b3f1a507702e68fe943cbedc80b39c92b"
+      "sha256": "6a7c329b0f92a1c27efa12769608cd2dc006a8a98188f23f66c6a4230b045f09"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2530,7 +2530,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "fadfa99bf773c9d14303e9a1adcaf58c1bb9eb63c2f6cd6c77a1ba405d455fe8"
+      "sha256": "7cffd80f76e412cc8b26a55b27dfac2c530475626064833729f20be0e0e33929"
     },
     "src/tests/test_server_prospective.c": {
       "disposition": "host-fixture",
@@ -2593,8 +2593,8 @@
       "sha256": "921d232c510d9a842cd5dbc103d3230df1003b4d944683407b2444f98b62430f",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "3653f317ecb1324de586fba3ed3651b1300098b6ab6eb7a0c417de112cf5192f",
-        "src/modules/db2/c/schema_sqlite.sql": "d1f2b0cefd2cdeb8441bd89f54a0318204993ce6c57ba4cb9fe543998392cac8"
+        "src/modules/db2/c/schema.sql": "0cc0111402111d3e69468fb5c6654313a421b2c3fe7c7b787b5c7f6d7992266b",
+        "src/modules/db2/c/schema_sqlite.sql": "b9c4f2168bc96d8ee4b80f05da378a1985f962a6c58584db11d34656352ca7e4"
       }
     },
     "src/server/openapi_server_data.h": {
@@ -2606,7 +2606,7 @@
       "sha256": "19d190a778402939297a89eaff296d5cba8fef540dd30b4d2dce56b8c580efde",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "d7b810c63a69d39f47ed5cf657ed72d339914d83066c681fecc35c9d0d7eaf82"
+        "api/openapi-server-v1.yaml": "be639d4535523463ac0fc0b8ef43de8c15ab61b69876fdb4092fb8f26467dac8"
       }
     }
   }

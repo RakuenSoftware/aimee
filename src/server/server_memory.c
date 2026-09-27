@@ -192,15 +192,13 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
 
 /* Hygiene has an explicit structured scope. Forward its arguments unchanged
  * for the Go owner to validate; ambient workspace state must not widen it. */
-int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_hygiene_command(cJSON *req)
 {
-   (void)ctx;
    cJSON *request = cJSON_Duplicate(req, 1);
    if (!cJSON_IsObject(request))
    {
       cJSON_Delete(request);
-      return send_and_free(conn, server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                                        "invalid hygiene request", NULL));
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "invalid hygiene request", NULL);
    }
    cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
    cJSON_DeleteItemFromObjectCaseSensitive(request, "protocol_version");
@@ -210,7 +208,7 @@ int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                        : NULL;
    cJSON *reply = NULL;
    if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
-       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(parsed, "dry_run")) &&
+       cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(parsed, "dry_run")) &&
        cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "findings")))
       reply = cJSON_CreateRaw(raw);
    else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
@@ -218,11 +216,15 @@ int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       reply = memory_owner_error_reply(raw, parsed);
    cJSON_Delete(parsed);
    free(raw);
-   return send_and_free(
-       conn,
-       reply ? reply
-             : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
-                                      "KB hygiene owner unavailable or invalid response", NULL));
+   return reply ? reply
+                : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                         "KB hygiene owner unavailable or invalid response", NULL);
+}
+
+int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_hygiene_command(req));
 }
 
 /* The runtime envelope quotes the owner's JSON so cJSON never rewrites its

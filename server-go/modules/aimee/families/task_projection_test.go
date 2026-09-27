@@ -50,6 +50,7 @@ func TestTaskProjectionAtomicOwnerPostgres(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+	exec(`CREATE TABLE workflow_binding(aimee_session_id TEXT PRIMARY KEY,lease_expiry TIMESTAMPTZ)`)
 	exec(`INSERT INTO server_sessions(id,principal) VALUES('session','alice'),('foreign','bob');INSERT INTO session_state(session_id,active_task_id) VALUES('session',1),('foreign',1)`)
 	handler := GuardrailState.Handler(explorationLiveDB{liveQueryer{pool}})
 	call := func(principal string, ref uint32, req map[string]any) map[string]any {
@@ -159,6 +160,28 @@ func TestTaskProjectionAtomicOwnerPostgres(t *testing.T) {
 	exec(`UPDATE session_state SET active_task_id=2 WHERE session_id='session'`)
 	if r := call("alice", 0, request("get", "")); r["reason"] != "active_task_mismatch" || r["kind"] != "invalid_argument" {
 		t.Fatal("task switch leaked old state", r)
+	}
+	cleanup := request("cleanup_expired", "3")
+	// Read the current CAS token; earlier event rebuilds can advance it.
+	var cleanupRevision string
+	if e = pool.QueryRow(ctx, `SELECT task_projection_state::jsonb->>'revision' FROM session_state WHERE session_id='session'`).Scan(&cleanupRevision); e != nil {
+		t.Fatal(e)
+	}
+	cleanup["expected_revision"] = cleanupRevision
+	if r := call("alice", 0, cleanup); r["reason"] != "projection_retention_or_active_lease" {
+		t.Fatal("live projection cleaned", r)
+	}
+	exec(`UPDATE session_state SET task_projection_state=jsonb_set(task_projection_state::jsonb,'{expires_at}',to_jsonb('2000-01-01T00:00:00Z'::text))::text WHERE session_id='session'`)
+	exec(`INSERT INTO workflow_binding VALUES('session',clock_timestamp()+interval '1 hour')`)
+	if r := call("alice", 0, cleanup); r["status"] != "blocked" {
+		t.Fatal("active workflow lease ignored", r)
+	}
+	exec(`UPDATE workflow_binding SET lease_expiry=clock_timestamp()-interval '1 second'`)
+	if r := call("alice", 0, cleanup); r["reason"] != "expired_derived_state_cleaned" {
+		t.Fatal("old task cleanup failed", r)
+	}
+	if r := call("alice", 0, cleanup); r["status"] != "ok" {
+		t.Fatal("cleanup retry failed", r)
 	}
 	switched := request("rebuild", "0")
 	switched["task_id"] = "2"

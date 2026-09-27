@@ -544,7 +544,9 @@ static void test_memory_hygiene_explicit_scope(void)
    assert(cJSON_GetObjectItemCaseSensitive(request, "max_content_bytes")->valueint == 1000);
    assert(!cJSON_HasObjectItem(request, "cwd"));
    cJSON_Delete(request);
-   assert(!marshal_memory_hygiene(2, args));
+   request = marshal_memory_hygiene(2, args);
+   assert(request && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request, "dry_run")));
+   cJSON_Delete(request);
    const char *bad[] = {"--apply",          "--auto-apply",          "--dry-run=false", "--sql",
                         "--max-rows=5junk", "--scope=project:other", "--store=user"};
    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)

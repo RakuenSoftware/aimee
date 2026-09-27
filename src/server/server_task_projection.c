@@ -40,7 +40,8 @@ cJSON *task_projection_command(cJSON *input)
    }
    const char *op = jo_cstr(input, "operation");
    if (strcmp(op, "rebuild") && strcmp(op, "get") && strcmp(op, "describe") &&
-       strcmp(op, "discard") && strcmp(op, "promotion_preview") && strcmp(op, "promote"))
+       strcmp(op, "cleanup_expired") && strcmp(op, "discard") && strcmp(op, "promotion_preview") &&
+       strcmp(op, "promote"))
    {
       cJSON_Delete(request);
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,

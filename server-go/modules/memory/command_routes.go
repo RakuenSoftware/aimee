@@ -21,7 +21,7 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
-	{"memory", "hygiene", "Preview bounded duplicate findings without creating proposals or mutating memory.", handleHygienePreview, true},
+	{"memory", "hygiene", "Inspect bounded scoped findings; dry-run is read-only, normal runs queue review proposals.", handleHygienePreview, true},
 	{"memory", "revalidate_sources", "Recheck scoped source versions before provider handoff.", handleSourceRevalidation, true},
 	{"memory", "correction_proposals", "Inspect scoped correction drafts outside recall.", handleCorrectionProposalCommand, true},
 	{"memory", "review_correction", "Approve or reject the exact scoped correction draft.", handleCorrectionProposalCommand, true},
