@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 77
+Total commands: 78
 
 ## Core commands
 
@@ -771,6 +771,18 @@ Subcommands:
 ### `aimee status`
 
 System health overview.
+
+### `aimee task`
+
+Owned disposable task projections.
+
+Subcommands:
+
+```
+  projection <operation> --session_id ID --task_id ID  Read or revise working state
+  Operations: describe, rebuild, get, discard, promotion_preview, promote
+  Changes require --expected_revision; promotion creates a private review draft
+```
 
 ### `aimee trajectory`
 

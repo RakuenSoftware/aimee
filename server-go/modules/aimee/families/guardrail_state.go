@@ -536,6 +536,7 @@ var GuardrailState = store.Family{
 	Event: EventGuardrailState,
 	Stage: StageGuardrailState,
 	Ops: map[uint32]store.Op{
+		9:                         {Name: "session_task_projection_apply", Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionTaskProjectionApply},
 		8:                         {Name: "session_exploration_apply", Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionExplorationApply},
 		opSessionStateLoad:        {Name: "session_state_load", Cells: 386, Args: 1, Run: sessionStateLoad},
 		opSessionStateSave:        {Name: "session_state_save", Args: saveFields, Tx: true, Run: sessionStateSave},

@@ -2,7 +2,6 @@
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
-
 #include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
@@ -1479,6 +1478,7 @@ static const struct
     {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
     {"memory.evidence", marshal_memory_evidence},
+    {"task.projection", marshal_task_projection},
     {"memory.serve", marshal_memory_serve},
     {"memory.claim_card", marshal_memory_claim_card},
     {"memory.identity", marshal_memory_identity},

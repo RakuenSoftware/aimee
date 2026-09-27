@@ -13,8 +13,11 @@ import (
 // The caller already holds the canonical parent lock and host actor context.
 // Draft identity includes the parent version and payload, including terminal
 // decisions, so repeating a rejected suggestion cannot reopen it.
-func (s *postgresDataStore) proposePersonalCorrection(ctx context.Context, old, wanted Record) error {
+func (s *postgresDataStore) proposePersonalCorrection(ctx context.Context, old, wanted Record, promotion ...*taskPromotion) error {
 	draft := correctionDraft{SchemaVersion: 1, Content: wanted.Content, Confidence: wanted.Confidence, Tier: wanted.Tier, EpistemicKind: old.Kind}
+	if len(promotion) > 0 {
+		draft.TaskProjection = promotion[0]
+	}
 	raw, err := json.Marshal(draft)
 	if err != nil {
 		return err
@@ -95,6 +98,11 @@ func (s *postgresDataStore) reviewPersonalCorrection(ctx context.Context, r corr
 	}
 	if _, ok := s.db.(store.Tx); !ok {
 		return correctionProposal{}, errors.New("memory: private review requires a transaction")
+	}
+	if r.Action == "approve" {
+		if err := s.checkTaskPromotionReview(ctx, r.ProposalID); err != nil {
+			return correctionProposal{}, err
+		}
 	}
 	var id int64
 	var owner, revision, state, kind string

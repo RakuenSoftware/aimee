@@ -42,6 +42,8 @@ const method_policy_t method_registry[] = {
     {"trajectory.export", CAP_SESSION_READ, "trajectory export"},
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
+    {"task.projection", CAP_MEMORY_WRITE,
+     "operate on owned disposable task state and promotion drafts"},
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
     /* Destructive: hard-deletes the row and its provenance, and the audit event
      * carries only the id — the content is not recoverable afterwards. Graded

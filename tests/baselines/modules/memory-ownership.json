@@ -2041,7 +2041,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "697315b904d039aa5acd341bea5fd9db8a935615fb0f97a32bc331c7176d8dae"
+      "sha256": "5079c6d61c7ff7493807cb7096ee146ac57a2e0889253a8ade9da181557d19df"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2138,7 +2138,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "17b35c6e76af73e1f695b7044ef457b5dc422195337af356fd93b9831b1dcea7"
+      "sha256": "09923ee664ec5badf8a9261744bc10bf1a54b987f7c2d5cc3f38c7a96b515f29"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2159,7 +2159,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "66465fc352701b371adc129c3d820265fb8edb0c6e39818de294621d10b11a0b"
+      "sha256": "8be7cee7c302e29d70eb4c25f1460cef0be21793c3e80b301d3936ec3e44ceeb"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2184,7 +2184,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "5f12d0c1e61cf7d48eb841e7b3e114c2441f338ed2461a826be8939d32cf5d0c"
+      "sha256": "1076673305587b51d686bfd0d158f89c94be2b49ca50957bc71a904c5963c2e8"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2193,7 +2193,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "78387d0e52db987b01caafeaf7b482f4a8646879d05f8e89ad25f82556e47365"
+      "sha256": "96fd04117d9a0021134a0c96911d688b3f1a507702e68fe943cbedc80b39c92b"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2606,7 +2606,7 @@
       "sha256": "19d190a778402939297a89eaff296d5cba8fef540dd30b4d2dce56b8c580efde",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "8fea0e27c52f8803d6b0786ba3e7b165edcde1f140c44e2d2299f278610439db"
+        "api/openapi-server-v1.yaml": "d7b810c63a69d39f47ed5cf657ed72d339914d83066c681fecc35c9d0d7eaf82"
       }
     }
   }

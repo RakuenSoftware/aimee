@@ -316,6 +316,33 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               s));
    }
 
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      const char *strings[] = {"operation", "session_id",     "task_id", "expected_revision",
+                               "target_id", "preview_digest", NULL};
+      for (int i = 0; strings[i]; i++)
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, strings[i]), "type", "string");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "binding"), "type", "object");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "items"), "type", "array");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "events"), "type", "array");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "claim_index"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "ttl_seconds"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_context_bytes"), "type",
+                              "integer");
+      cJSON *required = cJSON_AddArrayToObject(schema, "required");
+      for (int i = 0; i < 3; i++)
+         cJSON_AddItemToArray(required, cJSON_CreateString(strings[i]));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("task_projection",
+                              "Rebuild, get, describe, discard, promotion_preview or promote "
+                              "disposable state for the active task and owned session. "
+                              "Requires expected_revision for changes; hypotheses and plans remain "
+                              "non-authoritative.",
+                              schema));
+   }
+
    /* Explicit served views and canonical claim cards share the HTTP/CLI owner. */
    for (int card = 0; card < 2; card++)
    {

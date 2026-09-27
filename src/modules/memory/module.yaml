@@ -233,7 +233,8 @@
     "server-go/modules/memory/retrieval_health_native.go",
     "server-go/modules/memory/retrieval_health_release.go",
     "server-go/modules/memory/retrieval_health_typed.go",
-    "server-go/modules/memory/retrieval_health_positions.go"
+    "server-go/modules/memory/retrieval_health_positions.go",
+    "server-go/modules/memory/task_promotion.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",

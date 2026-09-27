@@ -145,6 +145,16 @@ static cJSON *mcph_served_memory(struct mcp_call *c, int card)
    return content;
 }
 
+static cJSON *mcph_task_projection(struct mcp_call *c)
+{
+   cJSON *reply = task_projection_command(c->jargs);
+   char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   cJSON *content = text_content(raw ? raw : "{\"status\":\"unavailable\"}");
+   free(raw);
+   cJSON_Delete(reply);
+   return content;
+}
+
 static cJSON *mcph_memory_serve(struct mcp_call *c)
 {
    return mcph_served_memory(c, 0);
@@ -2140,6 +2150,7 @@ static const struct
     {"list_facts", mcph_list_facts, NULL},
     {"memory_briefing", mcph_memory_briefing, NULL},
     {"memory_serve", mcph_memory_serve, "core,review_indexed"},
+    {"task_projection", mcph_task_projection, "core,review_indexed"},
     {"memory_claim_card", mcph_memory_claim_card, "core,review_indexed"},
     {"get_identity", mcph_get_identity, NULL},
     {"list_curiosity_items", mcph_list_curiosity_items, NULL},

@@ -32,6 +32,7 @@ const (
 )
 
 type DataRequest struct {
+	TaskPromotion       *taskPromotion     `json:"task_promotion,omitempty"`
 	ServedView          *servedViewRequest `json:"served_view,omitempty"`
 	recoveryActor       string
 	recoveryRole        *evidenceRecoveryAction
@@ -962,6 +963,9 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		return DataRequest{}, errors.New("memory: trailing data request")
 	}
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
+	if request.TaskPromotion != nil && request.Operation != "task-projection-propose" {
+		return DataRequest{}, errors.New("memory: task proof requires proposal admission")
+	}
 	if len(request.AssemblyBudgetBytes) != 0 {
 		if request.Operation != "assemble-context" {
 			return DataRequest{}, errors.New("memory: assembly budget requires assemble-context")
@@ -1381,7 +1385,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	privateRead := options.placement == PlacementServer && (request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
+	privateRead := options.placement == PlacementServer && (request.Operation == "task-projection-propose" || request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
 	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || privateRead) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
@@ -1485,6 +1489,16 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			if len(response.Payload) > maxDataBody {
 				err = errors.New("memory: CSS conventions exceed response capacity")
 			}
+		}
+	case "task-projection-propose":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementServer || invocation.PrincipalRef != 0 || !request.TaskPromotion.valid() || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result map[string]any
+		result, err = backend.proposeTaskProjection(ctx, request.TaskPromotion, options.commandContext)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
 		}
 	case "hygiene-preview":
 		backend, ok := options.data.(*postgresDataStore)

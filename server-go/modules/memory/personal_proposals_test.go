@@ -328,6 +328,66 @@ func TestPersonalCorrectionReview(t *testing.T) {
 	if err == nil {
 		t.Fatal("compatibility SQL revived expired model content")
 	}
+	t.Run("task projection promotion remains reviewed and source bound", func(t *testing.T) {
+		taskTarget := one(call(human, DataRequest{Operation: "store", Authority: AuthorityUser, Key: "task-projection-target", Kind: "fact", Tier: "L2", Content: "old task claim", Confidence: &certainty}))
+		witness := one(call(human, DataRequest{Operation: "store", Authority: AuthorityUser, Key: "task-projection-witness", Kind: "fact", Tier: "L2", Content: "observed condition", Confidence: &certainty}))
+		targetVersion := one(call(nil, DataRequest{Operation: "get", ID: taskTarget.ID, IncludeVersion: true}))
+		witnessVersion := one(call(nil, DataRequest{Operation: "get", ID: witness.ID, IncludeVersion: true}))
+		proof := &taskPromotion{ProjectionID: "0123456789abcdef0123456789abcdef", Revision: "1", SessionID: "owned-task", TaskID: "1", Principal: model.Principal, Kind: "hypothesis", Content: "condition may require restart", Expires: time.Now().Add(time.Hour), Target: *targetVersion.Version, Sources: append(servedRecordItem(targetVersion, 0).Sources, servedRecordItem(witnessVersion, 0).Sources...)}
+		submit := func() correctionProposal {
+			t.Helper()
+			out := call(model, DataRequest{Operation: "task-projection-propose", Scope: Scope{Type: ScopeUser}, TaskPromotion: proof})
+			var payload struct {
+				Status   string             `json:"status"`
+				Proposal correctionProposal `json:"proposal"`
+			}
+			if json.Unmarshal(out.Payload, &payload) != nil || payload.Status != "ok" || payload.Proposal.ID == "" {
+				t.Fatal("promotion draft admission", string(out.Payload))
+			}
+			return payload.Proposal
+		}
+		proposed := submit()
+		if again := submit(); again.ID != proposed.ID {
+			t.Fatal("promotion retry duplicated draft")
+		}
+		if current := one(call(nil, DataRequest{Operation: "get", ID: taskTarget.ID})); current.Content != "old task claim" {
+			t.Fatal("hypothesis became canonical without review")
+		}
+		call(human, DataRequest{Operation: "supersede", Authority: AuthorityUser, ID: witness.ID, Content: "changed condition", Confidence: &certainty, ExpectedVersion: witnessVersion.Version})
+		review := DataRequest{Operation: "correction-review", CorrectionReview: &correctionReviewRequest{ProposalID: proposed.ID, Digest: proposed.Digest, Action: "approve", Expected: proposed.Target}}
+		if refused := call(human, review); refused.Code == nil || *refused.Code != MutationVersionConflict {
+			t.Fatal("stale promotion source accepted", refused)
+		}
+		witnessVersion = one(call(nil, DataRequest{Operation: "get", ID: witness.ID, IncludeVersion: true}))
+		proof.Revision = "2"
+		proof.Sources = append(servedRecordItem(targetVersion, 0).Sources, servedRecordItem(witnessVersion, 0).Sources...)
+		proposed = submit()
+		review.CorrectionReview = &correctionReviewRequest{ProposalID: proposed.ID, Digest: proposed.Digest, Action: "approve", Expected: proposed.Target}
+		approved := extract(call(human, review))
+		if approved.State != "approved" {
+			t.Fatal(approved)
+		}
+		current := one(call(nil, DataRequest{Operation: "get", ID: taskTarget.ID}))
+		if current.Content != "Task hypothesis: condition may require restart" {
+			t.Fatal("promotion lost hypothesis label", current)
+		}
+		evidenceTx, e := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer evidenceTx.Rollback(ctx)
+		if _, e = evidenceTx.Exec(ctx, "SET LOCAL search_path="+schema+",public; SET LOCAL ROLE "+role); e != nil {
+			t.Fatal(e)
+		}
+		evidenceOwner := &postgresDataStore{db: evalQueryer{evidenceTx}, placement: PlacementServer}
+		lineage, e := evidenceOwner.memoryEvidence(ctx, taskTarget.ID)
+		if e != nil || lineage["lineage_state"] != "partial" || lineage["independence_state"] != "unknown" {
+			t.Fatal("projection minted corroboration", lineage, e)
+		}
+		if e = evidenceTx.Rollback(ctx); e != nil {
+			t.Fatal(e)
+		}
+	})
 	// Revocation/erasure gates draft access and replay; physical erase removes payloads.
 	call(human, DataRequest{Operation: "delete", Authority: AuthorityUser, ID: target.ID})
 	if out := call(human, request); out.Code == nil || *out.Code != MutationReplayUnavailable {

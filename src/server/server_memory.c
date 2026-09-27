@@ -304,6 +304,11 @@ static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
    return user_memory_owner_command_as(operation, req, MEMORY_AUTHORITY_MODEL);
 }
 
+cJSON *memory_task_promotion_command(const cJSON *req)
+{
+   return user_memory_owner_command("task-projection-propose", req);
+}
+
 cJSON *memory_user_mcp_supersede_command(const cJSON *req)
 {
    return user_memory_owner_command_as("user-mcp-supersede", req, MEMORY_AUTHORITY_MODEL);

@@ -15,13 +15,14 @@ import (
 
 // Drafts are deliberately not Records: neither recall nor extraction accepts one.
 type correctionDraft struct {
-	SchemaVersion int     `json:"schema_version"`
-	Content       string  `json:"content"`
-	Confidence    float64 `json:"confidence"`
-	SessionID     string  `json:"session_id"`
-	Tier          string  `json:"tier"`
-	UseCases      string  `json:"use_cases"`
-	EpistemicKind string  `json:"epistemic_kind"`
+	TaskProjection *taskPromotion `json:"task_projection,omitempty"`
+	SchemaVersion  int            `json:"schema_version"`
+	Content        string         `json:"content"`
+	Confidence     float64        `json:"confidence"`
+	SessionID      string         `json:"session_id"`
+	Tier           string         `json:"tier"`
+	UseCases       string         `json:"use_cases"`
+	EpistemicKind  string         `json:"epistemic_kind"`
 }
 
 type correctionProposal struct {
@@ -107,7 +108,7 @@ func (s *postgresDataStore) proposeKBCorrection(ctx context.Context, id int64, c
 	if tier == "L5" {
 		confidence = math.Min(confidence, .5)
 	}
-	draft := correctionDraft{1, content, confidence, session, tier, useCases, epistemic}
+	draft := correctionDraft{SchemaVersion: 1, Content: content, Confidence: confidence, SessionID: session, Tier: tier, UseCases: useCases, EpistemicKind: epistemic}
 	raw, err := json.Marshal(draft)
 	if err != nil {
 		return err

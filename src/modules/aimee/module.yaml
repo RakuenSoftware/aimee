@@ -72,7 +72,9 @@
     "server-go/modules/aimee/db_contract.go",
     "server-go/modules/aimee/wire.go",
     "server-go/modules/aimee/process/process.go",
-    "server-go/modules/aimee/families/session_exploration.go"
+    "server-go/modules/aimee/families/session_exploration.go",
+    "server-go/modules/aimee/families/task_projection.go",
+    "server-go/modules/aimee/families/task_projection_promotion.go"
   ],
   "go_tests": [
     "server-go/modules/aimee/db_contract_test.go",
@@ -122,7 +124,8 @@
     "server-go/modules/aimee/unavailable_test.go",
     "server-go/modules/aimee/families/trace_pagination_test.go",
     "server-go/modules/aimee/process/directory_test.go",
-    "server-go/modules/aimee/families/session_exploration_live_test.go"
+    "server-go/modules/aimee/families/session_exploration_live_test.go",
+    "server-go/modules/aimee/families/task_projection_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"
@@ -165,6 +168,7 @@
     "server-go/modules/aimee/families/schema_subject_erasure.sql",
     "server-go/modules/aimee/families/schema_telemetry.sql",
     "server-go/modules/aimee/families/schema_workflow.sql",
-    "server-go/modules/aimee/families/schema_session_exploration.sql"
+    "server-go/modules/aimee/families/schema_session_exploration.sql",
+    "server-go/modules/aimee/families/schema_task_projection.sql"
   ]
 }

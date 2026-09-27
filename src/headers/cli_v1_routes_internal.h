@@ -87,6 +87,7 @@ cJSON *marshal_memory_benchmark(int argc, char **argv);
 cJSON *marshal_memory_stats(int argc, char **argv);
 cJSON *marshal_memory_get(int argc, char **argv);
 cJSON *marshal_memory_evidence(int argc, char **argv);
+cJSON *marshal_task_projection(int argc, char **argv);
 cJSON *marshal_memory_serve(int argc, char **argv);
 cJSON *marshal_memory_claim_card(int argc, char **argv);
 cJSON *marshal_memory_delete(int argc, char **argv);

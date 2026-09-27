@@ -1,6 +1,6 @@
 # MR-13: Disposable task projections with explicit promotion
 
-- **State:** Proposed
+- **State:** In progress — task owner, explicit access and private correction-promotion admission; acceptance pending
 - **Priority:** P2: task continuity
 - **Owner:** Task runtime and derived-memory owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md), [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md)

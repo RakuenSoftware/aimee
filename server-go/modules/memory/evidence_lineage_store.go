@@ -74,7 +74,8 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
 			err = s.db.QueryRow(ctx, `SELECT m.record_revision::text,
  (SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),
  COALESCE((SELECT min(generation)::text FROM user_memory_invalidation_outbox e
- WHERE e.memory_id=m.id AND e.operation='insert' HAVING count(*)=1),''),true,'[]'
+ WHERE e.memory_id=m.id AND e.operation='insert' HAVING count(*)=1),''),
+ NOT EXISTS(SELECT 1 FROM user_memory_correction_proposals p WHERE p.result_id=m.id AND p.result_revision=m.record_revision AND p.state='approved' AND p.payload::jsonb ? 'task_projection'),'[]'
  FROM user_memories m WHERE m.id=$1 AND `+personalCurrentMemorySQL("m."), next).Scan(&revision, &nodeOwner, &event, &local, &raw)
 		}
 		if store.IsNoRows(err) {

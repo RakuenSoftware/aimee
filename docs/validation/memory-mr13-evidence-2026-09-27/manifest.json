@@ -1,0 +1,12 @@
+{
+  "state": "candidate acceptance pending",
+  "files": {
+    "db1-race.log": "d268f451cef21301f55c8f2f9f50d76215993ac4f010576d2a47811c8b4f1b1b",
+    "live_acceptance.py": "395a238de5d5c3713a1e2f0fe07c5f1c0ccd24359beb5d5a5272a5c163a51a1f",
+    "memory-race-and-export.log": "fa567bb6aee5efb3b3fdee10d18721f7827e6104c7f16875f2c7b5244db9cc01",
+    "native-transport.log": "da539d8a6327200aba11e97f1efa8ca1e361a5456b39a09beecf01156f158e49",
+    "task-owner-final.log": "f578951f157787aae5f0f01450d7c7626248e3ab393ddc93de21dfe61895112d",
+    "task-recovery.log": "7902027c08018c47d2512bf767ad1bfcaff6daa53b3f783fd1ec1a5524967395",
+    "upgrade_candidate.py": "f8055b7f61235dc48f71852f92204dd8ba939ec081b3087a7fc926051bd5613d"
+  }
+}

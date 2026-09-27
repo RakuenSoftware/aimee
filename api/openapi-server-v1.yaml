@@ -4245,6 +4245,66 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /task/projection:
+    post:
+      summary: Operate on disposable state for the owned session's active task
+      description: >-
+        Host-only state ownership with compare-and-swap revisions. Rebuilds and
+        releases use fresh memory-owner evidence. Promotion previews bind an
+        exact claim and existing private target; promote submits a review draft,
+        never an authoritative insert. Shared-store promotion is unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, session_id, task_id]
+              properties:
+                operation:
+                  type: string
+                  enum: [describe, rebuild, get, discard, promotion_preview, promote]
+                session_id: {type: string}
+                task_id: {type: string, pattern: '^[1-9][0-9]*$'}
+                expected_revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                binding:
+                  type: object
+                  required: [store, project, task, view]
+                  properties:
+                    store: {type: string, enum: [user, kb]}
+                    project: {type: string}
+                    task: {type: string}
+                    view: {type: string, enum: [briefing]}
+                ttl_seconds: {type: integer, minimum: 1, maximum: 86400}
+                max_context_bytes: {type: integer, minimum: 0, maximum: 65536}
+                items:
+                  type: array
+                  maxItems: 32
+                  items:
+                    type: object
+                    required: [kind, text]
+                    properties:
+                      kind: {type: string, enum: [hypothesis, planned_action, working_decision, open_question]}
+                      text: {type: string, maxLength: 4096}
+                events:
+                  type: array
+                  maxItems: 32
+                  items: {type: string, pattern: '^[1-9][0-9]*$'}
+                target_id: {type: string, pattern: '^[1-9][0-9]*$'}
+                claim_index: {type: integer, minimum: 0, maximum: 31}
+                preview_digest: {type: string}
+      responses:
+        "200":
+          description: Non-authoritative projection, review draft, or explicit conflict/unavailable state
+          content:
+            application/json:
+              schema: {type: object}
+        "503":
+          description: Owner unavailable or request refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /memory/serve:
     post:
       summary: Serve a named authorized memory view

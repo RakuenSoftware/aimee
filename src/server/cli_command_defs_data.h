@@ -28,6 +28,10 @@
      "  trust             Pin the configured server certificate again\n"
      "  status             Show the resolved transport and a health probe\n"
      "  clear              Revert to the local Unix socket\n"},
+    {"task", "Owned disposable task projections", AIMEE_CMD_TIER_ADVANCED, 0,
+     "  projection <operation> --session_id ID --task_id ID  Read or revise working state\n"
+     "  Operations: describe, rebuild, get, discard, promotion_preview, promote\n"
+     "  Changes require --expected_revision; promotion creates a private review draft\n"},
     {"wm", "Working memory (session-scoped scratch)", AIMEE_CMD_TIER_CORE, 0,
      "  set              Store a value\n"
      "  get              Read a value\n"

@@ -30,7 +30,7 @@ unchanged acceptance gates and completed verification.
 
 Completion of all MR-01–18 implementation and acceptance work is the active goal.
 Execution is sequential by proposal, as requested on 2026-09-24: complete MR-01,
-then MR-02, continuing numerically through MR-18. MR-01–11 functional implementation has now been addressed, with MR-07 in
+then MR-02, continuing numerically through MR-18. MR-01–12 functional implementation has now been addressed, with MR-07 in
 observe mode and MR-09/MR-10 optional policies disabled pending promotion
 evidence. MR-12 served-view acceptance is complete; MR-13 disposable task projections are next. Previously implemented work for later proposals is retained, but new
 work on those proposals waits for the preceding proposal's closeout. Integration

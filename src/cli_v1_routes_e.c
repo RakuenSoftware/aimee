@@ -974,3 +974,32 @@ void pt_print_memory_health(const char *method, cJSON *resp)
       }
    }
 }
+
+cJSON *marshal_task_projection(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("task.projection");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "operation", opts.positional[0]);
+   const char *fields[] = {"session_id", "task_id",        "expected_revision",
+                           "target_id",  "preview_digest", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   const char *structured[] = {"binding",     "ttl_seconds", "max_context_bytes", "items", "events",
+                               "claim_index", NULL};
+   for (int i = 0; structured[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, structured[i]);
+      if (value)
+      {
+         cJSON *parsed = cJSON_ParseWithOpts(value, NULL, 1);
+         cJSON_AddItemToObject(req, structured[i], parsed ? parsed : cJSON_CreateString(value));
+      }
+   }
+   return req;
+}

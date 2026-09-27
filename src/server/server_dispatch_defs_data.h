@@ -85,6 +85,7 @@
     {"memory.stats", handle_memory_stats},
     {"memory.get", handle_memory_get},
     {"memory.evidence", handle_memory_evidence},
+    {"task.projection", handle_task_projection},
     {"memory.serve", handle_memory_serve},
     {"memory.claim_card", handle_memory_claim_card},
     {"memory.delete", handle_memory_delete},
