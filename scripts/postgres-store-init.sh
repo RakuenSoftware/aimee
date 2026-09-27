@@ -30,6 +30,9 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_store_runtime') 
 SELECT format('ALTER ROLE aimee_store_migrator WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'migrator_password') \gexec
 SELECT format('ALTER ROLE aimee_store_runtime WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'runtime_password') \gexec
 
+-- Administrator-only worker provisioning precedes domain migrations.
+\i /usr/local/share/aimee/postgres-hygiene-role.sql
+
 ALTER DATABASE aimee_store OWNER TO aimee_store_migrator;
 ALTER SCHEMA public OWNER TO aimee_store_migrator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

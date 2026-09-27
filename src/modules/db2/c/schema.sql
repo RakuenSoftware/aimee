@@ -19476,6 +19476,10 @@ DO $hygiene_worker$
 DECLARE r RECORD; cols TEXT;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene') THEN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+   RAISE EXCEPTION 'PostgreSQL administrator must provision postgres-hygiene-role.sql before migration';
+  END IF;
+  -- Standalone administrator-owned fixtures may apply the schema directly.
   CREATE ROLE aimee_memory_hygiene NOLOGIN NOINHERIT NOBYPASSRLS;
  END IF;
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene' AND
@@ -19498,7 +19502,12 @@ BEGIN
    END IF;
   END IF;
  END LOOP;
- GRANT aimee_memory_hygiene TO aimee_store_runtime;
+ IF NOT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','MEMBER') THEN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+   RAISE EXCEPTION 'PostgreSQL administrator must provision hygiene worker membership';
+  END IF;
+  GRANT aimee_memory_hygiene TO aimee_store_runtime WITH INHERIT FALSE;
+ END IF;
 END $hygiene_worker$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS learning_hygiene_finding_identity
@@ -19606,6 +19615,16 @@ CREATE TABLE IF NOT EXISTS memory_hygiene_runs (
  finished_at TIMESTAMPTZ
 );
 REVOKE ALL ON memory_hygiene_runs FROM PUBLIC,aimee_memory_hygiene;
+ALTER TABLE memory_hygiene_runs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_hygiene_run_visible ON memory_hygiene_runs;
+CREATE POLICY memory_hygiene_run_visible ON memory_hygiene_runs
+ USING(memory_row_scope_visible(scope_type,scope_value));
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  REVOKE ALL ON memory_hygiene_runs FROM aimee_store_runtime;
+  GRANT SELECT ON memory_hygiene_runs TO aimee_store_runtime;
+ END IF;
+END $$;
 CREATE OR REPLACE FUNCTION learning_hygiene_job(p JSONB) RETURNS TEXT
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
 DECLARE run BIGINT; v_scope_type TEXT; v_scope_value TEXT; key TEXT;

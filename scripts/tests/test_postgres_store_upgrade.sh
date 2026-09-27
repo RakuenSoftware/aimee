@@ -99,11 +99,18 @@ start_repaired() {
     -v "$tls_volume":/var/lib/postgresql/secure \
     -v "$REPO_ROOT/scripts/postgres-secure-entrypoint.sh":/opt/aimee/postgres-secure-entrypoint.sh:ro \
     -v "$REPO_ROOT/scripts/postgres-store-init.sh":/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro \
+    -v "$REPO_ROOT/scripts/postgres-hygiene-role.sql":/usr/local/share/aimee/postgres-hygiene-role.sql:ro \
     --entrypoint /opt/aimee/postgres-secure-entrypoint.sh postgres:18 >/dev/null
   wait_for_sql "$repaired_container" aimee_store_runtime repair-runtime-secret
 }
 
 start_repaired
+
+# The administrator provisions only a non-inherited, NOLOGIN worker membership.
+test "$(docker exec "$repaired_container" psql -U postgres -d aimee_store -Atqc \
+  "SELECT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','MEMBER') AND NOT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','USAGE') AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolcanlogin AND NOT rolreplication FROM pg_roles WHERE rolname='aimee_memory_hygiene'")" = t
+test "$(docker exec "$repaired_container" psql -U postgres -d aimee_store -Atqc \
+  "SELECT NOT rolcreaterole AND NOT rolsuper FROM pg_roles WHERE rolname='aimee_store_migrator'")" = t
 
 test "$(docker exec -e PGPASSWORD=repair-runtime-secret -e PGSSLMODE=require \
   "$repaired_container" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store \

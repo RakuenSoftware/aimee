@@ -300,6 +300,13 @@ func TestHygieneGovernedPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	provision, e := os.ReadFile("../../../scripts/postgres-hygiene-role.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = tx.Exec(ctx, string(provision)); e != nil {
+		t.Fatal(e)
+	}
 	for _, markers := range [][2]string{{"DO $memory_store_grants$", "END\n$memory_store_grants$;"}, {"DO $hygiene_worker$", "END $hygiene_worker$;"}} {
 		first, last := strings.Index(string(schema), markers[0]), strings.Index(string(schema), markers[1])
 		if first < 0 || last < first {

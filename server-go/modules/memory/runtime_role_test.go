@@ -111,7 +111,11 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 	if workerStart < 0 || workerEnd < workerStart {
 		t.Fatal("hygiene role migration missing")
 	}
-	grants += "\n" + string(schema[workerStart:workerEnd+len("END $hygiene_worker$;")])
+	provision, provisionErr := os.ReadFile("../../../scripts/postgres-hygiene-role.sql")
+	if provisionErr != nil {
+		t.Fatal(provisionErr)
+	}
+	grants += "\n" + string(provision) + "\n" + string(schema[workerStart:workerEnd+len("END $hygiene_worker$;")])
 	for i := 0; i < 2; i++ {
 		if _, err := tx.Exec(ctx, grants); err != nil {
 			t.Fatal(err)

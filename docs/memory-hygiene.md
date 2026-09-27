@@ -67,3 +67,15 @@ cleanup. Only derived items, dependency text and pending submission text are
 cleared; immutable admission digests and execution receipts survive. This route
 never sweeps other sessions or modifies canonical memory. It is separate from
 shared-memory hygiene and is not automatically scheduled by the shared tick.
+
+## Upgrade prerequisite
+
+The PostgreSQL administrator provisions the NOLOGIN hygiene role before the
+restricted migrator applies the application schema. New PostgreSQL images and
+`postgres-store-init.sh` both use `scripts/postgres-hygiene-role.sql`. When keeping
+an existing PostgreSQL image, run that exact SQL file as the database administrator
+before upgrading the application. It is idempotent, rejects an unsafe pre-existing
+role, grants runtime SET-role membership without inheritance, and grants no table
+mutation rights. Never grant CREATEROLE to the application migrator. Snapshot the
+owned stores before schema application; rolling back the application image alone
+does not restore its schema. The harmless NOLOGIN role may remain after rollback.
