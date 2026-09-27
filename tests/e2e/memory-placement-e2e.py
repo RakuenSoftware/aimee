@@ -112,26 +112,37 @@ class Gate:
         try:
             result = self.good('bounded hygiene HTTP preview', self.call('hygiene', request))
             findings = result.get('findings', [])
-            targets = [v for f in findings for v in f.get('expected_versions', [])]
+            duplicates = [f for f in findings if f.get('type') == 'possible_duplicate_cluster']
+            expired = [f for f in findings if f.get('type') == 'obsolete_assertion_candidate']
+            targets = [v for f in duplicates for v in f.get('expected_versions', [])]
             ids = self.sql(f"SELECT id FROM memories WHERE key IN ('{scope}-a','{scope}-b') ORDER BY id").splitlines()
             self.check('hygiene keeps exact scope and eligible duplicate revisions',
-                len(findings) == 1 and sorted(v.get('record_id') for v in targets) == sorted(ids)
+                len(duplicates) == 1 and len(expired) == 1 and len(findings) == 2 and sorted(v.get('record_id') for v in targets) == sorted(ids)
                 and all(v.get('record_revision') and v.get('owner_id') for v in targets)
                 and result.get('rows_compared') == 3 and result.get('partial') is False, result)
             self.check('hygiene labels candidate-only findings without leaking content',
-                all(f.get('uncertainty') == 'candidate_only' for f in findings)
+                all(f.get('uncertainty') == 'candidate_only' for f in duplicates)
+                and all(f.get('uncertainty') == 'candidate_only_scoped_evidence' for f in expired)
                 and content not in json.dumps(result) and result.get('canonical_writes') == 0
                 and result.get('proposal_writes') == 0, result)
             repeated = self.good('hygiene repeat preview', self.call('hygiene', request))
             self.check('hygiene findings are stable on repeated read', repeated.get('findings') == findings)
             limited = self.good('hygiene bounded partial preview', self.call('hygiene', dict(request, max_rows=1)))
             self.check('hygiene row limit cannot claim clean full coverage', limited.get('partial') is True
-                and limited.get('unvisited') == 'remaining_eligible_content_unknown'
-                and limited.get('rows_compared') == 1 and limited.get('findings') == [], limited)
+                and limited.get('unvisited') == 'remaining_retained_rows_or_content_unknown'
+                and limited.get('resume_available') is True and bool(limited.get('resume_cursor'))
+                and limited.get('rows_compared') == 1 and limited.get('findings') == duplicates, limited)
             limited = self.good('hygiene bounded content preview', self.call('hygiene', dict(request, max_content_bytes=1)))
             self.check('hygiene byte limit reports unvisited content', limited.get('partial') is True
                 and limited.get('rows_compared') == 0 and limited.get('findings') == [], limited)
-            for name, override in [('apply', dict(dry_run=False)), ('mutation', dict(operation='delete')),
+            proposal = self.good('hygiene persists review proposals', self.call('hygiene', dict(request, dry_run=False)))
+            self.check('hygiene proposal mode leaves canonical data untouched',
+                proposal.get('dry_run') is False and proposal.get('canonical_writes') == 0
+                and proposal.get('proposal_writes') == 2
+                and all(f.get('proposal_state') == 'pending' and f.get('proposal_id')
+                        for f in proposal.get('findings', []))
+                and before == self.sql(snapshot), proposal)
+            for name, override in [('mutation', dict(operation='delete')),
                     ('sql', dict(sql='DELETE FROM memories')), ('all', dict(include_all=True)),
                     ('unbounded', dict(max_rows=0)), ('private', dict(store='user'))]:
                 code, rejected = self.call('hygiene', dict(request, **override))

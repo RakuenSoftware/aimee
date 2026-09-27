@@ -208,9 +208,6 @@
     "server-go/modules/memory/ranking_policy.go",
     "server-go/modules/memory/ranking_artifact.go",
     "server-go/modules/memory/selection_policy.go",
-    "server-go/modules/memory/ranking_policy_test.go",
-    "server-go/modules/memory/selection_policy_test.go",
-    "server-go/modules/memory/fair_retrieval_test.go",
     "server-go/modules/memory/evidence_recovery.go",
     "server-go/modules/memory/relation_invalidation.go",
     "server-go/modules/memory/provider_receipt.go",
@@ -418,17 +415,14 @@
     "server-go/modules/memory/retrieval_health_typed_test.go",
     "server-go/modules/memory/retrieval_health_positions_test.go",
     "server-go/modules/memory/procedure_exposure_test.go",
-    "server-go/modules/memory/action_evidence_test.go"
+    "server-go/modules/memory/action_evidence_test.go",
+    "server-go/modules/memory/ranking_policy_test.go",
+    "server-go/modules/memory/selection_policy_test.go",
+    "server-go/modules/memory/fair_retrieval_test.go"
   ],
   "public_headers": [],
   "private_headers": [],
-  "tests": [
-    "tests/eval/memory_mr05_coverage_cases.json",
-    "tests/eval/memory_mr09/baseline-policy.json",
-    "tests/eval/memory_mr09/diversity-policy.json",
-    "tests/eval/memory_mr09/diversity-v2-policy.json",
-    "tests/eval/memory_mr09/code-navigation-pilot.json"
-  ],
+  "tests": [],
   "docs": [
     "docs/modules/memory.md"
   ]

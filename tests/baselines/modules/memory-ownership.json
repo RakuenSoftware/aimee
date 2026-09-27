@@ -2592,10 +2592,10 @@
         "aimee_memory_hygiene",
         "db2_memory_find_facts_like"
       ],
-      "sha256": "4c4107b9222746d0dd29a73531c429376b6eacefad5ba8f30bc719d1233aca88",
+      "sha256": "505428ed42073ce1f3f66c3a67424160bfc54738bbb4f038992fd6fedc8c727c",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "41861161bb95e7dc2460096860da86e3da369fa764e8885c755839db2cdf7f06",
+        "src/modules/db2/c/schema.sql": "ab3b3e738a84a6fa84c340ac227f4eab8010caea33fa06870e3211b04449c735",
         "src/modules/db2/c/schema_sqlite.sql": "6241722db33b81c95bf9c07f16a9212657206b0f449ba7ecb064911fdd4a0d1e"
       }
     },

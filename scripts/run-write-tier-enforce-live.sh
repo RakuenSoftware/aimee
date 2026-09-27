@@ -115,8 +115,8 @@ pg_indb_val() { pg_val "$1"; }
 step "Provisioning the JWKS trust chain (real envelope, real signature)"
 export AIMEE_TEST_MODULE_BIN="$PWD/src/build/obj/aimee-module"
 # live_env_pg_create just created a uniquely named empty database. Do not let
-# the generic reusable-store fixture drop its public schema: this rig shares
-# that schema with DB2's pgvector/pg_trgm extensions.
+# the generic reusable-store fixture drop public: it holds DB2 and its extensions.
+# The private store uses the separately owned aimee_private schema.
 export AIMEE_TEST_STORE_RESET_SCHEMA=0
 # `make all` does not build the module -- its rule lives in tests/Rules.mk --
 # and both this step and live_env_start_module need it, so build it here rather

@@ -141,7 +141,7 @@ def inside(output):
                 choices=[dict(index=0, message=dict(role='assistant', content='NATIVE_MEMORY_OK'),
                               finish_reason='stop')],
                 usage=dict(prompt_tokens=11, completion_tokens=2, total_tokens=13))
-            if scenario in ('refresh-update', 'refresh-outage', 'protected-fold') and ordinal <= 5:
+            if scenario in ('refresh-stable', 'refresh-update', 'refresh-outage', 'protected-fold') and ordinal <= 5:
                 # Distinct real reads avoid repeated-call detection. The fifth
                 # reply is withheld until the memory state changes, so refresh
                 # and provider dispatch cannot race the test's intervention.
@@ -452,15 +452,24 @@ def inside(output):
               len(captures) == before + 1)
         check('recovered provider retains complete Go memory', any(content in text for text in strings(captures[-1])))
         before = len(captures)
-        result, events = run('native context refresh', mode='refresh-update')
-        check('native refresh fixture commits its memory update', not provider_errors and refresh_id is not None)
+        result, events = run('native stable context refresh', mode='refresh-stable')
         check('native multi-turn run completes after five tool calls', result.get('status') == 'completed' and
               len(captures) == before + 6)
         check('native refresh follows five real file reads', all(
             any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
             for turn in range(1, 6)))
+        before = len(captures)
+        result, events = run('native context refresh', mode='refresh-update')
+        check('native refresh fixture commits its memory update', not provider_errors and refresh_id is not None)
+        # The mutation precedes the fifth governed file read. That action must
+        # refuse the old collection proof before the next scheduled refresh.
+        check('native action refuses a collection changed after provider dispatch',
+              result.get('status') == 'failed' and
+              any('stale_context' in text for text in strings(events)) and len(captures) == before + 5)
         check('initial context predates the new identity',
               not any(refreshed_content in text for text in strings(captures[before])))
+        result, _ = run('native context after committed update')
+        check('fresh native run accepts the updated collection', result.get('status') == 'completed')
         check('refreshed provider context contains the new complete identity',
               any(refreshed_content in text for text in strings(captures[-1])))
         owner_pid = memory_owner()

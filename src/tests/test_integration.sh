@@ -181,6 +181,7 @@ stop_policy_module() {
 # production. A missing owner is an outage, not native validation fallback.
 MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
 MEMORY_MODULE_PID=""
+MEMORY_MODULE_ENABLED=0
 install_memory_module() {
     cp "$DB1_MODULE_BUILT" "$MEMORY_MODULE"
     chmod 0755 "$MEMORY_MODULE"
@@ -779,7 +780,7 @@ start_server() {
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
-            start_memory_module
+            if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
             config_started=1
         fi
@@ -1112,6 +1113,18 @@ else
 fi
 check_output "index overview reports KB outage" '"status":"unavailable"' echo "$INDEX_OVERVIEW"
 check_output "index overview maps KB outage to HTTP 503" '"http_status":503' echo "$INDEX_OVERVIEW"
+# Start the real personal-memory owner only after the explicit local-index
+# outage cases. Starting it earlier makes those cases race its registration.
+MEMORY_MODULE_ENABLED=1
+start_memory_module
+for attempt in $(seq 1 100); do
+    RESP=$(srv_auth_req '{"method":"memory.get","store":"user"}') || true
+    case "$RESP" in
+    *'"kind":"invalid_argument"'*) break ;;
+    esac
+    sleep 0.1
+done
+check_output "personal memory owner is ready" '"kind":"invalid_argument"' echo "$RESP"
 
 RESP=$(mcp_framed_req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"integration-test","version":"1"}}}') || true
 check_output "mcp initialize over stdio framing" '"protocolVersion":"2024-11-05"' echo "$RESP"

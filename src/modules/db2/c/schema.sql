@@ -19387,7 +19387,7 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '43')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '44')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Utility horizon anchors are protected change events. Exact per-record probes
