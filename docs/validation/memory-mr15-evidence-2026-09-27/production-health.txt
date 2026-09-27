@@ -1,0 +1,3 @@
+aimee-aimee-server-1 aimee-native-core:0.4.5-bridge.2 Up 20 hours (healthy)
+aimee-aimee-embedder-1 ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5 Up 3 days (healthy)
+aimee-aimee-store-db-1 ghcr.io/rakuensoftware/aimee-postgres:0.4.5 Up 3 days (healthy)

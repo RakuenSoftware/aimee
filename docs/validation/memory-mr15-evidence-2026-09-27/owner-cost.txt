@@ -1,0 +1,2 @@
+ok  	github.com/JBailes/aimee/server-go/modules/economizer	3.695s
+ok  	github.com/JBailes/aimee/server-go/modules/learning	1.008s

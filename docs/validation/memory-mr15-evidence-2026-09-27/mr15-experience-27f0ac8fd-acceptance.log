@@ -1,0 +1,30 @@
+PASS fixture session created
+PASS controlled provider selected
+PASS actual provider bytes have a durable prepared receipt
+PASS reviewed procedure retained in the exact final request
+PASS native turn completes with a bound final request
+PASS principal receipt reader attests acknowledged procedure delivery
+PASS explicit feedback produces governed experience
+PASS duplicate event reuses immutable identity
+PASS conflicting replacement rejected
+PASS model self-reward rejected
+PASS omitted procedure cannot gain success
+PASS unused procedure cannot gain success
+PASS distinct conflicting evidence is preserved
+PASS actual provider bytes have a durable prepared receipt
+PASS reviewed procedure retained in the exact final request
+PASS native turn completes with a bound final request
+PASS principal receipt reader attests acknowledged procedure delivery
+PASS compiled CLI records a separate repair attempt
+MR15_CHANGE_VERSION
+PASS actual provider bytes have a durable prepared receipt
+PASS reviewed procedure retained in the exact final request
+PASS native turn completes with a bound final request
+PASS principal receipt reader attests acknowledged procedure delivery
+PASS procedure edit creates a new canonical version
+PASS new version starts an unknown cohort
+PASS native cost owner preserves exact integers duplicates and unknown coverage
+PASS compiled CLI cost parity
+PASS paired cost remains unqualified with unknown pricing
+PASS missing paired failures cannot be silently excluded
+MR15_COMPLETE /var/lib/aimee/mr15-live-27f0ac8fd
