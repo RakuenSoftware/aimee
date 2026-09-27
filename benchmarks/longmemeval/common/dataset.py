@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from benchmarks.common.dataset_inventory import DatasetCases
+
 
 def _infer_subset(item: dict[str, Any], question: str) -> str:
     for key in ("subset", "question_type", "category", "type"):
@@ -25,19 +27,25 @@ def _infer_subset(item: dict[str, Any], question: str) -> str:
 
 def load_cases(dataset_path: str, max_cases: int = 0) -> list[dict[str, Any]]:
     root = json.loads(Path(dataset_path).read_text())
-    cases = []
+    if max_cases < 0:
+        raise ValueError("negative case cap")
+    cases = DatasetCases(dataset_path)
     for index, item in enumerate(root):
-        if max_cases and len(cases) >= max_cases:
-            break
+        case_id = str(item.get("question_id") or f"longmemeval-{index + 1}")
+        label = item.get("answerable", "_abs" not in case_id)
+        if type(label) is not bool:
+            raise ValueError("invalid answerability label")
         question = str(item.get("question", "")).strip()
-        if not question:
-            continue
+
         answer = item.get("answer", "")
         sessions = item.get("haystack_sessions", [])
         session_ids = item.get("haystack_session_ids", [])
         dates = item.get("haystack_dates", [])
         answer_ids = [str(entry) for entry in item.get("answer_session_ids", []) if isinstance(entry, str)]
-        if not sessions or not answer_ids:
+        reason = ("max_cases" if max_cases and len(cases) >= max_cases else
+                  "empty_question" if not question else "empty_history" if not sessions else "")
+        cases.record(case_id, label, reason)
+        if reason:
             continue
         normalized_sessions = []
         for idx, session in enumerate(sessions):
@@ -50,7 +58,8 @@ def load_cases(dataset_path: str, max_cases: int = 0) -> list[dict[str, Any]]:
             )
         cases.append(
             {
-                "question_id": str(item.get("question_id") or f"longmemeval-{index + 1}"),
+                "question_id": case_id,
+                "answerable": label,
                 "question": question,
                 "gold_answer": str(answer),
                 "subset": _infer_subset(item, question),

@@ -91,6 +91,34 @@ static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
    return AIMEE_MODULE_STATUS_OK;
 }
 
+/* The private owner must finish its storage-owned erasure replay before it
+ * advertises stages. This transport fixture acknowledges only that exact SQL
+ * operation; all other storage work remains unavailable. Real non-owner SQL
+ * behavior is covered by the PostgreSQL replay suite, not this wire fixture. */
+static atomic_int startup_replays;
+static aimee_module_status_t startup_store(const aimee_module_invocation_t *invocation,
+                                           const uint8_t *request, uint32_t request_len,
+                                           uint8_t *response, uint32_t response_capacity,
+                                           uint32_t *response_len, void *user_data)
+{
+   (void)invocation;
+   (void)user_data;
+   static const char sql[] = "SELECT user_memory_replay_erasure_intents()";
+   uint8_t expected[24 + sizeof(sql) - 1] = {2}; /* QUERY, empty statement, no tx/args */
+   expected[16] = sizeof(sql) - 1;
+   memcpy(expected + 20, sql, sizeof(sql) - 1);
+   if (request_len != sizeof(expected) || memcmp(request, expected, sizeof(expected)) != 0)
+      return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+   assert(response_capacity >= 29);
+   memset(response, 0, 29);
+   response[12] = 1; /* one column */
+   response[16] = 1; /* one row */
+   response[20] = 2; /* int64 zero */
+   *response_len = 29;
+   atomic_fetch_add(&startup_replays, 1);
+   return AIMEE_MODULE_STATUS_OK;
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
@@ -197,7 +225,7 @@ static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
       (void)bus_runtime_maintain(runtime, now_ns);
       uint32_t admitted = host->admitted;
       pthread_mutex_unlock(lock);
-      if (admitted == 2)
+      if (admitted == 3)
          return;
       nanosleep(&pause, NULL);
    }
@@ -1111,7 +1139,13 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = probe_executable,
                                     .request = requested,
-                                    .request_count = serve_count}};
+                                    .request_count = serve_count},
+                                   {.principal_class = 1,
+                                    .principal_ref = 28,
+                                    .uid = BUS_RUNTIME_SELF_UID,
+                                    .executable = executable,
+                                    .serve = postgres_request,
+                                    .serve_count = 1}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -1129,7 +1163,8 @@ int main(int argc, char **argv)
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
                                           .grants = grants,
-                                          .grant_count = argc == 4 ? 4
+                                          .grant_count = memory_process ? 5
+                                                         : argc == 4    ? 4
                                                          : (memory_process || provider_process)
                                                              ? 3
                                                              : 2};
@@ -1144,6 +1179,25 @@ int main(int argc, char **argv)
                                           .stages = stages,
                                           .stage_count = 1,
                                           .handler = handle}};
+   pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
+   atomic_init(&pump_state.stop, 0);
+   pthread_t pump_thread;
+   assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
+
+   static const aimee_module_stage_t sql_stage[] = {
+       {AIMEE_POSTGRES_EVENT_SQL, AIMEE_POSTGRES_STAGE_SQL}};
+   process_thread_t startup = {.config = {.socket_path = socket_path,
+                                          .module_name = "startup-store-fixture",
+                                          .principal_class = 1,
+                                          .principal_ref = 28,
+                                          .stages = sql_stage,
+                                          .stage_count = 1,
+                                          .handler = startup_store}};
+   pthread_t startup_thread;
+   atomic_init(&startup_replays, 0);
+   if (memory_process)
+      assert(pthread_create(&startup_thread, NULL, run_process, &startup) == 0);
+
    pthread_t module_thread;
    pid_t module_pid = -1;
    if (argc >= 2)
@@ -1158,12 +1212,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, memory_process ? 4 : provider_process ? 3 : 2, module_pid);
-
-   pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
-   atomic_init(&pump_state.stop, 0);
-   pthread_t pump_thread;
-   assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
+   wait_for_clients(&host, &host_lock, memory_process ? 5 : provider_process ? 3 : 2, module_pid);
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
@@ -1185,7 +1234,7 @@ int main(int argc, char **argv)
             wait_for_memory_departure(runtime, &host, &host_lock, &caller, &embedding_host);
             memory_discovery_unavailable(&module_client);
             module_pid = spawn_module_child(module_executable, socket_path, NULL);
-            wait_for_clients(&host, &host_lock, 4, module_pid);
+            wait_for_clients(&host, &host_lock, 5, module_pid);
             smoke_host_gateway_plan(&embedding_host);
             run_memory_probe(probe_executable, socket_path);
             puts("memory: terminated provider unavailable; restarted Go owner passed host/client "
@@ -1266,6 +1315,13 @@ finish:
    {
       aimee_module_process_stop();
       assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
+   }
+   if (memory_process)
+   {
+      const char *placement = getenv("AIMEE_MODULE_PLACEMENT");
+      assert(atomic_load(&startup_replays) == (strcmp(placement, "server") == 0 ? 2 : 0));
+      aimee_module_process_stop();
+      assert(pthread_join(startup_thread, NULL) == 0 && startup.result == 0);
    }
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);

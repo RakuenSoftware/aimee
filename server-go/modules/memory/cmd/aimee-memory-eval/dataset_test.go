@@ -29,13 +29,13 @@ func TestDatasetParsingAndDenominators(t *testing.T) {
 		}
 		path := datasetFile(t, "["+sample+","+sample+"]")
 		plan, err := readDataset(path, suite, 0)
-		if err != nil || len(plan.groups) != 2 || len(plan.groups[0].Cases) != 1 {
+		if err != nil || len(plan.groups) != 2 || len(plan.groups[0].Cases) != map[string]int{"locomo": 2, "longmemeval": 1}[suite] {
 			t.Fatal(plan, err)
 		}
-		if plan.groups[0].Cases[0].Query != "Where is the nebula?" {
+		if plan.groups[0].Cases[len(plan.groups[0].Cases)-1].Query != "Where is the nebula?" {
 			t.Fatal("query was normalized or truncated", plan)
 		}
-		if suite == "locomo" && (plan.excluded["no_evidence"] != 2 || plan.groups[0].Cases[0].ID != "kept") {
+		if suite == "locomo" && (len(plan.excluded) != 0 || plan.groups[0].Cases[0].ID != "skip") {
 			t.Fatal("question identity/denominator drift", plan)
 		}
 		plan, err = readDataset(path, suite, 1)
@@ -52,7 +52,7 @@ func TestDatasetParsingAndDenominators(t *testing.T) {
 	}
 	abs := strings.Replace(longmemSample, "question-1", "question_abs", 1)
 	plan, err = readDataset(datasetFile(t, "["+abs+","+longmemSample+"]"), "longmemeval", 0)
-	if err != nil || plan.excluded["abstention"] != 1 || len(plan.groups) != 1 {
+	if err != nil || len(plan.excluded) != 0 || len(plan.groups) != 2 || *plan.groups[0].Cases[0].Answerable {
 		t.Fatal(plan, err)
 	}
 	for _, row := range []struct{ suite, raw string }{
@@ -111,5 +111,42 @@ func TestDatasetIsolatedGoReplay(t *testing.T) {
 		if err := runDataset(context.Background(), schema, 3, path, suite, 0, "printf '[1,0]'", "", "json", "", "", &output); err == nil || output.Len() != 0 {
 			t.Fatal("failed embedding published partial dataset scores", err, output.String())
 		}
+	}
+}
+
+func TestUnanswerableRetrievalPreservesCasesAndNullMetrics(t *testing.T) {
+	url := os.Getenv("AIMEE_DB_TEST_URL")
+	if url == "" {
+		if os.Getenv("AIMEE_DB_TEST_REQUIRED") == "1" {
+			t.Fatal("database required")
+		}
+		t.Skip("requires disposable PostgreSQL")
+	}
+	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	script := filepath.Join(t.TempDir(), "embed.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf '[1,0,0]\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	sample := strings.Replace(longmemSample, "question-1", "question_abs", 1)
+	sample = strings.Replace(sample, `"answer_session_ids":["session-1"]`, `"answer_session_ids":[]`, 1)
+	path := datasetFile(t, "["+sample+"]")
+	var output bytes.Buffer
+	if err := runDataset(context.Background(), "../../../../../src/modules/db2/c/schema.sql", 3, path, "longmemeval", 0, script, "", "json", "", "", &output); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["total_cases"] != float64(1) || got["metrics"].(map[string]any)["mrr"] != nil {
+		t.Fatal(output.String())
+	}
+	row := got["case_results"].([]any)[0].(map[string]any)
+	if row["id"] != "0/question_abs" || row["metrics"] != nil || row["unscored_reason"] != "unanswerable" {
+		t.Fatal(output.String())
+	}
+	plan, err := readDataset(datasetFile(t, "["+sample+","+longmemSample+"]"), "longmemeval", 1)
+	if err != nil || len(plan.inventory.Cases) != 2 || plan.inventory.Cases[1].Reason != "max_cases" {
+		t.Fatal(plan, err)
 	}
 }

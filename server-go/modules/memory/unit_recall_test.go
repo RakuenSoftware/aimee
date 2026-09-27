@@ -164,3 +164,26 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 		t.Fatal("unit query refusal hidden", status)
 	}
 }
+
+func TestUnitSemanticMergeKeepsVersionIdentity(t *testing.T) {
+	version := &MemoryRecordVersion{SchemaVersion: 1, OwnerID: "owner", RecordID: "7", RecordRevision: "1"}
+	other := *version
+	other.RecordRevision = "2"
+	whole := semanticCandidate{record: Record{ID: 7, observedVersion: version}, score: .8}
+	unit := semanticCandidate{record: Record{ID: 7, observedVersion: version}, score: 1.1}
+	req := DataRequest{Limit: 20, lanes: recallLanes{}}
+	got := mergeSemanticCandidates(req, false, []semanticCandidate{whole}, []semanticCandidate{unit})
+	if len(got) != 1 || got[0].observedVersion != version {
+		t.Fatal("unit winner lost source version", got)
+	}
+	graph := Record{ID: 7, Version: version}
+	if fused := fuseRanked(context.Background(), got, []Record{graph}, 20, "semantic", "graph"); len(fused) != 1 {
+		t.Fatal("same-version graph removed semantic winner", fused)
+	}
+	for _, bad := range []*MemoryRecordVersion{nil, &other} {
+		unit.record.observedVersion = bad
+		if got := mergeSemanticCandidates(req, false, []semanticCandidate{whole}, []semanticCandidate{unit}); len(got) != 0 {
+			t.Fatal("mixed or missing version admitted", got)
+		}
+	}
+}

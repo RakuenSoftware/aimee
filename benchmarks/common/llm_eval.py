@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 from benchmarks.common.harness import AimeeHarness, AgentExecution, token_estimate_cost
@@ -33,19 +34,27 @@ def judge_vote(
     question: str,
     gold_answer: str,
     candidate: str,
+    answerable: bool | None = None,
 ) -> tuple[str, float, int, int]:
     prompt = (
         f"Question: {question}\n"
         f"Gold answer: {gold_answer}\n"
         f"Candidate answer: {candidate}\n\nReturn JSON only."
     )
+    if answerable is False:
+        prompt = (f"Question: {question}\nThis question is unanswerable from the supplied history. "
+                  f"Score 1 only if the candidate explicitly abstains without asserting an answer.\n"
+                  f"Candidate answer: {candidate}\nReturn JSON only.")
     # Reasoning delegates (e.g. MiniMax) spend tokens on hidden reasoning before
     # emitting the JSON verdict; a too-small budget yields "no content". Allow a
     # larger judge budget via AIMEE_BENCH_JUDGE_MAX_TOKENS (default 64 preserves
     # prior behaviour for non-reasoning judges).
     judge_max_tokens = int(os.environ.get("AIMEE_BENCH_JUDGE_MAX_TOKENS", "64"))
     result = harness.agent_run(home, prompt=prompt, system=JUDGE_SYSTEM, max_tokens=judge_max_tokens)
-    verdict = "CORRECT" if '"score": 1' in result.response or '"score":1' in result.response else "WRONG"
+    parsed = json.loads(result.response)
+    if not isinstance(parsed, dict) or type(parsed.get("score")) is not int or parsed["score"] not in (0, 1):
+        raise ValueError("invalid judge score")
+    verdict = "CORRECT" if parsed["score"] else "WRONG"
     return verdict, result.latency_s, result.prompt_tokens, result.completion_tokens
 
 
@@ -56,6 +65,7 @@ def judge_majority(
     question: str,
     gold_answer: str,
     candidate: str,
+    answerable: bool | None = None,
 ) -> tuple[list[str], float, int, int, str]:
     votes = []
     judge_latency_s = 0.0
@@ -68,6 +78,7 @@ def judge_majority(
             question=question,
             gold_answer=gold_answer,
             candidate=candidate,
+            answerable=answerable,
         )
         votes.append(vote)
         judge_latency_s += latency_s

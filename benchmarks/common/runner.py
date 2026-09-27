@@ -47,45 +47,46 @@ def is_abstention(answer: str) -> bool:
 # Derived LongMemEval metrics
 # ---------------------------------------------------------------------------
 
-def compute_longmemeval_derived(results: list[dict[str, Any]]) -> dict[str, float]:
-    """Compute factoid_recall, abstention_precision, and false_abstention_rate.
+def compute_longmemeval_derived(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Mixed-answerability metrics; missing labels never become negative labels.
 
-    All LongMemEval questions have gold answers (none are truly unanswerable),
-    so:
-      - factoid_recall       = fraction correctly answered (CORRECT and not abstained)
-      - false_abstention_rate = fraction where the model abstained (all are false negatives)
-      - abstention_precision  = fraction of abstentions that scored CORRECT anyway
-                                (judge may still award CORRECT for partial credit)
+    Abstention detection is a declared text heuristic, not a citation-support judge.
+    Undefined ratios are JSON null. Failures remain in the overall denominator.
     """
-    if not results:
-        return {"factoid_recall": 0.0, "abstention_precision": 0.0, "false_abstention_rate": 0.0}
-
-    n = len(results)
-    abstained = [r for r in results if is_abstention(str(r.get("generated_answer") or ""))]
-    n_abstained = len(abstained)
-
-    # Recall: answered correctly without abstaining
-    n_correct_factoid = sum(
-        1 for r in results
-        if r.get("verdict") == "CORRECT" and not is_abstention(str(r.get("generated_answer") or ""))
-    )
-    factoid_recall = n_correct_factoid / n
-
-    # False abstention: model abstained on an answerable question (all LME questions are answerable)
-    false_abstention_rate = n_abstained / n
-
-    # Abstention precision: of abstentions, how many scored CORRECT (partial credit)
-    if n_abstained:
-        n_abstained_correct = sum(1 for r in abstained if r.get("verdict") == "CORRECT")
-        abstention_precision = n_abstained_correct / n_abstained
-    else:
-        abstention_precision = 1.0  # vacuously perfect if no abstentions
-
-    return {
-        "factoid_recall": round(factoid_recall, 4),
-        "abstention_precision": round(abstention_precision, 4),
-        "false_abstention_rate": round(false_abstention_rate, 4),
-    }
+    counts = {"answerable_answered": 0, "answerable_abstained": 0,
+              "unanswerable_answered": 0, "unanswerable_abstained": 0}
+    labelled = correct = answered_wrong = unknown = failed = 0
+    for row in results:
+        label = row.get("answerable")
+        if type(label) is not bool:
+            unknown += 1
+            continue
+        if row.get("run_status", "ok") != "ok":
+            failed += 1
+            continue
+        labelled += 1
+        abstained = row.get("abstained")
+        if type(abstained) is not bool:
+            abstained = is_abstention(str(row.get("generated_answer") or ""))
+        counts[("answerable" if label else "unanswerable") +
+               ("_abstained" if abstained else "_answered")] += 1
+        correct += int(label and not abstained and row.get("verdict") == "CORRECT")
+        answered_wrong += int(not abstained and row.get("verdict") != "CORRECT")
+    aa, az = counts["answerable_answered"], counts["answerable_abstained"]
+    ua, uz = counts["unanswerable_answered"], counts["unanswerable_abstained"]
+    def ratio(a: int, b: int) -> float | None:
+        return round(a / b, 6) if b else None
+    return {"confusion": counts, "total_cases": len(results), "labelled_cases": labelled,
+            "missing_answerability_labels": unknown, "failed_labelled_cases": failed,
+            "abstention_detection": "explicit-boolean-or-text-heuristic-v1",
+            "factoid_recall": ratio(correct, aa + az),
+            "abstention_precision": ratio(uz, uz + az),
+            "abstention_recall": ratio(uz, uz + ua),
+            "false_abstention_rate": ratio(az, aa + az),
+            "unsupported_answer_rate": ratio(ua, ua + uz),
+            "unsupported_answer_definition": "answered-unanswerable / unanswerable; not citation support",
+            "risk_coverage": {"coverage": ratio(aa + ua, labelled),
+                              "risk": ratio(answered_wrong, aa + ua)}}
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ def build_summary(
         summary["cost"] = summarize_costs(costs, correct_count)
 
         # Derived LongMemEval metrics (only populated for LME LLM track)
-        if dataset == "longmemeval" and all("generated_answer" in r for r in results):
+        if all("generated_answer" in r for r in results):
             summary["derived"] = compute_longmemeval_derived(results)
 
     return summary
@@ -129,10 +130,28 @@ def write_result_file(path: Path, payload: dict[str, Any]) -> None:
     # A malformed coverage block is worse than none: it would be read back as
     # proof of a complete run. Reject it at the point of writing, where the
     # producer that got it wrong is still on the stack.
+    if "dataset_inventory" in payload:
+        from benchmarks.common.dataset_inventory import validate_inventory_results
+        validate_inventory_results(payload["dataset_inventory"], payload["results"])
+        if "coverage" in payload:
+            counts = payload["coverage"]["counts"]
+            counts["excluded_questions"] = sum(r["disposition"] == "excluded" for r in payload["dataset_inventory"]["cases"])
+            counts["failed_questions"] = sum(r.get("run_status", "ok") != "ok" for r in payload["results"])
+            payload["coverage"]["complete"] = payload["coverage"]["complete"] and not (counts["excluded_questions"] or counts["failed_questions"])
     if "coverage" in payload:
         validate_coverage(payload["coverage"])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    import os
+    import tempfile
+    data = json.dumps(payload, indent=2, allow_nan=False) + "\n"
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name, dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as out:
+            out.write(data)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def print_summary(dataset_name: str, track: str, summary: dict[str, Any], label_field: str) -> None:
@@ -152,8 +171,4 @@ def print_summary(dataset_name: str, track: str, summary: dict[str, Any], label_
         )
         derived = summary.get("derived")
         if derived:
-            print(
-                f"  factoid_recall={derived['factoid_recall']:.3f} "
-                f"abstention_precision={derived['abstention_precision']:.3f} "
-                f"false_abstention_rate={derived['false_abstention_rate']:.3f}"
-            )
+            print("  answerability=" + json.dumps(derived, sort_keys=True))
