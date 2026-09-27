@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -14,6 +15,10 @@ func TestRecordPublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
 		{"get", `{"id":0}`}, {"get", `{"id":1.5}`}, {"fact_history", `{}`},
+		{"find_facts", `{"query":"key","project":{}}`},
+		{"find_facts", `{"query":"key","workspace":null}`},
+		{"find_facts", `{"query":"key","scope_context":"yes"}`},
+		{"find_facts", `{"query":"key","include_all":1}`},
 		{"get", `{"id":"9007199254740993x","view":"console"}`},
 		{"get", `{"id":9007199254740993,"view":"console"}`},
 		{"list_session_scope_priority_like", `{"pattern":null}`}, {"search_facts_patterns_by_keyword", `{}`},
@@ -66,11 +71,20 @@ func TestRecordPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA record_command_test;
 CREATE FUNCTION record_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,record_command_test,public;
-CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  epistemic_kind text DEFAULT 'world_fact',scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
  valid_from text DEFAULT '2026-01-01',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
-CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
+CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,memory_id bigint,scope text,summary text);
+CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memory_workspaces(memory_id bigint,workspace text,PRIMARY KEY(memory_id,workspace));
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
 INSERT INTO memories(key,content) VALUES ('release',repeat('memory detail ',700));
@@ -78,11 +92,13 @@ INSERT INTO memories(key,lifecycle_state,valid_until) VALUES ('release#v1','supe
 INSERT INTO memories(key,scope_value) VALUES ('private-key','private');
 INSERT INTO memories(key,content,scope_type,scope_value) VALUES ('global-key','global marker','global','_global'),('workspace-key','workspace marker','workspace','team');
 INSERT INTO memory_summaries(memory_id,scope,summary) VALUES (1,'summary','fallback'),(1,'headline','Release headline'),(3,'headline','Private headline');
+INSERT INTO derived_memory_dependencies SELECT 'summary',s.id::text,'memory',m.id::text,m.record_revision::text,'go-derived-text-v1','summary-input-v1' FROM memory_summaries s JOIN memories m ON m.id=s.memory_id;
 INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
+	client := clientForHandler(t, handler)
 	run := func(verb, args string) map[string]any {
 		t.Helper()
 		r := runPublicCommand(t, client, verb, args)
@@ -117,6 +133,40 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 				t.Fatal(row)
 			}
 		}
+	}
+	for _, sample := range []struct {
+		args    string
+		allowed map[string]bool
+	}{
+		{`{"query":"key","project":"private"}`, map[string]bool{"private-key": true, "global-key": true}},
+		{`{"query":"key","workspace":"team"}`, map[string]bool{"workspace-key": true, "global-key": true}},
+		{`{"query":"key","include_all":false}`, map[string]bool{"global-key": true}},
+	} {
+		result := run("find_facts", sample.args)
+		rows := result["facts"].([]any)
+		if len(rows) != len(sample.allowed) {
+			t.Fatal("legacy scope argument was ignored", sample.args, result)
+		}
+		for _, row := range rows {
+			if !sample.allowed[row.(map[string]any)["key"].(string)] {
+				t.Fatal("legacy scope argument admitted foreign row", sample.args, row)
+			}
+		}
+	}
+	// Credential restrictions narrow the audience without turning an implicit
+	// audience query into an exact-scope query that loses public/global rows.
+	caller := bus.CommandContext{Authenticated: true, Principal: "credential:fixture", ScopeKind: "project", ScopeID: "private"}
+	listed, status := invokeContextCommand(t, handler, 0, caller, "list", `{"limit":64}`)
+	rows, ok := listed["memories"].([]any)
+	if status != bus.ModuleStatusOK || !ok || len(rows) != 2 {
+		t.Fatal("verified audience lost global or admitted foreign records", listed, status)
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.(map[string]any)["key"].(string)] = true
+	}
+	if !seen["private-key"] || !seen["global-key"] {
+		t.Fatal("verified audience changed shared visibility", seen)
 	}
 	full := run("find_facts_visible", `{"query":"release","project":"app"}`)["facts"].([]any)
 	if len(full) != 1 || full[0].(map[string]any)["content"] != record["content"] {
@@ -264,6 +314,124 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if view := run("top_l2_facts", `{"view":"session","section":"facts","scope_context":true,"project":"app","budget_bytes":1}`)["text"]; view != "" {
 		t.Fatal("session exceeded budget", view)
 	}
+	// Enrichment is another READ COMMITTED statement: mutations between source
+	// selection and metadata selection must not create a mixed public record.
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for _, mutation := range []string{
+		"UPDATE memories SET content='changed after selection' WHERE id=1",
+		"UPDATE memories SET scope_value='moved after selection' WHERE id=1",
+		"UPDATE memories SET confidence=0.25 WHERE id=1",
+		"UPDATE memories SET record_revision=record_revision+1 WHERE id=1",
+		"UPDATE memory_collection_owner SET owner_id='00000000-0000-4000-8000-000000000002' WHERE id=1",
+	} {
+		if _, err := tx.Exec(ctx, "SAVEPOINT enrichment_race"); err != nil {
+			t.Fatal(err)
+		}
+		selected, err := backend.getAtVersioned(ctx, Scope{}, 1, false, "", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := backend.publicRecords(ctx, []Record{selected}); err != nil || len(rows) != 1 || rows[0].Content != selected.Content {
+			t.Fatal("unchanged enrichment refused", rows, err)
+		}
+		if _, err := tx.Exec(ctx, mutation); err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := backend.publicRecords(ctx, []Record{selected}); err == nil || rows != nil {
+			t.Fatal("mixed enrichment accepted", mutation, rows, err)
+		}
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT enrichment_race"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected, err := backend.getAtVersioned(ctx, Scope{}, 1, false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SAVEPOINT unversioned_enrichment; UPDATE memories SET content='changed unversioned payload' WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := backend.publicRecords(ctx, []Record{selected}); err == nil || rows != nil {
+		t.Fatal("mixed unversioned enrichment accepted", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT unversioned_enrichment"); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy JSON omits versions, but the in-process read still captures the
+	// owner/revision used for selection. Identical payloads do not excuse a
+	// revision or lifecycle transition before enrichment.
+	loaders := map[string]func() ([]Record, error){
+		"get": func() ([]Record, error) { r, e := backend.Get(ctx, Scope{}, 1); return []Record{r}, e },
+		"visible": func() ([]Record, error) {
+			return backend.SearchVisible(ctx, DataRequest{Query: "release", Project: "app", Limit: 5})
+		},
+		"scoped": func() ([]Record, error) {
+			return backend.Search(ctx, Scope{Type: "project", Value: "app"}, "release", "", "", 5)
+		},
+		"legacy-query": func() ([]Record, error) { return backend.QueryRecords(ctx, "like", "release", 0, 5) },
+	}
+	for name, load := range loaders {
+		for _, mutation := range []string{
+			"UPDATE memories SET record_revision=record_revision+1 WHERE id=1",
+			"UPDATE memories SET activation_suppressed=1 WHERE id=1",
+			"UPDATE memories SET valid_until=(now()-interval '1 second')::text WHERE id=1",
+		} {
+			if _, err := tx.Exec(ctx, "SAVEPOINT observed_enrichment"); err != nil {
+				t.Fatal(err)
+			}
+			records, err := load()
+			if err != nil || len(records) != 1 || records[0].ID != 1 || records[0].Version != nil || records[0].observedVersion == nil {
+				t.Fatal("missing private read observation", name, records, err)
+			}
+			if rows, err := backend.publicRecords(ctx, records); err != nil || len(rows) != 1 {
+				t.Fatal("current observation refused", name, rows, err)
+			}
+			if _, err := tx.Exec(ctx, mutation); err != nil {
+				t.Fatal(err)
+			}
+			if rows, err := backend.publicRecords(ctx, records); err == nil || rows != nil {
+				t.Fatal("stale private observation admitted", name, mutation, rows, err)
+			}
+			if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT observed_enrichment"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	historical, err := backend.FactHistory(ctx, "release", 5)
+	if err != nil || len(historical) != 2 {
+		t.Fatal("history selection", historical, err)
+	}
+	if rows, err := backend.publicRecords(ctx, historical); err != nil || len(rows) != 2 {
+		t.Fatal("historical enrichment imposed current eligibility", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "SAVEPOINT historical_enrichment; UPDATE memories SET lifecycle_state='revoked' WHERE id=2"); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := backend.publicRecords(ctx, historical); err == nil || rows != nil {
+		t.Fatal("revocation during historical enrichment admitted", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT historical_enrichment"); err != nil {
+		t.Fatal(err)
+	}
+	// A requested history key is an identity, not a SQL wildcard pattern.
+	// An unrelated record cannot supply a false predecessor for a '%'/'_' key.
+	if _, err := tx.Exec(ctx, `SAVEPOINT literal_history;
+ INSERT INTO memories(key,content) VALUES ('history_%','literal current'),('history_%#v1','literal old'),('history_other#v1','unrelated old');
+ UPDATE memories SET lifecycle_state='superseded',activation_suppressed=1 WHERE key='history_%#v1';`); err != nil {
+		t.Fatal(err)
+	}
+	literal := run("fact_history", `{"key":"history_%","max":64}`)["history"].([]any)
+	if len(literal) != 2 {
+		t.Fatal("history interpreted a key as a pattern", literal)
+	}
+	for _, row := range literal {
+		if row.(map[string]any)["key"] == "history_other#v1" {
+			t.Fatal("unrelated predecessor admitted", literal)
+		}
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT literal_history"); err != nil {
+		t.Fatal(err)
+	}
 	// Metadata loss must not silently produce partial success.
 	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
 		t.Fatal("missing metadata accepted")
@@ -293,9 +461,10 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	}
 	// Verify visibility with a real non-owner connection, including metadata.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_record_test;
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
 GRANT SELECT,UPDATE ON memories TO memory_record_test;
-GRANT SELECT ON memory_summaries TO memory_record_test;
+GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies TO memory_record_test;
 GRANT SELECT,INSERT ON memory_scopes,memory_workspaces TO memory_record_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
@@ -305,6 +474,24 @@ CREATE POLICY test_memory_visibility ON memories USING
 SET LOCAL ROLE memory_record_test;`)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args string
+		keys map[string]bool
+	}{
+		{`{"scope_context":true,"max":100}`, map[string]bool{"global-key": true}},
+		{`{"scope_context":true,"project":"private","max":100}`, map[string]bool{"global-key": true, "private-key": true}},
+	} {
+		result := run("load_eval_corpus", tc.args)
+		rows := result["memories"].([]any)
+		if len(rows) != len(tc.keys) {
+			t.Fatal("evaluation corpus ignored explicit scope", result)
+		}
+		for _, row := range rows {
+			if !tc.keys[row.(map[string]any)["key"].(string)] {
+				t.Fatal("evaluation corpus widened scope", row)
+			}
+		}
 	}
 	if r := runPublicCommand(t, client, "get", `{"id":3,"scope_context":true,"project":"app"}`); r["kind"] != "not_found" {
 		t.Fatal(r)

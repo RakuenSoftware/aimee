@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "kind": "controlled_source_excerpt_pilot",
+  "decision": "not_eligible_for_promotion",
+  "reason": "controlled feature pilot; no production exposure or routing claim",
+  "fitted_policy": {
+    "route": "all",
+    "exposure_penalty": 0,
+    "gold_retained": 6,
+    "cases": 6
+  },
+  "fit_grid": [
+    {
+      "route": "all",
+      "exposure_penalty": 0,
+      "gold_retained": 6,
+      "cases": 6
+    },
+    {
+      "route": "all",
+      "exposure_penalty": 1,
+      "gold_retained": 6,
+      "cases": 6
+    },
+    {
+      "route": "all",
+      "exposure_penalty": 3,
+      "gold_retained": 6,
+      "cases": 6
+    },
+    {
+      "route": "lexical",
+      "exposure_penalty": 0,
+      "gold_retained": 2,
+      "cases": 6
+    },
+    {
+      "route": "lexical",
+      "exposure_penalty": 1,
+      "gold_retained": 2,
+      "cases": 6
+    },
+    {
+      "route": "lexical",
+      "exposure_penalty": 3,
+      "gold_retained": 2,
+      "cases": 6
+    }
+  ],
+  "gates": {
+    "native_representative_workload": false,
+    "sufficient_heldout_pairs": false,
+    "all_cells_valid": true,
+    "strict_fit_improvement": false,
+    "observed_success_noninferior": true,
+    "p95_latency": true,
+    "estimated_cost": true
+  },
+  "metrics": {
+    "baseline": {
+      "pairs": 6,
+      "successes": 6,
+      "valid": true,
+      "p95_latency_seconds": 8.024240331957117,
+      "estimated_cost_usd": 0.011953
+    },
+    "fitted": {
+      "pairs": 6,
+      "successes": 6,
+      "valid": true,
+      "p95_latency_seconds": 7.845993520983029,
+      "estimated_cost_usd": 0.011953
+    }
+  },
+  "estimated_cost_model": {
+    "label": "estimated cost; hypothetical normalized rates, not actual billing or vendor pricing",
+    "currency": "USD",
+    "input_per_million_tokens": 1,
+    "output_per_million_tokens": 1,
+    "cached_input_per_million_tokens": 1
+  },
+  "cells": [
+    {
+      "case": "nav-7",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.896867480012588,
+      "estimated_cost_usd": 0.001842,
+      "usage": {
+        "prompt_tokens": 1819,
+        "completion_tokens": 23,
+        "total_tokens": 1842
+      },
+      "model": "codex",
+      "request_sha256": "8db3d21200e2fedc5ec52958cd23e2fea9624e9004959ecddff9169e8654e5cb",
+      "context_sha256": "b17bd81144c09ee68a81ef6c68f98aadb31ef0cb347232a1a839071d3cf57711",
+      "retained": [
+        "source-6",
+        "source-7"
+      ],
+      "answer": {
+        "symbol": "protectedRecallOverflow",
+        "path": "server-go/modules/memory/recall.go"
+      }
+    },
+    {
+      "case": "nav-7",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.306447647046298,
+      "estimated_cost_usd": 0.001842,
+      "usage": {
+        "prompt_tokens": 1819,
+        "completion_tokens": 23,
+        "total_tokens": 1842
+      },
+      "model": "codex",
+      "request_sha256": "8db3d21200e2fedc5ec52958cd23e2fea9624e9004959ecddff9169e8654e5cb",
+      "context_sha256": "b17bd81144c09ee68a81ef6c68f98aadb31ef0cb347232a1a839071d3cf57711",
+      "retained": [
+        "source-6",
+        "source-7"
+      ],
+      "answer": {
+        "symbol": "protectedRecallOverflow",
+        "path": "server-go/modules/memory/recall.go"
+      }
+    },
+    {
+      "case": "nav-8",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 7.845993520983029,
+      "estimated_cost_usd": 0.001918,
+      "usage": {
+        "prompt_tokens": 1895,
+        "completion_tokens": 23,
+        "total_tokens": 1918
+      },
+      "model": "codex",
+      "request_sha256": "0ada9fd911bf3da295a7018d3f0e79f82110a84d53e706299513acfdee9d09a9",
+      "context_sha256": "de1dfbca0c952ec94caa1f1e369a2893f942fb9fe51e5daf7c3d24c09195cf66",
+      "retained": [
+        "source-7",
+        "source-8"
+      ],
+      "answer": {
+        "symbol": "validEvidenceRole",
+        "path": "server-go/modules/memory/evidence_tasks.go"
+      }
+    },
+    {
+      "case": "nav-8",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 7.391562658012845,
+      "estimated_cost_usd": 0.001918,
+      "usage": {
+        "prompt_tokens": 1895,
+        "completion_tokens": 23,
+        "total_tokens": 1918
+      },
+      "model": "codex",
+      "request_sha256": "0ada9fd911bf3da295a7018d3f0e79f82110a84d53e706299513acfdee9d09a9",
+      "context_sha256": "de1dfbca0c952ec94caa1f1e369a2893f942fb9fe51e5daf7c3d24c09195cf66",
+      "retained": [
+        "source-7",
+        "source-8"
+      ],
+      "answer": {
+        "symbol": "validEvidenceRole",
+        "path": "server-go/modules/memory/evidence_tasks.go"
+      }
+    },
+    {
+      "case": "nav-9",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 8.024240331957117,
+      "estimated_cost_usd": 0.001945,
+      "usage": {
+        "prompt_tokens": 1922,
+        "completion_tokens": 23,
+        "total_tokens": 1945
+      },
+      "model": "codex",
+      "request_sha256": "df5b899c088432af8e8cc0334ed07e22cff5fd5f615f9906aae9c0ef38f43ba7",
+      "context_sha256": "6c0429cabcdf735eba7c2a357f8d4105b9b9f22b8f9815f53e5b3db8d5c0586e",
+      "retained": [
+        "source-8",
+        "source-9"
+      ],
+      "answer": {
+        "symbol": "evidenceTime",
+        "path": "server-go/modules/memory/evidence_tasks.go"
+      }
+    },
+    {
+      "case": "nav-9",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.808289904030971,
+      "estimated_cost_usd": 0.001945,
+      "usage": {
+        "prompt_tokens": 1922,
+        "completion_tokens": 23,
+        "total_tokens": 1945
+      },
+      "model": "codex",
+      "request_sha256": "df5b899c088432af8e8cc0334ed07e22cff5fd5f615f9906aae9c0ef38f43ba7",
+      "context_sha256": "6c0429cabcdf735eba7c2a357f8d4105b9b9f22b8f9815f53e5b3db8d5c0586e",
+      "retained": [
+        "source-8",
+        "source-9"
+      ],
+      "answer": {
+        "symbol": "evidenceTime",
+        "path": "server-go/modules/memory/evidence_tasks.go"
+      }
+    },
+    {
+      "case": "nav-10",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.580093174998183,
+      "estimated_cost_usd": 0.002118,
+      "usage": {
+        "prompt_tokens": 2095,
+        "completion_tokens": 23,
+        "total_tokens": 2118
+      },
+      "model": "codex",
+      "request_sha256": "9f85dbdf8e50e946707d925049f3135c6ed8533a8336fb0b0dddad389bca78e9",
+      "context_sha256": "c406b9d38140886baaeb99d1e7a26bdd140838063f650cfced0da0feb0c76df6",
+      "retained": [
+        "source-9",
+        "source-10"
+      ],
+      "answer": {
+        "symbol": "typedSelectionDigest",
+        "path": "server-go/modules/memory/typed_context.go"
+      }
+    },
+    {
+      "case": "nav-10",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.50501456897473,
+      "estimated_cost_usd": 0.002118,
+      "usage": {
+        "prompt_tokens": 2095,
+        "completion_tokens": 23,
+        "total_tokens": 2118
+      },
+      "model": "codex",
+      "request_sha256": "9f85dbdf8e50e946707d925049f3135c6ed8533a8336fb0b0dddad389bca78e9",
+      "context_sha256": "c406b9d38140886baaeb99d1e7a26bdd140838063f650cfced0da0feb0c76df6",
+      "retained": [
+        "source-9",
+        "source-10"
+      ],
+      "answer": {
+        "symbol": "typedSelectionDigest",
+        "path": "server-go/modules/memory/typed_context.go"
+      }
+    },
+    {
+      "case": "nav-11",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 7.606547539005987,
+      "estimated_cost_usd": 0.002173,
+      "usage": {
+        "prompt_tokens": 2145,
+        "completion_tokens": 28,
+        "total_tokens": 2173
+      },
+      "model": "codex",
+      "request_sha256": "b04eeef70900ff57ea1382b6b8f86de686f0386f2e9a2ceea578ce358ce75515",
+      "context_sha256": "0f233ae75f76427da036cb6c29261cc39ab8cf27b4c55cdcb71cccf48dc4319f",
+      "retained": [
+        "source-10",
+        "source-11"
+      ],
+      "answer": {
+        "symbol": "healthFamiliesFromEvidence",
+        "path": "server-go/modules/memory/retrieval_health_families.go"
+      }
+    },
+    {
+      "case": "nav-11",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.976951014017686,
+      "estimated_cost_usd": 0.002173,
+      "usage": {
+        "prompt_tokens": 2145,
+        "completion_tokens": 28,
+        "total_tokens": 2173
+      },
+      "model": "codex",
+      "request_sha256": "b04eeef70900ff57ea1382b6b8f86de686f0386f2e9a2ceea578ce358ce75515",
+      "context_sha256": "0f233ae75f76427da036cb6c29261cc39ab8cf27b4c55cdcb71cccf48dc4319f",
+      "retained": [
+        "source-10",
+        "source-11"
+      ],
+      "answer": {
+        "symbol": "healthFamiliesFromEvidence",
+        "path": "server-go/modules/memory/retrieval_health_families.go"
+      }
+    },
+    {
+      "case": "nav-12",
+      "arm": "fitted",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.428353046998382,
+      "estimated_cost_usd": 0.001957,
+      "usage": {
+        "prompt_tokens": 1930,
+        "completion_tokens": 27,
+        "total_tokens": 1957
+      },
+      "model": "codex",
+      "request_sha256": "8ab41fe7b38874be893e4a2395b2f1b847b47ad4290f0d79c34e9bfb33714cc3",
+      "context_sha256": "7f7ec2c76e7c8d6fcda9b3e93347ed5a074709470fb30d7f5e6d7432bd4e1170",
+      "retained": [
+        "source-11",
+        "source-0"
+      ],
+      "answer": {
+        "symbol": "validHealthFamilies",
+        "path": "server-go/modules/memory/retrieval_health_families.go"
+      }
+    },
+    {
+      "case": "nav-12",
+      "arm": "baseline",
+      "valid": true,
+      "task_success": true,
+      "latency_seconds": 6.592335168970749,
+      "estimated_cost_usd": 0.001957,
+      "usage": {
+        "prompt_tokens": 1930,
+        "completion_tokens": 27,
+        "total_tokens": 1957
+      },
+      "model": "codex",
+      "request_sha256": "8ab41fe7b38874be893e4a2395b2f1b847b47ad4290f0d79c34e9bfb33714cc3",
+      "context_sha256": "7f7ec2c76e7c8d6fcda9b3e93347ed5a074709470fb30d7f5e6d7432bd4e1170",
+      "retained": [
+        "source-11",
+        "source-0"
+      ],
+      "answer": {
+        "symbol": "validHealthFamilies",
+        "path": "server-go/modules/memory/retrieval_health_families.go"
+      }
+    }
+  ],
+  "manifest_sha256": "07ffa0eadabee8d7eff183405dd37b211d9a653459f6dc491ea4fef710c927c4"
+}

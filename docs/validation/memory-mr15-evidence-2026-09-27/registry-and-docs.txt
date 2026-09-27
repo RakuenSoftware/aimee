@@ -1,0 +1,55 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+aimee: version changed ( -> v0.4.3-493-gae7b046a8) — cleaned stale objects in build/obj
+module-bus-boundary: ok (80 declared crossings remain)
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.006s
+
+OK
+check_event_durability: ok (84 header kinds from 117 symbols, 121 declared: 97 ledger, 24 capture, 0 sampled)
+check_module_inventory: ok (25 required, 10 optional; /home/virant/dev/aimee-pr2990/tests/baselines/modules/canonical-inventory.yaml)
+line-check: WARN  cli_main.c has 2393 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes.c has 2364 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_b.c has 2486 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_c.c has 2461 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_d.c has 2432 lines (aim for <=1000)
+line-check: WARN  client_integrations.c has 2500 lines (aim for <=1000)
+line-check: WARN  cmd_agent_delegate.c has 2131 lines (aim for <=1000)
+line-check: WARN  db1_client/telemetry.c has 2101 lines (aim for <=1000)
+line-check: WARN  kb/http/kb_http.c has 2458 lines (aim for <=1000)
+line-check: WARN  kb/http/kb_http_code.c has 2245 lines (aim for <=1000)
+line-check: WARN  kb/kb.c has 2427 lines (aim for <=1000)
+line-check: WARN  kb/kb_main.c has 2461 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/canonical_index.c has 2054 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/db_postgres.c has 2002 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/fact_mutation.c has 2056 lines (aim for <=1000)
+line-check: WARN  modules/git/git_verify.c has 2084 lines (aim for <=1000)
+line-check: WARN  modules/guardrails/guardrails_orchestrator.c has 2046 lines (aim for <=1000)
+line-check: WARN  modules/kb_client/kb_client.c has 2128 lines (aim for <=1000)
+line-check: WARN  modules/protocols/mcp/mcp_tools.c has 2128 lines (aim for <=1000)
+line-check: WARN  modules/roundtable/delegate_ensemble.c has 2459 lines (aim for <=1000)
+line-check: WARN  modules/skills/skill.c has 2400 lines (aim for <=1000)
+line-check: WARN  modules/tools/agent_tools.c has 2127 lines (aim for <=1000)
+line-check: WARN  modules/tools/agent_tools_dispatch.c has 2497 lines (aim for <=1000)
+line-check: WARN  modules/workflows/wfe_blocks.c has 2276 lines (aim for <=1000)
+line-check: WARN  modules/workspace/workspace.c has 2498 lines (aim for <=1000)
+line-check: WARN  posix/agent_bridge.c has 2050 lines (aim for <=1000)
+line-check: WARN  posix/agent_runtime.c has 2263 lines (aim for <=1000)
+line-check: WARN  server/agent_runtime.c has 2305 lines (aim for <=1000)
+line-check: WARN  server/openai_chat.c has 2033 lines (aim for <=1000)
+line-check: WARN  server/server.c has 2262 lines (aim for <=1000)
+line-check: WARN  server/server_compute.c has 2415 lines (aim for <=1000)
+line-check: WARN  server/server_http.c has 2500 lines (aim for <=1000)
+line-check: WARN  server/server_http_routes.c has 2436 lines (aim for <=1000)
+line-check: WARN  server/server_mcp.c has 2355 lines (aim for <=1000)
+line-check: WARN  server/server_mcp_call_table.c has 2324 lines (aim for <=1000)
+line-check: WARN  server/server_state.c has 2106 lines (aim for <=1000)
+line-check: warnings present (acceptable, but aim to reduce)
+line-check: ok
+gen-api-docs: docs/gen/api-v1.md up to date (no-op)
+gen-reference-docs: wrote docs/gen/cli-commands.md
+gen-reference-docs: wrote docs/gen/configuration.md
+gen-v1-route-descriptor: wrote 410 routes -> docs/gen/v1-route-descriptor.json
+gen-reference-docs: plant-test ok (unparseable source refused)
+docs-gen-check: ok
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

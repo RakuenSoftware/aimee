@@ -1,0 +1,1 @@
+This run failed before certification. CT109 ran out of disk space. Its valid JSON receipts and cleanup record are retained here; truncated JSON was excluded. Inactive Docker build cache was cleared on CT109, freeing about 35 GB. The final run uses a fresh evidence directory and image. The earlier public recovery-refusal mismatch was separately fixed in b1e707c83.

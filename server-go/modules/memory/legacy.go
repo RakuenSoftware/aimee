@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	store "github.com/JBailes/aimee/server-go/db"
 	"io"
 	"os"
 	"path/filepath"
@@ -268,9 +269,16 @@ func (s *postgresDataStore) ExtractAntiPatterns(ctx context.Context, source stri
 		query = `WITH inserted AS (
  INSERT INTO anti_patterns(pattern,description,source,source_ref,confidence)
  SELECT r.title,r.description,'feedback','rule:'||r.id::text,0.8 FROM rules r
- WHERE r.polarity='negative' AND r.title<>'' AND NOT EXISTS
-  (SELECT 1 FROM anti_patterns a WHERE a.source_ref='rule:'||r.id::text)
- RETURNING 1) SELECT count(*) FROM inserted`
+ WHERE r.polarity='negative' AND r.title<>'' AND ` + authoredRuleInputSQL("r.") + ` AND NOT EXISTS
+ (SELECT 1 FROM anti_patterns a WHERE a.source_ref='rule:'||r.id::text) RETURNING *
+ ), observations AS (
+ INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'anti_pattern',a.id,'legacy-rule-input-v1',jsonb_build_object('schema_version',1,
+ 'owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+ 'record_id',r.id::text,'record_revision',r.record_revision::text,
+ 'output_digest',encode(sha256(convert_to(jsonb_build_array(a.pattern,a.description)::text,'UTF8')),'hex'))::text
+ FROM inserted a JOIN rules r ON a.source_ref='rule:'||r.id::text RETURNING 1
+ ) SELECT count(*) FROM observations`
 	case "failure":
 		query = `WITH inserted AS (
  INSERT INTO anti_patterns(pattern,description,source,source_ref,confidence)
@@ -285,17 +293,26 @@ func (s *postgresDataStore) ExtractAntiPatterns(ctx context.Context, source stri
 	return count, err
 }
 
+// Escalation makes repeated observations visible as soft guidance. Hit counts
+// do not authenticate an author or authorize creation of a protected hard rule.
 func (s *postgresDataStore) EscalateAntiPatterns(ctx context.Context, threshold int) (int, error) {
 	if threshold <= 0 {
 		threshold = 5
 	}
 	var count int
-	err := s.db.QueryRow(ctx, `WITH inserted AS (
+	err := s.db.QueryRow(ctx, `WITH eligible AS MATERIALIZED (
+ SELECT a.* FROM anti_patterns a WHERE a.hit_count >= $1 AND (`+currentLegacyRuleInputsSQL("anti_pattern", "a.", `encode(sha256(convert_to(jsonb_build_array(a.pattern,a.description)::text,'UTF8')),'hex')`)+`)
+ ), inserted AS (
  INSERT INTO rules(polarity,title,description,weight,domain,directive_type,created_at,updated_at)
- SELECT 'negative',a.pattern,a.description,10,'anti-pattern','hard',pg_now_text(),pg_now_text()
- FROM anti_patterns a WHERE a.hit_count >= $1 AND NOT EXISTS
-  (SELECT 1 FROM rules r WHERE r.polarity='negative' AND r.title=a.pattern AND r.directive_type='hard')
- RETURNING 1) SELECT count(*) FROM inserted`, threshold).Scan(&count)
+ SELECT 'negative',a.pattern,a.description,10,'anti-pattern','soft',pg_now_text(),pg_now_text()
+ FROM eligible a WHERE NOT EXISTS(SELECT 1 FROM rules r WHERE r.title=a.pattern)
+ RETURNING id,title,description
+ ), observations AS (
+ INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'rule',r.id,'legacy-rule-input-v1',l.source_ref FROM inserted r JOIN eligible a ON a.pattern=r.title
+ JOIN memory_lineage l ON l.object_type='anti_pattern' AND l.object_id=a.id AND l.source_kind='legacy-rule-input-v1'
+ RETURNING object_id
+ ) SELECT count(DISTINCT object_id) FROM observations`, threshold).Scan(&count)
 	return count, err
 }
 
@@ -323,19 +340,43 @@ func containsAny(text string, values []string) bool {
 }
 
 func (s *postgresDataStore) LearnStyle(ctx context.Context) (int, error) {
-	rows, err := s.db.Query(ctx, `SELECT polarity,description FROM rules
-WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
+	if db, ok := s.db.(store.DB); ok {
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer tx.Rollback(context.Background())
+		bound := *s
+		bound.db = s.auditTransaction(tx)
+		n, err := bound.LearnStyle(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return n, tx.Commit(ctx)
+	}
+
+	// Pin the collection before reading it. A concurrent rule change makes this
+	// output stale rather than certifying a selection we did not observe.
+	var collectionRevision string
+	if err := s.db.QueryRow(ctx, `SELECT rules_revision::text FROM memory_collection_owner WHERE id=1`).Scan(&collectionRevision); err != nil {
+		return 0, err
+	}
+	rows, err := s.db.Query(ctx, `SELECT id,record_revision::text,polarity,description FROM rules r
+WHERE polarity IN ('positive','negative') AND `+authoredRuleInputSQL("r.")+` ORDER BY id DESC LIMIT 256 FOR SHARE`)
 	if err != nil {
 		return 0, err
 	}
+	inputs := []map[string]string{}
 	positive := make([]int, len(styleDimensions))
 	negative := make([]int, len(styleDimensions))
 	for rows.Next() {
-		var polarity, description string
-		if err := rows.Scan(&polarity, &description); err != nil {
+		var id int64
+		var revision, polarity, description string
+		if err := rows.Scan(&id, &revision, &polarity, &description); err != nil {
 			rows.Close()
 			return 0, err
 		}
+		inputs = append(inputs, map[string]string{"record_id": fmt.Sprint(id), "record_revision": revision, "collection_revision": collectionRevision})
 		description = strings.ToLower(description)
 		for i, dimension := range styleDimensions {
 			if polarity == "positive" && containsAny(description, dimension.positive) {
@@ -351,6 +392,10 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 		return 0, err
 	}
 	rows.Close()
+	encodedInputs, err := json.Marshal(inputs)
+	if err != nil {
+		return 0, err
+	}
 	learned := 0
 	for i, dimension := range styleDimensions {
 		content := ""
@@ -362,9 +407,23 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 		if content == "" {
 			continue
 		}
-		if _, err := s.Put(ctx, Scope{Type: ScopeGlobal, Value: "_global"}, Record{
+		record, err := s.Put(ctx, Scope{Type: ScopeGlobal, Value: "_global"}, Record{
 			Tier: "L1", Kind: "preference", Key: dimension.key, Content: content, Confidence: 0.8,
-		}); err != nil {
+		})
+		if err != nil {
+			return learned, err
+		}
+		if _, err = s.db.Exec(ctx, `WITH marked AS (UPDATE memories SET cognified_memory_kind='rule_style' WHERE id=$1 RETURNING id) DELETE FROM memory_lineage WHERE object_type='memory' AND object_id IN(SELECT id FROM marked) AND source_kind='legacy-rule-input-v1'`, record.ID); err != nil {
+			return learned, err
+		}
+		if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'memory',m.id,'legacy-rule-input-v1',(input||jsonb_build_object('schema_version',1,
+ 'owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),'output_digest',`+memoryClaimDigestSQL("m.")+`))::text
+ FROM memories m CROSS JOIN jsonb_array_elements($2::jsonb) input WHERE m.id=$1`, record.ID, string(encodedInputs)); err != nil {
+			return learned, err
+		}
+		if _, err = s.db.Exec(ctx, `SELECT derived_memory_declare('memory',$1::text,COALESCE(jsonb_agg(jsonb_build_object(
+ 'input_kind','rule','input_id',input->>'record_id','input_version',input->>'record_revision','contribution','essential','extractor_version','legacy-rule-input-v1')),'[]'::jsonb),'suppress') FROM jsonb_array_elements($2::jsonb) input`, fmt.Sprint(record.ID), string(encodedInputs)); err != nil {
 			return learned, err
 		}
 		learned++
@@ -382,22 +441,24 @@ func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session str
 	if err != nil {
 		return 0, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
-WHERE source_session=$1 AND lifecycle_state='active'
+	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value,record_revision::text,
+(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM memories m
+WHERE source_session=$1 AND `+currentMemorySQL("m.")+`
  AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
-ORDER BY id LIMIT 201`, session)
+ORDER BY id LIMIT 201 FOR SHARE OF m`, session)
 	if err != nil {
 		return 0, err
 	}
 	type source struct {
-		id           int64
-		key, content string
-		scope        Scope
+		id              int64
+		key, content    string
+		revision, owner string
+		scope           Scope
 	}
 	var sources []source
 	for rows.Next() {
 		var item source
-		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value); err != nil {
+		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value, &item.revision, &item.owner); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -452,9 +513,10 @@ ORDER BY id LIMIT 201`, session)
 		return 0, err
 	}
 	var unitID int64
-	var created bool
+	var parentRevision string
+	var created, eligible bool
 	err = s.db.QueryRow(ctx, `WITH existing AS (
- SELECT u.id FROM memory_units u JOIN memories m ON m.id=u.memory_id
+ SELECT u.id,m.record_revision::text AS parent_revision,(`+currentMemorySQL("m.")+`) AS eligible FROM memory_units u JOIN memories m ON m.id=u.memory_id
  WHERE m.key=$1 AND m.source_session=$3 AND m.lifecycle_state='active'
    AND u.unit_type='episode_card' AND u.unit_key=$3 AND u.is_episode_card=1
  AND m.scope_type=$4 AND m.scope_value=$5
@@ -462,18 +524,35 @@ ORDER BY id LIMIT 201`, session)
 ), parent AS (
  INSERT INTO memories(tier,kind,epistemic_kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
  SELECT 'L1','episode','episode',$1,$2,0.8,$3,$4,$5,'active'
- WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id
+ WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id,record_revision
 ), created AS (
  INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind,is_episode_card)
- SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id
+ SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id,memory_id
 )
-SELECT id,false FROM existing UNION ALL SELECT id,true FROM created LIMIT 1`,
-		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &created)
+SELECT id,parent_revision,false,eligible FROM existing UNION ALL
+ SELECT c.id,p.record_revision::text,true,true FROM created c JOIN parent p ON p.id=c.memory_id LIMIT 1`,
+		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &parentRevision, &created, &eligible)
 	if err != nil {
 		return 0, err
 	}
 	if !created {
+		if !eligible {
+			return 0, errors.New("memory: existing episode card inputs are stale; regeneration requires a new reviewed artifact")
+		}
 		return unitID, nil
+	}
+	inputs := make([]map[string]string, 0, len(sources))
+	for _, item := range sources {
+		inputs = append(inputs, map[string]string{"record_id": fmt.Sprint(item.id), "record_revision": item.revision})
+	}
+	observation, err := json.Marshal(map[string]any{"schema_version": 1, "owner_id": sources[0].owner, "parent_revision": parentRevision, "inputs": inputs, "query_policy": "episode-session-inputs-v1", "source_session": session})
+	if err != nil {
+		return 0, err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+ SELECT 'memory_unit',u.id,'episode-card-input-v1',($2::jsonb || jsonb_build_object('unit_digest',`+unitInputDigestSQL("u")+`))::text,0.8
+ FROM memory_units u WHERE u.id=$1`, unitID, string(observation)); err != nil {
+		return 0, err
 	}
 	for _, item := range sources {
 		_, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
@@ -493,6 +572,13 @@ SELECT 'memory_unit',$1,'memory',$2,0.8 WHERE NOT EXISTS(
  AND NOT EXISTS(SELECT 1 FROM memory_relations r WHERE r.memory_id=m.id AND r.relation='REL_SUMMARISES' AND r.dst_entity=$2)`, unitID, fmt.Sprintf("memory:%d", item.id), card.Title); err != nil {
 			return 0, err
 		}
+	}
+	var parentID int64
+	if err = s.db.QueryRow(ctx, `SELECT memory_id FROM memory_units WHERE id=$1`, unitID).Scan(&parentID); err != nil {
+		return 0, err
+	}
+	if err = s.registerDerivedMemoryInputs(ctx, parentID); err != nil {
+		return 0, err
 	}
 	return unitID, nil
 }
@@ -523,7 +609,16 @@ func (s *postgresDataStore) searchVectors(ctx context.Context, vector []float64,
 		return nil, errors.New("memory: invalid vector search")
 	}
 	rows, err := s.db.Query(ctx, `SELECT e.point_id,1-(e.embedding <=> $1::vector) AS score
-FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
+FROM memory_embeddings e WHERE e.record_type=$2
+ AND (e.record_type NOT IN ('memory','unit') OR EXISTS(SELECT 1 FROM memories m WHERE m.id=CASE e.record_type
+   WHEN 'memory' THEN e.point_id WHEN 'unit' THEN
+    (SELECT u.memory_id FROM memory_units u WHERE u.id=e.point_id-1000000000000 AND `+currentUnitInputsSQL("u")+`) END
+   AND `+currentMemorySQL("m.")+`
+   AND m.scope_type=e.primary_scope AND
+    ((m.scope_type='global' AND m.scope_value='_global') OR
+     (m.scope_type='workspace' AND m.scope_value=e.workspace) OR
+     (m.scope_type='project' AND m.scope_value=e.project))))
+ AND ($5 OR
  e.primary_scope='global' OR e.workspace='_shared' OR ($3<>'' AND e.workspace=$3) OR
  ($4<>'' AND e.project=$4))
  AND ($7='' OR (e.primary_scope=$7 AND

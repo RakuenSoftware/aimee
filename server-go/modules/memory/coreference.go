@@ -112,13 +112,17 @@ func (s *postgresDataStore) refreshCoreference(ctx context.Context, id int64, co
 		return nil
 	}
 	var session string
-	if err := s.db.QueryRow(ctx, `SELECT COALESCE(source_session,'') FROM memories WHERE id=$1`, id).Scan(&session); err != nil {
+	var allowed bool
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(source_session,''),`+indexableMemorySQL("")+` FROM memories WHERE id=$1`, id).Scan(&session, &allowed); err != nil {
 		return err
+	}
+	if !allowed {
+		return nil
 	}
 	prior := []corefPrior{}
 	if session != "" {
 		rows, err := s.db.Query(ctx, `SELECT p.key,p.content FROM memories p JOIN memories current ON current.id=$1
- WHERE p.id<current.id AND p.source_session=current.source_session AND p.lifecycle_state='active'
+ WHERE p.id<current.id AND p.source_session=current.source_session AND `+currentMemorySQL("p.")+`
  AND p.scope_type=current.scope_type AND p.scope_value=current.scope_value ORDER BY p.id DESC LIMIT $2`, id, settings.CorefWindow)
 		if err != nil {
 			return err

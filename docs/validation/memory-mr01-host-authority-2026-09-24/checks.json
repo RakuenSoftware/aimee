@@ -1,0 +1,92 @@
+[
+  {
+    "name": "project verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 1",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 2",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 3",
+    "passed": true
+  },
+  {
+    "name": "project include_all stays within verified audience",
+    "passed": true
+  },
+  {
+    "name": "project explicit exact scope still excludes global records",
+    "passed": true
+  },
+  {
+    "name": "project actorless credential gains no user diagnostic authority",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot replace verified audience",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot grant diagnostic authority",
+    "passed": true,
+    "observation": {
+      "http_status": 403,
+      "kind": null,
+      "decision_present": false
+    }
+  },
+  {
+    "name": "project concurrent live owner requests preserve scope (64 calls)",
+    "passed": true
+  },
+  {
+    "name": "workspace verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 11",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 12",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 13",
+    "passed": true
+  },
+  {
+    "name": "workspace include_all stays within verified audience",
+    "passed": true
+  },
+  {
+    "name": "workspace explicit exact scope still excludes global records",
+    "passed": true
+  },
+  {
+    "name": "workspace actorless credential gains no user diagnostic authority",
+    "passed": true
+  },
+  {
+    "name": "workspace request text cannot replace verified audience",
+    "passed": true
+  },
+  {
+    "name": "workspace request text cannot grant diagnostic authority",
+    "passed": true,
+    "observation": {
+      "http_status": 403,
+      "kind": null,
+      "decision_present": false
+    }
+  },
+  {
+    "name": "workspace concurrent live owner requests preserve scope (64 calls)",
+    "passed": true
+  }
+]

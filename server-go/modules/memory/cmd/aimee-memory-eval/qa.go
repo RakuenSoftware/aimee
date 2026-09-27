@@ -140,6 +140,9 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 	defer closeExecutor()
 	metrics := map[string]float64{"cases": 0, "accuracy": 0, "exact_match": 0, "avg_retrieved_tokens": 0, "answered_cases": 0, "judged_cases": 0, "cited_answers": 0, "uncited_answers": 0, "low_confidence_answers": 0, "answer_prompt_tokens": 0, "answer_completion_tokens": 0, "judge_prompt_tokens": 0, "judge_completion_tokens": 0}
 	failures := []map[string]any{}
+	caseResults := []map[string]any{}
+	confusion := map[string]int{"answerable_answered": 0, "answerable_abstained": 0, "unanswerable_answered": 0, "unanswerable_abstained": 0}
+	unknownLabels, answeredWrong := 0, 0
 	latencies := []float64{}
 	for groupIndex, corpus := range plan.groups {
 		err = evaluationSession(ctx, schema, dimension, func(db *postgres.EvaluationStore) error {
@@ -169,6 +172,9 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 					return err
 				}
 				prompt = fmt.Sprintf("Question: %s\nGold answer: %s\nCandidate answer: %s\n\nReturn JSON only.", row.Query, row.Answer, answer.Response)
+				if row.Answerable != nil && !*row.Answerable {
+					prompt = fmt.Sprintf("Question: %s\nUnanswerable from supplied history. Score 1 only for explicit abstention without asserting an answer.\nCandidate answer: %s\nReturn JSON only.", row.Query, answer.Response)
+				}
 				judge, err := checkedModel(ctx, opts.model, judgeSystem, prompt, 64)
 				if err != nil {
 					return err
@@ -176,6 +182,25 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 				score, err := judgeScore(judge.Response)
 				if err != nil {
 					return err
+				}
+				abstained := evaluationAbstention(answer.Response)
+				caseResults = append(caseResults, map[string]any{"id": fmt.Sprintf("%d/%s", groupIndex, row.ID), "answerable": row.Answerable, "status": "ok", "abstained": abstained, "judge_score": score})
+				if row.Answerable == nil {
+					unknownLabels++
+				} else {
+					key := "answerable"
+					if !*row.Answerable {
+						key = "unanswerable"
+					}
+					if abstained {
+						key += "_abstained"
+					} else {
+						key += "_answered"
+						if score == 0 {
+							answeredWrong++
+						}
+					}
+					confusion[key]++
 				}
 				exact := normalizeAnswer(row.Answer) != "" && normalizeAnswer(row.Answer) == normalizeAnswer(answer.Response)
 				metrics["cases"]++
@@ -221,7 +246,21 @@ func runDatasetQA(ctx context.Context, schema string, dimension int, path, suite
 	metrics["hallucination_rate"] = 1 - metrics["accuracy"]
 	sort.Float64s(latencies)
 	percentile := func(p float64) float64 { return latencies[int(math.Ceil(float64(len(latencies))*p))-1] }
-	view := map[string]any{"status": "ok", "suite": suite, "dataset": path, "samples": len(plan.groups), "excluded_cases": plan.excluded, "fixture_policy": "full-text-raw-query-v1", "qa_policy": "module-context-strict-judge-v1", "token_accounting": "provider-or-byte4-estimate", "citation_policy": "numbered-marker-presence", "metrics": metrics, "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}, "latency_scope": "owner-context-answer-judge", "latency": map[string]any{"p50_ms": percentile(.5), "p95_ms": percentile(.95), "p99_ms": percentile(.99), "min_ms": latencies[0], "max_ms": latencies[len(latencies)-1], "queries": len(latencies)}}
+	view := map[string]any{"status": "ok", "suite": suite, "dataset": path, "samples": len(plan.groups), "excluded_cases": plan.excluded, "dataset_inventory": plan.inventory, "fixture_policy": "full-text-raw-query-v1", "qa_policy": "module-context-strict-judge-v1", "token_accounting": "provider-or-byte4-estimate", "citation_policy": "numbered-marker-presence", "metrics": metrics, "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}, "latency_scope": "owner-context-answer-judge", "latency": map[string]any{"p50_ms": percentile(.5), "p95_ms": percentile(.95), "p99_ms": percentile(.99), "min_ms": latencies[0], "max_ms": latencies[len(latencies)-1], "queries": len(latencies)}}
+	aa, az := confusion["answerable_answered"], confusion["answerable_abstained"]
+	ua, uz := confusion["unanswerable_answered"], confusion["unanswerable_abstained"]
+	ratio := func(n, d int) any {
+		if d == 0 {
+			return nil
+		}
+		return float64(n) / float64(d)
+	}
+	view["case_results"] = caseResults
+	view["answerability"] = map[string]any{"confusion": confusion, "missing_labels": unknownLabels,
+		"abstention_detection": "normalized-text-heuristic-v1", "abstention_precision": ratio(uz, uz+az),
+		"abstention_recall": ratio(uz, uz+ua), "unsupported_answer_rate": ratio(ua, ua+uz),
+		"unsupported_answer_definition": "answered-unanswerable / unanswerable; not citation support",
+		"risk_coverage":                 map[string]any{"coverage": ratio(aa+ua, aa+az+ua+uz), "risk": ratio(answeredWrong, aa+ua)}}
 	if opts.reportFailures {
 		view["failures"] = failures
 	}
@@ -242,4 +281,18 @@ func writeEvaluationView(view map[string]any, format, fields, profile string, ou
 	}
 	_, err = output.Write(raw)
 	return err
+}
+
+// This deliberately labelled heuristic is not a model-graded citation/support score.
+func evaluationAbstention(answer string) bool {
+	text := normalizeAnswer(answer)
+	if text == "unknown" || text == "n a" || text == "unclear" {
+		return true
+	}
+	for _, phrase := range []string{"i don t know", "cannot determine", "no information", "not mentioned", "no record of"} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,5 @@
+--- FAIL: TestSourceSendStorageBarrierPostgres (0.16s)
+    source_release_test.go:613: unexpected admission: UPDATE memories SET value=value+1 WHERE id=1
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.178s
+FAIL

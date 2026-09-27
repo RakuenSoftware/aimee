@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* test_json_fluent.c: unit tests for the json_fluent helpers */
 #include "json_fluent.h"
 #include "json_wire.h"
@@ -132,15 +133,76 @@ static int test_exact_integer_wire(void)
    cJSON_Delete(doc);
    doc = json_wire_parse_exact_integers("9007199254740993");
    CHECK(cJSON_IsRaw(doc) && !strcmp(doc->valuestring, "9007199254740993"));
+   int64_t exact_id = 0;
+   CHECK(jo_read_i64_exact(doc, &exact_id) && exact_id == INT64_C(9007199254740993));
    cJSON_Delete(doc);
    CHECK(!json_wire_parse_exact_integers("{\"id\":1} trailing"));
    CHECK(!json_wire_parse_exact_integers("{\"id\":9223372036854775807"));
    return 0;
 }
 
+static int test_exact_i64_values(void)
+{
+   const int64_t values[] = {0,
+                             42,
+                             -42,
+                             INT64_C(9007199254740991),
+                             INT64_C(9007199254740992),
+                             INT64_C(9007199254740993),
+                             -INT64_C(9007199254740993),
+                             INT64_MIN,
+                             INT64_MAX};
+   for (unsigned i = 0; i < sizeof(values) / sizeof(values[0]); i++)
+   {
+      cJSON *value = jo_i64_value_exact(values[i]);
+      CHECK(value);
+      CHECK(cJSON_IsNumber(value) ==
+            (values[i] >= -INT64_C(9007199254740991) && values[i] <= INT64_C(9007199254740991)));
+      char *wire = cJSON_PrintUnformatted(value);
+      cJSON *parsed = cJSON_Parse(wire);
+      int64_t decoded = 17;
+      CHECK(jo_read_i64_exact(parsed, &decoded) && decoded == values[i]);
+      cJSON_Delete(parsed);
+      cJSON_free(wire);
+      cJSON_Delete(value);
+   }
+   const char *invalid[] = {"null",
+                            "true",
+                            "[]",
+                            "{}",
+                            "1.5",
+                            "1e999",
+                            "9007199254740992",
+                            "-9007199254740992",
+                            "9223372036854775807",
+                            "\"\"",
+                            "\"+1\"",
+                            "\"01\"",
+                            "\"-0\"",
+                            "\"1x\"",
+                            "\" 1\"",
+                            "\"1 \"",
+                            "\"1.0\"",
+                            "\"1e2\"",
+                            "\"9223372036854775808\"",
+                            "\"-9223372036854775809\""};
+   for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+   {
+      cJSON *value = cJSON_Parse(invalid[i]);
+      int64_t decoded = 17;
+      CHECK(!jo_read_i64_exact(value, &decoded) && decoded == 17);
+      cJSON_Delete(value);
+   }
+   CHECK(json_wire_has_nul_escape("[\"9007199254740993\\u0000suffix\"]",
+                                  strlen("[\"9007199254740993\\u0000suffix\"]")));
+   CHECK(!json_wire_has_nul_escape("[\"literal\\\\u0000\"]", strlen("[\"literal\\\\u0000\"]")));
+   return 0;
+}
+
 int main(void)
 {
    int failed = test_exact_integer_wire();
+   failed += test_exact_i64_values();
    failed += test_numeric_arrays();
    failed += test_optional_getters();
    failed += test_required_getters();

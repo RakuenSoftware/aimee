@@ -17,6 +17,7 @@
 #include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
+#include "client_config.h"
 #include "client_integrations.h"
 #include "headers/util.h"
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
@@ -956,6 +957,17 @@ static int handle_subagent_guard(void)
          tool_name = tn->valuestring;
    }
 
+   char scope_cwd[4096];
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "cwd"));
+   if ((!cwd || !cwd[0]) && getcwd(scope_cwd, sizeof(scope_cwd)))
+      cwd = scope_cwd;
+   if (client_config_workspace_contains(cwd) == 0)
+   {
+      free(stdin_data);
+      cJSON_Delete(json);
+      return 0;
+   }
+
    int rc = 0;
    if (client_tool_is_subagent(tool_name))
    {
@@ -1046,30 +1058,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
    char hook_sid[64] = "";
    const char *sid =
        client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
-   const char *discovery_command = NULL;
-   cJSON *discovery_input = cJSON_Parse(tool_input);
-   if (cJSON_IsObject(discovery_input))
-      discovery_command =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "command"));
-   char discovery_reason[1024];
-   int discovery_deny = attn_discovery_gate(tool_name, discovery_command, sid, discovery_reason,
-                                            sizeof(discovery_reason));
-   cJSON_Delete(discovery_input);
-   if (discovery_deny)
-   {
-      if (cli_hook_client_uses_pretool_json())
-      {
-         emit_pretool_deny_json(discovery_reason);
-         discovery_deny = 0; /* denial is carried by the hook JSON contract */
-      }
-      else
-         fprintf(stderr, "aimee: %s\n", discovery_reason);
-      free(stdin_data);
-      cJSON_Delete(json);
-      free(tool_input_heap);
-      return discovery_deny;
-   }
-
    /* Worktree routing must happen on the client: a remote Aimee server cannot
     * see or create a worktree in this machine's repository. */
    const char *hook_cwd = NULL;
@@ -1089,6 +1077,43 @@ static int handle_hooks(int argc, char **argv, int json_output)
       else
          hook_cwd = "";
    }
+   hook_cwd = attn_tool_cwd(hook_cwd, hook_input);
+   if (client_config_workspace_contains(hook_cwd) == 0)
+   {
+      free(stdin_data);
+      cJSON_Delete(json);
+      free(tool_input_heap);
+      return 0;
+   }
+   const char *discovery_command = NULL;
+   cJSON *discovery_input = cJSON_Parse(tool_input);
+   if (cJSON_IsObject(discovery_input))
+      discovery_command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "command"));
+   if (!discovery_command)
+      discovery_command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "cmd"));
+   char discovery_reason[1024];
+   int discovery_deny = strcmp(phase, "pre") == 0
+                            ? attn_discovery_gate(tool_name, discovery_command, sid,
+                                                  discovery_reason, sizeof(discovery_reason))
+                            : 0;
+   cJSON_Delete(discovery_input);
+   if (discovery_deny)
+   {
+      if (cli_hook_client_uses_pretool_json())
+      {
+         emit_pretool_deny_json(discovery_reason);
+         discovery_deny = 0; /* denial is carried by the hook JSON contract */
+      }
+      else
+         fprintf(stderr, "aimee: %s\n", discovery_reason);
+      free(stdin_data);
+      cJSON_Delete(json);
+      free(tool_input_heap);
+      return discovery_deny;
+   }
+
    cJSON *local_updated = NULL;
    if (strcmp(phase, "pre") == 0)
    {
@@ -2367,21 +2392,9 @@ int main(int argc, char **argv)
                return 1;
             }
          }
-         int git_runner = 0;
-         if (strcmp(cmd, "git") == 0 && cli_v1_remote_endpoint_is_network())
-         {
-            git_runner = cli_workspace_git_runner_start();
-            if (git_runner < 0)
-            {
-               fprintf(stderr, "aimee: could not start the detached workspace runner for this Git "
-                               "command; no request was sent\n");
-               return 1;
-            }
-         }
+         cli_v1_set_git_runner(cli_workspace_git_runner_start, cli_workspace_git_runner_stop);
          int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
                                  sub_argv);
-         if (git_runner > 0)
-            cli_workspace_git_runner_stop();
          if (rc >= 0)
             return rc;
          fprintf(stderr, "aimee: server /v1 request failed for '%s'\n", cmd);

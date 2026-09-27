@@ -1,0 +1,126 @@
+[
+  {
+    "name": "rebuild binds derived revision and fresh evidence",
+    "passed": true
+  },
+  {
+    "name": "fresh get preserves exact rendering",
+    "passed": true
+  },
+  {
+    "name": "zero budget omits all working text",
+    "passed": true
+  },
+  {
+    "name": "working text remains absent from canonical memory",
+    "passed": true
+  },
+  {
+    "name": "stale expected revision rejected",
+    "passed": true
+  },
+  {
+    "name": "parallel revisions have exactly one winner",
+    "passed": true
+  },
+  {
+    "name": "parallel winner is revision two",
+    "passed": true
+  },
+  {
+    "name": "compiled CLI projection parity",
+    "passed": true
+  },
+  {
+    "name": "MCP projection parity",
+    "passed": true
+  },
+  {
+    "name": "promotion preview identifies exact revision",
+    "passed": true
+  },
+  {
+    "name": "stale preview rejected",
+    "passed": true
+  },
+  {
+    "name": "promotion uses existing review admission",
+    "passed": true
+  },
+  {
+    "name": "promotion cannot directly overwrite canonical target",
+    "passed": true
+  },
+  {
+    "name": "identical promotion is idempotent",
+    "passed": true
+  },
+  {
+    "name": "explicit review admits exact proposed hypothesis",
+    "passed": true
+  },
+  {
+    "name": "reviewed hypothesis retains unknown independence",
+    "passed": true
+  },
+  {
+    "name": "parent retirement follows governed owner",
+    "passed": true
+  },
+  {
+    "name": "retired parent blocks cached release",
+    "passed": true
+  },
+  {
+    "name": "explicit rebuild recovers valid remaining inputs",
+    "passed": true
+  },
+  {
+    "name": "execution evidence preserves actual failure label",
+    "passed": true
+  },
+  {
+    "name": "changed execution receipt blocks release",
+    "passed": true
+  },
+  {
+    "name": "short lived projection rebuilt",
+    "passed": true
+  },
+  {
+    "name": "expired projection cannot release text",
+    "passed": true
+  },
+  {
+    "name": "expiry drops derived content and declares replay limit",
+    "passed": true
+  },
+  {
+    "name": "expiry preserves execution and canonical records",
+    "passed": true
+  },
+  {
+    "name": "discard is explicit derived-only transition",
+    "passed": true
+  },
+  {
+    "name": "old task access denied after switching",
+    "passed": true
+  },
+  {
+    "name": "task switch creates fresh identity",
+    "passed": true
+  },
+  {
+    "name": "foreign session principal cannot read task state",
+    "passed": true
+  },
+  {
+    "name": "candidate healthy after restart",
+    "passed": true
+  },
+  {
+    "name": "restart recovers exact task revision with fresh owner",
+    "passed": true
+  }
+]

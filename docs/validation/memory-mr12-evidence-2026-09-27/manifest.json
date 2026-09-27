@@ -1,0 +1,22 @@
+{
+  "candidate": "5d4bcab87",
+  "image": "sha256:139d2956cdab1bc707d1764ea3646cdddecdd4e29bc5d43abff70d6d3970c1dc",
+  "acceptance": "passed",
+  "live_checks": 43,
+  "files": {
+    "live-run.txt": "c2e7d4b9ca0be674a0670c5ce7695fd5c08e8a17e64dcc583a2828b49211d5ca",
+    "final-race-delta.txt": "67f8ee7df3b583face3828eff9d617664ea712597012c3af114e512c3b9af0dd",
+    "full-race-and-export.txt": "8715ce890d91ecaadbaf9c2fc3d8aa0cb1ea5e36422dd66050de6d54218d4bed",
+    "upgrade.py": "e75d4ac0d0082e47fa22268823481d0d95a762ade2ecc29e4a5f7cb8ead984c4",
+    "native-adapters.txt": "c2d642c486ae650e0fc2b79018661ca30dbeea3e781f922ae143a223cfb53f29",
+    "live-views.py": "03f8885c7b36fbae27921811d8a6eb1f8f297083bafee729fb5751e48c4e8216",
+    "lint-corrections.txt": "c5367e80127b03a48dbda26dd7aaf19cb05324956a154bf1e26eb3ea4d238254",
+    "production-health.txt": "0cd70a59bce28543e4525aa1a95db1d18696640745ce314004d7215e84e45f14",
+    "generated-docs.txt": "f16dde6169cbd5931760d352861a6b39185ee50746404c2e4e702ebb3699d3a8",
+    "upgrade/names.json": "ea52ae77a312ef369d484e20ad4528321b82a40b93f1302e150f4dcfd3d3f0ef",
+    "upgrade/image-identities.json": "fff116f8fabe111b411186380971ebdccb70d647bb745548646b29ce872b62fd",
+    "live/observations.json": "4d87308a57721a01f745212d735c32b9ba0fa0b40e2caad5386ddaeb687a9566",
+    "live/summary.json": "ea2dd8bddc3c7a2e27148a5e16b2b4ac2464ddf9ac7684cde8c58507d03c892d",
+    "live/checks.json": "3958791820be440cf5a837661cb49c819e2df3f0a1d7eed3a71e7002ad90cdf2"
+  }
+}

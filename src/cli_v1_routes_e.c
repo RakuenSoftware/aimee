@@ -250,6 +250,189 @@ cJSON *marshal_memory_search(int argc, char **argv)
    return req;
 }
 
+/* Decode CLI spelling only. Scope authorization and all budget policy remain
+ * in the Go owner. Unsupported options must not silently become a dry run. */
+cJSON *marshal_memory_health(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.health");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      if (!strcmp(arg, "--traces"))
+      {
+         if (cJSON_HasObjectItem(req, "traces"))
+            goto invalid;
+         cJSON_AddTrueToObject(req, "traces");
+         continue;
+      }
+      const char *value = strchr(arg, '=');
+      size_t n = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = n == 8 && !strncmp(arg, "--window", n)         ? "window"
+                          : n == 9 && !strncmp(arg, "--project", n)      ? "project"
+                          : n == 11 && !strncmp(arg, "--workspace", n)   ? "workspace"
+                          : n == 9 && !strncmp(arg, "--purpose", n)      ? "purpose"
+                          : n == 13 && !strncmp(arg, "--query-class", n) ? "query_class"
+                          : n == 7 && !strncmp(arg, "--stage", n)        ? "stage"
+                                                                         : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      if (!*value || !strncmp(value, "--", 2))
+         goto invalid;
+      cJSON_AddStringToObject(req, field, value);
+   }
+   return req;
+invalid:
+   cJSON_Delete(req);
+   return NULL;
+}
+
+cJSON *marshal_memory_receipt(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.receipt");
+   for (int i = 0; i < argc; i++)
+   {
+      if (!strcmp(argv[i], "--replay"))
+      {
+         cJSON_AddTrueToObject(req, "replay");
+         continue;
+      }
+      if (!strcmp(argv[i], "--json"))
+         continue;
+      if (argv[i][0] == '-' || cJSON_HasObjectItem(req, "request_id"))
+      {
+         cJSON_Delete(req);
+         return NULL;
+      }
+      cJSON_AddStringToObject(req, "request_id", argv[i]);
+   }
+   if (!cJSON_HasObjectItem(req, "request_id"))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   return req;
+}
+
+cJSON *marshal_memory_validity(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.validity");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      if (strncmp(arg, "--", 2))
+      {
+         if (cJSON_HasObjectItem(req, "id"))
+            goto invalid;
+         cJSON_AddStringToObject(req, "id", arg);
+         continue;
+      }
+      const char *value = strchr(arg, '=');
+      size_t length = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = length == 6 && !strncmp(arg, "--mode", length)           ? "mode"
+                          : length == 10 && !strncmp(arg, "--valid-at", length)    ? "valid_at"
+                          : length == 13 && !strncmp(arg, "--believed-at", length) ? "believed_at"
+                          : length == 7 && !strncmp(arg, "--store", length)        ? "store"
+                          : length == 9 && !strncmp(arg, "--project", length)      ? "project"
+                          : length == 11 && !strncmp(arg, "--workspace", length)   ? "workspace"
+                                                                                   : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      cJSON_AddStringToObject(req, field, value);
+   }
+   if (!cJSON_HasObjectItem(req, "id"))
+      goto invalid;
+   return req;
+invalid:
+   cJSON_Delete(req);
+   return NULL;
+}
+
+cJSON *marshal_memory_hygiene(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.hygiene");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      if (!strcmp(arg, "--dry-run"))
+      {
+         if (cJSON_HasObjectItem(req, "dry_run"))
+            goto invalid;
+         cJSON_AddBoolToObject(req, "dry_run", 1);
+         continue;
+      }
+      const char *value = strchr(arg, '=');
+      size_t length = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = length == 7 && !strncmp(arg, "--scope", length)       ? "scope"
+                          : length == 8 && !strncmp(arg, "--cursor", length)    ? "cursor"
+                          : length == 10 && !strncmp(arg, "--max-rows", length) ? "max_rows"
+                          : length == 19 && !strncmp(arg, "--max-content-bytes", length)
+                              ? "max_content_bytes"
+                              : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      if (!strcmp(field, "scope"))
+      {
+         const char *colon = strchr(value, ':');
+         if (!colon || colon == value || !colon[1])
+            goto invalid;
+         char *type = strndup(value, (size_t)(colon - value));
+         if (!type)
+            goto invalid;
+         cJSON *scope = cJSON_AddObjectToObject(req, "scope");
+         cJSON_AddStringToObject(scope, "type", type);
+         cJSON_AddStringToObject(scope, "value", colon + 1);
+         free(type);
+      }
+      else if (!strcmp(field, "cursor"))
+         cJSON_AddStringToObject(req, "cursor", value);
+      else
+      {
+         cJSON *number = cJSON_ParseWithOpts(value, NULL, 1);
+         if (!cJSON_IsNumber(number))
+         {
+            cJSON_Delete(number);
+            goto invalid;
+         }
+         cJSON_AddItemToObject(req, field, number);
+      }
+   }
+   if (cJSON_HasObjectItem(req, "scope"))
+   {
+      if (!cJSON_HasObjectItem(req, "dry_run"))
+         cJSON_AddBoolToObject(req, "dry_run", 0);
+      return req;
+   }
+invalid:
+   cJSON_Delete(req);
+   fprintf(stderr, "aimee: usage: aimee memory hygiene --scope <type:value> [--dry-run] "
+                   "[--cursor TOKEN] [--max-rows N] [--max-content-bytes N] [--json]\n");
+   return NULL;
+}
+
 /* `aimee memory recall [task] [--task T] [--query Q] [--session-start]
  * [--limit-tokens N]` -> POST /v1/memory/recall. task_hint is required by the
  * endpoint; fall back to a generic hint so the command always succeeds. */
@@ -479,6 +662,60 @@ cJSON *marshal_memory_get(int argc, char **argv)
       as_of = cli_args_get(&opts, "as_of");
    if (as_of && as_of[0])
       cJSON_AddStringToObject(req, "as_of", as_of);
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
+cJSON *marshal_memory_serve(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("memory.serve");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "view", opts.positional[0]);
+   const char *fields[] = {"task", "valid_at", "believed_at", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   const char *structured[] = {"limit", "context_limits", "evidence_requirements", NULL};
+   for (int i = 0; structured[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, structured[i]);
+      if (value)
+      {
+         cJSON *parsed = cJSON_ParseWithOpts(value, NULL, 1);
+         /* Preserve invalid input for the owner's typed validation. */
+         cJSON_AddItemToObject(req, structured[i], parsed ? parsed : cJSON_CreateString(value));
+      }
+   }
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
+cJSON *marshal_memory_claim_card(int argc, char **argv)
+{
+   cli_args_t opts;
+   const char *bool_flags[] = {"expand-evidence", NULL};
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("memory.claim_card");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
+   if (cli_args_has_flag(&opts, "expand-evidence"))
+      cJSON_AddBoolToObject(req, "expand_evidence", 1);
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
+cJSON *marshal_memory_evidence(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("memory.evidence");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
    marshal_add_memory_scope(req, &opts);
    return req;
 }
@@ -716,4 +953,117 @@ void pt_print_memory_read(const char *method, cJSON *resp)
 void pt_print_memory_stats(const char *method, cJSON *resp)
 {
    print_memory_stats(resp);
+}
+
+void pt_print_memory_health(const char *method, cJSON *resp)
+{
+   (void)method;
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "text"));
+   if (text)
+      fputs(text, stdout);
+   else
+   {
+      char *json = cJSON_Print(resp);
+      if (json)
+      {
+         puts(json);
+         free(json);
+      }
+   }
+   const cJSON *collection = cJSON_GetObjectItemCaseSensitive(resp, "collection");
+   if (collection)
+   {
+      char *json = cJSON_PrintUnformatted(collection);
+      if (json)
+      {
+         printf("Receipt collection: %s\n", json);
+         free(json);
+      }
+   }
+}
+
+cJSON *marshal_task_projection(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("task.projection");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "operation", opts.positional[0]);
+   const char *fields[] = {"session_id", "task_id",        "expected_revision",
+                           "target_id",  "preview_digest", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   const char *structured[] = {"binding",     "ttl_seconds", "max_context_bytes", "items", "events",
+                               "claim_index", NULL};
+   for (int i = 0; structured[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, structured[i]);
+      if (value)
+      {
+         cJSON *parsed = cJSON_ParseWithOpts(value, NULL, 1);
+         cJSON_AddItemToObject(req, structured[i], parsed ? parsed : cJSON_CreateString(value));
+      }
+   }
+   return req;
+}
+
+cJSON *marshal_learning_application(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   const char *event = cli_args_get(&opts, "event-json");
+   if (opts.pos_count < 1 || !opts.positional[0][0] || !event || !event[0])
+      return NULL;
+   cJSON *req = marshal_no_args("learning.application");
+   cJSON_AddStringToObject(req, "request_id", opts.positional[0]);
+   cJSON_AddStringToObject(req, "event_json", event);
+   return req;
+}
+cJSON *marshal_learning_task_cost(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   const char *cost = cli_args_get(&opts, "cost-json");
+   if (!cost || !cost[0])
+      return NULL;
+   cJSON *req = marshal_no_args("learning.task_cost");
+   cJSON_AddStringToObject(req, "cost_json", cost);
+   return req;
+}
+
+cJSON *marshal_aux_test(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("aux.test");
+
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "task", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "prompt", opts.positional[1]);
+   if (opts.pos_count > 2)
+      cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
+   return req;
+}
+
+cJSON *marshal_action_receipt(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("action.receipt");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "operation", opts.positional[0]);
+   const char *fields[] = {"session_id", "action_id", "directory", "arguments_json", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   return req;
 }

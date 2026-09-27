@@ -1,0 +1,117 @@
+import http.client,socket,json,subprocess,time,sys,copy
+from pathlib import Path
+from datetime import datetime,timezone
+head=sys.argv[1]
+names=json.loads(Path('/opt/pr2990-evidence/mr08-final-upgrade-'+head+'/names.json').read_text())
+out=Path('/opt/pr2990-evidence/mr10-horizons-'+head+'-provider-v4');out.mkdir(exist_ok=False)
+checks=[];fixtures=[]
+class Docker(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(120);self.sock.connect('/var/run/docker.sock')
+def docker(method,path,body=None):
+ c=Docker('localhost');c.request(method,path,None if body is None else json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+ if r.status>=400:raise RuntimeError('Docker '+method+' '+path.split('?')[0]+' status '+str(r.status))
+ return json.loads(raw) if raw else None
+prior={k:docker('GET','/containers/'+names[k]+'/json') for k in ['server','kb']}
+for info in prior.values():
+ assert info['Config']['Image']=='aimee-pr2990:'+head
+ assert info['Config']['Labels']['com.docker.compose.project'] in [names['project'],names['kb_project']]
+ assert not info['HostConfig'].get('PortBindings')
+def check(name,passed):
+ checks.append(dict(name=name,passed=bool(passed)));(out/'checks.json').write_text(json.dumps(checks,indent=2)+'\n')
+ if not passed:raise RuntimeError(name)
+def configure(mode):
+ for key in ['server','kb']:docker('POST','/containers/'+names[key]+'/stop?t=30')
+ for key in ['server','kb']:docker('DELETE','/containers/'+names[key])
+ for key in ['kb','server']:
+  info=prior[key];cfg=copy.deepcopy(info['Config']);cfg['Env']=[v for v in cfg['Env'] if not v.startswith(('AIMEE_MEMORY_UTILITY_HORIZON_POLICY=','AIMEE_MEMORY_HEALTH_ENABLED=','AIMEE_MEMORY_SELECTION_POLICY='))]
+  if mode:
+   policy=dict(mode=mode,policy=dict(schema_version=1,revision='mr10-live-zero-v1',transient_kinds={'task_state':True,'fact':True},kinds={'task_state':dict(id='explicit-task-zero',duration_seconds=0,anchor='created')},unknown_rule='exclude'))
+   policy['overrides']=[dict(version=f['version'],rule=dict(id='explicit-transient-identity-probe',duration_seconds=0,anchor='created')) for f in fixtures if f['kind']=='fact' and f['transient']]
+   cfg['Env'].append('AIMEE_MEMORY_UTILITY_HORIZON_POLICY='+json.dumps(policy,separators=(',',':')))
+  cfg['HostConfig']=info['HostConfig'];cfg['NetworkingConfig']={'EndpointsConfig':{k:{'Aliases':v.get('Aliases',[]),'IPAMConfig':v.get('IPAMConfig'),'DriverOpts':v.get('DriverOpts')} for k,v in info['NetworkSettings']['Networks'].items()}}
+  docker('POST','/containers/create?name='+names[key],cfg);docker('POST','/containers/'+names[key]+'/start')
+  deadline=time.monotonic()+180
+  while time.monotonic()<deadline:
+   current=docker('GET','/containers/'+names[key]+'/json')
+   if current['State'].get('Health',{}).get('Status')=='healthy':break
+   time.sleep(1)
+  else:raise RuntimeError(key+' health timeout')
+  print(mode or 'off',key,'healthy',flush=True)
+helper='''import http.client,socket,json,sys
+class Local(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(120);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+p=json.loads(sys.stdin.readline());c=Local('localhost');c.request('POST',p['path'],json.dumps(p['body']),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+try:d=json.loads(raw)
+except ValueError:d=raw.decode()
+print(json.dumps(dict(status=r.status,result=d)))
+'''
+def api(path,body,label):
+ if path=='/v1/memory/validity' and body.get('store')=='kb':body=dict(body,scope=dict(type='global',value='_global'))
+ r=subprocess.run(['docker','exec','-i','-u','1000',names['server'],'python3','-c',helper],input=json.dumps(dict(path=path,body=body))+'\n',capture_output=True,text=True,timeout=150)
+ if r.returncode:raise RuntimeError('API subprocess '+label+' failed')
+ response=json.loads(r.stdout);(out/(label+'.json')).write_text(json.dumps(response,indent=2)+'\n');return response['status'],response['result']
+def args(f,**extra):return dict(store=f['store'],id=str(f['id']),**({'scope':'all'} if f['store']=='kb' else {}),**extra)
+def validity(d):return d.get('decision',{})
+def provider_check(mode):
+ provider_source=Path('/tmp/pr2990-mr10-provider.py').read_text()
+ run=subprocess.run(['docker','exec','-i','-u','1000',names['server'],'python3','-c',provider_source],input=json.dumps(dict(fixtures=fixtures,mode=mode))+'\n',capture_output=True,text=True,timeout=180)
+ try:provider_result=json.loads(run.stdout)
+ except ValueError:provider_result=dict(error='invalid provider fixture output',exit_code=run.returncode)
+ (out/('provider-'+mode+'.json')).write_text(json.dumps(provider_result,indent=2)+'\n')
+ for row in provider_result.get('checks',[]):check(mode+' '+row['name'],row['passed'])
+ check(mode+' provider fixture exits successfully',run.returncode==0)
+try:
+ for store in ['user','kb']:
+  for kind,role,transient in [('task_state','task_state',True),('constraint','constraint',False),('fact','durable_probe',False),('fact','transient_probe',True)]:
+   name=('identity:' if kind=='fact' else '')+'mr10-v4-'+head+'-'+store+'-'+role
+   status,d=api('/v1/memory/store',dict(store=store,key=name,content='MR10_HORIZON_FIXTURE '+name,kind=kind,tier='L2',**({'scope':'all'} if store=='kb' else {})),'store-'+store+'-'+role)
+   check('authenticated '+store+' '+kind+' creation',status==200 and d.get('status')=='ok')
+   f=dict(store=store,kind=kind,role=role,transient=transient,id=d['id'],key=name);fixtures.append(f)
+   status,d=api('/v1/memory/get',args(f,include_version=True),'initial-get-'+store+'-'+role)
+   check(store+' '+kind+' canonical classification',status==200 and d.get('memory',{}).get('kind')==kind)
+   f['version']=d['memory']['version']
+ previous=None;stable=time.monotonic();limit=stable+90
+ while time.monotonic()<limit:
+  query="SELECT json_build_object('pending',(SELECT count(*) FROM kb_async_jobs WHERE kind='memory_index' AND status<>'done'),'generation',(SELECT COALESCE(sum(generation),0) FROM memory_collection_generations),'projections',(SELECT COALESCE(sum(generation),0) FROM memory_projection_generations))"
+  row=json.loads(subprocess.check_output(['docker','exec',names['kb_project']+'-aimee-store-db-1','psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',query],text=True))
+  if row!=previous or row['pending']!=0:previous=row;stable=time.monotonic()
+  if row['pending']==0 and time.monotonic()-stable>=2:break
+  time.sleep(.25)
+ else:raise RuntimeError('fixture index did not settle')
+ for f in fixtures:
+  status,d=api('/v1/memory/get',args(f,include_version=True),'settled-get-'+f['store']+'-'+f['role']);check('settled '+f['store']+' '+f['kind']+' remains readable',status==200 and d.get('status')=='ok');f['version']=d['memory']['version']
+ configure('shadow')
+ for f in fixtures:
+  label=f['store']+'-'+f['role']
+  status,d=api('/v1/memory/validity',args(f),'shadow-validity-'+label);v=validity(d);h=v.get('utility_horizon',{})
+  check('shadow '+label+' remains eligible',status==200 and v.get('eligible') is True)
+  check('shadow '+label+' decision matches classification',h.get('mode')=='shadow' and (h.get('would_exclude') is True if f['transient'] else h.get('status')=='not_applicable'))
+ provider_check('shadow')
+ configure('enforce')
+ for f in fixtures:
+  label=f['store']+'-'+f['role'];transient=f['transient']
+  status,d=api('/v1/memory/validity',args(f),'enforce-validity-'+label);v=validity(d)
+  check('enforce '+label+' actual eligibility',status==200 and v.get('eligible') is (not transient))
+  if transient:check('enforce '+label+' distinct exclusion reason','utility_horizon_elapsed' in v.get('reason_codes',[]))
+  status,d=api('/v1/memory/get',args(f,include_version=True),'enforce-get-'+label)
+  check('enforce '+label+' exact current get',d.get('kind')=='not_found' if transient else status==200 and d.get('memory',{}).get('kind')==f['kind'])
+  if transient:
+   history=dict(at_version=f['version']) if f['store']=='user' else dict(read_policy=dict(schema_version=1,mode='historical',valid_at=datetime.now(timezone.utc).isoformat()))
+   status,d=api('/v1/memory/get',args(f,**history),'history-'+label)
+   check('authorized '+label+' history survives',status==200 and d.get('memory',{}).get('content','').startswith('MR10_HORIZON_FIXTURE'))
+  status,d=api('/v1/memory/search',dict(store=f['store'],keywords=[f['key']],**({'scope':'all'} if f['store']=='kb' else {})),'enforce-search-'+label)
+  # Test the serialized exact fixture identity, independent of legacy envelope names.
+  contains=f['key'] in json.dumps([d.get('memories',[]),d.get('facts',[]),d.get('windows',[])])
+  check('enforce '+label+' lexical search',status==200 and contains is (not transient))
+ provider_check('enforce')
+finally:
+ configure(None)
+ for f in fixtures:
+  label=f['store']+'-'+f['role']
+  status,d=api('/v1/memory/get',args(f,include_version=True),'rollback-get-'+label)
+  check('rollback '+label+' restores horizon eligibility',status==200 and d.get('memory',{}).get('version')==f['version'])
+  api('/v1/memory/delete',args(f),'cleanup-'+label)
+ (out/'final-state.json').write_text(json.dumps([dict(role=k,healthy=docker('GET','/containers/'+names[k]+'/json')['State']['Health']['Status']=='healthy',image=head,optional_policies='unset') for k in ['server','kb']],indent=2)+'\n')
+print('MR10_COMPLETE',len(checks),'checks',flush=True)

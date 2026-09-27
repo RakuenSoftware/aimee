@@ -255,13 +255,18 @@ static int workspace_root_contains(const char *root, const char *cwd)
    return strncmp(root, cwd, n) == 0 && (cwd[n] == '\0' || cwd[n] == '/');
 }
 
-int cli_workspace_git_runner_start(void)
+int cli_workspace_git_runner_start(const char *target)
 {
    if (g_git_runner_active || !cli_v1_has_remote_endpoint())
       return 0;
 
    char cwd[CLI_TUI_PATH_MAX];
-   if (!getcwd(cwd, sizeof(cwd)) || cwd[0] != '/')
+   if (target && target[0])
+   {
+      if (!realpath(target, cwd))
+         return 0; /* May be a server-local checkout; never serve a different one. */
+   }
+   else if (!getcwd(cwd, sizeof(cwd)) || cwd[0] != '/')
       return -1;
    char *endpoint = cli_v1_client_endpoint();
    char *bearer = endpoint ? cli_v1_client_bearer() : NULL;

@@ -51,15 +51,15 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			seen[verb] = true
 		}
 		if placement == PlacementServer {
-			if offset != len(response) || len(seen) != 4 || !seen["screen_content"] || !seen["pack"] {
+			if offset != len(response) || len(seen) != 9 || !seen["serve"] || !seen["claim_card"] || !seen["evidence"] || !seen["screen_content"] || !seen["pack"] {
 				t.Fatal("private commands shadowed shared KB commands", seen)
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 106 {
+		if offset != len(response) || len(seen) != 115 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
-		for _, verb := range []string{"search_assertions", "assemble_typed_context", "recall", "directive_create", "prospective_match", "list_unused_l2", "stats", "cognify", "cognify_drain", "cognify_status", "audit", "calibrate"} {
+		for _, verb := range []string{"serve", "claim_card", "evidence", "revalidate_sources", "search_assertions", "assemble_typed_context", "recall", "directive_create", "prospective_match", "list_unused_l2", "stats", "cognify", "cognify_drain", "cognify_status", "audit", "calibrate", "correction_proposals", "review_correction"} {
 			if !seen[verb] {
 				t.Fatal("missing public route", verb)
 			}

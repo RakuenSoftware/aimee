@@ -43,8 +43,56 @@ char *kb_v1_action_request(const char *method, cJSON *request)
           strcmp(method, "memory.directive_suppress") == 0);
    return strdup("{\"status\":\"ok\"}");
 }
+static const char *recall_envelope;
+int server_memory_store_selection(const cJSON *request)
+{
+   const char *store = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "store"));
+   return store && strcmp(store, "kb") == 0;
+}
+void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
+{
+   (void)args;
+   *active_context_missing = 0;
+}
+void mcp_memory_scope_end(void)
+{
+}
+char *kb_client_memory_recall_shared_json(const char *hint, int limit, int session_start)
+{
+   (void)hint;
+   (void)limit;
+   (void)session_start;
+   return strdup(recall_envelope);
+}
+char *server_user_memory_recall_json(const char *hint, int limit, int session_start)
+{
+   return kb_client_memory_recall_shared_json(hint, limit, session_start);
+}
+static void test_recall_refusals(void)
+{
+   const char *refusals[] = {
+       "{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}",
+       "{\"status\":\"quarantined\",\"recall\":{}}",
+       "{\"status\":\"degraded\",\"recall\":{}}",
+   };
+   for (size_t i = 0; i < sizeof(refusals) / sizeof(refusals[0]); i++)
+      for (int store = 0; store < 2; store++)
+         for (int start = 0; start < 2; start++)
+         {
+            recall_envelope = refusals[i];
+            struct mcp_call call = {0};
+            call.jargs = cJSON_CreateObject();
+            cJSON_AddStringToObject(call.jargs, "store", store ? "kb" : "user");
+            cJSON_AddBoolToObject(call.jargs, "session_start", start);
+            cJSON *reply = mcph_memory_recall(&call);
+            assert(strcmp(cJSON_GetStringValue(reply), recall_envelope) == 0);
+            cJSON_Delete(reply);
+            cJSON_Delete(call.jargs);
+         }
+}
 int main(void)
 {
+   test_recall_refusals();
    struct mcp_call call = {0};
    call.jargs = cJSON_Parse("{\"question\":\"secret question\",\"topic\":\"topic\"}");
    cJSON *reply = mcph_create_epistemic_directive(&call);

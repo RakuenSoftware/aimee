@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "baseline_revision": "91a1f02969806adca232da8f50fa394dffe343fa",
+  "predicate_source_sha256": "5a29a861736a4495f5eecf221fbd492201f972ca2b8da140d0eebb27b5837f22",
+  "benchmark_function_sha256": "3deb7dfb81fcfd11eca4b85f00598ee1c64d45398bcb6635f020ada5e97d3ca6",
+  "fixture": {
+    "memories": 10000,
+    "evidence_parents": 16,
+    "assertions": 1,
+    "role": "NOINHERIT NOBYPASSRLS",
+    "scope": "project",
+    "client": "pgx",
+    "warmup_queries": 5
+  },
+  "cpu": "Intel(R) Core(TM) i7-14700K",
+  "benchtime": "1s",
+  "repetitions": 3,
+  "samples": {
+    "concatenated_parent_id": [
+      {
+        "ns_per_op": 2298268,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 2446890,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 2695828,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      }
+    ],
+    "parsed_evidence_id": [
+      {
+        "ns_per_op": 1899891,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 1868217,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 1899109,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      }
+    ],
+    "bounded_primary_key_lookup": [
+      {
+        "ns_per_op": 50864,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 50499,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      },
+      {
+        "ns_per_op": 50654,
+        "bytes_per_op": 344,
+        "allocations_per_op": 5
+      }
+    ]
+  },
+  "median_ratio": 48.305958068464484,
+  "claim_boundary": "PostgreSQL parent-eligibility query only; not whole-request P95 or MR-18 acceptance"
+}

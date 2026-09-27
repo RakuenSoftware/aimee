@@ -1,0 +1,43 @@
+[
+  200,
+  {
+    "count": 2,
+    "entity_profiles": [],
+    "exported_at": "2026-09-24T15:40:22Z",
+    "memories": [
+      {
+        "id": 16,
+        "key": "mr02-aa0963aefae249f6a170e87ba80bcec8-import-episode",
+        "kind": "fact",
+        "tier": "L2",
+        "content": "imported protected text",
+        "use_count": 0,
+        "workspace": "mr02-aa0963aefae249f6a170e87ba80bcec8-imports",
+        "confidence": 0.8,
+        "created_at": "2026-09-24 15:40:21",
+        "updated_at": "2026-09-24 15:40:21",
+        "epistemic_kind": "episode",
+        "source_session": "",
+        "lifecycle_state": "active"
+      },
+      {
+        "id": 17,
+        "key": "mr02-aa0963aefae249f6a170e87ba80bcec8-import-policy",
+        "kind": "fact",
+        "tier": "L2",
+        "content": "imported protected text",
+        "use_count": 0,
+        "workspace": "mr02-aa0963aefae249f6a170e87ba80bcec8-imports",
+        "confidence": 0.8,
+        "created_at": "2026-09-24 15:40:22",
+        "updated_at": "2026-09-24 15:40:22",
+        "epistemic_kind": "policy",
+        "source_session": "",
+        "lifecycle_state": "active"
+      }
+    ],
+    "schema_version": "1",
+    "status": "ok",
+    "workspace": "mr02-aa0963aefae249f6a170e87ba80bcec8-imports"
+  }
+]

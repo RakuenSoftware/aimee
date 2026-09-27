@@ -17,6 +17,8 @@ func TestDomainPublicValidation(t *testing.T) {
 	for _, test := range []struct{ verb, args string }{
 		{"entity_profile", `{"entity":null}`}, {"entity_edges", `{"entity":12}`},
 		{"search_graph", `{}`}, {"search_graph_as_of", `{"query":"app"}`},
+		{"search_graph_as_of", `{"query":"app","as_of":"now"}`},
+		{"search_graph_as_of", `{"query":"app","as_of":"infinity"}`},
 		{"get_episode", `{}`}, {"get_provenance", `{"memory_id":1.5}`},
 		{"link_query", `{"memory_id":0}`}, {"link_create", `{"source_id":1,"target_id":1,"relation":"same"}`},
 		{"link_delete", `{"link_id":-1}`},
@@ -34,7 +36,9 @@ func TestDomainPublicScope(t *testing.T) {
 		scoped, all        bool
 		workspace, project string
 	}{
-		{`{"include_all":false,"workspace":"ignored"}`, false, true, "", ""},
+		{`{"include_all":false,"workspace":"legacy"}`, true, false, "legacy", ""},
+		{`{"project":"legacy"}`, true, false, "", "legacy"},
+		{`{"include_all":false}`, true, false, "", ""},
 		{`{"scope_context":true,"workspace":"repo","project":"app","scope":{"type":"global"}}`, true, false, "repo", "app"},
 		{`{"scope_context":true,"include_all":true}`, true, true, "", ""},
 	} {
@@ -69,7 +73,11 @@ func TestDomainPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA domain_command_test;
  CREATE FUNCTION domain_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,domain_command_test,public;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
+ CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
  INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES (1,'L2','fact','global','_global'),(2,'L1','episode','workspace','repo'),(3,'L2','preference','project','app');
  CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
  INSERT INTO memory_scopes VALUES (1,'workspace','repo'),(1,'project','app');
@@ -82,9 +90,15 @@ func TestDomainPublicPostgres(t *testing.T) {
  CREATE TEMP TABLE memory_provenance(id bigserial PRIMARY KEY,memory_id bigint,session_id text,action text,details text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_provenance(memory_id,session_id,action,details) VALUES (1,'session','created','source detail');
  CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text,weight double precision DEFAULT 1,created_at text DEFAULT pg_now_text());
- CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
+ CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time) VALUES (2,'release','release recap','session','2026-09-01');
- CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
+CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_relations(memory_id,episode_id,src_entity,relation,dst_entity,fact_text,valid_at,invalid_at,weight) VALUES
  (1,1,'app','uses','old','app used old','2025-01-01','2026-01-01',0.9),
  (3,1,'app','uses','new','app uses new','2026-01-01','',1);
@@ -93,7 +107,7 @@ func TestDomainPublicPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB})))
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
 	run := func(verb, args string) map[string]any {
 		t.Helper()
 		r := runPublicCommand(t, client, verb, args)
@@ -115,7 +129,7 @@ func TestDomainPublicPostgres(t *testing.T) {
 		t.Fatal(past)
 	}
 	edges := run("entity_edges", `{"entity":"APP"}`)["edges"].([]any)
-	if len(edges) != 2 {
+	if len(edges) != 1 || edges[0].(map[string]any)["dst_entity"] != "new" {
 		t.Fatal(edges)
 	}
 	if rows := run("entity_edges", `{"entity":"missing"}`)["edges"].([]any); len(rows) != 0 {
@@ -280,8 +294,9 @@ func TestDomainPublicPostgres(t *testing.T) {
 	// Derived rows have no RLS of their own. Query through the parent memory
 	// policy, with a real non-owner connection and transaction-local scope.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_domain_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_domain_test;
 GRANT USAGE ON SCHEMA domain_command_test TO memory_domain_test;
-GRANT SELECT ON memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
+GRANT SELECT ON memory_lineage,memory_summaries,derived_memory_dependencies,memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
 GRANT INSERT,DELETE ON memory_links TO memory_domain_test;
 GRANT USAGE,SELECT ON SEQUENCE memory_links_id_seq TO memory_domain_test;
 UPDATE memories SET scope_type='project',scope_value='app' WHERE id=2;
@@ -310,9 +325,9 @@ INSERT INTO entity_edges(id,source,target,edge_class,lifecycle_state,suppressed,
  (5,'typed-only','invalid','semantic','persistent',0,'','2026','',''),
  (6,'typed-only','superseded','semantic','persistent',0,'2026','','',''),
  (7,'typed-only','private','semantic','persistent',0,'','','',''),
- (8,'typed-only','future','semantic','persistent',0,'','','2999',''),
+ (8,'typed-only','future','semantic','persistent',0,'','','2999-01-01T00:00:00Z',''),
  (9,'typed-only','cooccur','cooccurrence','persistent',0,'','','',''),
- (10,'typed-only','expired','semantic','persistent',0,'','','','2000'),
+ (10,'typed-only','expired','semantic','persistent',0,'','','','2000-01-01T00:00:00Z'),
  (11,'typed-only','retired-memory','semantic','persistent',0,'','','','');
 INSERT INTO fact_evidence(assertion_id,source_kind,source_id,invalidated_at,stance) VALUES
  (2,'memory','memory:3','','supports'),(7,'memory','memory:4','','supports'),(11,'memory','memory:5','','supports');
@@ -325,6 +340,49 @@ SET LOCAL ROLE memory_domain_test;`)
 		t.Fatal(err)
 	}
 	client = clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	for _, tc := range []struct{ verb, args, field string }{
+		{"get_provenance", `{"memory_id":4,"project":"app"}`, "entries"},
+		{"link_query", `{"memory_id":1,"project":"app"}`, "links"},
+	} {
+		t.Run("legacy scoped "+tc.verb, func(t *testing.T) {
+			if rows := run(tc.verb, tc.args)[tc.field].([]any); len(rows) != 0 {
+				t.Error("public scoped derived read leaked private parent", tc.verb, rows)
+			}
+		})
+	}
+	t.Run("legacy scoped conflicts", func(t *testing.T) {
+		for _, row := range run("list_conflicts", `{"project":"app","max":256}`)["conflicts"].([]any) {
+			c := row.(map[string]any)
+			if c["memory_a"] == float64(4) || c["memory_b"] == float64(4) {
+				t.Error("public scoped conflict read leaked private parent", row)
+			}
+		}
+	})
+	t.Run("scoped statistics preserve operator lifecycle coverage", func(t *testing.T) {
+		stats := run("stats", `{"project":"app"}`)["stats"].(map[string]any)
+		if stats["total"] != float64(5) || stats["conflicts"] != float64(300) {
+			t.Error("scoped statistics include foreign rows or omit retained states", stats)
+		}
+	})
+	t.Run("scoped console effectiveness", func(t *testing.T) {
+		result := run("stats", `{"project":"app","view":"console","effectiveness":true}`)
+		display := result["display"].(map[string]any)
+		if display["total"] != float64(5) || display["effectiveness"].(map[string]any)["low_effectiveness"] != float64(5) {
+			t.Error("console statistics widened the audience", display)
+		}
+	})
+	t.Run("scoped dashboard conflict endpoints", func(t *testing.T) {
+		dashboard := run("stats_dashboard", `{"project":"app"}`)["dashboard"].(map[string]any)
+		var count, conflicted float64
+		for _, item := range dashboard["scopes"].([]any) {
+			row := item.(map[string]any)
+			count += row["count"].(float64)
+			conflicted += row["conflicted_memories"].(float64)
+		}
+		if count != 5 || conflicted != 600 {
+			t.Error("dashboard exposed foreign rows or hidden conflict endpoints", count, conflicted)
+		}
+	})
 	for _, verb := range []string{"entity_edges", "search_graph", "search_graph_as_of"} {
 		result := run(verb, `{"entity":"app","query":"app","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
 		key := "relations"
@@ -371,7 +429,12 @@ SET LOCAL ROLE memory_domain_test;`)
 			key = "edges"
 		}
 		got := run(verb, `{"query":"hidden-entity","entity":"hidden-entity","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
-		if len(got[key].([]any)) != 0 {
+		rows := got[key].([]any)
+		if verb == "search_graph_as_of" {
+			if len(rows) != 1 || rows[0].(map[string]any)["dst_entity"] != "archived" {
+				t.Fatalf("historical retained-parent set: %v", got)
+			}
+		} else if len(rows) != 0 {
 			t.Fatalf("%s recalled retired parents: %v", verb, got)
 		}
 		got = run(verb, `{"query":"rank-entity","entity":"rank-entity","as_of":"2026-09-01","limit":1,"scope_context":true,"project":"app"}`)
@@ -392,6 +455,18 @@ SET LOCAL ROLE memory_domain_test;`)
 	profile = run("entity_profile", `{"entity":"typed-only","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
 	if profile["mention_count"] != float64(0) || profile["relation_count"] != float64(2) {
 		t.Fatalf("typed-only profile currency/scope: %v", profile)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT profile_mixed_evidence; RESET ROLE;
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id,invalidated_at,stance)
+ VALUES(2,'memory','memory:4','','supports'); SET LOCAL ROLE memory_domain_test`); err != nil {
+		t.Fatal(err)
+	}
+	profile = run("entity_profile", `{"entity":"typed-only","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
+	if profile["relation_count"] != float64(1) {
+		t.Fatal("visible source admitted hidden profile evidence", profile)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT profile_mixed_evidence; RELEASE SAVEPOINT profile_mixed_evidence`); err != nil {
+		t.Fatal(err)
 	}
 	profile = run("entity_profile", `{"entity":"rank-entity","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
 	if profile["summary"] != "local low weight" || profile["relation_count"] != float64(2) {

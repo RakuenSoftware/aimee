@@ -30,6 +30,9 @@ static const kb_content_route_t g_kb_content_routes[] = {
     {"GET", "/v1/code/lessons/observe", KB_CONTENT_EXACT, 0},
     {"GET", "/v1/code/repo-trust", KB_CONTENT_EXACT, 0},
     {"GET", "/v1/docs/manifest", KB_CONTENT_EXACT, 0},
+    /* Receipt-backed feedback needs the same service/caller intersection even
+     * though its final operation writes the learning ledger. */
+    {"POST", "/v1/actions/learning.record_governed_application", KB_CONTENT_EXACT, 1},
     {"POST", "/v1/search", KB_CONTENT_EXACT, 1},
     {"POST", "/v1/implements", KB_CONTENT_EXACT, 1},
     {"POST", "/v1/synthesize", KB_CONTENT_EXACT, 1},

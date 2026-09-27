@@ -1,0 +1,17 @@
+--- FAIL: TestRelationValidityPostgres (0.12s)
+    --- FAIL: TestRelationValidityPostgres/future (0.01s)
+        derived_eligibility_test.go:300: edges relation interval eligibility [{13050 140079 0 relation-validity-instant uses target  2026-09-24T19:04:08.114888+09:00  1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:300: search relation interval eligibility [{13050 140079 0 relation-validity-instant uses target  2026-09-24T19:04:08.114888+09:00  1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:305: profile interval eligibility {relation-validity-instant 0 1  } <nil>
+    --- FAIL: TestRelationValidityPostgres/exclusive_offset (0.01s)
+        derived_eligibility_test.go:300: edges relation interval eligibility [{13050 140079 0 relation-validity-instant uses target   2026-09-24T19:04:08.114887+09:00 1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:300: search relation interval eligibility [{13050 140079 0 relation-validity-instant uses target   2026-09-24T19:04:08.114887+09:00 1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:305: profile interval eligibility {relation-validity-instant 0 1  } <nil>
+    --- FAIL: TestRelationValidityPostgres/expired (0.01s)
+        derived_eligibility_test.go:300: search relation interval eligibility [{13050 140079 0 relation-validity-instant uses target   2026-09-24T19:04:07.114887+09:00 1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:300: edges relation interval eligibility [{13050 140079 0 relation-validity-instant uses target   2026-09-24T19:04:07.114887+09:00 1 2026-09-24 19:04:08}] <nil>
+        derived_eligibility_test.go:305: profile interval eligibility {relation-validity-instant 0 1  } <nil>
+    derived_eligibility_test.go:314: requested instant differs from offset spelling [] <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.133s
+FAIL

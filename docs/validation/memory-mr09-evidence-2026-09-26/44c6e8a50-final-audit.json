@@ -1,0 +1,26 @@
+{
+  "candidate": "44c6e8a50",
+  "owners": [
+    {
+      "role": "server",
+      "image": "sha256:f90df02667b4a8fde2cb3b3a3654373466f9af609473c8d48cff9191ce4613d7",
+      "configured_image": "aimee-pr2990:44c6e8a50",
+      "healthy": true,
+      "selection_flag_present": false,
+      "health_flag_present": false
+    },
+    {
+      "role": "kb",
+      "image": "sha256:f90df02667b4a8fde2cb3b3a3654373466f9af609473c8d48cff9191ce4613d7",
+      "configured_image": "aimee-pr2990:44c6e8a50",
+      "healthy": true,
+      "selection_flag_present": false,
+      "health_flag_present": false
+    }
+  ],
+  "native_checks": 41,
+  "native_passed": 41,
+  "adaptive_promotion": false,
+  "default_selection": "baseline",
+  "health_collection": "disabled"
+}

@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "name": "read bounded recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "set bounded recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "read bounded recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    },
+    {
+      "name": "set bounded recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    },
+    {
+      "name": "provider fixture session created",
+      "passed": true
+    },
+    {
+      "name": "provider fixture route selected",
+      "passed": true
+    },
+    {
+      "name": "provider payload excludes all elapsed transient records",
+      "passed": true
+    },
+    {
+      "name": "provider payload retains eligible durable fixture context",
+      "passed": true
+    },
+    {
+      "name": "exact provider bytes have a committed preparation receipt",
+      "passed": true
+    },
+    {
+      "name": "dispatch preparation binds effective horizon policy on collections",
+      "passed": true
+    },
+    {
+      "name": "native turn completes through the actual provider boundary",
+      "passed": true
+    },
+    {
+      "name": "provider dispatch has a durable started receipt",
+      "passed": true
+    },
+    {
+      "name": "restore recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "restore recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    }
+  ],
+  "captures": [
+    {
+      "attempt": "b6191c734125e74b8b8ed666879adf19",
+      "payload_sha256": "9f934fe11aa08727f3c66fbe369bdd0b0d8b0136d62f15953e3ee068bee9f90d",
+      "payload_bytes": 32148,
+      "binding_sha256": "221ed68268f0ab01d1ecc15af7adfb0d4a4d9132ae79cba613b83ccd69fec895"
+    }
+  ],
+  "observations": [
+    {
+      "payload_sha256": "9f934fe11aa08727f3c66fbe369bdd0b0d8b0136d62f15953e3ee068bee9f90d",
+      "payload_bytes": 32148,
+      "fixture_presence": {
+        "user/task_state": false,
+        "user/constraint": false,
+        "user/durable_probe": true,
+        "user/transient_probe": false,
+        "kb/task_state": false,
+        "kb/constraint": false,
+        "kb/durable_probe": true,
+        "kb/transient_probe": false
+      }
+    }
+  ],
+  "measurement": "synthetic functional provider at fixed 8192-token recall allocation; not a quality or billing measurement"
+}

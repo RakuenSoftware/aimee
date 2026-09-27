@@ -101,3 +101,11 @@ func SchemaFileCount() int {
 	}
 	return n
 }
+
+// ReplayErasureIntents runs before the owner advertises readiness, even when all
+// migration versions are already present. It returns a payload-free cleanup count.
+func ReplayErasureIntents(ctx context.Context, q store.Queryer) (int64, error) {
+	var removed int64
+	err := q.QueryRow(ctx, `SELECT user_memory_replay_erasure_intents()`).Scan(&removed)
+	return removed, err
+}

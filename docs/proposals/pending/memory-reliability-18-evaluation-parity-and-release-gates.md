@@ -1,19 +1,21 @@
 # MR-18: Frozen evaluation, migration parity and release gates
 
-- **State:** In progress; initial corpus manifest and comparison binding implemented
+- **State:** Complete — frozen gate and final candidate upgrade acceptance passed; optional promotion remains separately gated
 - **Priority:** P0: starts before behavior changes and evolves with every proposal
 - **Owner:** Evaluation and all affected module owners
 - **Depends on:** None for the harness; feature-specific tests activate with each proposal
 - **Delivery:** Four implementation slices
 
 
-The initial Go corpus runner now freezes the checked-in 105-case input, emits
-per-case fixture-ID receipts and binds baseline comparisons to corpus/schema,
-embedding identity/dimension and ranking configuration. Changed inputs with an
-unchanged denominator fail. Failed evaluation or manifest comparison publishes
-no successful result and does not update the baseline. This implements the first
-comparison foundation; the full adversarial, surface parity, temporal, restart,
-failure and measured quality/performance gates below remain required.
+The implementation now includes mixed-answerability dataset accounting, nullable
+undefined metrics, frozen adversarial execution with required CI, explicit
+paired quality/cost promotion decisions and a serving-surface parity matrix.
+The original 105-case corpus and 123 acceptance clauses remain unchanged.
+See the [evaluation guide](../../memory-reliability-evaluation.md) and
+[serving parity matrix](../../validation/memory-mr18-serving-parity-2026-09-27.md).
+The [final release evidence](../../validation/memory-mr18-release-2026-09-27.md) records 173 required Go tests, 40 Python tests and fresh deployed acceptance.
+Optional promotion remains separate from functional implementation; a missing
+or underpowered paired experiment is explicitly unqualified.
 
 ## Problem and intended result
 

@@ -15,19 +15,52 @@
  * command failures before accepting a row as imported. */
 static int dispatch_result = 1;
 static int dispatch_calls;
-int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+cJSON *kb_service_command_context(void)
+{
+   return cJSON_Parse(
+       "{\"authenticated\":true,\"scope_kind\":\"workspace\",\"scope_id\":\"import-ws\"}");
+}
+
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
 {
    assert(strcmp(method, "memory.store") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "scope_id")),
+                 "import-ws") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "scope_context")));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "workspace")),
                  "import-ws") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "session_id")),
                  "test") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "epistemic_kind")),
+                 "policy") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "authority"));
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "provenance_category"));
    dispatch_calls++;
    *result = dispatch_result < 0
                  ? NULL
                  : cJSON_Parse(dispatch_result ? "{\"status\":\"ok\"}" : "{\"status\":\"error\"}");
    return dispatch_result < 0 ? -1 : 1;
+}
+
+static int export_dispatch_result = 1;
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(timeout_ms == 60000);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "scope_id")),
+                 "import-ws") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "export-filtered") == 0);
+   if (export_dispatch_result < 0)
+   {
+      *result = NULL;
+      return -1;
+   }
+   *result = cJSON_Parse("{\"json\":\"{\\\"status\\\":\\\"ok\\\",\\\"memories\\\":[]}\"}");
+   return 1;
 }
 
 static cJSON *sample_export(void)
@@ -168,7 +201,8 @@ static void test_import_dry_run_parse_contract(void)
    assert(f);
    fputs("{\"schema_version\":\"1\",\"memories\":[{\"tier\":\"L2\",\"kind\":\"fact\","
          "\"key\":\"portable-memory\",\"content\":\"portable content\","
-         "\"confidence\":0.75,\"source_session\":\"test\"}]}\n",
+         "\"confidence\":0.75,\"source_session\":\"test\",\"epistemic_kind\":\"policy\","
+         "\"authority\":\"user\",\"provenance_category\":\"user_stated\"}]}\n",
          f);
    fclose(f);
 
@@ -204,6 +238,11 @@ int main(void)
    printf("kb_export:\n");
    test_obsidian_frontmatter_links_and_sanitation();
    test_json_render_parseable_with_schema_version();
+   cJSON *owner_export = db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0);
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(owner_export, "memories")));
+   cJSON_Delete(owner_export);
+   export_dispatch_result = -1;
+   assert(db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0) == NULL);
    test_import_dry_run_parse_contract();
    printf("All kb_export tests passed.\n");
    return 0;

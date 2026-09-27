@@ -252,30 +252,34 @@ func TestCorpusCancellationStopsQueryEmbedding(t *testing.T) {
 		t.Skip("requires disposable PostgreSQL")
 	}
 	t.Setenv("AIMEE_DB2_EVAL_URL", url)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	executor := &corpusExecutor{blockQuery: make(chan struct{})}
-	done := make(chan struct{})
+	cancelledAt := make(chan time.Time, 1)
 	go func() {
-		defer close(done)
 		select {
 		case <-executor.blockQuery:
+			cancelledAt <- time.Now()
 			cancel()
 		case <-ctx.Done():
+			cancelledAt <- time.Now()
 		}
 	}()
-	started := time.Now()
+	var returnedAt time.Time
 	err := evaluationSession(ctx, "../../../../../src/modules/db2/c/schema.sql", 3, func(db *postgres.EvaluationStore) error {
 		result, err := memory.EvaluateCorpus(ctx, db, executor, validCorpus(), "http://corpus-test")
+		returnedAt = time.Now()
 		if err == nil || result.Status == "ok" {
 			t.Error("cancelled query produced valid evaluation", result, err)
 		}
 		return err
 	})
 	cancel()
-	<-done
-	if err == nil || executor.queries != 1 || time.Since(started) > 3*time.Second {
-		t.Fatal("cancellation was not propagated", err, executor.queries, time.Since(started))
+	// Measure propagation from cancellation to the evaluator's return. Schema
+	// provisioning and cleanup are separate work, especially under -race in CI.
+	elapsed := returnedAt.Sub(<-cancelledAt)
+	if err == nil || executor.queries != 1 || returnedAt.IsZero() || elapsed < 0 || elapsed > 3*time.Second {
+		t.Fatal("cancellation was not propagated", err, executor.queries, elapsed)
 	}
 }
 

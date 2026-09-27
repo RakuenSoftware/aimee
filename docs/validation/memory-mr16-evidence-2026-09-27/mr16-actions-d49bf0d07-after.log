@@ -1,0 +1,21 @@
+PASS receipt survives actual server restart
+PASS restart cannot replay a committed effect
+PASS failed postcondition cannot claim confirmed effect
+PASS unverified mutation really occurred
+PASS wrong material cannot reconcile unknown outcome
+PASS new attempt cannot bypass unresolved destination
+PASS owner verifies original object during reconciliation
+PASS unknown or foreign session cannot inspect receipt
+PASS started effect cannot be relabeled as cancelled
+PASS measured governed read 0
+PASS measured governed read 1
+PASS measured governed read 2
+PASS measured governed read 3
+PASS measured governed read 4
+PASS measured governed read 5
+PASS measured governed read 6
+PASS measured governed read 7
+PASS measured governed read 8
+PASS measured governed read 9
+PASS measured governed read 10
+PASS measured governed read 11

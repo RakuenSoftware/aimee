@@ -1,0 +1,30 @@
+[
+  {
+    "name": "fixture binds an actual enrolled fingerprint",
+    "passed": true
+  },
+  {
+    "name": "fixture has exactly one service membership",
+    "passed": true
+  },
+  {
+    "name": "verified service and caller reach the code index",
+    "passed": true
+  },
+  {
+    "name": "certificate alone cannot replace service team membership",
+    "passed": true
+  },
+  {
+    "name": "restored membership permits the same authenticated request",
+    "passed": true
+  },
+  {
+    "name": "service membership cannot replace the exact enrolled certificate",
+    "passed": true
+  },
+  {
+    "name": "restored certificate binding permits the same request",
+    "passed": true
+  }
+]

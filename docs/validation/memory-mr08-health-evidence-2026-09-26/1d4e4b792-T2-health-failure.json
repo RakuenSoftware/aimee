@@ -1,0 +1,22 @@
+{
+  "result": "failed",
+  "reason": "fixture selected an unsupported query population",
+  "scope_populations": [
+    {
+      "attempts": 23,
+      "query_context": 0,
+      "empty_turn_ids": 23
+    },
+    {
+      "attempts": 4,
+      "query_context": 4,
+      "empty_turn_ids": 4,
+      "query_scope_matches": 4
+    }
+  ],
+  "native_records_with_canonical_family": 43,
+  "topology": "T2",
+  "candidate": "1d4e4b792",
+  "acceptance_waived": false,
+  "additional_defect": "owned primary turn ID was not published on asynchronous worker"
+}

@@ -113,7 +113,9 @@ static void install_fake_tmux(void)
            "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
-           "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
+           "  new-session) shift; if [ \"$FAKE_TMUX_MODE\" = startup ]; then "
+           "while [ \"$1\" != /bin/bash ]; do shift; done; exec \"$@\"; fi; "
+           "for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
            g_capturelog, counter, counter, counter, counter, counter, counter, counter, counter,
@@ -188,6 +190,8 @@ static void test_create_multiword_cli_cmd_single_arg(void)
                                "AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions",
                                quoting_wd, 0);
    assert(rc == 0);
+   assert(createlog_has("ARG:[/bin/bash]"));
+   assert(createlog_has("ARG:[-ic]"));
    assert(createlog_has("ARG:[AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions]"));
    char expect_wd[300];
    snprintf(expect_wd, sizeof expect_wd, "ARG:[%s]", quoting_wd);
@@ -196,6 +200,37 @@ static void test_create_multiword_cli_cmd_single_arg(void)
    assert(!createlog_has("ARG:[AIMEE_SESSION_ID=web-1]"));
    s.active = 0; /* fake tmux: no real session to tear down */
 }
+static void test_new_session_loads_bashrc(void)
+{
+   char *saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+   char rcfile[320], output[320], command[1024];
+   snprintf(rcfile, sizeof(rcfile), "%s/.bashrc", g_fake_dir);
+   snprintf(output, sizeof(output), "%s/startup-result", g_fake_dir);
+   FILE *f = fopen(rcfile, "w");
+   assert(f);
+   fputs("export AIMEE_BASHRC_TEST=loaded\n", f);
+   fclose(f);
+   setenv("HOME", g_fake_dir, 1);
+   setenv("FAKE_TMUX_MODE", "startup", 1);
+   snprintf(command, sizeof(command), "printf '%%s' \"$AIMEE_BASHRC_TEST\" > '%s'", output);
+   cli_session_t session;
+   assert(cli_session_create(&session, "startup-test", command, NULL, 0) == 0);
+   f = fopen(output, "r");
+   assert(f);
+   char value[32] = "";
+   assert(fgets(value, sizeof(value), f));
+   fclose(f);
+   assert(strcmp(value, "loaded") == 0);
+   if (saved_home)
+      setenv("HOME", saved_home, 1);
+   else
+      unsetenv("HOME");
+   free(saved_home);
+   setenv("FAKE_TMUX_MODE", "stable", 1);
+   unlink(rcfile);
+   unlink(output);
+}
+
 static void sendlog_reset(void)
 {
    unlink(g_sendlog);
@@ -1391,6 +1426,7 @@ int main(void)
 
    printf("test_create_multiword_cli_cmd_single_arg... ");
    test_create_multiword_cli_cmd_single_arg();
+   test_new_session_loads_bashrc();
    printf("OK\n");
 
    printf("test_recv_timeout_on_changing_pane... ");

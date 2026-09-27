@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 216.984
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 162.992
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 192.917
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 142.915
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": false,
+    "elapsed_ms": 180.439
+  },
+  {
+    "name": "common fixture completed",
+    "passed": false,
+    "error": "Legacy project applies without scope_context"
+  }
+]

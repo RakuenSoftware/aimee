@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "b6eac1378e53db1b7b28b9196e93a11005fd37c2",
-  "source_fingerprint": "b5d8b5146ba41e0f5967a78e5f28028e4a67685015fe367a4de5d5c6495fa79b",
+  "source_revision": "469e02608b2b0fe751a3061f69f606f63f468ea4",
+  "source_fingerprint": "8fa525817caf756bd982987add75c619b93c10e10d4a0a9595b64826a45d8100",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2703,6 +2703,7 @@
         "src/modules/db2/c/db2_witness_checkpoint.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/db_schema.c",
+        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_nodes.c",
         "src/modules/db2/c/evidence_lifecycle.c",
@@ -2962,5 +2963,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "ce3c0b386e354b4a39ed8658d57112ee62ab3e139d59dac43ef82ef77c3bc496"
+  "fingerprint": "836ce081dc773b3622428cb6bebaee2f976963bf6510cd818db23a999e780f0f"
 }

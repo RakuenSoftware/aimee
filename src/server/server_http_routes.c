@@ -1681,6 +1681,8 @@ const http_route_t g_v1_routes[] = {
     /* Memory read family (hub-migration P1), dispatch-backed; caps derived from
      * the op (memory.* reads -> CAP_MEMORY_READ). memory.store (write) is not
      * exposed here. (memory.recall above keeps its bespoke native handler.) */
+    {"POST", "/v1/memory/validity", NULL, RM_EXACT, "memory.validity", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/hygiene", NULL, RM_EXACT, "memory.hygiene", 0, rh_dispatch_op},
     {"POST", "/v1/memory/search", NULL, RM_EXACT, "memory.search", 0, rh_dispatch_op},
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},
     {"POST", "/v1/memory/review", NULL, RM_EXACT, "memory.review_list", 0, rh_dispatch_op},
@@ -1688,8 +1690,17 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/memory/restore", NULL, RM_EXACT, "memory.restore", 0, rh_dispatch_op},
     {"GET", "/v1/memory/stats", NULL, RM_EXACT, "memory.stats", 0, rh_dispatch_op},
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/evidence", NULL, RM_EXACT, "memory.evidence", 0, rh_dispatch_op},
+    {"POST", "/v1/action/receipt", NULL, RM_EXACT, "action.receipt", 0, rh_dispatch_op},
+    {"POST", "/v1/task/projection", NULL, RM_EXACT, "task.projection", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/serve", NULL, RM_EXACT, "memory.serve", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/claim-card", NULL, RM_EXACT, "memory.claim_card", 0, rh_dispatch_op},
     {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
     {"POST", "/v1/memory/supersede", NULL, RM_EXACT, "memory.supersede", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/correction_proposals", NULL, RM_EXACT, "memory.correction_proposals", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/memory/review_correction", NULL, RM_EXACT, "memory.review_correction", 0,
+     rh_dispatch_op},
     {"GET", "/v1/memory/read", NULL, RM_EXACT, "memory.read", 0, rh_dispatch_op},
 
     /* Write families (hub-migration P1), dispatch-backed data-plane writes:
@@ -1907,6 +1918,12 @@ const http_route_t g_v1_routes[] = {
     /* dashboard/insights/identity/dogfood/lsp op-parity wave 4; read views are GET. */
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/audit", NULL, RM_EXACT, "dashboard.audit", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/receipt/forget", NULL, RM_EXACT, "memory.receipt_forget", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/memory/health", NULL, RM_EXACT, "memory.health", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/receipt", NULL, RM_EXACT, "memory.receipt", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/task_cost", NULL, RM_EXACT, "learning.task_cost", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/application", NULL, RM_EXACT, "learning.application", 0, rh_dispatch_op},
     {"GET", "/v1/audit/verify", NULL, RM_EXACT, "audit.verify", 0, rh_dispatch_op},
     {"GET", "/v1/audit/captures", NULL, RM_EXACT, "audit.captures", 0, rh_dispatch_op},
     {"POST", "/v1/audit/replay", NULL, RM_EXACT, "audit.replay", 0, rh_dispatch_op},

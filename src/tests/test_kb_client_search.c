@@ -518,6 +518,18 @@ static int index_get_handler(const char *url, const char *extra_headers, char **
                                 "\"generation\":7,\"freshness\":\"current\","
                                 "\"resolved\":true,\"results\":[]}");
    }
+   else if (g_route_case == 99 || g_route_case == 100)
+   {
+      assert(timeout_ms == 1000);
+      assert(strcmp(url,
+                    "http://127.0.0.1:4010/v1/code/"
+                    "project-stats?project=aimee%20core%2Fkb%3F&generation=9007199254740993") == 0);
+      if (response_buf)
+         *response_buf =
+             strdup(g_route_case == 99 ? "{\"status\":\"ok\",\"project\":\"aimee core/kb?\"}"
+                                       : "{\"error\":{\"type\":\"stale_generation\"}}");
+      return g_route_case == 99 ? 200 : 409;
+   }
    else
    {
       assert(!"unexpected index route case");
@@ -1412,6 +1424,28 @@ static void test_mtls_raw_post_preserves_content_type_and_status(void)
    kb_client_dependency_reset_for_tests();
 }
 
+static void test_index_generation_fence_uses_exact_scoped_query(void)
+{
+   g_get_seen = 0;
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(index_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   int status = 0;
+   g_route_case = 99;
+   char *reply = kb_client_index_generation_check("aimee core/kb?", "9007199254740993", &status);
+   assert(reply && status == 200);
+   free(reply);
+   g_route_case = 100;
+   reply = kb_client_index_generation_check("aimee core/kb?", "9007199254740993", &status);
+   assert(!reply && status == 409);
+   assert(!kb_client_index_generation_check("aimee", "unavailable", &status));
+   assert(!kb_client_index_generation_check("aimee", "9223372036854775808", &status));
+   assert(!kb_client_index_generation_check("aimee", "7&scope=all", &status));
+   assert(g_get_seen == 2);
+   unsetenv("AIMEE_KB_API_URL");
+}
+
 static void test_index_scan_uses_v1_api_when_configured(void)
 {
    g_post_seen = 0;
@@ -1539,6 +1573,7 @@ int main(void)
    test_intelligence_readiness_uses_v1_api_when_configured();
    test_action_wrappers_use_v1_api_when_configured();
    test_index_reads_use_v1_api_when_configured();
+   test_index_generation_fence_uses_exact_scoped_query();
    test_mtls_non_2xx_is_not_returned_as_valid_json();
    test_mtls_raw_post_preserves_content_type_and_status();
    test_index_scan_uses_v1_api_when_configured();

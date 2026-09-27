@@ -255,7 +255,7 @@ func (s *postgresDataStore) extractAnswer(ctx context.Context, rows []publicMemo
 FROM memories m
 LEFT JOIN LATERAL (SELECT actor,action,object,location,event_time FROM memory_event_frames WHERE memory_id=m.id ORDER BY id LIMIT 1) e ON true
 LEFT JOIN LATERAL (SELECT ref_key FROM memory_temporal_refs WHERE memory_id=m.id ORDER BY CASE granularity WHEN 'date_phrase' THEN 0 WHEN 'absolute_day' THEN 1 WHEN 'month' THEN 2 WHEN 'weekday' THEN 3 WHEN 'year' THEN 4 ELSE 5 END,weight DESC,id LIMIT 1) t ON true
-LEFT JOIN LATERAL (SELECT summary FROM memory_summaries WHERE memory_id=m.id ORDER BY id LIMIT 1) s ON true
+LEFT JOIN LATERAL (SELECT summary FROM memory_summaries summary WHERE memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 1) s ON true
 WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if err != nil {
 			return "", err

@@ -1,0 +1,13 @@
+{
+  "before_restart_report_seconds": [
+    1.255726677016355,
+    1.3190937269828282,
+    1.2451148750260472
+  ],
+  "after_restart_report_seconds": [
+    1.2233334920019843,
+    1.262185639992822,
+    1.3710785720031708
+  ],
+  "workload": "synthetic provider fixture; report latency, not provider p95"
+}

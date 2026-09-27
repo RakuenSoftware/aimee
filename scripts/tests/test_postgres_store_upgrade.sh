@@ -99,11 +99,18 @@ start_repaired() {
     -v "$tls_volume":/var/lib/postgresql/secure \
     -v "$REPO_ROOT/scripts/postgres-secure-entrypoint.sh":/opt/aimee/postgres-secure-entrypoint.sh:ro \
     -v "$REPO_ROOT/scripts/postgres-store-init.sh":/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro \
+    -v "$REPO_ROOT/scripts/postgres-hygiene-role.sql":/usr/local/share/aimee/postgres-hygiene-role.sql:ro \
     --entrypoint /opt/aimee/postgres-secure-entrypoint.sh postgres:18 >/dev/null
   wait_for_sql "$repaired_container" aimee_store_runtime repair-runtime-secret
 }
 
 start_repaired
+
+# The administrator provisions only a non-inherited, NOLOGIN worker membership.
+test "$(docker exec "$repaired_container" psql -U postgres -d aimee_store -Atqc \
+  "SELECT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','MEMBER') AND NOT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','USAGE') AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolcanlogin AND NOT rolreplication FROM pg_roles WHERE rolname='aimee_memory_hygiene'")" = t
+test "$(docker exec "$repaired_container" psql -U postgres -d aimee_store -Atqc \
+  "SELECT NOT rolcreaterole AND NOT rolsuper FROM pg_roles WHERE rolname='aimee_store_migrator'")" = t
 
 test "$(docker exec -e PGPASSWORD=repair-runtime-secret -e PGSSLMODE=require \
   "$repaired_container" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store \
@@ -159,6 +166,19 @@ if docker exec "$repaired_container" psql -h 127.0.0.1 -U aimee_store_runtime \
   exit 1
 fi
 
+# Domain migrations can narrow the broad defaults. Reconciliation must preserve
+# those table, sequence and function ACLs after a real PostgreSQL restart.
+docker exec -i -e PGPASSWORD=repair-migrator-secret -e PGSSLMODE=require \
+  "$repaired_container" psql -h 127.0.0.1 -U aimee_store_migrator -d aimee_store -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE protected_history(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, payload text);
+REVOKE ALL ON protected_history FROM aimee_store_runtime, PUBLIC;
+GRANT SELECT ON protected_history TO aimee_store_runtime;
+REVOKE ALL ON SEQUENCE protected_history_id_seq FROM aimee_store_runtime, PUBLIC;
+CREATE FUNCTION protected_writer() RETURNS integer LANGUAGE sql SECURITY DEFINER
+  SET search_path=pg_catalog AS $$ SELECT 1 $$;
+REVOKE ALL ON FUNCTION protected_writer() FROM aimee_store_runtime, PUBLIC;
+SQL
+
 # Recreate the container over the same volumes. Every reconciliation step must
 # be safe after it has already committed, including revocation of the bootstrap
 # identity.
@@ -168,6 +188,13 @@ start_repaired
 test "$(docker exec -e PGPASSWORD=repair-runtime-secret -e PGSSLMODE=require \
   "$repaired_container" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store \
   -Atqc 'SELECT payload FROM release_upgrade_probe')" = preserved-before-upgrade
+
+test "$(docker exec "$repaired_container" psql -U postgres -d aimee_store -Atqc \
+  "SELECT has_table_privilege('aimee_store_runtime','protected_history','SELECT') AND NOT has_table_privilege('aimee_store_runtime','protected_history','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_sequence_privilege('aimee_store_runtime','protected_history_id_seq','USAGE,SELECT,UPDATE') AND NOT has_function_privilege('aimee_store_runtime','protected_writer()','EXECUTE')")" = t
+# Legacy adopted identities and sequence grants still permit ordinary writes.
+docker exec -e PGPASSWORD=repair-runtime-secret -e PGSSLMODE=require \
+  "$repaired_container" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store \
+  -v ON_ERROR_STOP=1 -c "INSERT INTO release_upgrade_probe(payload) VALUES ('after-restart')" >/dev/null
 
 # Two named stores are ambiguous; never open TCP or silently discard one.
 docker exec "$repaired_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \

@@ -923,10 +923,23 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       int application_matches = application_authority == 1 &&
                                 application_identity_matches_certificate(cn, &application_identity);
       int content_read = kb_http_is_content_read(method, cpath);
-      int server_binding = server_id[0] && named_team > 0
-                               ? db2_server_registry_client_match(
-                                     server_id, named_team, transport.issuer, transport.subject, fp)
-                               : 0;
+      int server_binding = 0;
+      if (server_id[0] && named_team > 0 && application_authority == 1 && application_matches)
+      {
+         /* Registry rows are tenant-scoped, including inside their definer.
+          * Carry the independently verified service identity into this read;
+          * a certificate or caller-supplied team alone grants no visibility.
+          * End this scope before resolving the content caller below. */
+         int scope_rc = db2_tenant_scope_begin(&application_identity, named_team);
+         if (scope_rc == 0)
+         {
+            server_binding = db2_server_registry_client_match(
+                server_id, named_team, transport.issuer, transport.subject, fp);
+            db2_tenant_scope_rollback();
+         }
+         else
+            server_binding = scope_rc == DB2_ERR_TENANT_DENIED ? 0 : -1;
+      }
       kb_principal_t caller_identity = {0};
       int caller_authority = 0;
       host_assertion_result_t host_assertion = HOST_ASSERTION_NONE;

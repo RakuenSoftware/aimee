@@ -1,0 +1,62 @@
+[
+  {
+    "project": "aimee-e2e-kb-38c87bf8b3",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-5429e17bea",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-5a58ca4c75",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-76519d5464",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-ca6fc2825a",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-cb640c8283",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-df8de2c9a5",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-fc8a8a44ea",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-28a1abf8cd",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-46fc68a9b2",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-a9ca1964c4",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-f62c58ee6f",
+    "containers": [],
+    "networks": []
+  }
+]

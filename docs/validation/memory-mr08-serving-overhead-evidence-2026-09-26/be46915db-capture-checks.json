@@ -1,0 +1,66 @@
+{
+  "off-confirmed-a": {
+    "enabled": false,
+    "optional_metadata_captured": false
+  },
+  "on-confirmed-a": {
+    "enabled": true,
+    "optional_metadata_captured": true,
+    "health": {
+      "http_status": 200,
+      "status": "ok",
+      "collection": {
+        "selected_requests": 75,
+        "imported_requests": 75,
+        "failed_requests": 0,
+        "truncated": false,
+        "verified_through_sequence": "136858"
+      },
+      "metadata_gaps": {
+        "arm_contributions": 25,
+        "family": 25,
+        "final_rank": 25,
+        "memory_kind": 25,
+        "previous_eligible_turn": 25,
+        "release_labels": 25,
+        "trust": 25
+      },
+      "counts": {
+        "dispatched": 24,
+        "network_uncertain": 1
+      }
+    }
+  },
+  "on-confirmed-b": {
+    "enabled": true,
+    "optional_metadata_captured": true,
+    "health": {
+      "http_status": 200,
+      "status": "ok",
+      "collection": {
+        "selected_requests": 94,
+        "imported_requests": 94,
+        "failed_requests": 0,
+        "truncated": false,
+        "verified_through_sequence": "149847"
+      },
+      "metadata_gaps": {
+        "arm_contributions": 44,
+        "family": 44,
+        "final_rank": 44,
+        "memory_kind": 44,
+        "previous_eligible_turn": 44,
+        "release_labels": 44,
+        "trust": 44
+      },
+      "counts": {
+        "dispatched": 43,
+        "network_uncertain": 1
+      }
+    }
+  },
+  "off-confirmed-b": {
+    "enabled": false,
+    "optional_metadata_captured": false
+  }
+}

@@ -81,3 +81,115 @@ authorize locally. Additive rules must preserve fail-closed handling of unknown 
 Add an action class in `IR`, wire fixtures, normalization, policy evaluation, enforcement, audit mapping,
 and denial tests together. Removing a rule requires proving no caller depends on its reason semantics.
 Removing the module requires a reviewed replacement at every action seam; bypass is not a migration.
+
+### Exploration contract implementation status
+
+The legacy tool seam reports source discovery as observe-only metadata when no
+host-authenticated contract is available. Baseline forbidden-command, path and
+approval checks still decide authorization, including registered shell aliases.
+Compound commands and effectful `find`/`rg` invocations are not classified as
+pure discovery. The attention guard retains its explicit legacy operator cap;
+nonpositive legacy values remain disabled.
+
+The private exploration state machine models literal-zero limits, revision
+history, atomic in-process reservations, retry identities, conservative refunds,
+and host-observed recovery. A fallback requires a recorded empty/failed indexed
+attempt and a matching gap. It is restricted to one class, canonical path scope,
+contract revision and one-minute expiry; operator limits still apply. Two
+completed constrained turns can lower the adaptive tier without changing
+confidence provenance. These APIs are not exposed through model tool JSON.
+
+The session owner now commits the bounded state into `session_state` using
+migration 38. Its private operation checks the session directory's principal,
+locks the session row, and applies the same accounting across tasks and
+processes. Hard directives run before admission, which atomically marks a call
+as possibly dispatched; uncertain outcomes cannot refund a charge. Optional
+adaptive storage failure falls back to baseline, while configured operator
+ceilings still require durable accounting. Final memory assembly provides plan/source commitments and coverage;
+C forwards them without deciding memory sufficiency. Native dispatch and the
+authenticated `hooks.pre` route consume the Go accounting decision. Literal
+operator ceilings live under `exploration` in the operator policy; optional
+adaptive ceilings live under `adaptive_exploration` and default to observe.
+
+`context_contract_expand` is registered as a native control tool. It consumes a
+reason and references from a host-observed `code_search`/`find_symbol` failure or
+empty result. Completed native turns derive starvation from recorded lookup
+gaps and budget observations; model declarations and trivial writes cannot
+reset it. External hook result bodies are not accepted as proof of a lookup.
+
+Child jobs inherit the host context's `budget_task` root while retaining their
+own task/plan revisions and attempt histories. PostgreSQL stores the root usage
+once alongside global session usage. Unrelated tasks have separate adaptive
+allowances; revisions cannot transfer a task to a fresh root. Existing JSON rows
+upgrade their task counters without resetting spent work.
+
+The retained code-context packet supplies an exact index generation when present;
+dropped, mixed-generation or unprovenanced context cannot claim one. Native
+refresh preserves retained ingress coverage and index observations. Before native discovery admission, the host rechecks the exact generation via
+the scoped project-stats route, with a one-second transport timeout. Unknown,
+stale, rejected or malformed replies invalidate adaptive freshness. The external `tools.execute` route binds the authenticated
+session and observes actual indexed results before exposing expansion references.
+
+The host observes a clean Git worktree at issuance and rechecks it before
+discovery admission. A dirty tree or changed commit invalidates the adaptive
+binding without resetting operator work counters. The bounded read disables
+Git filesystem-monitor commands and treats errors/timeouts as unavailable.
+
+Final provider receipt admission adds the routed provider/model, route and
+context-limit commitments. Subsequent receipts for the same plan preserve the
+revision and recovery gaps; changed models or limits create a revision without
+resetting usage. A private memory-owner probe checks the retained plan before
+native admission. Restarted owners, expired handles and scope changes invalidate
+adaptive control.
+
+Enforcement additionally requires `AIMEE_EXPLORATION_ENFORCE=1` and a reviewed,
+root-owned `/etc/aimee/exploration-calibration.json`. Every ancestor must be
+protected from non-root writes; symlinks and non-regular artifacts are rejected.
+The file and opt-in are checked again for each admission, so revocation takes
+effect without deleting budget history. The artifact pins the supported query
+class, project/workspace/directory, clean checkout, exact index generation,
+provider/model/route, executable build, final context-limit digest and adaptive limits. Only raw
+scan caps are eligible in this first activation path. A missing or incompatible
+artifact preserves observe mode and baseline operator policy. See the
+[calibration contract](../../benchmarks/memory/EXPLORATION_GATE.md).
+
+MR-07 is still in progress. Both disposable process topologies passed at
+`6008b3835`; the later receipt/freshness/activation changes need fresh process
+acceptance. Fresh process acceptance of the subsequent hook/identity changes and measured
+paired workload gates remain open. No reviewed
+calibration artifact is installed or shipped. MR-08 and MR-09 have not started.
+Component tests are not evidence of task-quality noninferiority.
+
+Native `chat.send_stream`/`/v1/chat/stream` callers may supply the existing MR-05
+`evidence_requirements` object alongside their task message. Both native worker
+paths forward a bounded copy to the scoped Go typed-context request. The host
+does not accept a coverage/confidence verdict: Go validates obligations and
+computes retained coverage. Duplicate outer fields and oversized values become
+invalid input; duplicate inner fields, null and scalars reach the strict Go
+decoder intact. Starting or ending a session turn clears the prior obligations.
+Absent requirements continue to produce uncalibrated coverage, not complete
+coverage inferred from similarity.
+
+Authenticated hooks rebind the durable session only when their currently bound
+execution directory matches the contract, then observe current index and memory
+producer generation through host transports before using the same Go admission
+policy. Hook handling keeps its workspace provider bound until this admission
+finishes. Detached and delegate-container workspaces cannot attest a same-named
+server checkout: only shared/mirror execution permits local worktree observation.
+Missing freshness removes adaptive restrictions while preserving operator
+accounting. Unknown or outside-project discovery paths are also excluded from
+adaptive restrictions. Structured reasons retain the owner-selected indexed and
+expansion alternatives through both native and hook callers.
+
+Generic model ingress may issue observe contracts for an existing session carried
+by an operator-trusted proxy. The PostgreSQL owner still checks principal/session
+ownership. Ordinary TCP/UDS session headers do not establish this identity, and
+native host session identity takes precedence. This does not add a general client
+API for authoring a task contract or a confidence value.
+
+A deployment-owned, time-bounded experimental authorization can collect the
+paired workload before calibration. It pins the frozen manifest, principal,
+pre-created sessions and all live scope/budget fields; it retains the same
+coverage, freshness and final-receipt checks. Contracts explicitly distinguish
+`approval_kind: "experiment"` from measured `calibration`. This is not release
+approval. See the [collection contract](../../benchmarks/memory/EXPLORATION_GATE.md#collection-before-calibration).

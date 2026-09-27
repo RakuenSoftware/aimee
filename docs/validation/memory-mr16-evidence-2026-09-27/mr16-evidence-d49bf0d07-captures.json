@@ -1,0 +1,24 @@
+[
+  {
+    "phase": "fresh",
+    "receipt": "d40431b03baa1f0d33899aad1c4d91ca70852d4bc7a1132c4c3c373d73cac200",
+    "source_version": {
+      "schema_version": 1,
+      "owner_id": "99ae7d2b-3b7f-4af0-b168-f692d4e0c8f9",
+      "record_id": "12",
+      "record_revision": "1"
+    },
+    "payload_sha256": "947aa19f95df02109821691816731f385e67956860b7254660ffaf8ffa5ad22c"
+  },
+  {
+    "phase": "stale",
+    "receipt": "62170f2fb7aab0fa6a26e567c8ea0083ff39bccde1536672fdccfabc9c04cacd",
+    "source_version": {
+      "schema_version": 1,
+      "owner_id": "99ae7d2b-3b7f-4af0-b168-f692d4e0c8f9",
+      "record_id": "12",
+      "record_revision": "1"
+    },
+    "payload_sha256": "947aa19f95df02109821691816731f385e67956860b7254660ffaf8ffa5ad22c"
+  }
+]

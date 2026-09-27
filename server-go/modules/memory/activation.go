@@ -84,13 +84,13 @@ AND $%d-a.last_turn<=m.activation_sticky_turns)`, turnParam)
 	}
 	query := fmt.Sprintf(`WITH candidates AS (
  SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,
- m.use_count,m.updated_at, `+queryScopeOrder+` AS scope_rank, %s AS sticky,
+ m.use_count,m.updated_at,m.record_revision, `+queryScopeOrder+` AS scope_rank, %s AS sticky,
  (m.activation_suppressed=0 AND $%d>m.activation_delay_turns AND
  (a.last_turn IS NULL OR m.activation_cooldown_turns=0 OR
   $%d-a.last_turn>m.activation_cooldown_turns)) AS eligible
  FROM memories m LEFT JOIN jsonb_to_recordset($%d::jsonb)
  AS a(memory_id bigint,last_turn bigint) ON a.memory_id=m.id
- WHERE m.lifecycle_state='%s' AND `+memoryValiditySQL("m.")+` AND (%s)
+ WHERE m.lifecycle_state='%s' AND `+memoryValiditySQL("m.")+` AND `+utilityHorizonSQL("m.", false)+` AND %s AND (%s)
 ), served AS (
  SELECT * FROM candidates WHERE eligible
  ORDER BY scope_rank,confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,
@@ -98,11 +98,14 @@ AND $%d-a.last_turn<=m.activation_sticky_turns)`, turnParam)
 )
 SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',id,'scope',jsonb_build_object('type',scope_type,'value',scope_value),
- 'tier',tier,'kind',kind,'key',key,'content',content,'confidence',confidence,'sticky',sticky)
+ 'tier',tier,'kind',kind,'key',key,'content',content,'confidence',confidence,'sticky',sticky,
+ 'version',jsonb_build_object('schema_version',1,
+ 'owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+ 'record_id',id::text,'record_revision',record_revision::text))
  ORDER BY scope_rank,confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,use_count DESC,updated_at DESC,id DESC)
  FROM served),'[]'::jsonb)::text,
  (SELECT COUNT(*) FROM candidates WHERE NOT eligible)`,
-		sticky, turnParam, turnParam, rowsParam, state, match, limitParam)
+		sticky, turnParam, turnParam, rowsParam, state, currentDerivedMemoryInputsSQL("m.", false), match, limitParam)
 	args = append(args, snapshot.CurrentTurn, string(rowsJSON), limit)
 	var payload string
 	var held int
@@ -116,10 +119,16 @@ SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object(
 	items := make([]Record, 0, len(selected))
 	reasons := make(map[int64]string)
 	for _, record := range selected {
+		if !record.Version.validFor(record.ID) {
+			return nil, nil, 0, fmt.Errorf("invalid activated memory version")
+		}
 		items = append(items, record.Record)
 		if record.Sticky {
 			reasons[record.ID] = "sticky activation"
 		}
+	}
+	if err := s.annotateUtilityHorizons(ctx, items, "current"); err != nil {
+		return nil, nil, 0, err
 	}
 	return items, reasons, held, nil
 }
@@ -165,6 +174,9 @@ func (s *postgresDataStore) activationAfterFusion(ctx context.Context, snapshot 
 				delete(eligible, record.ID)
 			}
 		}
+	}
+	if err := s.annotateUtilityHorizons(ctx, items, "current"); err != nil {
+		return nil, nil, 0, err
 	}
 	return items, reasons, held, nil
 }

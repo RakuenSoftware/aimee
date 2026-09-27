@@ -1,0 +1,16 @@
+=== RUN   TestProviderReceiptRecoveryStages
+=== RUN   TestProviderReceiptRecoveryStages/prepared
+=== RUN   TestProviderReceiptRecoveryStages/dispatch_admitted
+=== RUN   TestProviderReceiptRecoveryStages/dispatch_started
+=== RUN   TestProviderReceiptRecoveryStages/outcome_unknown
+=== RUN   TestProviderReceiptRecoveryStages/acknowledged
+--- PASS: TestProviderReceiptRecoveryStages (0.04s)
+    --- PASS: TestProviderReceiptRecoveryStages/prepared (0.01s)
+    --- PASS: TestProviderReceiptRecoveryStages/dispatch_admitted (0.01s)
+    --- PASS: TestProviderReceiptRecoveryStages/dispatch_started (0.01s)
+    --- PASS: TestProviderReceiptRecoveryStages/outcome_unknown (0.01s)
+    --- PASS: TestProviderReceiptRecoveryStages/acknowledged (0.01s)
+=== RUN   TestProviderReceiptReplayRetention
+--- PASS: TestProviderReceiptReplayRetention (0.01s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.075s

@@ -21,11 +21,13 @@ type EvaluationManifest struct {
 }
 
 type EvaluationCaseResult struct {
-	ID        string           `json:"id"`
-	Expected  []string         `json:"expected_fids"`
-	Retrieved []string         `json:"retrieved_fids"`
-	Scores    EvaluationScores `json:"metrics"`
-	LatencyMS float64          `json:"owner_latency_ms"`
+	Answerable     *bool            `json:"answerable,omitempty"`
+	UnscoredReason string           `json:"unscored_reason,omitempty"`
+	ID             string           `json:"id"`
+	Expected       []string         `json:"expected_fids"`
+	Retrieved      []string         `json:"retrieved_fids"`
+	Scores         EvaluationScores `json:"metrics"`
+	LatencyMS      float64          `json:"owner_latency_ms"`
 }
 
 func EvaluationDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
@@ -90,4 +92,16 @@ func (m *EvaluationModule) evaluationManifest(ctx context.Context, corpus Evalua
 	}
 	result.PolicySHA256 = EvaluationDigest(raw)
 	return result, nil
+}
+
+// Missing gold relevance is not a perfect or zero-valued retrieval score.
+func (r EvaluationCaseResult) MarshalJSON() ([]byte, error) {
+	type plain EvaluationCaseResult
+	if r.UnscoredReason == "" {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Metrics any `json:"metrics"`
+	}{plain: plain(r), Metrics: nil})
 }

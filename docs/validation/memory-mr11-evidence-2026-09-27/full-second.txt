@@ -1,0 +1,23 @@
+ok  	github.com/JBailes/aimee/server-go/modules/memory	350.809s
+E
+======================================================================
+ERROR: test_memory_export_builds_with_all_owner_sources (scripts.tests.test_export_c_process_build.CProcessBuildTests.test_memory_export_builds_with_all_owner_sources)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/virant/dev/aimee-pr2990/scripts/tests/test_export_c_process_build.py", line 89, in test_memory_export_builds_with_all_owner_sources
+    exporter.export_module(root, "memory", "required", contract,
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                           exporter.source_timestamp(),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                           exporter.CORE_VERSION_FILE.read_text().strip())
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/virant/dev/aimee-pr2990/scripts/export_c_repositories.py", line 868, in export_module
+    owned = module_owned_files(module_id, descriptor)
+  File "/home/virant/dev/aimee-pr2990/scripts/export_c_repositories.py", line 249, in module_owned_files
+    raise ExportError(f"{module_id}: duplicate owned file")
+export_c_repositories.ExportError: memory: duplicate owned file
+
+----------------------------------------------------------------------
+Ran 1 test in 0.004s
+
+FAILED (errors=1)

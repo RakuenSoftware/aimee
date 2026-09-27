@@ -1,0 +1,110 @@
+[
+  {
+    "project": "aimee-e2e-kb-06827fba01",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-1588ce52a3",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-1bfa59ed45",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-1d939562a0",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-2a74394e5c",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-33903c2d32",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-681c422128",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-6cb7b35d25",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-95da20926d",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-b536baebd1",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-kb-ce0170d980",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-171b44534b",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-29bc7acbdf",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-33b49d1b36",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-3e5c7d9a4e",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-8343d34617",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-e742e372df",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  },
+  {
+    "project": "aimee-e2e-server-f72f2db1a6",
+    "containers": [],
+    "networks": [],
+    "volumes": []
+  }
+]

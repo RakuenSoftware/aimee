@@ -81,8 +81,7 @@ func (s *postgresDataStore) ensureCodeIndex(ctx context.Context) error {
 	if !ok {
 		return errors.New("code index migration capability unavailable")
 	}
-	statements := []string{codeIndexSchema}
-	if err := db.Migrate(ctx, store.MigrationRequest{Owner: "memory-code", Version: 1, Statements: statements, Checksum: store.StoreChecksum(statements)}); err != nil {
+	if err := migrateCodeGenerations(ctx, db); err != nil {
 		return err
 	}
 	s.code.ready = true

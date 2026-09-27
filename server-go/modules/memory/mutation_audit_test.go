@@ -60,6 +60,9 @@ func TestMutationAuditFields(t *testing.T) {
 			t.Fatal(c, got)
 		}
 	}
+	if _, ok := mutationAudit(DataRequest{Operation: "supersede"}, DataResponse{Records: response.Records, MutationReceipt: &MemoryMutationReceipt{Replayed: true}}, bus.ModuleStatusOK); ok {
+		t.Fatal("idempotent replay counted as a new mutation")
+	}
 	if _, ok := mutationAudit(DataRequest{Operation: "get"}, DataResponse{}, bus.ModuleStatusOK); ok {
 		t.Fatal("read emitted mutation")
 	}

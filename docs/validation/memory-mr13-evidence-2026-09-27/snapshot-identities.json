@@ -1,0 +1,10 @@
+{
+  "server": {
+    "sha256": "8e2981c66078011a593359daf040e8f1af1f79ea1ac11e0e4652b905a3f701f8",
+    "restoration_scope": "exact owned CT109 store"
+  },
+  "kb": {
+    "sha256": "58061377c7c5f3a558a2d8bd50563a504d763a41b458f38f3446a4788df4225d",
+    "restoration_scope": "exact owned CT109 store"
+  }
+}

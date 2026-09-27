@@ -1,0 +1,1326 @@
+{
+  "checks": [
+    {
+      "name": "Fixture has a bounded deployment-owned provider byte ceiling",
+      "passed": true
+    },
+    {
+      "name": "Go private memory stores the Unicode and escaping fixture",
+      "passed": true
+    },
+    {
+      "name": "Go memory returns the exact content and current version",
+      "passed": true
+    },
+    {
+      "name": "Go recall selects the stored fixture",
+      "passed": true
+    },
+    {
+      "name": "chat to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "chat to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "chat to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "chat to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "chat to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "chat to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "chat to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "chat to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "chat to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "responses to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses to openai recovers from one transient provider failure",
+      "passed": true
+    },
+    {
+      "name": "responses to openai performs exactly one admitted resend",
+      "passed": true
+    },
+    {
+      "name": "responses to openai resend preserves exact serialized bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "messages to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "messages to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "messages to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "messages to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "messages to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "messages to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "messages to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic uses Anthropic system and tool fields",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic uses Anthropic system and tool fields",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic recovers from one transient provider failure",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic performs exactly one admitted resend",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic resend preserves exact serialized bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic uses Anthropic system and tool fields",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic uses Anthropic system and tool fields",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai continuation completes",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai continuation dispatches once",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai continuation preserves prior memory and current input",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai continuation uses current instructions",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai tool result is relayed without local execution",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai preserves returned call identity",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to openai preserves returned call arguments",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic continuation completes",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic continuation dispatches once",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic continuation preserves prior memory and current input",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic continuation uses current instructions",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic tool result is relayed without local execution",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic preserves returned call identity",
+      "passed": true
+    },
+    {
+      "name": "buffered Responses to anthropic preserves returned call arguments",
+      "passed": true
+    },
+    {
+      "name": "provider refusal fixture identifies one real memory owner",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic buffered paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic streaming paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "responses to anthropic buffered paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming paused memory owner reports explicit failure",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to anthropic streaming paused memory owner sends zero provider requests",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic buffered memory-disabled passthrough retains provider dispatch",
+      "passed": true
+    },
+    {
+      "name": "messages to anthropic streaming memory-disabled passthrough retains provider dispatch",
+      "passed": true
+    },
+    {
+      "name": "provider refusal fixture recovers committed memory after owner restart",
+      "passed": true
+    },
+    {
+      "name": "new request after memory owner recovery dispatches exactly once",
+      "passed": true
+    },
+    {
+      "name": "fixture memory is retired after capture",
+      "passed": true
+    }
+  ],
+  "accounting": [
+    {
+      "frontend": "chat",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7725,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:6c996d561a5d4989abcd4dbf3b7f7517cd98c8b59b3cb4af2a50aa8c0dec3997",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7725,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:6c996d561a5d4989abcd4dbf3b7f7517cd98c8b59b3cb4af2a50aa8c0dec3997",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses_stream",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7725,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:6c996d561a5d4989abcd4dbf3b7f7517cd98c8b59b3cb4af2a50aa8c0dec3997",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7723,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:935abbac3b9b16030fee08495875c81210f12f594ba758f6d4527dad7e40961f",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "chat",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7827,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:890a9a6d04a20000436cadbc83dbd7d46708cc1bb03024b169b9c82b31797f4c",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7827,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:890a9a6d04a20000436cadbc83dbd7d46708cc1bb03024b169b9c82b31797f4c",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses_stream",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 7827,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:890a9a6d04a20000436cadbc83dbd7d46708cc1bb03024b169b9c82b31797f4c",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 1903,
+      "memory_projection_bytes": 1303,
+      "digest": "sha256:035e4220420e54e4efc884db34f3a2ba3d07f31013f9b98b0b2b91c3a02bf166",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    }
+  ]
+}

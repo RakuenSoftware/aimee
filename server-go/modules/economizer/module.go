@@ -24,20 +24,24 @@ import (
 // 4096 + ordinal*256 + stage. The economizer is inventory ordinal 27, so these
 // are not a free choice.
 const (
-	EventReduce      uint32 = 11009
-	StageReduce      uint32 = 1
-	EventJSONCompact uint32 = 11010
-	StageJSONCompact uint32 = 2
-	EventToolRecall  uint32 = 11011
-	StageToolRecall  uint32 = 3
-	EventToolStats   uint32 = 11012
-	StageToolStats   uint32 = 4
-	EventRecordBuild uint32 = 11013
-	StageRecordBuild uint32 = 5
-	EventPostStatus  uint32 = 11014
-	StagePostStatus  uint32 = 6
-	EventStats       uint32 = 11015
-	StageStats       uint32 = 7
+	EventReduce        uint32 = 11009
+	StageReduce        uint32 = 1
+	EventJSONCompact   uint32 = 11010
+	StageJSONCompact   uint32 = 2
+	EventToolRecall    uint32 = 11011
+	StageToolRecall    uint32 = 3
+	EventToolStats     uint32 = 11012
+	StageToolStats     uint32 = 4
+	EventRecordBuild   uint32 = 11013
+	StageRecordBuild   uint32 = 5
+	EventPostStatus    uint32 = 11014
+	StagePostStatus    uint32 = 6
+	EventRequestBudget uint32 = 11016
+	StageRequestBudget uint32 = 8
+	EventStats         uint32 = 11015
+	StageStats         uint32 = 7
+	EventTaskCost      uint32 = 11017
+	StageTaskCost      uint32 = 9
 )
 
 // StatsRequest asks for the published snapshot.
@@ -160,11 +164,13 @@ type ReduceResponse struct {
 }
 
 var reduceReasonNames = map[ReduceReason]string{
-	ReduceReasonNone:       "none",
-	ReduceReasonReduced:    "reduced",
-	ReduceReasonMeasured:   "measured",
-	ReduceReasonSkipNoGain: "skip_no_gain",
-	ReduceReasonAlready:    "already",
+	ReduceReasonNone:        "none",
+	ReduceReasonReduced:     "reduced",
+	ReduceReasonMeasured:    "measured",
+	ReduceReasonSkipNoGain:  "skip_no_gain",
+	ReduceReasonAlready:     "already",
+	ReduceReasonProtected:   "protected_context_changed",
+	ReduceReasonNotAdmitted: "reduction_not_admitted",
 }
 
 // NewHandler serves the economizer's reduce stage.
@@ -187,6 +193,10 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 			return nil, bus.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
+		case StageTaskCost:
+			return handleTaskCost(request)
+		case StageRequestBudget:
+			return handleRequestBudget(invocation, request)
 		case StageStats:
 			var req StatsRequest
 			if err := json.Unmarshal(request, &req); err != nil {
@@ -290,6 +300,16 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 	st := restoreState(store, stats, req.StateKey)
 
 	out := Reduce(messages, req.SystemPrompt, seam, cfg, st)
+
+	// Native callers install any returned mutated array. Apply the same shrink
+	// and tool-pair admission as the gateway before exposing that candidate.
+	if seam == SeamDelegate && out.Mutated && GWShouldApply(true, &out, ReduceErrNone, MessageHistoryRepair) != GWBypassNone {
+		out.Messages, out.Mutated, out.Reason = nil, false, ReduceReasonNotAdmitted
+		out.ReducedTokens, out.RemovedTokens = out.BaselineTokens, 0
+		if st != nil {
+			st.Reduced = false
+		}
+	}
 
 	resp := ReduceResponse{
 		Mutated:        out.Mutated,

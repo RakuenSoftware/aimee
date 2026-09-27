@@ -1,0 +1,75 @@
+{
+  "sources": [
+    {
+      "channel": "native_directives",
+      "stable_id": "11",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "11",
+          "record_revision": "3"
+        },
+        "memory_parents": [
+          {
+            "schema_version": 1,
+            "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+            "record_id": "1",
+            "record_revision": "3"
+          }
+        ],
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_directives",
+      "stable_id": "14",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "14",
+          "record_revision": "1"
+        },
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_reminders",
+      "stable_id": "1",
+      "source_version": {
+        "record_kind": "memory_reminder",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "1",
+          "record_revision": "3"
+        },
+        "memory_parent_state": "observed"
+      }
+    }
+  ],
+  "admission": {
+    "check_id": "5478524b0dca42b8b9e06d4f2bac91ad",
+    "eligible": true,
+    "lease_ms": 5000,
+    "send_guard": "acquired",
+    "sources_digest": "0cd904d46c79b4fd85bf6877fcdba71a9eb866d1d716e1517402bd976b67f315",
+    "status": "ok"
+  },
+  "release": {
+    "check_id": "5478524b0dca42b8b9e06d4f2bac91ad",
+    "eligible": true,
+    "send_guard": "released",
+    "sources_digest": "0cd904d46c79b4fd85bf6877fcdba71a9eb866d1d716e1517402bd976b67f315",
+    "status": "ok"
+  },
+  "stale_reacquisition": {
+    "check_id": "289d8a06b5a74fc4b3c32653b71d8b2d",
+    "eligible": false,
+    "sources_digest": "0cd904d46c79b4fd85bf6877fcdba71a9eb866d1d716e1517402bd976b67f315",
+    "status": "ok"
+  }
+}

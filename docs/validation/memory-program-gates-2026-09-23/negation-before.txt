@@ -1,0 +1,4 @@
+    runtime_role_test.go:359: negation validity leak 2221 [2221 2220 2219 2218 2217 2216 2215 2214]
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	37.111s
+FAIL

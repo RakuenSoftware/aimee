@@ -1,0 +1,7 @@
+  context: first refusal survives worker copy without leaking into another request: ok
+  context: budget header is bounded, copied, cleared and duplicate-safe: ok
+request_context: unit tests
+  context: unset -> empty, never NULL: ok
+  context: set/get roundtrip + accessors: ok
+  context: clear + set(NULL): ok
+All request_context tests passed.

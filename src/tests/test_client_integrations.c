@@ -686,8 +686,8 @@ static int stub_delegates_unknown(void)
 }
 
 /* The sub-agent-ban gate: ensure_claude_code_hooks installs the subagent-guard
- * PreToolUse hook + permissions.deny [Task, Agent] ONLY when the injected delegate
- * probe reports usable delegates, and removes both when it does not. An "unknown"
+ * scoped PreToolUse hook ONLY when the injected delegate
+ * probe reports usable delegates, and removes it when it does not. An "unknown"
  * probe (server down) must leave settings untouched. Config subagent_ban_enabled
  * defaults ON (no aimee.yaml opt-out in the test env). */
 static void test_claude_hooks_subagent_ban_gate(void)
@@ -698,7 +698,7 @@ static void test_claude_hooks_subagent_ban_gate(void)
    char settings_path[512];
    snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
 
-   /* Delegates available -> install the guard hook AND the static deny backstop. */
+   /* Delegates available -> install the workspace-aware hook without global denies. */
    FILE *fp = fopen(settings_path, "w");
    assert(fp != NULL);
    fputs("{}", fp);
@@ -708,8 +708,8 @@ static void test_claude_hooks_subagent_ban_gate(void)
    cJSON *root = read_json_file(settings_path);
    cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
    assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
-   assert(perms_deny_has(root, "Task"));
-   assert(perms_deny_has(root, "Agent"));
+   assert(!perms_deny_has(root, "Task"));
+   assert(!perms_deny_has(root, "Agent"));
    /* The composed pre hook covers all tools; the dedicated guard owns Task|Agent. */
    assert(hook_event_has_cmd(hooks, "PreToolUse", "hooks pre"));
    cJSON_Delete(root);
@@ -767,7 +767,7 @@ static void test_claude_hooks_subagent_ban_gate(void)
    assert(!perms_deny_has(root, "Agent"));
    cJSON_Delete(root);
 
-   /* Re-install, then an UNKNOWN probe (server unreachable) must leave it as-is. */
+   /* Re-install; an unknown probe retains the scoped hook. */
    client_integrations_set_delegate_probe(stub_delegates_available);
    ensure_claude_code_hooks(settings_path);
    client_integrations_set_delegate_probe(stub_delegates_unknown);
@@ -775,7 +775,30 @@ static void test_claude_hooks_subagent_ban_gate(void)
    root = read_json_file(settings_path);
    hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
    assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
-   assert(perms_deny_has(root, "Task"));
+   assert(!perms_deny_has(root, "Task"));
+   /* Migrate a previous global deny without removing unrelated user rules,
+    * even when delegate availability cannot be checked. */
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   if (!perms)
+      perms = cJSON_AddObjectToObject(root, "permissions");
+   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
+   if (!deny)
+      deny = cJSON_AddArrayToObject(perms, "deny");
+   cJSON_AddItemToArray(deny, cJSON_CreateString("Task"));
+   cJSON_AddItemToArray(deny, cJSON_CreateString("Agent"));
+   cJSON_AddItemToArray(deny, cJSON_CreateString("Bash(rm:*)"));
+   char *serialized = cJSON_PrintUnformatted(root);
+   fp = fopen(settings_path, "w");
+   assert(fp && serialized);
+   fputs(serialized, fp);
+   fclose(fp);
+   free(serialized);
+   cJSON_Delete(root);
+   ensure_claude_code_hooks(settings_path);
+   root = read_json_file(settings_path);
+   assert(!perms_deny_has(root, "Task"));
+   assert(!perms_deny_has(root, "Agent"));
+   assert(perms_deny_has(root, "Bash(rm:*)"));
    cJSON_Delete(root);
 
    client_integrations_set_delegate_probe(NULL); /* don't leak into other tests */

@@ -33,7 +33,7 @@ func TestMaintenancePublicPostgres(t *testing.T) {
  CREATE FUNCTION maintenance_test.pg_now_text(shift text) RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,maintenance_test,public;
  CREATE TEMP TABLE kb_meta(key text PRIMARY KEY,value text);
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,key text,lifecycle_state text DEFAULT 'active',artifact_ref text DEFAULT '',artifact_hash text DEFAULT '',confidence double precision DEFAULT 0.8,use_count bigint DEFAULT 0,
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,key text,provenance_category text DEFAULT 'agent_message',epistemic_kind text DEFAULT 'world_fact',lifecycle_state text DEFAULT 'active',artifact_ref text DEFAULT '',artifact_hash text DEFAULT '',confidence double precision DEFAULT 0.8,use_count bigint DEFAULT 0,
  updated_at text DEFAULT pg_now_text(),activation_suppressed bigint DEFAULT 0,valid_until text DEFAULT '');
  CREATE TEMP TABLE memory_provenance(memory_id bigint);
  CREATE TEMP TABLE memory_links(source_id bigint,target_id bigint);

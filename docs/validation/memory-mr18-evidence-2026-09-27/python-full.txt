@@ -1,0 +1,41 @@
+.............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 781 tests in 28.998s
+
+OK
+validate-agent-code-intelligence: ok (5 cases, fixture sha256=1903013f7801368937d04bc7a70f23f495384cd73ebf8986fa253978cf844c56)
+/tmp/tmpq0n9wma_/a.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmpq0n9wma_/b.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmp7148bk10/msc_model_only.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=0.333 (1/3)
+/tmp/tmp7148bk10/msc_aimee.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=0.667 (2/3)
+/tmp/tmp9qef5dct/good.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmp9qef5dct/bad.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+/tmp/tmpadjl1hcm/a.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmpadjl1hcm/b.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmpyij1nf5_/a.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmpyij1nf5_/b.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=1.000 (1/1)
+/tmp/tmpr4xd288d/a.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=0.500 (1/2)
+/tmp/tmpr4xd288d/b.json: dataset=msc track=direct
+  coverage: unrecorded (cannot be shown to be a complete run)
+  single-session: accuracy=0.000 (0/2)

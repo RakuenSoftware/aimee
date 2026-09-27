@@ -1,0 +1,24 @@
+[
+  {
+    "name": "/aimee-aimee-server-1",
+    "image": "aimee-native-core:0.4.5-bridge.2",
+    "image_id": "sha256:015e395b630bf12c42bacd905953027a02231aee7e1ac52a0b27325a665d4a5d",
+    "health": "healthy",
+    "optional_flags": [],
+    "clean_retry_enabled": false
+  },
+  {
+    "name": "/aimee-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "image_id": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-aimee-store-db-1",
+    "image": "ghcr.io/rakuensoftware/aimee-postgres:0.4.5",
+    "image_id": "sha256:0506544622e038b0e6733a25fc4287001ce6cfb97a5d4bd7ed5a89f892d7bf00",
+    "health": "healthy",
+    "optional_flags": []
+  }
+]

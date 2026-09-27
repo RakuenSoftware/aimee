@@ -1,0 +1,30 @@
+[
+  {
+    "name": "fixture session created",
+    "passed": true
+  },
+  {
+    "name": "controlled provider selected",
+    "passed": true
+  },
+  {
+    "name": "actual provider bytes have a durable prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "reviewed procedure retained in the exact final request",
+    "passed": true
+  },
+  {
+    "name": "native turn completes with a bound final request",
+    "passed": true
+  },
+  {
+    "name": "principal receipt reader attests acknowledged procedure delivery",
+    "passed": true
+  },
+  {
+    "name": "explicit feedback produces governed experience",
+    "passed": false
+  }
+]

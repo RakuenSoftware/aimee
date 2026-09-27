@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -244,4 +245,103 @@ func exerciseAlertsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		t.Fatal(result)
 	}
 	exec(`ROLLBACK TO SAVEPOINT alerts_failure; RELEASE SAVEPOINT alerts_failure`)
+}
+
+// Operator alerts retain pending and historical records, but neither side of a
+// conflict may expose erased, quarantined or suppressed active content.
+func TestAlertParentEligibilityPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL for packaged alert eligibility")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const key = "alert-parent-eligibility"
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+ CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ SELECT set_config('aimee.memory_scope_all','1',true)`)
+	var a, b int64
+	for _, id := range []*int64{&a, &b} {
+		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact',$1,'alert source','project',$1) RETURNING id`, key).Scan(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO memory_conflicts(memory_a,memory_b,detected_at) VALUES($1,$2,now()::text)`, a, b)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	for _, tc := range []struct {
+		name, state string
+		suppressed  int
+		from, until string
+		want        bool
+	}{
+		{"current", "active", 0, "", "", true}, {"future", "active", 0, "2999-01-01", "", true},
+		{"expired", "active", 0, "", "2000-01-01", true}, {"suppressed", "active", 1, "", "", false},
+		{"pending", "pending", 0, "", "", true}, {"fulfilled", "fulfilled", 0, "", "", true},
+		{"superseded", "superseded", 1, "", "", true}, {"archived", "archived", 0, "", "", true},
+		{"retired", "retired", 1, "", "", true}, {"quarantined", "quarantined", 0, "", "", false},
+		{"deleted", "deleted", 0, "", "", false}, {"revoked", "revoked", 0, "", "", false},
+		{"rejected", "rejected", 0, "", "", false}, {"unknown", "unknown", 0, "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, id := range []int64{a, b} {
+				exec(`RESET ROLE`)
+				exec(`UPDATE memories SET lifecycle_state='active',activation_suppressed=0,valid_from='',valid_until='' WHERE id IN ($1,$2)`, a, b)
+				exec(`UPDATE memories SET lifecycle_state=$2,activation_suppressed=$3,valid_from=$4,valid_until=$5 WHERE id=$1`, id, tc.state, tc.suppressed, tc.from, tc.until)
+				exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true),
+ set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value',$1,true)`, key)
+				exec(`SET LOCAL ROLE aimee_store_runtime`)
+				raw, err := backend.AlertsBundle(ctx, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got alertsBundle
+				if err = json.Unmarshal(raw, &got); err != nil {
+					t.Fatal(err)
+				}
+				if (len(got.Conflicts) == 1) != tc.want {
+					t.Fatalf("parent %d: got %d conflicts; eligible=%v", id, len(got.Conflicts), tc.want)
+				}
+			}
+		})
+	}
+	// Invalid conflicts newer than the eligible one must not consume its cap.
+	exec(`RESET ROLE`)
+	exec(`UPDATE memories SET lifecycle_state='active',activation_suppressed=0,valid_from='',valid_until='' WHERE id IN ($1,$2)`, a, b)
+	exec(`WITH hidden AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state)
+ SELECT 'L2','fact',$1||i,'erased','project',$1,'deleted' FROM generate_series(1,60) i RETURNING id)
+ INSERT INTO memory_conflicts(memory_a,memory_b,detected_at) SELECT $2,id,'2999-01-01T00:00:00Z' FROM hidden`, key, a)
+	exec(`INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed,created_at,ttl_at)
+ VALUES('L2','fact','suppressed-pending','hidden pending','project',$1,'pending',1,
+ (now()-interval '9 days')::text,(now()+interval '1 day')::text)`, key)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	raw, err := backend.AlertsBundle(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got alertsBundle
+	if err = json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Conflicts) != 1 || got.Conflicts[0].MemoryBID != b || len(got.Stale) != 0 {
+		t.Fatalf("inspection backfill or suppressed pending: %+v", got)
+	}
+
 }

@@ -1,0 +1,10 @@
+PASS owned action session created
+PASS native read receives durable acknowledgement
+PASS native write verifies exact file effect
+PASS principal receipt inspection reports verified effect
+PASS duplicate request returns receipt without repeating effect
+PASS changed payload cannot reuse the committed action
+PASS changed destination cannot reuse committed action
+PASS unresolved external publisher cannot self-label as read
+PASS compiled thin-client command reaches owned receipt
+MR16_RESTART_READY

@@ -6,8 +6,21 @@
 
 #include "agent_exec.h"
 #include "computer_use.h"
+#include "request_context.h"
 #include <aimee/core/event_bus/module_protocol.h>
 #include "headers/module_json_call.h"
+#include "modules/workspace/workspace_provider.h"
+#include <stdlib.h>
+
+void policy_action_attempt(const char *attempt)
+{
+   (void)attempt;
+}
+int policy_action_inherit(const char *session)
+{
+   (void)session;
+   return 0;
+}
 
 static int g_available;
 static const char *g_reply;
@@ -49,6 +62,122 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
    return g_reply ? cJSON_Parse(g_reply) : NULL;
 }
 
+static request_context_t test_context;
+static int context_active;
+static int owner_calls;
+static int test_job = 7;
+static workspace_provider_t test_provider = {.kind = WS_PROVIDER_SHARED};
+static char issued_binding[4096];
+static int test_freshness;
+static int check_session_calls;
+const workspace_provider_t *workspace_provider_active(void)
+{
+   return &test_provider;
+}
+static const char *owner_reply = "{\"status\":\"ok\"}";
+const request_context_t *request_context_get(void)
+{
+   return context_active ? &test_context : NULL;
+}
+int request_context_set_exploration_binding(const char *binding)
+{
+   snprintf(test_context.exploration_binding, sizeof(test_context.exploration_binding), "%s",
+            binding);
+   return 0;
+}
+const char *run_cmd_get_cwd(void)
+{
+   return "/tmp";
+}
+int agent_get_durable_job_id(void)
+{
+   return test_job;
+}
+size_t agent_tool_output_cap(void)
+{
+   return 4096;
+}
+int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
+                                  char *reply, size_t reply_len)
+{
+   assert(strcmp(principal, "alice") == 0 && strcmp(sid, "session") == 0);
+   cJSON *body = cJSON_Parse(request);
+   assert(cJSON_IsObject(body));
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "operation"));
+   if (operation && strcmp(operation, "prepare") == 0 && owner_reply)
+   {
+      cJSON *contract = cJSON_CreateObject();
+      cJSON *result = cJSON_CreateObject();
+      cJSON *binding = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(body, "binding"), 1);
+      cJSON_ReplaceItemInObjectCaseSensitive(binding, "worktree_generation",
+                                             cJSON_CreateString("host-observed-generation"));
+      assert(cJSON_PrintPreallocated(binding, issued_binding, sizeof(issued_binding), 0));
+      cJSON_AddItemToObject(contract, "binding", binding);
+      cJSON_AddItemToObject(result, "contract", contract);
+      assert(cJSON_PrintPreallocated(result, reply, (int)reply_len, 0));
+      cJSON_Delete(result);
+      cJSON_Delete(body);
+      owner_calls++;
+      return 0;
+   }
+   if (operation && strcmp(operation, "bind_session") == 0 && owner_reply)
+   {
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "canonical_path")),
+                    "/tmp") == 0);
+      cJSON *result = cJSON_CreateObject();
+      cJSON_AddItemToObject(result, "binding", cJSON_Parse(issued_binding));
+      assert(cJSON_PrintPreallocated(result, reply, (int)reply_len, 0));
+      cJSON_Delete(result);
+      cJSON_Delete(body);
+      owner_calls++;
+      return 0;
+   }
+   if (operation && strcmp(operation, "check_session") == 0)
+   {
+      check_session_calls++;
+      const cJSON *index = cJSON_GetObjectItemCaseSensitive(body, "index_observation");
+      const cJSON *owner = cJSON_GetObjectItemCaseSensitive(body, "owner_observation");
+      if (test_provider.kind == WS_PROVIDER_SHARED && test_freshness)
+      {
+         assert(cJSON_GetObjectItemCaseSensitive(index, "http_status")->valueint == 200);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(owner, "generation_only")));
+      }
+      else
+         assert(!index && !owner);
+   }
+   cJSON_Delete(body);
+   owner_calls++;
+   if (!owner_reply)
+      return -1;
+   snprintf(reply, reply_len, "%s", owner_reply);
+   return 0;
+}
+
+char *kb_client_index_generation_check(const char *project, const char *generation, int *status_out)
+{
+   (void)project;
+   (void)generation;
+   if (status_out)
+      *status_out = test_freshness ? 200 : 0;
+   return test_freshness ? strdup("{\"status\":\"ok\",\"project\":\"project\"}") : NULL;
+}
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
+                                                    int timeout_ms, cJSON **response)
+{
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   assert(!strcmp(operation, "exploration-owner-observe") ||
+          !strcmp(operation, "exploration-owner-generation"));
+   *response =
+       test_freshness
+           ? cJSON_Parse("{\"status\":\"ok\",\"generation_only\":true,\"memory_owner\":\"m1\"}")
+           : NULL;
+   return test_freshness ? 1 : 0;
+}
+
 int main(void)
 {
    char reason[256];
@@ -79,6 +208,74 @@ int main(void)
    assert(policy_check_tool("read_file", "none", "{}", reason, sizeof reason) == -1);
    assert(strstr(reason, "invalid decision"));
 
+   context_active = 1;
+   snprintf(test_context.principal, sizeof(test_context.principal), "alice");
+   snprintf(test_context.request_id, sizeof(test_context.request_id), "request");
+   cJSON *offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
+   assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
+   cJSON_Delete(offer);
+   assert(owner_calls == 1 && test_context.exploration_binding[0]);
+   assert(strstr(test_context.exploration_binding, "host-observed-generation"));
+   cJSON *parent_binding = cJSON_Parse(test_context.exploration_binding);
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "budget_task")),
+              "job:7") == 0);
+   cJSON_Delete(parent_binding);
+   test_job = 8;
+   offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
+   assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
+   cJSON_Delete(offer);
+   parent_binding = cJSON_Parse(test_context.exploration_binding);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "task")),
+                 "job:8") == 0);
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent_binding, "budget_task")),
+              "job:7") == 0);
+   cJSON_Delete(parent_binding);
+   owner_calls = 1; /* Subsequent admission assertions count from this checkpoint. */
+   g_reply = "{\"allowed\":false,\"reason\":\"baseline denies\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{}", "a", reason, sizeof reason) == -1);
+   assert(owner_calls == 1);
+   g_reply = "{\"allowed\":true,\"reason\":\"baseline "
+             "allows\",\"exploration\":{\"mode\":\"observe\",\"accounting_required\":true}}";
+   owner_reply = "{\"allowed\":false,\"reason\":\"operator_exploration_budget_exhausted\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "a", reason,
+                                    sizeof reason) == -1);
+   assert(owner_calls == 2 && strstr(reason, "budget_exhausted"));
+   owner_reply = "{\"allowed\":true,\"reason\":\"observed\"}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "b", reason,
+                                    sizeof reason) == 0);
+   owner_reply = NULL;
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "c", reason,
+                                    sizeof reason) == -1);
+   /* Adaptive issuer failure falls back to baseline only without operator ceilings. */
+   g_reply =
+       "{\"allowed\":true,\"reason\":\"baseline allows\",\"exploration\":{\"mode\":\"observe\"}}";
+   assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "d", reason,
+                                    sizeof reason) == 0);
+   test_job = 0;
+   owner_reply = "{\"allowed\":true,\"reason\":\"host_recorded_indexed_fallback\"}";
+   offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"7\"}");
+   assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
+   cJSON_Delete(offer);
+   test_freshness = 1;
+   assert(policy_check_session_tool("session", "bash", "{\"command\":\"rg foo\"}", "hook-fallback",
+                                    reason, sizeof(reason)) == 0);
+   owner_reply =
+       "{\"allowed\":false,\"reason\":\"adaptive_exploration_budget_exhausted\","
+       "\"exploration\":{\"alternatives\":[\"find_symbol\",\"context_contract_expand\"]}}";
+   assert(policy_check_session_tool("session", "bash", "{\"command\":\"rg foo\"}", "hook-deny",
+                                    reason, sizeof(reason)) == -1);
+   assert(strstr(reason, "adaptive_exploration_budget_exhausted"));
+   cJSON *detail = cJSON_Parse(reason);
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(detail, "alternatives")));
+   cJSON_Delete(detail);
+   test_provider.kind = WS_PROVIDER_DETACHED;
+   owner_reply = "{\"allowed\":true,\"reason\":\"contract_invalidated\"}";
+   assert(policy_bind_session_exploration("session") == -1);
+   assert(policy_check_session_tool("session", "bash", "{\"command\":\"rg foo\"}", "hook-detached",
+                                    reason, sizeof(reason)) == 0);
+   assert(check_session_calls == 3);
    puts("test_execution_policy_bus: OK");
    return 0;
 }

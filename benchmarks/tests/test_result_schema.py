@@ -169,6 +169,15 @@ class RetrievalAssessmentSchemaTest(unittest.TestCase):
     def test_complete_assessment_passes(self) -> None:
         validate_retrieval_assessment(self.assessment())
 
+    def test_unknown_coverage_is_not_assessed_insufficiency(self) -> None:
+        for verdict, suffix in (("CORRECT", "correct"), ("WRONG", "wrong")):
+            row = {**_valid_direct_row(), **self.assessment(),
+                   "context_sufficiency": "UNKNOWN", "verdict": verdict,
+                   "context_sufficiency_reason": "Requirements have not been evaluated."}
+            validate_retrieval_assessment(row)
+            self.assertEqual(retrieval_outcome_bucket(row),
+                             f"unknown_context__{suffix}_answer")
+
     def test_partial_instrumentation_fails(self) -> None:
         with self.assertRaises(ValueError):
             validate_retrieval_assessment({"context_sufficiency": "COMPLETE"})

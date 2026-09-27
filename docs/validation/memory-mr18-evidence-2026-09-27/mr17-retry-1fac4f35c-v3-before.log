@@ -1,0 +1,9 @@
+PASS owned retry session created
+MR17_SESSION b6924e20-6500-227e-a7f5-368a6d003340
+PASS before controlled native provider selected
+PASS before final provider request has durable receipt
+PASS before retained exact current controlled procedure
+PASS initial read is governed
+PASS failed attempt really completed a verified write
+PASS before host emits durable attempt identity
+PASS controlled provider failure is not reported as completion

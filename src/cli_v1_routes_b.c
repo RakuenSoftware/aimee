@@ -2,7 +2,6 @@
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
-
 #include "cli_argspec.h"
 #include "cli_v1_routes_internal.h"
 #include "platform_path.h"
@@ -21,22 +20,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
-
-static cJSON *marshal_aux_test(int argc, char **argv)
-{
-   cli_args_t opts;
-   cli_args_parse(argc, argv, NULL, &opts);
-
-   cJSON *req = marshal_no_args("aux.test");
-
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "task", opts.positional[0]);
-   if (opts.pos_count > 1)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[1]);
-   if (opts.pos_count > 2)
-      cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
-   return req;
-}
 
 static cJSON *marshal_agent_episodes(int argc, char **argv)
 {
@@ -577,7 +560,11 @@ static void add_verify_arg(cJSON *args, const char *name, const char *val)
 {
    if (!name || !name[0] || !val)
       return;
-   if (strcmp(val, "true") == 0)
+   if (strcmp(name, "repo") == 0)
+      name = "path";
+   if (strcmp(name, "path") == 0 || strcmp(name, "cwd") == 0)
+      cJSON_AddStringToObject(args, name, val);
+   else if (strcmp(val, "true") == 0)
       cJSON_AddBoolToObject(args, name, 1);
    else if (strcmp(val, "false") == 0)
       cJSON_AddBoolToObject(args, name, 0);
@@ -1473,7 +1460,18 @@ static const struct
     {"memory.benchmark", marshal_memory_benchmark},
     {"memory.delete", marshal_memory_delete},
     {"memory.supersede", marshal_memory_supersede},
+    {"memory.validity", marshal_memory_validity},
+    {"memory.health", marshal_memory_health},
+    {"memory.receipt", marshal_memory_receipt},
+    {"learning.application", marshal_learning_application},
+    {"learning.task_cost", marshal_learning_task_cost},
+    {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
+    {"memory.evidence", marshal_memory_evidence},
+    {"task.projection", marshal_task_projection},
+    {"action.receipt", marshal_action_receipt},
+    {"memory.serve", marshal_memory_serve},
+    {"memory.claim_card", marshal_memory_claim_card},
     {"memory.identity", marshal_memory_identity},
     {"memory.list", marshal_memory_list},
     {"memory.prefer", marshal_memory_prefer},

@@ -369,7 +369,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2},
+             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2, "go_assets": 0},
         )
 
     def test_contract_ownership_is_scoped_and_complete(self) -> None:
@@ -407,6 +407,7 @@ class DescriptorTests(unittest.TestCase):
         cases = (
             ("src/modules/module-runtime/example.json", "ownership-role-boundary"),
             ("src/modules/module-runtime/eventcontract/example.yaml", "ownership-role"),
+            ("src/modules/module-runtime/eventcontract/schema.sql", "ownership-role"),
         )
         for relative, rule in cases:
             mutated = copy.deepcopy(descriptor)
@@ -416,8 +417,37 @@ class DescriptorTests(unittest.TestCase):
             ):
                 validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
 
+    def test_go_assets_reject_wrong_boundary_extension_and_symlink(self) -> None:
+        cases = (
+            ("server-go/modules/memory/schema.sql", "ownership-role-boundary"),
+            ("src/modules/aimee/schema.sql", "ownership-role-boundary"),
+            ("server-go/modules/aimee/asset.go", "ownership-role"),
+        )
+        for relative, rule in cases:
+            with self.subTest(relative=relative), self.assertRaisesRegex(
+                validator.DescriptorError, rf"rule={rule} pointer=/go_assets/0"
+            ):
+                validator.validate_owned_path(
+                    REPO_ROOT, "aimee", "go_assets", relative, "/go_assets/0"
+                )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            root = repo / "server-go/modules/aimee"
+            root.mkdir(parents=True)
+            (root / "schema.sql").write_text("SELECT 1;\n", encoding="utf-8")
+            (root / "alias.sql").symlink_to("schema.sql")
+            with self.assertRaisesRegex(
+                validator.DescriptorError, r"rule=ownership-path-symlink pointer=/go_assets/0"
+            ):
+                validator.validate_owned_path(
+                    repo, "aimee", "go_assets",
+                    "server-go/modules/aimee/alias.sql", "/go_assets/0"
+                )
+
     def test_production_complete_ownership_mutations(self) -> None:
         cases = (
+            ("aimee", "go_assets",
+             "server-go/modules/aimee/families/schema_personal_memory_retirement_retries.sql"),
             ("roundtable", "sources", "src/modules/roundtable/roundtable_verify.c"),
             ("roundtable", "private_headers", "src/modules/roundtable/roundtable_verify.h"),
             ("protocols", "sources", "src/modules/protocols/acp/acp_server.c"),

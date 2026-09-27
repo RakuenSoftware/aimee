@@ -1,0 +1,7 @@
+{
+  "log_sha256": "f4caf2d91bb7527be44dee3a5338bef7a3e85b0a2eb983e0c83a478deb3d20a7",
+  "outcomes": [
+    "postgres-store-upgrade: ok (aimee_store)",
+    "postgres-store-upgrade: ok (aimee_shared)"
+  ]
+}

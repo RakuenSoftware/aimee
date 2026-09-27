@@ -3,9 +3,11 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
@@ -36,21 +38,42 @@ func TestPersonalMemoryPrivacyRegression(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Use the shipping user table definition, isolated in the session's temp schema.
+	// Use the shipping private schema in a transaction-owned namespace.
+	fixture := pgx.Identifier{fmt.Sprintf("private_privacy_%d", time.Now().UnixNano())}.Sanitize()
+	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+fixture+"; SET LOCAL search_path="+fixture+",public"); err != nil {
+		t.Fatal(err)
+	}
 	start, end := "CREATE TABLE IF NOT EXISTS user_memories (", "CREATE INDEX IF NOT EXISTS user_memories_recall"
 	text := string(schema)
 	a, b := strings.Index(text, start), strings.Index(text, end)
 	if a < 0 || b <= a {
 		t.Fatal("user memory schema missing")
 	}
-	_, err = tx.Exec(ctx, strings.Replace(text[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)+`
+	_, err = tx.Exec(ctx, text[a:b]+`
+CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memories (
- id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,
+ id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,
  content text,confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
-INSERT INTO memories VALUES(42,'global','_global','L0','fact','kb-fixture','shared knowledge',1,'active',0);
+INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state,activation_suppressed) VALUES(42,'global','_global','L0','fact','kb-fixture','shared knowledge',1,'active',0);
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixture: local only');`)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql", "schema_personal_memory_proposals.sql"} {
+		migration, err := os.ReadFile("../aimee/families/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	call := func(placement Placement, req DataRequest) (DataResponse, bus.ModuleStatus) {
 		t.Helper()
@@ -58,7 +81,8 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixtu
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, status := NewHandler(nil, WithDataStore(placement, backend))(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		req.Authority = AuthorityUser
+		raw, status := handleData(handlerOptions{placement: placement, data: backend, commandContext: &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user"}}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var reply DataResponse
 		if status == bus.ModuleStatusOK {
 			if err := json.Unmarshal(raw, &reply); err != nil {
@@ -118,6 +142,22 @@ INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES
 	}
 	if len(bundle.ActiveContext) != 1 || bundle.ActiveContext[0].ID != 42 || !bundle.SessionStart {
 		t.Fatalf("session recall exposed expired or retired rows: %+v", bundle)
+	}
+	for _, id := range []int64{42, 90, 91} {
+		result, status := call(PlacementServer, DataRequest{Operation: "get", ID: id, ReadPolicy: &MemoryReadPolicy{SchemaVersion: 1, Mode: "current"}})
+		if status != bus.ModuleStatusOK || result.Read == nil || result.Read.ErrorCode != "" || result.Read.Mode != "current" || (len(result.Records) == 1) != (id == 42) {
+			t.Fatalf("versioned personal get with KB absent: id=%d status=%v result=%+v", id, status, result)
+		}
+	}
+	personal, err := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer := runHostRuntime(t, NewHandler(nil, WithDataStore(PlacementServer, personal)), `{"operation":"user-get","id":42,"read_policy":{"schema_version":1,"mode":"current"}}`)
+	var inner map[string]any
+	innerJSON, ok := outer["json"].(string)
+	if !ok || json.Unmarshal([]byte(innerJSON), &inner) != nil || inner["status"] != "ok" || inner["read"] == nil || inner["memory"] == nil {
+		t.Fatalf("private host read policy lost at runtime boundary: %v", outer)
 	}
 	if _, err := tx.Exec(ctx, `ALTER TABLE unavailable_shared_store RENAME TO memories;
 DELETE FROM user_memories WHERE id IN (90,91);`); err != nil {

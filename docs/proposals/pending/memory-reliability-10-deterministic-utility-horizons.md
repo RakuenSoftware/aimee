@@ -1,6 +1,6 @@
 # MR-10: Deterministic utility horizons for transient memory
 
-- **State:** Proposed
+- **State:** Functional implementation and acceptance complete; optional policy off, domain tuning/promotion gated by MR-18
 - **Priority:** P1: after shared validity enforcement
 - **Owner:** Go memory lifecycle policy
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); measure with [MR-08](memory-reliability-08-retrieval-health-telemetry.md)/[MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
@@ -55,3 +55,25 @@ Expose the decision in `memory validity`, actual selection traces and health rep
 Start with observed would-exclude counts, query classes and false exclusions. Enable per domain/kind after its fixture and quality gates pass. Disabling the horizon restores ordinary horizon eligibility, not records erased or prohibited by other controls. Do not use horizon expiry as an implicit housekeeping delete.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+A pure shadow evaluator and bounded policy schema now live in the Go memory
+owner. Tests pin explicit transient-kind admission, system/record/domain/kind
+precedence, exact deadline boundaries, version-bound event anchors, future/missing
+anchor behavior, historical inspection and unchanged anchors across repeated
+reads. The evaluator has no live serving effect. Canonical anchor loading,
+authorized override mutation, diagnostic/selection integration, population
+measurement and rollout remain open; this is a foundation, not MR-10 completion.
+
+## Functional closeout — 2026-09-26
+
+The canonical journal integration, exact-version operator overrides, explicitly
+admitted confirmation anchors, shared serving/release eligibility, collection
+cache dependencies, validity/ranking diagnostics and health signal are complete.
+The full PostgreSQL/race suite, exported owner, lint and final deployed 109-check
+replay pass. Default mode is off. No population-derived duration or learned
+policy has been promoted; slice 3 domain tuning remains subject to representative
+MR-18 outcome evidence. This supersedes the earlier foundation-only checkpoint.
+
+[Validation and rollout limitations](../../validation/memory-mr10-horizons-2026-09-26.md)

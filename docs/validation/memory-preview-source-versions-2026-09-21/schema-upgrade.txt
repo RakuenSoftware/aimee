@@ -1,0 +1,1 @@
+PASS schema 30 -> 31 -> 31 preserves exact prior correction/retirement receipts, canonical rows, evidence and summary payloads; edited summary revision survives reapply; mixed event references and restricted ACL remain intact

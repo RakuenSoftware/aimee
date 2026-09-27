@@ -1,0 +1,24 @@
+[
+  {
+    "phase": "before",
+    "receipt": "64fa538a070d76bbc622981fd79d603391828f2c13144b1a098c7045999fc7ca",
+    "source_version": {
+      "schema_version": 1,
+      "owner_id": "99ae7d2b-3b7f-4af0-b168-f692d4e0c8f9",
+      "record_id": "16",
+      "record_revision": "1"
+    },
+    "payload_sha256": "fd046e35dfaad2081eb252af0197220c6eea9638d1fb9b5798a0a8f9d5771e69"
+  },
+  {
+    "phase": "after",
+    "receipt": "dab06ae994a90b8ee084f9151f394b2df2a07ee1fa5a2a67fb501c7886a63df3",
+    "source_version": {
+      "schema_version": 1,
+      "owner_id": "99ae7d2b-3b7f-4af0-b168-f692d4e0c8f9",
+      "record_id": "16",
+      "record_revision": "2"
+    },
+    "payload_sha256": "473db2349df5748191d912eddac8578f17b23b366d608ead064b116c0f15184a"
+  }
+]

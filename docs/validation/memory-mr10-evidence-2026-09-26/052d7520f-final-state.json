@@ -1,0 +1,14 @@
+[
+  {
+    "role": "server",
+    "healthy": true,
+    "image": "052d7520f",
+    "optional_policies": "unset"
+  },
+  {
+    "role": "kb",
+    "healthy": true,
+    "image": "052d7520f",
+    "optional_policies": "unset"
+  }
+]

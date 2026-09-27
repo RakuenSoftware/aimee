@@ -13,6 +13,8 @@
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
+#include "ingress_preinject.h"
+#include "request_context.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include <aimee/delegates/delegate_driver.h>
@@ -445,8 +447,15 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
     * workspace is detached, so a thin-client `claude` agent runs the standard
     * `claude` CLI over tmux on the client — no `claude -p` involved. */
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      if (wire_fence_external_backend() != 0)
+      {
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         return -1;
+      }
       return agent_execute_cli_session(agent, network, system_prompt, user_prompt, max_tokens,
                                        temperature, out);
+   }
 
    /* Dispatch to provider-CLI backend. Some legacy provider-CLI configs now
     * bridge into Aimee's native HTTP provider loop instead of spawning a CLI. */
@@ -467,8 +476,15 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
          goto native_provider_http;
       }
       if (adapter)
+      {
+         if (wire_fence_external_backend() != 0)
+         {
+            snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+            return -1;
+         }
          return provider_cli_adapter_execute(adapter, agent, run_cmd_get_cwd(), system_prompt,
                                              user_prompt, out);
+      }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "
                "mistral-plan, vibe-plan)",
@@ -554,10 +570,25 @@ native_provider_http:
    /* Build context-rich system prompt */
    /* Read, not derived: the permission was resolved when the run was configured. */
    int current_code_only = !agent_tools_knowledge_write_allowed();
-   char *assembled_sys = agent_build_exec_context_for_role(
+   char *task_instructions =
+       current_code_only ? NULL : ingress_preinject_task_instructions(system_prompt, user_prompt);
+   if (task_instructions)
+      system_prompt = task_instructions;
+   char *assembled_sys = agent_build_exec_context_checked(
        agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
-       current_code_only);
-   const char *sys = assembled_sys ? assembled_sys : system_prompt;
+       current_code_only, out->error, sizeof(out->error));
+   if (!assembled_sys)
+   {
+      free(task_instructions);
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   int context_refused = 0;
+   const char *sys = assembled_sys;
    if (!sys || !sys[0])
       sys = current_code_only
                 ? "# Instructions\n"
@@ -574,6 +605,7 @@ native_provider_http:
    {
       snprintf(out->error, sizeof(out->error), "auth resolution failed");
       free(assembled_sys);
+      free(task_instructions);
       if (has_ephemeral_ssh)
          agent_ssh_cleanup(network, ephemeral_key, session_id);
       if (has_tunnels && network && network->tunnel_mgr)
@@ -597,6 +629,8 @@ native_provider_http:
    if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
    {
       snprintf(out->error, sizeof(out->error), "failed to build request URL");
+      free(assembled_sys);
+      free(task_instructions);
       return -1;
    }
 
@@ -620,17 +654,37 @@ native_provider_http:
    /* Build conversation history. Primary sessions pass structured provider
     * history here; delegate runs start empty and remain single-task. */
    cJSON *messages = initial_messages ? cJSON_Duplicate(initial_messages, 1) : cJSON_CreateArray();
-   int has_prior_messages = messages && cJSON_GetArraySize(messages) > 0;
 
    /* For OpenAI, system prompt goes in messages array.
     * For Anthropic and ChatGPT it goes in the request body, handled by the
     * respective request builder. */
-   if (!has_prior_messages && !chatgpt && !anthropic)
+   if (!chatgpt && !anthropic)
    {
-      cJSON *sys_msg = cJSON_CreateObject();
-      cJSON_AddStringToObject(sys_msg, "role", "system");
-      cJSON_AddStringToObject(sys_msg, "content", sys);
-      cJSON_AddItemToArray(messages, sys_msg);
+      /* History carries the preceding turn's system context. Its replacement
+       * must match the current Go assembly and source receipt. */
+      cJSON *first = cJSON_GetArrayItem(messages, 0);
+      const char *first_role =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "role"));
+      if (first_role && strcmp(first_role, "system") == 0)
+      {
+         cJSON *replacement = cJSON_CreateString(sys);
+         if (!replacement || !cJSON_ReplaceItemInObjectCaseSensitive(first, "content", replacement))
+         {
+            cJSON_Delete(replacement);
+            (void)request_context_refuse_assembly("unavailable");
+         }
+      }
+      else
+      {
+         cJSON *sys_msg = cJSON_CreateObject();
+         if (!sys_msg || !cJSON_AddStringToObject(sys_msg, "role", "system") ||
+             !cJSON_AddStringToObject(sys_msg, "content", sys) ||
+             !cJSON_InsertItemInArray(messages, 0, sys_msg))
+         {
+            cJSON_Delete(sys_msg);
+            (void)request_context_refuse_assembly("unavailable");
+         }
+      }
    }
 
    cJSON *user_msg = cJSON_CreateObject();
@@ -803,9 +857,16 @@ native_provider_http:
             do_refresh = 0;
          if (do_refresh)
          {
-            char *refreshed = agent_build_exec_context_ex(
-                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), system_prompt,
-                current_code_only);
+            char *refreshed = agent_build_exec_context_checked(
+                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role,
+                system_prompt, current_code_only, out->error, sizeof(out->error));
+            if (!refreshed)
+            {
+               context_refused = 1;
+               out->success = 0;
+               snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+               break;
+            }
             if (refreshed)
             {
                free(assembled_sys);
@@ -1056,16 +1117,20 @@ native_provider_http:
                                                                   : WIRE_FENCE_OPENAI_CHAT;
       wire_fence_t *wire_snapshot = NULL;
       wire_fence_bytes_t wire_body;
-      if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                            &wire_body) != 0)
+      int wire_rc = wire_fence_select(economizer_active, wire_route, body, strlen(body),
+                                      &wire_snapshot, &wire_body);
+      if (wire_rc != 0)
       {
-         snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
+         context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+         if (context_refused)
+            snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
          free(body);
          break;
       }
-      int http_status = http_retry_post_context_bytes(
-          url, auth_header, wire_body.data, wire_body.len, &response_body, per_call, extra_headers,
-          ra, rb, rm, agent->provider, fb_agent.model, session_id);
+      int http_status = wire_fence_post(url, auth_header, wire_body.data, wire_body.len,
+                                        &response_body, per_call, extra_headers, ra, rb, rm,
+                                        agent->provider, fb_agent.model, session_id, wire_route);
       api_call_count++;
       {
          int dj = agent_get_durable_job_id();
@@ -1074,6 +1139,14 @@ native_provider_http:
       }
       free(body);
       wire_fence_destroy(wire_snapshot);
+
+      if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      {
+         context_refused = 1;
+         snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         break;
+      }
 
       /* Model fallback on first turn: if 400, retry with fallback_model */
       if (http_status == 400 && turn == 0 && fb_agent.fallback_model[0])
@@ -1109,17 +1182,21 @@ native_provider_http:
             }
             wire_fence_t *fb_snapshot = NULL;
             wire_fence_bytes_t fb_wire_body;
-            if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
-                                  &fb_snapshot, &fb_wire_body) != 0)
+            wire_rc = wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                        &fb_snapshot, &fb_wire_body);
+            if (wire_rc != 0)
             {
-               snprintf(out->error, sizeof(out->error),
-                        "economizer wire fence unavailable for fallback");
+               context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+               if (context_refused)
+                  snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+               snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
                free(fb_body);
                break;
             }
-            http_status = http_retry_post_context_bytes(
-                url, auth_header, fb_wire_body.data, fb_wire_body.len, &response_body, per_call,
-                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id);
+            http_status =
+                wire_fence_post(url, auth_header, fb_wire_body.data, fb_wire_body.len,
+                                &response_body, per_call, extra_headers, ra, rb, rm,
+                                fb_agent.provider, fb_agent.model, session_id, wire_route);
             api_call_count++;
             {
                int dj = agent_get_durable_job_id();
@@ -1129,6 +1206,14 @@ native_provider_http:
             free(fb_body);
             wire_fence_destroy(fb_snapshot);
          }
+      }
+
+      if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      {
+         context_refused = 1;
+         snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         break;
       }
 
       /* Update provider health cache */
@@ -1777,51 +1862,6 @@ native_provider_http:
             continue;
          }
 
-         /* Check policy */
-         char policy_reason[256] = {0};
-         const char *se = tool_side_effect(parsed.calls[i].name);
-         if (policy_check_tool(parsed.calls[i].name, se, parsed.calls[i].arguments, policy_reason,
-                               sizeof(policy_reason)) != 0)
-         {
-            char *err_result = malloc(512);
-            if (!err_result)
-            {
-               total_calls++;
-               continue;
-            }
-            snprintf(err_result, 512, "error: blocked by policy: %s", policy_reason);
-            consecutive_errors++;
-            if (anthropic)
-            {
-               cJSON *tr = cJSON_CreateObject();
-               cJSON_AddStringToObject(tr, "type", "tool_result");
-               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tr, "content", err_result);
-               cJSON_AddItemToArray(anth_results, tr);
-            }
-            else if (!chatgpt)
-            {
-               cJSON *tool_msg = cJSON_CreateObject();
-               cJSON_AddStringToObject(tool_msg, "role", "tool");
-               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tool_msg, "content", err_result);
-               cJSON_AddItemToArray(messages, tool_msg);
-            }
-            else
-            {
-               cJSON *out_item = cJSON_CreateObject();
-               cJSON_AddStringToObject(out_item, "type", "function_call_output");
-               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(out_item, "output", err_result);
-               cJSON_AddItemToArray(messages, out_item);
-            }
-            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
-            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
-            free(err_result);
-            total_calls++;
-            continue;
-         }
-
          /* Check hard directives */
          char directive_reason[256] = {0};
          if (directive_check_tool(parsed.calls[i].name, parsed.calls[i].arguments, directive_reason,
@@ -1866,6 +1906,58 @@ native_provider_http:
             continue;
          }
 
+         /* Provider tool IDs need only be unique within one response. Bind
+          * accounting to this host-observed turn too, so another turn cannot
+          * reuse an old admission while a retry of this dispatch stays stable. */
+         char exploration_attempt[96];
+         snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%s", api_call_count,
+                  parsed.calls[i].id);
+         /* Check policy */
+         char policy_reason[256] = {0};
+         const char *se = tool_side_effect(parsed.calls[i].name);
+         if (policy_check_tool_attempt(parsed.calls[i].name, se, parsed.calls[i].arguments,
+                                       exploration_attempt, policy_reason,
+                                       sizeof(policy_reason)) != 0)
+         {
+            char *err_result = malloc(512);
+            if (!err_result)
+            {
+               total_calls++;
+               continue;
+            }
+            snprintf(err_result, 512, "error: blocked by policy: %s", policy_reason);
+            consecutive_errors++;
+            if (anthropic)
+            {
+               cJSON *tr = cJSON_CreateObject();
+               cJSON_AddStringToObject(tr, "type", "tool_result");
+               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(tr, "content", err_result);
+               cJSON_AddItemToArray(anth_results, tr);
+            }
+            else if (!chatgpt)
+            {
+               cJSON *tool_msg = cJSON_CreateObject();
+               cJSON_AddStringToObject(tool_msg, "role", "tool");
+               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(tool_msg, "content", err_result);
+               cJSON_AddItemToArray(messages, tool_msg);
+            }
+            else
+            {
+               cJSON *out_item = cJSON_CreateObject();
+               cJSON_AddStringToObject(out_item, "type", "function_call_output");
+               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
+               cJSON_AddStringToObject(out_item, "output", err_result);
+               cJSON_AddItemToArray(messages, out_item);
+            }
+            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
+            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            free(err_result);
+            total_calls++;
+            continue;
+         }
+
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
@@ -1875,6 +1967,8 @@ native_provider_http:
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
          agent_tools_set_effect_authorized(0);
+         result_str = policy_annotate_indexed(parsed.calls[i].name, parsed.calls[i].arguments,
+                                              exploration_attempt, result_str);
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
@@ -1969,6 +2063,9 @@ native_provider_http:
             cJSON_Delete(anth_results);
          }
       }
+
+      if (!out->error[0])
+         policy_complete_exploration_turn(turn);
 
       if (progress_action == LIVENESS_PROGRESS_ABORT)
       {
@@ -2137,6 +2234,7 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
+   free(task_instructions);
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)
       agent_ssh_cleanup(network, ephemeral_key, session_id);
@@ -2161,5 +2259,5 @@ native_provider_http:
    /* Store execution outcome as feedback for future context */
    agent_store_feedback(out, "", user_prompt);
 
-   return out->success ? 0 : -1;
+   return context_refused ? AGENT_RC_CONTEXT_REFUSED : (out->success ? 0 : -1);
 }

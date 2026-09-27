@@ -1,0 +1,4 @@
+[
+  "2026/09/26 23:25:50 shared memory indexing pending: aimee: the store refused begin: begin: failed to connect to `user=aimee_store_runtime database=aimee_store`: 172.31.0.2:5432 (aimee-store-db): dial error: dial tcp 172.31.0.2:5432: connect: connection refused",
+  "2026/09/26 23:25:55 shared memory indexing pending: aimee: the store refused statement (SQLSTATE 42P01): relation \"kb_async_jobs\" does not exist"
+]

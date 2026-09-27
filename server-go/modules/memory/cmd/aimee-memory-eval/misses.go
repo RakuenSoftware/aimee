@@ -24,6 +24,7 @@ func runDatasetMisses(ctx context.Context, schema string, dimension int, path, s
 	}
 	defer closeExecutor()
 	cases, misses := 0, 0
+	unscored := []string{}
 	buckets := map[string]int{}
 	reports := []map[string]any{}
 	for index, corpus := range plan.groups {
@@ -37,6 +38,10 @@ func runDatasetMisses(ctx context.Context, schema string, dimension int, path, s
 				return err
 			}
 			for _, row := range corpus.Cases {
+				if len(row.Expected) == 0 || (row.Answerable != nil && !*row.Answerable) {
+					unscored = append(unscored, fmt.Sprintf("%d/%s", index, row.ID))
+					continue
+				}
 				expected := make([]string, len(row.Expected))
 				for i, fid := range row.Expected {
 					expected[i] = ids[fid]
@@ -66,5 +71,5 @@ func runDatasetMisses(ctx context.Context, schema string, dimension int, path, s
 			return fmt.Errorf("%s sample %d: %w", suite, index, err)
 		}
 	}
-	return writeEvaluationView(map[string]any{"status": "ok", "suite": suite, "dataset": path, "samples": len(plan.groups), "cases": cases, "misses": misses, "limit": limit, "excluded_cases": plan.excluded, "fixture_policy": "full-text-raw-query-v1", "buckets": buckets, "reports": reports}, format, fields, profile, output)
+	return writeEvaluationView(map[string]any{"status": "ok", "suite": suite, "dataset": path, "samples": len(plan.groups), "cases": cases, "total_cases": cases + len(unscored), "unscored_case_ids": unscored, "dataset_inventory": plan.inventory, "misses": misses, "limit": limit, "excluded_cases": plan.excluded, "fixture_policy": "full-text-raw-query-v1", "buckets": buckets, "reports": reports}, format, fields, profile, output)
 }

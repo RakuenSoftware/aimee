@@ -1,0 +1,122 @@
+[
+  {
+    "name": "owned action session created",
+    "passed": true
+  },
+  {
+    "name": "native read receives durable acknowledgement",
+    "passed": true
+  },
+  {
+    "name": "native write verifies exact file effect",
+    "passed": true
+  },
+  {
+    "name": "principal receipt inspection reports verified effect",
+    "passed": true
+  },
+  {
+    "name": "duplicate request returns receipt without repeating effect",
+    "passed": true
+  },
+  {
+    "name": "changed payload cannot reuse the committed action",
+    "passed": true
+  },
+  {
+    "name": "changed destination cannot reuse committed action",
+    "passed": true
+  },
+  {
+    "name": "unresolved external publisher cannot self-label as read",
+    "passed": true
+  },
+  {
+    "name": "compiled thin-client command reaches owned receipt",
+    "passed": true
+  },
+  {
+    "name": "receipt survives actual server restart",
+    "passed": true
+  },
+  {
+    "name": "restart cannot replay a committed effect",
+    "passed": true
+  },
+  {
+    "name": "failed postcondition cannot claim confirmed effect",
+    "passed": true
+  },
+  {
+    "name": "unverified mutation really occurred",
+    "passed": true
+  },
+  {
+    "name": "wrong material cannot reconcile unknown outcome",
+    "passed": true
+  },
+  {
+    "name": "new attempt cannot bypass unresolved destination",
+    "passed": true
+  },
+  {
+    "name": "owner verifies original object during reconciliation",
+    "passed": true
+  },
+  {
+    "name": "unknown or foreign session cannot inspect receipt",
+    "passed": true
+  },
+  {
+    "name": "started effect cannot be relabeled as cancelled",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 0",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 1",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 2",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 3",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 4",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 5",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 6",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 7",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 8",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 9",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 10",
+    "passed": true
+  },
+  {
+    "name": "measured governed read 11",
+    "passed": true
+  }
+]

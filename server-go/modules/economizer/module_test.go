@@ -104,8 +104,8 @@ func TestModuleReduceStage(t *testing.T) {
 	if got == nil || !got.IsArray() {
 		t.Fatal("emitted messages are not a JSON array")
 	}
-	if !strings.Contains(got.At(0).GetString("content"), "folded") {
-		t.Error("the first message should be the fold summary")
+	if !strings.Contains(got.At(1).GetString("content"), "folded") {
+		t.Error("the original user message should precede optional folded history")
 	}
 }
 

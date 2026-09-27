@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "events": [
+    {
+      "event": "turn_start"
+    },
+    {
+      "event": "tool_call.started",
+      "name": "write_file"
+    },
+    {
+      "event": "tool_call.completed",
+      "name": "write_file"
+    },
+    {
+      "status": "error",
+      "message": "stale_context"
+    }
+  ]
+}

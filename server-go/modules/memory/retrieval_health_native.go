@@ -1,0 +1,109 @@
+package memory
+
+import (
+	"encoding/json"
+	"math"
+)
+
+// Native ranking has ordered stages, not additive bonuses across stages.
+// Preserve their observed semantics; never translate them to assertion RRF.
+func validatedHealthRanking(steps []rankingStep) []rankingStep {
+	if len(steps) == 0 || len(steps) > 8 {
+		return nil
+	}
+	finite := func(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+	for _, step := range steps {
+		if !healthLabelName(step.Operation) || !finite(step.Score) || len(step.Contributions) == 0 || len(step.Contributions) > 8 {
+			return nil
+		}
+		if step.PriorPolicy != "" && !healthLabelName(step.PriorPolicy) {
+			return nil
+		}
+		if step.BaseRank != 0 || step.FinalRank != 0 || step.MaxRankDisplacement != 0 {
+			if step.PriorPolicy != nativePriorPolicy || step.MaxRankDisplacement != nativePriorRankDisplacement || step.BaseRank < 1 || step.FinalRank < 1 || step.BaseRank > pageRankCandidateCap || step.FinalRank > pageRankCandidateCap || math.Abs(float64(step.BaseRank-step.FinalRank)) > float64(nativePriorRankDisplacement) {
+				return nil
+			}
+		}
+		if step.PriorScore != nil && (!validScorePriorResult(step.PriorScore) || step.PriorScore.Policy != step.PriorPolicy || math.Abs(step.PriorScore.Final-step.Score) > 1e-12) {
+			return nil
+		}
+		for _, c := range step.Contributions {
+			if !healthLabelName(c.Arm) || c.Rank < 0 || c.Rank > maxDataBody || !finite(c.Value) {
+				return nil
+			}
+		}
+	}
+	return append([]rankingStep(nil), steps...)
+}
+func validatedHealthSelectionPaths(paths []string) []string {
+	if len(paths) > 4 {
+		return nil
+	}
+	seen := map[string]bool{}
+	result := []string{}
+	for _, path := range paths {
+		switch path {
+		case "native_identity", "native_preferences", "native_active_context", "native_open_commitments":
+		default:
+			return nil
+		}
+		if !seen[path] {
+			result = append(result, path)
+			seen[path] = true
+		}
+	}
+	return result
+}
+func healthRecordArmsKnown(record healthRecord) bool {
+	if len(record.Arms) > 0 || len(record.RankingSteps) > 0 {
+		return true
+	}
+	if len(record.SelectionPaths) == 0 {
+		return false
+	}
+	for _, path := range record.SelectionPaths {
+		if path == "native_active_context" {
+			return false
+		}
+	}
+	// Identity/preference/commitment SQL selectors have no numeric fusion arms.
+	return true
+}
+func healthNativeRanking(records []healthRecord, raw json.RawMessage, placement string) []healthRecord {
+	kind := ""
+	switch placement {
+	case "user":
+		kind = "user_memory_record"
+	case "kb":
+		kind = "memory_record"
+	default:
+		return records
+	}
+	var capture rankingCapture
+	if len(raw) == 0 || len(raw) > 128<<10 || json.Unmarshal(raw, &capture) != nil || capture.SchemaVersion != 1 || len(capture.Candidates) > 256 {
+		return records
+	}
+	byVersion := map[string][]rankingStep{}
+	horizons := map[string]*bool{}
+	for _, candidate := range capture.Candidates {
+		if candidate.Version == nil || candidate.ID != candidate.Version.RecordID {
+			continue
+		}
+		// Owner identity and revision, not the numeric ID alone, join placements.
+		byVersion[releaseDigest(candidate.Version)] = validatedHealthRanking(candidate.Steps)
+		if d := candidate.UtilityHorizon; d != nil && d.RecordVersion == *candidate.Version && d.Purpose == "current" && (d.Mode == "shadow" || d.Mode == "enforce") && (d.Status == "eligible" || d.Status == "would_exclude" || d.Status == "excluded") && (d.Reason == "utility_horizon_elapsed" || d.Reason == "utility_horizon_unelapsed") && d.WouldExclude == d.Elapsed {
+			value := d.WouldExclude
+			horizons[releaseDigest(candidate.Version)] = &value
+		}
+	}
+	for i, record := range records {
+		var identity []string
+		if json.Unmarshal([]byte(record.RecordID), &identity) != nil || len(identity) != 3 || identity[0] != kind {
+			continue
+		}
+		version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: identity[1], RecordID: identity[2], RecordRevision: record.VersionID}
+		records[i].RankingSteps = byVersion[releaseDigest(version)]
+		records[i].UtilityHorizonWouldExclude = horizons[releaseDigest(version)]
+	}
+	return records
+}

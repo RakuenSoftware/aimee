@@ -454,9 +454,16 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * row's provenance and governs what the typed-fact drain may later mine from it
  * (memory.h). handle_memory_store derives it from the connection's attestation. */
 char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start);
+char *server_user_memory_recall_native_json(const char *hint, int limit_tokens, int session_start,
+                                            size_t native_bytes);
 cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
+cJSON *memory_user_mcp_supersede_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
+cJSON *memory_hygiene_command(cJSON *req);
+cJSON *memory_evidence_command(cJSON *req);
+cJSON *memory_serve_command(cJSON *req);
+cJSON *memory_claim_card_command(cJSON *req);
 /* Takes the request's authenticated ACCOUNT because only a person's delete
  * DESTROYS; a caller with no account that clears CAP_MEMORY_ADMIN retires the
  * row instead. The response reports which happened via `destroyed`. */
@@ -478,11 +485,18 @@ int handle_memory_restore(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int memory_request_positive_id(cJSON *req, const char *field, int64_t *out);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_serve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_claim_card(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -561,6 +575,11 @@ int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON 
 int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_task_cost(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -695,5 +714,12 @@ int server_active_project_match(const char *cwd, const project_info_t *projects,
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
+/* Host bridge to the task state and memory owners. */
+cJSON *action_receipt_command(cJSON *input);
+int handle_action_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+cJSON *task_projection_command(cJSON *input);
+cJSON *memory_task_promotion_command(const cJSON *req);
+int handle_task_projection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 #endif /* DEC_SERVER_H */

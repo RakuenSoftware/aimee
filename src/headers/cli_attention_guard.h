@@ -21,6 +21,8 @@
 #include <stddef.h>
 typedef struct cJSON cJSON;
 
+const char *attn_tool_cwd(const char *cwd, const cJSON *input);
+
 /* Client-neutral worktree router used by direct attention-guard hooks and by
  * the full hooks.pre path. Returns 0 with an owned replacement input, 1 when no
  * rewrite applies, -2 on provisioning failure, and -3 on cross-session access. */

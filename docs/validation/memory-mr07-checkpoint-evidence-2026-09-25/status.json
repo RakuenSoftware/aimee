@@ -1,0 +1,23 @@
+{
+  "proposal": "MR-07",
+  "complete": false,
+  "mr08_started": false,
+  "validation": {
+    "execution_policy_race_exit": 0,
+    "native_attention_guard_exit": 0,
+    "lint_exit": 0,
+    "lint_checks": 77,
+    "go_vet_exit": 0
+  },
+  "candidate_deployed": false,
+  "production_release": "0.4.5",
+  "production_healthy_containers": 3,
+  "local_thinclient_status": 200,
+  "remaining": [
+    "Authenticated existing task/session durable storage adapter and session-wide allowance across tasks/processes",
+    "Issuance from final memory coverage/source-version plan",
+    "Shared live attention-guard and execution-policy decision, host tool outcome observation and expansion surface",
+    "Frozen paired-workload calibration/noninferiority and fresh CT109 acceptance",
+    "All MR-08 implementation and validation"
+  ]
+}

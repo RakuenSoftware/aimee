@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http.h"
+#include "server_error_kind.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -63,7 +64,18 @@ int server_http_declared_status(const char *json)
     * generic failed-upstream status. */
    cJSON *result = cJSON_GetObjectItemCaseSensitive(doc, "status");
    if (status == 200 && cJSON_IsString(result) && strcmp(result->valuestring, "error") == 0)
+   {
       status = 502;
+      /* Opaque owner replies may not have passed through a command wrapper.
+       * Ask the existing status provider; keep the raw owner reply unchanged. */
+      cJSON *classification = cJSON_CreateObject();
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(doc, "kind"));
+      server_error_kind_apply(classification, kind);
+      const cJSON *classified = cJSON_GetObjectItemCaseSensitive(classification, "http_status");
+      if (cJSON_IsNumber(classified) && classified->valueint >= 400 && classified->valueint <= 599)
+         status = classified->valueint;
+      cJSON_Delete(classification);
+   }
    cJSON_Delete(doc);
    return status;
 }

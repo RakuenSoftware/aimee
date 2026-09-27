@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "server.h"
+#include "request_context.h"
 
 typedef struct
 {
@@ -147,9 +148,59 @@ static void test_close_idle_pool_reaps_immediately(void)
    ctx_free(ctx);
 }
 
+static void context_job(void *arg)
+{
+   const request_context_t *request = request_context_get();
+   assert(request && strcmp(request->principal, "uid:1000") == 0);
+   assert(strcmp(request->request_id, "captured-request") == 0);
+   assert(request->request_budget_present == 1);
+   assert(strcmp(request->request_budget_limits, "{\"max_request_bytes\":0}") == 0);
+   assert(request->context_refused == 1);
+   assert(strcmp(request->memory_source_release, "host-source-handle") == 0);
+   gated_job(arg);
+}
+
+static void anonymous_context_job(void *arg)
+{
+   assert(request_context_get() == NULL);
+   gated_job(arg);
+}
+
+static void test_request_context_survives_queue_without_leaking(void)
+{
+   server_ctx_t *ctx = ctx_new();
+   gate_t first, second;
+   gate_init(&first);
+   gate_init(&second);
+   request_context_t request = {0};
+   snprintf(request.principal, sizeof(request.principal), "uid:1000");
+   snprintf(request.request_id, sizeof(request.request_id), "captured-request");
+   request.request_budget_present = 1;
+   snprintf(request.request_budget_limits, sizeof(request.request_budget_limits),
+            "{\"max_request_bytes\":0}");
+   request.context_refused = 1;
+   snprintf(request.memory_source_release, sizeof(request.memory_source_release),
+            "host-source-handle");
+   request_context_set(&request);
+   assert(server_session_pool_submit(ctx, "sid-context", context_job, &first, NULL) == 0);
+   request_context_clear();
+   wait_for_gate_running(&first);
+   assert(server_session_pool_submit(ctx, "sid-context", anonymous_context_job, &second, NULL) ==
+          0);
+   release_gate(&first);
+   wait_for_gate_running(&second);
+   release_gate(&second);
+   server_session_pool_close(ctx, "sid-context");
+   wait_for_session_pool_removed(ctx, "sid-context");
+   gate_destroy(&first);
+   gate_destroy(&second);
+   ctx_free(ctx);
+}
+
 int main(void)
 {
    printf("server_session_pools: ");
+   test_request_context_survives_queue_without_leaking();
    test_close_reaps_after_active_job_finishes();
    test_close_idle_pool_reaps_immediately();
    printf("ok\n");

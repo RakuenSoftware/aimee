@@ -42,6 +42,9 @@ const method_policy_t method_registry[] = {
     {"trajectory.export", CAP_SESSION_READ, "trajectory export"},
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
+    {"memory.hygiene", CAP_MEMORY_WRITE, "inspect scoped hygiene and queue review proposals"},
+    {"task.projection", CAP_MEMORY_WRITE,
+     "operate on owned disposable task state and promotion drafts"},
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
     /* Destructive: hard-deletes the row and its provenance, and the audit event
      * carries only the id — the content is not recoverable afterwards. Graded
@@ -55,6 +58,8 @@ const method_policy_t method_registry[] = {
     {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
     {"memory.restore", CAP_MEMORY_ADMIN, "restore a rejected memory"},
     {"memory.review_list", CAP_MEMORY_READ, "review visible memories"},
+    {"memory.correction_proposals", CAP_MEMORY_READ, "inspect correction drafts"},
+    {"memory.review_correction", CAP_MEMORY_WRITE, "review a correction draft"},
     {"memory.reembed_start", CAP_INDEX_ADMIN, "stage a memory embedding version"},
     {"memory.reembed_cutover", CAP_INDEX_ADMIN, "activate a memory embedding version"},
     {"memory.reembed_rollback", CAP_INDEX_ADMIN, "restore a memory embedding version"},
@@ -72,6 +77,10 @@ const method_policy_t method_registry[] = {
     {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
     {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
+    {"learning.task_cost", CAP_MEMORY_READ, "report declared task costs without policy promotion"},
+    {"action.receipt", CAP_TOOL_EXECUTE, "inspect and reconcile owned action receipts"},
+    {"learning.application", CAP_MEMORY_WRITE, "record receipt-bound user procedure feedback"},
+    {"memory.receipt_forget", CAP_MEMORY_WRITE, "remove owned encrypted receipt replay payloads"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */
     {"blast_radius.preview", CAP_INDEX_READ, "blast radius preview"},

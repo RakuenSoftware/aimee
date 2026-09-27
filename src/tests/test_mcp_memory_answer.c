@@ -34,6 +34,11 @@ cJSON *memory_store_command(cJSON *args, memory_authority_t authority)
    (void)authority;
    abort();
 }
+cJSON *memory_user_mcp_supersede_command(const cJSON *args)
+{
+   (void)args;
+   abort();
+}
 cJSON *memory_delete_command(cJSON *args, const char *account)
 {
    (void)args;
@@ -146,6 +151,10 @@ char *kb_v1_action_request(const char *action, cJSON *request)
       assert(!strcmp(jo_cstr(request, "id"), "9007199254740993"));
       assert(!cJSON_HasObjectItem(request, "authority"));
       assert(!strcmp(jo_cstr(request, "view"), "mcp"));
+      assert(!strcmp(jo_cstr(request, "idempotency_key"), "mcp-retry-key-001"));
+      const cJSON *version = cJSON_GetObjectItemCaseSensitive(request, "expected_version");
+      assert(!strcmp(jo_cstr(version, "record_id"), "9007199254740993"));
+      assert(!strcmp(jo_cstr(version, "record_revision"), "9007199254740995"));
    }
    cJSON_Delete(request);
    return reply ? cJSON_PrintUnformatted(reply) : NULL;
@@ -294,12 +303,32 @@ int main(void)
       expected_project = "project-a";
       args = cJSON_Parse("{\"verb\":\"update\",\"id\":\"9007199254740993\",\"content\":"
                          "\"replacement\",\"authority\":\"user\",\"project\":\"project-a\"}");
+      cJSON_AddStringToObject(args, "idempotency_key", "mcp-retry-key-001");
+      cJSON *version = cJSON_AddObjectToObject(args, "expected_version");
+      cJSON_AddNumberToObject(version, "schema_version", 1);
+      cJSON_AddStringToObject(version, "owner_id", "00000000-0000-0000-0000-000000000001");
+      cJSON_AddStringToObject(version, "record_id", "9007199254740993");
+      cJSON_AddStringToObject(version, "record_revision", "9007199254740995");
       reply = cJSON_CreateObject();
       cJSON_AddStringToObject(reply, "status", "ok");
       cJSON_AddStringToObject(reply, "text", long_text);
       content = record_tools[i](args);
       assert(!active && !strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), long_text));
       cJSON_Delete(content);
+      if (i == 0)
+      {
+         cJSON *receipt = cJSON_AddObjectToObject(reply, "mutation_receipt");
+         cJSON_AddBoolToObject(receipt, "replayed", 1);
+         cJSON_AddStringToObject(receipt, "commit_id", "fixture-commit");
+         content = record_tools[i](args);
+         cJSON *parsed = cJSON_Parse(jo_cstr(cJSON_GetArrayItem(content, 0), "text"));
+         assert(parsed && !strcmp(jo_cstr(parsed, "text"), long_text));
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+             cJSON_GetObjectItemCaseSensitive(parsed, "mutation_receipt"), "replayed")));
+         cJSON_Delete(parsed);
+         cJSON_Delete(content);
+         cJSON_DeleteItemFromObjectCaseSensitive(reply, "mutation_receipt");
+      }
       cJSON_ReplaceItemInObjectCaseSensitive(reply, "text", cJSON_CreateNumber(7));
       content = record_tools[i](args);
       assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "invalid memory"));

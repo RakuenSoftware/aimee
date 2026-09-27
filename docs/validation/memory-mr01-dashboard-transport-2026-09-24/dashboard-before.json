@@ -1,0 +1,65 @@
+{
+  "http_status": 200,
+  "response": {
+    "status": "ok",
+    "payload": {
+      "scopes": [
+        {
+          "conflicted_memories": 0,
+          "count": 0,
+          "scope": "global"
+        },
+        {
+          "conflicted_memories": 1,
+          "count": 1,
+          "scope": "workspace"
+        },
+        {
+          "conflicted_memories": 19,
+          "count": 10,
+          "scope": "project"
+        }
+      ],
+      "tier_kinds": [
+        {
+          "count": 11,
+          "functional_name": "Observation",
+          "kind": "fact",
+          "tier": "L2"
+        }
+      ],
+      "tiers": [
+        {
+          "count": 0,
+          "functional_name": "Experience",
+          "tier": "L0"
+        },
+        {
+          "count": 0,
+          "functional_name": "Experience",
+          "tier": "L1"
+        },
+        {
+          "count": 11,
+          "functional_name": "Observation",
+          "tier": "L2"
+        },
+        {
+          "count": 0,
+          "functional_name": "World",
+          "tier": "L3"
+        },
+        {
+          "count": 0,
+          "functional_name": "MentalModel",
+          "tier": "L4"
+        },
+        {
+          "count": 0,
+          "functional_name": "Pattern",
+          "tier": "L5"
+        }
+      ]
+    }
+  }
+}

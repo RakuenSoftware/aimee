@@ -132,6 +132,33 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
  (SELECT count(*) FROM memory_event_frames WHERE memory_id=$1 AND evidence_kind='authored')`, id).Scan(&kept); err != nil || kept != 2 {
 		t.Fatal(kept, err)
 	}
+	// Only generated summaries have observed producer inputs. The authored row
+	// remains stored, but its unknown derivation must not masquerade as fresh.
+	summaries, err := backend.Summaries(ctx, id, 10)
+	if err != nil || len(summaries) != 2 {
+		t.Fatal("generated summary observation missing", summaries, err)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT summary_source_change`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET content='Changed canonical source must replace the old headline.' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err = backend.Summaries(ctx, id, 10)
+	if err != nil || len(summaries) != 0 {
+		t.Fatal("stale summaries survived parent edit", summaries, err)
+	}
+	r, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "reindex", args)
+	if status != bus.ModuleStatusOK || r["status"] != "ok" {
+		t.Fatal(r, status)
+	}
+	summaries, err = backend.Summaries(ctx, id, 10)
+	if err != nil || len(summaries) == 0 || !strings.Contains(summaries[0].Summary, "changed canonical source") {
+		t.Fatal("producer did not rebuild observed summary", summaries, err)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT summary_source_change; RELEASE SAVEPOINT summary_source_change`); err != nil {
+		t.Fatal(err)
+	}
 	before := counts()
 	if _, err := tx.Exec(ctx, `RESET ROLE; REVOKE INSERT ON memory_chunks FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
@@ -144,5 +171,17 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	}
 	if _, err := tx.Exec(ctx, `RESET ROLE; GRANT INSERT ON memory_chunks TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDerivedFrameValiditySeparatesTimeHints(t *testing.T) {
+	const parent = "2026-01-01"
+	for _, hint := range []string{"", "sep 12", "yesterday", "now", "infinity", "2026-02-30"} {
+		if got := derivedFrameValidAt(parent, hint); got != parent {
+			t.Errorf("hint %q acquired a validity bound: %q", hint, got)
+		}
+	}
+	if got := derivedFrameValidAt(parent, "2026-09-24T09:00:00.123+09:00"); got != "2026-09-24T00:00:00.123Z" {
+		t.Fatal("absolute frame time lost its instant", got)
 	}
 }

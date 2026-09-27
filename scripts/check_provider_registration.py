@@ -65,6 +65,11 @@ UNREACHABLE = {
         "kb_curator_grounding.c is reached only from kb_curator_extract_code.c, which is absent "
         "from the linked aimee-server binary: 'sidecar temp path too long to quote safely' appears "
         "in aimee-kb and not in aimee-server.",
+    ("kb", "agent_tools_register_action_owner"):
+        "The action callback has the same native-dispatch consumer as agent_tools_register_classifier. "
+        "The Make KB target does not link its owner, and the deployed CT109 KB binary lacks both "
+        "'error: spill store unavailable' and 'git tools are not available on this surface'. "
+        "KB does not dispatch this tool surface or own the DB1 action journal.",
     ("kb", "agent_tools_register_classifier"):
         "posix/agent_runtime.c is in the KB build and calls dispatch_tool_call_ctx, but the path is "
         "absent from the linked aimee-kb binary: strings unique to it ('error: spill store "

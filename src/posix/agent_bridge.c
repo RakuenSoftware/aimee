@@ -249,6 +249,7 @@ typedef struct
    int fd;
    SSL *ssl;
    aimee_core_control_t control;
+   const agent_http_send_guard_t *send_guard;
 } http_conn_t;
 
 static int core_agent_cancelled(void *unused)
@@ -350,6 +351,7 @@ static int conn_open(http_conn_t *conn, const parsed_url_t *url, int timeout_ms)
 {
    conn->fd = -1;
    conn->ssl = NULL;
+   conn->send_guard = NULL;
    if (aimee_core_control_init_timeout(
            &conn->control, timeout_ms > 0 ? timeout_ms : 0, HTTP_CANCEL_POLL_MS,
            agent_request_cancelled ? core_agent_cancelled : NULL, NULL) != AIMEE_CORE_OK)
@@ -576,7 +578,24 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
       off += (int)body_len;
    }
 
-   int rc = conn_write_all(conn, req, (size_t)off);
+   int rc;
+   const agent_http_send_guard_t *guard = conn->send_guard;
+   int64_t response_deadline = conn->control.deadline_ns;
+   if (guard && guard->send_timeout_ms > 0)
+   {
+      int64_t send_deadline = aimee_core_now_ns() + (int64_t)guard->send_timeout_ms * 1000000;
+      if (!response_deadline || send_deadline < response_deadline)
+         conn->control.deadline_ns = send_deadline;
+   }
+   if (guard && (!guard->acquire || !guard->release || guard->acquire(guard->context) != 0))
+      rc = -2;
+   else if (guard && aimee_core_control_check(&conn->control) != AIMEE_CORE_OK)
+      rc = -2;
+   else
+      rc = conn_write_all(conn, req, (size_t)off);
+   conn->control.deadline_ns = response_deadline;
+   if (guard && guard->release)
+      guard->release(guard->context, rc);
    free(req);
    return rc;
 }
@@ -1296,6 +1315,14 @@ int agent_http_post_bytes(const char *url, const char *auth_header, const void *
                           size_t body_len, char **response_buf, int timeout_ms,
                           const char *extra_headers)
 {
+   return agent_http_post_guarded_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                        extra_headers, NULL);
+}
+
+int agent_http_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, const agent_http_send_guard_t *guard)
+{
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1313,12 +1340,14 @@ int agent_http_post_bytes(const char *url, const char *auth_header, const void *
 
    aimee_log(LOG_DEBUG, "agent_http", "connected; sending request to %s:%d (%zu body bytes)",
              pu.host, pu.port, body_len);
-   if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
-                    extra_headers, "aimee/1.0", body, body_len) < 0)
+   conn.send_guard = guard;
+   int sent = send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
+                           extra_headers, "aimee/1.0", body, body_len);
+   if (sent < 0)
    {
       aimee_log(LOG_ERROR, "agent_http", "send_request failed: %s:%d", pu.host, pu.port);
       conn_close(&conn);
-      return -1;
+      return sent;
    }
 
    size_t resp_len = 0;
@@ -1495,6 +1524,15 @@ int agent_http_post_stream_bytes(const char *url, const char *auth_header, const
                                  size_t body_len, agent_http_stream_cb callback, void *userdata,
                                  int timeout_ms, const char *extra_headers)
 {
+   return agent_http_post_stream_guarded_bytes(url, auth_header, body, body_len, callback, userdata,
+                                               timeout_ms, extra_headers, NULL);
+}
+
+int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                         size_t body_len, agent_http_stream_cb callback,
+                                         void *userdata, int timeout_ms, const char *extra_headers,
+                                         const agent_http_send_guard_t *guard)
+{
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
       return -1;
@@ -1503,11 +1541,13 @@ int agent_http_post_stream_bytes(const char *url, const char *auth_header, const
    if (conn_open(&conn, &pu, timeout_ms) < 0)
       return -1;
 
-   if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
-                    extra_headers, "aimee/1.0", body, body_len) < 0)
+   conn.send_guard = guard;
+   int sent = send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
+                           extra_headers, "aimee/1.0", body, body_len);
+   if (sent < 0)
    {
       conn_close(&conn);
-      return -1;
+      return sent;
    }
 
    int status = http_read_response_stream(&conn, callback, userdata);

@@ -28,11 +28,13 @@ const (
 type ReduceReason int
 
 const (
-	ReduceReasonNone       ReduceReason = iota // no lever enabled at this seam
-	ReduceReasonReduced                        // reduction applied
-	ReduceReasonMeasured                       // measure-only: metrics computed, not mutated
-	ReduceReasonSkipNoGain                     // foldable tokens below MinGainTokens
-	ReduceReasonAlready                        // provenance: a prior seam already reduced
+	ReduceReasonNone        ReduceReason = iota // no lever enabled at this seam
+	ReduceReasonReduced                         // reduction applied
+	ReduceReasonMeasured                        // measure-only: metrics computed, not mutated
+	ReduceReasonSkipNoGain                      // foldable tokens below MinGainTokens
+	ReduceReasonAlready                         // provenance: a prior seam already reduced
+	ReduceReasonProtected                       // protected message changed; use original
+	ReduceReasonNotAdmitted                     // candidate failed dispatch admission
 )
 
 // PriceRates are the per-token provider rates the freeze guardrail needs.
@@ -196,6 +198,9 @@ func recallTrack(original *JSONValue, evictedCount int, cfg *ReduceConfig, st *R
 		evictedCount = n
 	}
 	for i := 0; i < evictedCount; i++ {
+		if protectedMessage(original.At(i)) {
+			continue
+		}
 		st.Recall.AddFromText(PrintJSONUnformatted(original.At(i)))
 	}
 	if st.Recall.Len() == 0 || n == 0 {
@@ -222,9 +227,8 @@ func recallTrack(original *JSONValue, evictedCount int, cfg *ReduceConfig, st *R
 // user's turn reads as something the USER said, which is both wrong and a way for
 // evicted text to put words in their mouth.
 //
-// Appends rather than splices, so it cannot land between an assistant tool_use
-// and its matching tool_result — the one structural mistake that would make the
-// request invalid.
+// Insert only before a complete user turn or tool cycle in the retained tail;
+// never between an assistant tool call and its matching result.
 func recallInject(reduced *JSONValue, out *ReduceResult) {
 	if reduced == nil || !reduced.IsArray() || out.RecallHint == "" {
 		return
@@ -235,9 +239,9 @@ func recallInject(reduced *JSONValue, out *ReduceResult) {
 		"them; it is PAGEABLE, not lost:\n")
 	body.WriteString(out.RecallHint)
 	note := NewObject()
-	note.Set("role", NewString("user"))
+	note.Set("role", NewString("assistant"))
 	note.Set("content", NewString(body.String()))
-	reduced.Append(note)
+	insertEvidenceNotice(reduced, note, out.RetainedMsgs)
 }
 
 // Reduce composes the levers over messages and reports the ledger.
@@ -374,6 +378,15 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	// Publish the compress-only result when the fold was disabled or no-opped.
 	if compressedOwned != nil && out.Messages == nil {
 		out.Messages = compressedOwned
+	}
+
+	if out.Mutated && !protectedContextPreserved(messages, out.Messages) {
+		out.Messages, out.Mutated, out.Reason = nil, false, ReduceReasonProtected
+		out.ReducedTokens, out.RemovedTokens = baseline, 0
+		if st != nil {
+			st.Reduced = false
+		}
+		return out
 	}
 
 	// Recompute the reduced/removed forecast once, over whatever view a lever

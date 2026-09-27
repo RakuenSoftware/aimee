@@ -135,7 +135,9 @@ func TestQueryPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA query_command_test;
 CREATE FUNCTION query_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,query_command_test,public;
-CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
+CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2,
  use_count int DEFAULT 0,lifecycle_state text DEFAULT 'active',archive_reason text DEFAULT '',artifact_type text DEFAULT '',artifact_ref text DEFAULT '',artifact_hash text DEFAULT '',
  created_at text DEFAULT pg_now_text('-20 days'),updated_at text DEFAULT pg_now_text());

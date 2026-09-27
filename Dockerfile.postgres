@@ -56,6 +56,7 @@ COPY --from=pgvectorscale-build /pgvectorscale/ /
 COPY --from=storage-build /out/aimee-postgres-storage /usr/local/bin/aimee-postgres-storage
 COPY --chmod=0755 scripts/postgres-secure-entrypoint.sh /opt/aimee/postgres-secure-entrypoint.sh
 COPY --chmod=0755 scripts/postgres-store-init.sh /docker-entrypoint-initdb.d/10-aimee-store-roles.sh
+COPY scripts/postgres-hygiene-role.sql /usr/local/share/aimee/postgres-hygiene-role.sql
 ENV PGDATA=/var/lib/postgresql/data/pgdata \
     AIMEE_STORE_SECURE_DIR=/var/lib/postgresql/data/secure \
     AIMEE_STORE_PUBLIC_TLS_DIR=/run/aimee-store-tls \

@@ -159,7 +159,7 @@ func anthropicEvidenceReason(e *TokenEvidence, ctx *AnthropicContext, json strin
 	if e == nil || ctx == nil ||
 		e.Provider != ProviderAnthropic ||
 		e.ModelSnapshotID != ctx.ModelSnapshotID || e.TokenizerID != ctx.TokenizerID ||
-		e.SerializedSize != len(json) {
+		!e.matchesSerialized(json) {
 		return ReasonTokenizerNotLocalExact
 	}
 	switch e.Source {

@@ -1,0 +1,92 @@
+{
+  "checks": [
+    {
+      "name": "concurrent writes produce distinct IDs",
+      "passed": true
+    },
+    {
+      "name": "concurrent reads preserve full Unicode content",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected 0",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected -1",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected 1.5",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected True",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected []",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected {}",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected '1junk'",
+      "passed": true
+    },
+    {
+      "name": "malformed ID rejected '9223372036854775808'",
+      "passed": true
+    },
+    {
+      "name": "HTTP preserves int64 ID above float precision",
+      "passed": true
+    },
+    {
+      "name": "CLI text preserves int64 ID and content",
+      "passed": true
+    },
+    {
+      "name": "CLI preserves int64 ID above float precision",
+      "passed": true
+    },
+    {
+      "name": "MCP preserves int64 ID above float precision",
+      "passed": true
+    },
+    {
+      "name": "retire exact int64 fixture",
+      "passed": true
+    },
+    {
+      "name": "decimal string ID resolves exact record",
+      "passed": true
+    },
+    {
+      "name": "paused personal owner produces bounded HTTP failure",
+      "passed": true
+    },
+    {
+      "name": "application stays live during memory owner outage",
+      "passed": true
+    },
+    {
+      "name": "supervised owner restart preserves committed content",
+      "passed": true
+    },
+    {
+      "name": "all concurrent records survive owner restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent reads exclude every retired record",
+      "passed": true
+    }
+  ],
+  "timings": {
+    "owner_unavailable_seconds": 65.11001831901376,
+    "owner_recovery_seconds": 2.361191050003981
+  }
+}

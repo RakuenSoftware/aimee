@@ -61,6 +61,7 @@ func handleDirectiveCommand(options handlerOptions, invocation bus.ModuleInvocat
 		request.Operation, request.State, request.Limit = "directive-list", "open", 20
 	case "directive_briefing":
 		request.Operation, request.State, request.Limit = "directive-current", "open", 5
+		commandScope(args, &request)
 		if n, ok := args.number("limit"); ok && n > 0 {
 			request.Limit = int(math.Min(32, n))
 		}

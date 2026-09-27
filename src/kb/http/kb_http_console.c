@@ -257,6 +257,13 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
    cJSON *context = cJSON_CreateObject();
    cJSON_AddNumberToObject(args, "id", (double)id);
    cJSON_AddStringToObject(args, "reason", reason ? reason : "");
+   const char *conditions[] = {"expected_version", "idempotency_key", NULL};
+   for (int i = 0; conditions[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, conditions[i]);
+      if (value)
+         cJSON_AddItemToObject(args, conditions[i], cJSON_Duplicate(value, 1));
+   }
    cJSON_AddBoolToObject(context, "authenticated", 1);
    cJSON_AddBoolToObject(context, "user_authority", 1);
    cJSON_AddStringToObject(context, "principal", actor.principal);
@@ -276,6 +283,9 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
                    : rc == 1 && (!strcmp(jo_cstr(reply, "kind"), "unauthorized") ||
                                  !strcmp(jo_cstr(reply, "kind"), "forbidden"))
                        ? 403
+                   : rc == 1 && (!strcmp(jo_cstr(reply, "kind"), "invalid_argument") ||
+                                 !strcmp(jo_cstr(reply, "kind"), "unsupported_mode"))
+                       ? 400
                    : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "conflict") ? 409
                                                                             : 503;
       cJSON_Delete(reply);

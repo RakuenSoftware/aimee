@@ -180,6 +180,53 @@ static void test_mcp_chdir_session_cwd_precedes_proxy_cwd(void)
    teardown_git_repo();
 }
 
+static int detached_unrelated_probes;
+static int detached_path_stat(const workspace_provider_t *ws, const char *path, ws_stat_t *st)
+{
+   (void)ws;
+   memset(st, 0, sizeof(*st));
+   st->exists = st->is_dir = strcmp(path, g_tmpdir) == 0;
+   return 0;
+}
+static char *detached_path_exec(const workspace_provider_t *ws, const char *cmd, int *rc)
+{
+   (void)ws;
+   if (strcmp(cmd, "pwd -P") == 0 && strcmp(run_cmd_get_cwd(), g_tmpdir) != 0)
+   {
+      detached_unrelated_probes++;
+      *rc = 1;
+      return strdup("missing server-only root");
+   }
+   return run_cmd(cmd, rc);
+}
+static void test_detached_authorization_only_probes_target_roots(void)
+{
+   char unrelated[256];
+   snprintf(unrelated, sizeof(unrelated), "%s/server-only-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(unrelated));
+   assert(config_workspace_add(unrelated, "shared", NULL, NULL) == 0);
+   setup_git_repo();
+   setup_ownership_db();
+   workspace_provider_t ws = {0};
+   ws.kind = WS_PROVIDER_DETACHED;
+   ws.stat = detached_path_stat;
+   ws.exec_shell = detached_path_exec;
+   workspace_provider_set_active(&ws);
+   detached_unrelated_probes = 0;
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", g_tmpdir);
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == 1);
+   assert(detached_unrelated_probes == 0);
+   assert(strcmp(run_cmd_get_cwd(), g_tmpdir) == 0);
+   cJSON_Delete(args);
+   run_cmd_set_cwd(NULL);
+   workspace_provider_set_active(NULL);
+   teardown_ownership_db();
+   teardown_git_repo();
+   assert(config_workspace_remove(unrelated) == 0);
+   assert(rmdir(unrelated) == 0);
+}
+
 static void test_explicit_path_is_authoritative_and_live(void)
 {
    setup_git_repo();
@@ -4153,6 +4200,7 @@ int main(void)
    test_git_status_modified();
    test_mcp_chdir_uses_cwd_argument();
    test_mcp_chdir_session_cwd_precedes_proxy_cwd();
+   test_detached_authorization_only_probes_target_roots();
    test_explicit_path_is_authoritative_and_live();
    test_mcp_chdir_repairs_stale_delegate_tracked_cwd();
    test_mcp_chdir_keeps_stale_delegate_cwd_when_repair_missing();

@@ -1,0 +1,3 @@
+kb upgraded and healthy
+server upgraded and healthy
+upgrade actual exit 0

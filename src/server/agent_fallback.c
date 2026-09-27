@@ -121,8 +121,8 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
     * is still valuable for availability, just a bigger semantic jump — so it is
     * the second choice, not the first. A legacy agent has no ':' and therefore no
     * siblings, which makes pass 0 empty and costs it nothing. */
-   for (int pass = 0; pass < 2 && rc != 0; pass++)
-      for (int i = 0; i < cfg->agent_count && rc != 0; i++)
+   for (int pass = 0; pass < 2 && rc != 0 && rc != AGENT_RC_CONTEXT_REFUSED; pass++)
+      for (int i = 0; i < cfg->agent_count && rc != 0 && rc != AGENT_RC_CONTEXT_REFUSED; i++)
       {
          agent_t *peer = &cfg->agents[i];
          /* agent_same_registration compares the STORED registration, never a

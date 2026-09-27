@@ -34,6 +34,16 @@ int main(void)
    kb_cache_invalidate_all();
    assert(kb_cache_get("k1") == NULL); /* flushed */
 
+   /* A fetch that started before erasure cannot repopulate the cache. */
+   uint64_t old_generation = kb_cache_observe();
+   kb_cache_invalidate_all();
+   kb_cache_put_observed("late-private-copy", "erased payload", old_generation);
+   assert(kb_cache_get("late-private-copy") == NULL);
+   kb_cache_put_observed("fresh-copy", "current payload", kb_cache_observe());
+   v = kb_cache_get("fresh-copy");
+   assert(v && strcmp(v, "current payload") == 0);
+   free(v);
+
    /* --- LRU eviction past capacity (256): oldest key gone, newest present --- */
    char key[32];
    for (int i = 0; i < 300; i++)

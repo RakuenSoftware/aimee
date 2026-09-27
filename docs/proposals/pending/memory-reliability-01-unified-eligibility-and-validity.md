@@ -1,6 +1,6 @@
 # MR-01: Unified retrieval eligibility and validity
 
-- **State:** In progress; shared current-state retrieval predicates implemented
+- **State:** Complete — implementation and acceptance validated 2026-09-24
 - **Priority:** P0: correctness foundation
 - **Owner:** Go memory module, with PostgreSQL storage and authenticated transport integration
 - **Depends on:** None; use the fixture harness in [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) from the first change
@@ -18,41 +18,19 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v6` predicate now applies active lifecycle, explicit
-suppression and half-open valid time before lexical, active-version whole-record
-semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
-recall-bundle, activation and briefing limits. Pending commitments use the same
-valid-time gate with their pending lifecycle. Sticky activation does not override
-validity, and briefing activity/entity aggregates require current parents. Memory-backed graph evidence uses the same predicate; semantic edge time
-bounds use the same timestamp adapter. Mixed graph evidence requires every memory
-source to resolve inside the current request audience, including exact-scope
-queries; visible evidence cannot admit a hidden or expired dependency. UTC wall timestamps and offset-bearing
-forms normalize to instants, using the storage transaction's captured clock.
-Malformed or relative/infinite governed times refuse retrieval rather than becoming open
-endpoints. Corpus baseline policy fingerprints include this eligibility version.
+Both Go placements implement `current-validity-v11`, host-bound
+EligibilityContext, transaction-captured time, declared current/historical and
+diagnostic semantics, and versioned context release protected through explicit
+send completion. Scope, lifecycle, time and required-parent checks precede
+ranking and limits across the serving inventory. Unsupported temporal modes
+fail explicitly. No C eligibility fallback is permitted.
 
-Restricted-role replay covers current/future/expired/suppressed and excluded
-lifecycle states, scope isolation, exact boundary instants, non-UTC sessions,
-malformed timestamps, and recovery. Dense/unit and PageRank fixtures include
-otherwise perfectly matching future/expired sources. Bundle, activation and
-briefing fixtures prove backfill with high-ranked invalid rows exceeding section
-limits. Directive/reminder match and briefing views now share normalized expiry;
-sweeps use the same exact upper boundary. PostgreSQL replay covers offsets,
-pre-limit exclusion, malformed timestamps and recovery. Operator lists preserve
-unswept lifecycle state. Assertion world-valid and belief-time SQL now preserves
-stored offsets and fractions and uses the same inclusive-start/exclusive-end
-semantics, with non-UTC replay coverage. Direct-ID current reads use the same predicate. Legacy `as_of` inspection retains
-superseded, archived and retired versions while refusing deleted, rejected,
-revoked, quarantined and unknown lifecycle states, plus suppressed active rows.
-This preserves diagnostic `valid_at` labeling rather than claiming a new
-historical reconstruction contract. Mutation admission stays separate from
-serving eligibility so excluded active rows can still be retired when authorized.
-The public anchor format remains
-second-precision UTC. Current typed-fact blocks share assertion time checks and
-require every memory parent to remain current/visible before limits. Late entity
-discovery/read errors refuse the complete block. This does not complete the host
-privilege vocabulary, all assertion-parent/cache surfaces, historical/belief-time
-modes, final-release generation checks or the validity command below.
+The [final closeout](../../validation/memory-mr01-closeout-2026-09-24.md)
+records 1,973 passing process checks, full PostgreSQL/race and export checks,
+native ingress tests and all 77 lint gates. The
+[seven-gate checklist](memory-reliability-01-closeout.md) and
+[serving inventory](memory-reliability-01-serving-inventory.md) map evidence to
+the unchanged contract below. MR-02 through MR-18 are not certified by this result.
 
 ## Contract
 
@@ -98,3 +76,17 @@ Compare old/new decisions on authorized fixtures and sampled shadow requests. Sh
 This proposal does not change canonical taxonomy, turn confidence into probability or make all stores share one database. No numeric relevance boost can override an ineligible decision.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+
+The [negation-lane follow-up](../../validation/memory-program-gates-2026-09-23.md)
+applies this same predicate before the optional negation candidate cap. Its
+restricted-role fixture reproduces expired/future re-entry and verifies that
+invalid candidates cannot crowd out eligible evidence.
+
+The [linked relation input repair](../../validation/memory-linked-relation-inputs-2026-09-23.md)
+binds generated relation text to every directly copied memory revision. Search,
+entity edges and profiles withhold changed, expired, hidden or unobserved inputs
+before limits and aggregation; rebuilding refreshes the observations. A packaged
+PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
+and exported owner pass; final fresh-image validation is recorded in the closeout above. Automatic
+dependent rebuilding belongs to the later freshness proposals.

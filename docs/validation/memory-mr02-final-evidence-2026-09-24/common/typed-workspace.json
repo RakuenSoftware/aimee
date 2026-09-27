@@ -1,0 +1,205 @@
+{
+  "context_accounting": {
+    "schema_version": 1,
+    "boundary": "typed_memory_projection",
+    "unit": "utf8_bytes",
+    "count_state": "exact",
+    "token_count_state": "unavailable",
+    "max_context_bytes": 1048576,
+    "rendered_bytes": 1439,
+    "digest": "sha256:832bfbbcae9e9fa0a031c11ee98f3e567b478ba55ffe4cea959e41e055c90c1e"
+  },
+  "projection_schema_version": 1,
+  "selection_digest": "sha256:c635b04d60113d2ff99bf7cff677047e7386dbd713686d4fc40d4e29b1924325",
+  "projection_digest": "sha256:832bfbbcae9e9fa0a031c11ee98f3e567b478ba55ffe4cea959e41e055c90c1e",
+  "rendered_bytes": 1439,
+  "token_count_state": "unavailable",
+  "retained_items": [
+    {
+      "channel": "current_assertions",
+      "stable_id": "41",
+      "source_version": {
+        "record_kind": "semantic_assertion",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+          "record_id": "41",
+          "record_revision": "1"
+        },
+        "memory_parents": [
+          {
+            "schema_version": 1,
+            "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+            "record_id": "11",
+            "record_revision": "2"
+          }
+        ],
+        "memory_parent_state": "observed",
+        "read_policy": {}
+      }
+    },
+    {
+      "channel": "episodes",
+      "stable_id": "8",
+      "source_version": {
+        "record_kind": "memory_episode",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+          "record_id": "8",
+          "record_revision": "1"
+        },
+        "memory_parents": [
+          {
+            "schema_version": 1,
+            "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+            "record_id": "11",
+            "record_revision": "2"
+          }
+        ],
+        "memory_parent_state": "observed"
+      }
+    }
+  ],
+  "source_version_state": "record_versions_observed",
+  "retrieval_availability": "available",
+  "status": "ok",
+  "default_injection": true,
+  "total_budget_tokens": 4096,
+  "used_tokens": 43,
+  "rendered_tokens": 360,
+  "channels": {
+    "approved_procedures": {
+      "enabled": true,
+      "budget_tokens": 500,
+      "used_tokens": 0,
+      "status": "ok",
+      "items": []
+    },
+    "current_assertions": {
+      "enabled": true,
+      "budget_tokens": 2048,
+      "used_tokens": 27,
+      "status": "ok",
+      "items": [
+        {
+          "assertion_id": 41,
+          "version": 1,
+          "subject": "mr01-lanes-18a5647300e54556936a00506430eb01-root",
+          "relation": "uses",
+          "object": "mr01-lanes-18a5647300e54556936a00506430eb01-workspace",
+          "assertion_kind": "world_fact",
+          "lifecycle_state": "persistent",
+          "authority_rank": 80,
+          "confidence_class": "A",
+          "confidence": 0.9,
+          "valid_from": "",
+          "valid_until": "",
+          "asserted_at": "",
+          "superseded_at": "",
+          "historical": false,
+          "support_count": 1,
+          "contradiction_count": 0,
+          "evidence": [
+            {
+              "source_kind": "memory",
+              "source_id": "memory:11",
+              "source_span": "",
+              "observed_at": "",
+              "stance": "supports"
+            }
+          ],
+          "retrieval": [
+            {
+              "channel": "lexical",
+              "raw_score": 2.7,
+              "fused_score": 0.03278688524590164,
+              "rank": 1
+            },
+            {
+              "channel": "vector",
+              "raw_score": 0.6979832261199723,
+              "fused_score": 0.03278688524590164,
+              "rank": 1
+            }
+          ],
+          "hop_depth": 0,
+          "inclusion_reason": "lexical semantic match after lifecycle, authority, and temporal filters",
+          "stable_id": "41",
+          "rendered": "mr01-lanes-18a5647300e54556936a00506430eb01-root uses mr01-lanes-18a5647300e54556936a00506430eb01-workspace"
+        }
+      ]
+    },
+    "episodes": {
+      "enabled": true,
+      "budget_tokens": 2048,
+      "used_tokens": 16,
+      "status": "ok",
+      "items": [
+        {
+          "episode_key": "mr01-lanes-18a5647300e54556936a00506430eb01-workspace",
+          "excerpt": "mr01-lanes-18a5647300e54556936a00506430eb01-workspace episode",
+          "reference_time": "",
+          "source_session": "mr01-lanes-18a5647300e54556936a00506430eb01",
+          "stable_id": "8",
+          "trust": "untrusted_data"
+        }
+      ]
+    },
+    "historical_assertions": {
+      "enabled": false,
+      "budget_tokens": 400,
+      "used_tokens": 0,
+      "status": "disabled",
+      "items": []
+    },
+    "observations": {
+      "enabled": true,
+      "budget_tokens": 500,
+      "used_tokens": 0,
+      "status": "ok",
+      "items": []
+    },
+    "summaries": {
+      "enabled": false,
+      "budget_tokens": 300,
+      "used_tokens": 0,
+      "status": "disabled",
+      "items": []
+    },
+    "working_context": {
+      "enabled": false,
+      "budget_tokens": 500,
+      "used_tokens": 0,
+      "status": "disabled",
+      "items": []
+    }
+  },
+  "packing_trace": [
+    {
+      "channel": "current_assertions",
+      "stable_id": "41",
+      "estimated_tokens": 27,
+      "decision": "included",
+      "reason": "ranked evidence fit channel and total budgets"
+    },
+    {
+      "channel": "episodes",
+      "stable_id": "8",
+      "estimated_tokens": 16,
+      "decision": "included",
+      "reason": "ranked evidence fit channel and total budgets"
+    }
+  ],
+  "watermark": {
+    "durable_at": "2026-09-24 15:41:32",
+    "observations_at": "",
+    "latest_turn_at": "",
+    "durable_lag": false,
+    "status": "known"
+  },
+  "context_sufficiency": "unknown",
+  "sufficiency_reason": "authorized evidence present; task requirements have not been evaluated",
+  "rendered_context": "<memory_data trust=\"untrusted\" authorization=\"none\">{\"current_assertions\":[{\"assertion_id\":41,\"version\":1,\"subject\":\"mr01-lanes-18a5647300e54556936a00506430eb01-root\",\"relation\":\"uses\",\"object\":\"mr01-lanes-18a5647300e54556936a00506430eb01-workspace\",\"assertion_kind\":\"world_fact\",\"lifecycle_state\":\"persistent\",\"authority_rank\":80,\"confidence_class\":\"A\",\"confidence\":0.9,\"valid_from\":\"\",\"valid_until\":\"\",\"asserted_at\":\"\",\"superseded_at\":\"\",\"historical\":false,\"support_count\":1,\"contradiction_count\":0,\"evidence\":[{\"source_kind\":\"memory\",\"source_id\":\"memory:11\",\"source_span\":\"\",\"observed_at\":\"\",\"stance\":\"supports\"}],\"retrieval\":[{\"channel\":\"lexical\",\"raw_score\":2.7,\"fused_score\":0.03278688524590164,\"rank\":1},{\"channel\":\"vector\",\"raw_score\":0.6979832261199723,\"fused_score\":0.03278688524590164,\"rank\":1}],\"hop_depth\":0,\"inclusion_reason\":\"lexical semantic match after lifecycle, authority, and temporal filters\",\"stable_id\":\"41\",\"rendered\":\"mr01-lanes-18a5647300e54556936a00506430eb01-root uses mr01-lanes-18a5647300e54556936a00506430eb01-workspace\"}],\"episodes\":[{\"episode_key\":\"mr01-lanes-18a5647300e54556936a00506430eb01-workspace\",\"excerpt\":\"mr01-lanes-18a5647300e54556936a00506430eb01-workspace episode\",\"reference_time\":\"\",\"source_session\":\"mr01-lanes-18a5647300e54556936a00506430eb01\",\"stable_id\":\"8\",\"trust\":\"untrusted_data\"}]}</memory_data>\n<approved_procedures authority=\"reviewed\" authorization=\"none\">[]</approved_procedures>",
+  "active_context_missing": false
+}

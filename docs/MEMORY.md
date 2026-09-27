@@ -25,6 +25,12 @@ This language boundary does not certify all historical behavioral parity or the
 numbered reliability proposals.
 
 
+The host missing-context marker is a read restriction, never a writable project
+or workspace. Shared store refuses that marker with `active_context_missing`;
+MCP callers must provide real context or explicitly request `scope=all` for a
+global write. Unscoped legacy global writes and private writes retain their
+existing behavior. Canonical Go admission also protects internal store callers.
+
 Shared KB get and ID-based mutations also accept canonical positive decimal-string
 IDs, preserving int64 identities through native JSON transports. Unsafe numeric
 IDs, noncanonical strings and overflow remain invalid. Server delete reports
@@ -92,6 +98,20 @@ unknown states and suppressed active rows. Scope checks still apply. Mutation
 admission reads the scoped identity independently of serving eligibility so an
 authorized caller can retire an excluded active row.
 
+Exact-ID `get` also accepts a versioned `read_policy` object through the data
+stage, public command and HTTP endpoints. With `schema_version: 1`, `mode:
+"current"` uses the storage transaction clock; `mode: "historical"` requires an
+absolute `valid_at` and returns only a retained KB version whose half-open
+interval contains that instant. The response's `read` object reports the applied
+policy and normalized historical time. Unlike legacy `as_of` inspection, an
+out-of-interval version returns `not_found`. Revocation, quarantine, suppression
+and scope rules still apply. The object cannot grant principal or scope authority.
+`believed_at`, unsupported modes/versions, personal historical reconstruction and
+use on other operations explicitly fail; legacy `as_of` cannot be combined with
+the new contract. HTTP classifies unsupported modes/versions as caller errors.
+Historical selection adds no SQL round trip. This is a temporal read contract,
+not yet the complete evidence decision, validity CLI or release-generation receipt.
+
 Directive/reminder matching, recall fallback and briefing views share the same
 normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving
 does not wait for a sweep. Operator lists/dashboard counts retain stored lifecycle
@@ -110,6 +130,76 @@ leave a successful partial block. Operator review/history semantics are separate
 The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
 utility horizons or a final release/revocation generation check.
+
+## Context projection and limits
+
+The Go ingress planner emits version-one `context_limits.max_context_bytes` for
+its assembler. The assembler checks the serialized memory envelope, returns
+exact UTF-8 byte accounting and retained memory IDs, and treats an explicit zero
+as zero. Token caps and reserves currently return `unsupported_mode` because
+complete provider-bound token counting is unavailable. The result certifies
+neither the complete provider request nor source freshness. Typed context keeps
+packing diagnostics outside the prompt, renders reviewed procedures once, and
+reports unknown task coverage until requirements are evaluated.
+
+Typed context optionally accepts `evidence_requirements` schema 1 with a bounded
+`task_revision`, `query_mode: current_state`, and up to 16 subject/relation
+obligations. The Go owner reports role coverage over retained, versioned current
+assertions. Missing, budget-dropped, conflicted and unavailable roles differ from
+ranking confidence. Repacking reevaluates coverage and cannot cure an earlier
+conflict by dropping evidence. Other query modes remain unknown. This opt-in
+coverage describes the memory projection; it does not authorize actions, prove
+answer correctness, attest provider dispatch, or replace source revalidation.
+
+An optional `evidence_requirements.recovery_budget` produces bounded current-state
+lookup proposals for missing required roles. `evidence_recovery` is metadata with
+`authority=proposal_only`; the host must separately admit and execute work. The
+plan is regenerated after packing and never changes coverage by itself. Caps are
+one round, 16 new items, 4096 estimated tokens, 2000 ms and zero external model
+cost. Budget-dropped/conflicting/unavailable evidence is not blindly retried.
+See the [planner validation](validation/memory-recovery-plans-2026-09-23.md).
+
+The host's assembly allocation is an inherited ceiling: an explicit byte cap may
+reduce it but cannot increase it. An absent cap inherits that ceiling. Versioned
+limits reject duplicate fields (including escaped aliases), case aliases, null
+values, unknown fields and invalid integers. Explicit null limit objects are
+rejected at the ingress and typed-context command boundaries.
+
+## Memory invalidation producers
+
+Personal storage now records a monotonic `record_revision` and a content-free
+invalidation event atomically with each governed row mutation. A collection row
+serializes event positions in commit order; rollback restores both position and
+event. Deletes retain an invalidation. Runtime roles may read the stream but
+cannot advance or erase its progress. Source IDs are immutable. Counter-only
+updates do not invoke the capture trigger, avoiding content serialization and
+invalidation during ordinary reads.
+
+The host-only data operation `change-feed` accepts `changes` with
+`schema_version: 1`, an optional `after: {owner_id, generation}` cursor and a
+bounded `limit` (default 64, maximum 256). It reads the current head and page in
+one SQL snapshot. A new consumer, changed owner, cursor beyond the current head or missing
+event requires a new canonical snapshot (`snapshot_required: true`); the feed
+does not supply that snapshot or acknowledge consumer application. Events remain
+retained. Server/personal placement uses the instance-local collection. Shared
+KB placement uses the request's explicit primary scope and includes `collection`
+in its cursor. A cursor from another collection requires resynchronization.
+All-scope feed requests and non-host access are refused.
+
+Shared record mutations advance separate counters for affected primary scopes;
+a scope move advances both the old and new collections. Unrelated scopes can
+commit independently. Secondary tag changes advance the parent record's revision
+and primary collection, and secondary tags inherit parent visibility through RLS.
+The journal never exposes a hidden parent's identity through a secondary tag.
+Empty collections retain owner identity with generation zero without a read-side
+write. Existing KB audit envelopes also record the new row revision.
+
+This is the producer foundation for MR-02. Personal content history, further
+governed child/dependency coverage, durable consumer checkpoints and release checks remain
+separate work; the feed cannot certify derivative freshness by itself. Backup
+restoration must rotate the producer identity before replay resumes; automatic
+restore identity rotation and restore-resistant erasure intent are not implemented
+by this producer slice.
 
 ## Canonical KB mutation admission
 
@@ -246,120 +336,7 @@ state what is retained and retired. This first manifest does not certify real-mo
 quality, historical C ranking parity, temporal reproducibility or the full release
 matrix. Existing aggregate-only baselines require explicit regeneration.
 
-## Go caller migration
 
-`server-go/modules/memory/client.go` and `public_commands.go` implement the Go
-caller for all eight stages using the existing module bus. It shares wire constants and request/result
-types with the handler, bounds requests and replies, and preserves transport
-errors without retries or local memory decisions. The caller supplies its admitted
-bus connection and trace ID. Scope travels unchanged to the placement owner for
-validation. A request context can shorten the configured call deadline.
-
-The live `aimee-memory-bus-probe` now uses this client. Its principal remains
-test-only and requires an explicit probe grant. The client borrows the connection;
-its owner must drain the concurrent bus caller before detaching.
-
-The first G0 implementation slice from the memory reliability proposals supplies
-the Go client. The next slice removes the unused native fact-gate and extraction
-callbacks, their Server registrations, and the obsolete C fixture generator.
-It also deletes the unused inline context-assembly helpers and their C-only test.
-The Go client/handler conformance tests retain the frozen historical fixtures;
-DB2 ingest tests inject candidates directly into their commit-path fixture.
-The remaining fact-gate header contains only legacy DB2 result codes.
-
-PII classification and the credential write boundary now execute together with
-their Go operations. `fact-write-decision` returns the ontology verdict and
-commit eligibility in one reply; an incomplete decision defers the DB2 write.
-Query-scoped typed-fact recall classifies the query in Go rather than accepting
-a native caller's PII flag. The native PII callbacks, their headers and their
-binary gate/PII encoders are deleted. The live process smoke test uses the Go
-client in both placements, including concurrent calls and version rejection.
-
-The server's private-memory public commands now pass their argument objects
-through the shared module command dispatcher to stage 8. Go validates arguments,
-supplies the user scope, applies defaults, and builds the complete public reply.
-The server only selects the explicit user/KB destination and applies its HTTP
-error classification. Shared-KB commands still use the native KB client. The KB recall endpoint now
-passes its complete argument object to stage 8. Migrated KB verbs are declared
-by Go at the common discovery stage (255) and invoked by the generic host
-dispatcher; the remaining verbs still use their native handlers.
-The command wire tests cover the existing CMPQ/CMPS frame, while Go tests cover
-private scope isolation, mutation defaults, missing records, and typed failures.
-
-Go owns recall section caps, identity-prefix selection, and complete-bundle
-budgeting in both placements. KB recall also includes always-on hard rules and
-the prompt-consumer `memory_id`, `text`, and `why` fields for reminders and
-directives. Unexpired open directives provide the fallback when none match the
-hint; only directives retained in the returned bundle increment surfaced counts,
-within the request transaction. Required reads and counter writes fail the
-request rather than returning an empty successful bundle.
-
-The budget estimate uses four serialized UTF-8 bytes per token, including all
-record aliases and metadata. Defaults remain 600 per turn and 1800 at session
-start, clamped to 64–8192. Whole rows are removed in reverse section priority,
-with hard rules last. If the required empty envelope alone exceeds a tiny budget,
-`budget_exceeded` reports that explicitly. This is the owner's bundle budget;
-the remaining native Server composition still needs final merged-payload
-budgeting during its migration.
-
-Go data-stage store/update/supersede/delete/reject/restore operations now publish
-content-free action observations on the owning daemon's audit bus after the
-request transaction commits or rolls back. Only a fingerprint of the kind/key
-identity is emitted; content and prose reasons are excluded. Publication uses
-the existing ACTION wire and a narrowly granted notification capability on
-principal 73. Ring backpressure is bounded, and a publish failure is logged
-without misreporting a committed mutation as rolled back. Enqueue success is
-not a durability acknowledgement: the KB's transactional SQL WORM record remains
-the durable mutation record. Background/direct-store mutations and pre-dispatch
-refusals still need observation coverage before the native audit hooks can be
-retired; the current request-level events do not claim that coverage.
-
-KB recall decodes conversation activation snapshots in Go. Cooldown, delay, and
-suppression are applied before each section cap; sticky state can preserve
-relevance but cannot override cooldown. Graph-expanded candidates pass the same
-gate and eligible lexical candidates backfill held rows. Missing conversation
-state fails open, while stored suppression remains effective. Recall does not
-advance the DB1 conversation turn or write reinforcement signals. PostgreSQL
-regressions cover the selector, graph backfill, public command, malformed state,
-and sticky/cooldown boundaries; DB1 owner tests cover persisted turns and events.
-The native activation header, snapshot parser, and discarded-snapshot wrapper
-are deleted. The local PostgreSQL fixture runs with `AIMEE_MEMORY_EVAL_URL`.
-
-The public KB prospective-memory and directive commands now validate and shape
-their replies in Go, including dashboard cards and session-start Markdown.
-The native KB adapters and memory CRUD wrappers for those operations are retired. PostgreSQL tests
-cover create/list/match/trigger/complete/expire, directive deduplication,
-priority zero, terminal states, 256-row lists, dashboards, and briefing filters.
-Reminder matching uses PostgreSQL text search so morphological matches survive
-the migration. Directive metrics count actual inserts, not duplicate requests.
-Maintenance and lint commands also render their complete results in Go. A
-maintenance dry run no longer writes the last-run timestamp and delays the next
-real cycle. Unused native background-embedding hooks and their suppression state
-are deleted; the Go embedding worker and explicit embedding operations remain.
-Graph queries, entity profiles, episode lookup, provenance, links, conflict
-lists, and health/statistics responses are also assembled in Go. The dashboard
-uses one grouped query for scope counts and includes all unresolved conflicts.
-Derived graph, episode, link, and provenance queries consult their parent memory
-rows so the runtime role's scope policy also protects these child tables.
-PostgreSQL tests exercise these commands with a non-owner role and verify that
-request scope does not remain on the pooled connection.
-The shared command owner also serves key lookup, effectiveness/unused/superseded
-lists, artifact updates, and memory review (including the operator console).
-Review reasons are matched to the memory's exact scope. Diagnostic list caps are
-validated consistently through the 256-row transport limit; PostgreSQL tests
-exercise the actual unused-memory interval binding and public response fields.
-Go declares and dispatches its migrated public KB commands from one route
-table. Fixed modules opt into stage 255 using DCMD/DCMR version 2, which carries
-the invocation stage; host dispatch takes a route snapshot before waiting on the
-bus. Internal dashboard and briefing builders are not declared as RPC actions.
-The legacy plugin version-1 admission and invocation protocol remains compatible.
-Authenticated admission and the server-to-KB transport remain native callers.
-
-The memory module has no native sources or headers. External C hosts retain
-transport and shared protocol declarations as described in Compatibility below;
-the C bus stays C. Memory behavior and its producer/consumer belong in Go. The
-descriptor's `ownership_complete` flag verifies the declared file inventory; it
-does not certify historical behavior or performance parity.
 
 ## Migration history
 
@@ -368,3 +345,132 @@ chronological record. Counts and pending statements there describe their origina
 checkpoint, not the current inventory. Current scope and validation limits appear
 above; the [delivery tracker](proposals/pending/memory-reliability-delivery.md)
 tracks remaining program work.
+
+
+### Observed diagnostic ranking
+
+The diagnose_scoped response returns parts.score_evidence: observed_ranking_steps
+and parts.ranking_steps for the selected candidates. Stages retain actual RRF arm
+ranks and votes, candidate-order resets, negation overlap and PageRank additions.
+Each stage replaces or transforms the preceding score; only the last stage's
+contributions sum to the final score. Earlier ranks and contributions are retained
+as zero-weight metadata in persisted feature_values, with ranking_trace_schema: 1.
+This does not supply native SQL/cosine scores or a complete excluded-candidate trace.
+
+Exact-ID explain_match labels its legacy text-match estimate separately.
+Its MCP scores map remains numeric; score_evidence is an adjacent field.
+Automatic ingress previews retain their established score and byte commitments.
+
+Generated relation search, entity edges and profile aggregation check the exact
+versions and current eligibility of all recorded copied inputs. Generator-owned
+rows without observations await reindexing; authored relations retain their
+existing parent policy. See [linked input validation](validation/memory-linked-relation-inputs-2026-09-23.md).
+
+### Utility horizons (MR-10)
+
+`AIMEE_MEMORY_UTILITY_HORIZON_POLICY` is an optional operator-owned JSON artifact
+in the memory process environment. Restart both owners to switch it atomically
+with the deployment. An absent artifact preserves the existing eligibility
+rules. Malformed configuration refuses owner initialization. Requests and stored
+model text cannot supply this policy.
+
+The artifact has `mode` (`shadow` or `enforce`), a `policy`, and up to 128 exact
+record-version `overrides`. Policy schema 1 declares its revision,
+`transient_kinds`, `safety`, `domains`, `kinds`, and `unknown_rule` (`exclude` or
+`allow`). There is no wildcard or default duration for other kinds. A rule has
+an ID, `duration_seconds` (0 through ten years), `anchor` (`created` or
+`confirmed`), and an optional absolute `deadline` which can only shorten that
+rule's deadline. Explicit deadlines must have at most microsecond precision,
+matching the canonical storage clock; finer values are rejected. An example
+shadow artifact is:
+
+```json
+{"mode":"shadow","policy":{"schema_version":1,"revision":"task-state-1","transient_kinds":{"task_state":true},"kinds":{"task_state":{"id":"task-day","duration_seconds":86400,"anchor":"created"}},"unknown_rule":"exclude"}}
+```
+
+Precedence is safety rule, matching admitted override, domain rule, then kind
+rule. Shared domains are canonical `scope_type:scope_value` values; the private
+domain is `personal`. Overrides carry the complete `MemoryRecordVersion` and a
+rule. A confirmed-anchor override additionally names `confirmation_generation`:
+the protected MR-02 journal's update event for that exact current revision and
+scope. The operator's artifact is the confirmation admission; the existence of
+an arbitrary update alone does not confirm usefulness. A stale version or
+nonexistent event cannot renew a horizon. Creation anchors come from the
+protected insertion journal, including for records whose editable creation
+metadata changes. Legacy records without journal evidence remain unknown under
+the declared rule. Access counters never create an anchor.
+
+Enforcement joins the shared Go eligibility predicates before lexical, dense,
+graph and bundle limits and again at source release. Retained historical reads
+keep their existing authorization/lifecycle gates. Horizon expiry does not
+change valid time, retire a row, delete history, or remove its vector. Disabling
+the policy restores only horizon eligibility. Validity diagnostics expose the
+actual version, policy digest, anchor, deadline, mode and decision. Selected
+transient records and native ranking traces carry the observed decision; health
+reports distinguish measured would-exclude occurrences from unknowns.
+
+Collection projections bind the artifact digest and the next visible horizon
+boundary as well as canonical generations. A policy revision or elapsed deadline
+invalidates reuse even if there was no memory write. Current payloads retain
+release-time checks; diagnostics are not transferable authorization.
+
+The default stays off. Domain durations require separate historical-task and
+outcome evidence before operator promotion. No learned duration, universal
+expiration, or automatic policy tuning is installed by this implementation.
+
+## Served views and claim cards (MR-12)
+
+`aimee memory serve briefing --task "review the deployment" --store kb --json`
+requests an explicit projection from the selected memory owner. The other views
+are `active_constraints`, `current_state`, `recent_decisions`, `relevant_context`,
+`known_failures`, `reviewed_procedures`, `open_contradictions`, and
+`historical_context`. Historical requests require `--valid_at` or `--believed_at`
+with second-precision UTC coordinates. The default store is private (`user`);
+shared views require `--store kb`. An unavailable private capability is reported
+as an omission, without reading shared data to fill it.
+
+The Go owner applies current eligibility and scope before candidate limits.
+Briefings protect hard rules and scoped constraints ahead of discretionary
+context. Contradiction sides travel as one bundle; a budget cannot retain half
+a contradiction. `--limit 0` and
+`--context_limits '{"schema_version":1,"max_context_bytes":0}'` retain no model
+text. Byte accounting covers the exact rendered memory envelope. Provider-bound
+hard token limits remain explicitly unsupported by this operation, consistent
+with the existing context-budget contract.
+
+HTTP clients use `POST /v1/memory/serve` with `view`, `task`, and the same typed
+options. KB clients use `memory.serve` through the existing Go module action.
+MCP tools `memory_serve` and `memory_claim_card` use the same owner; the
+`memory` family and native core/review toolsets expose them too.
+The named CLI command requires a client with its compiled view marshaller:
+current served argument specs cannot encode nested budget/requirement JSON, so
+no partial spec is published that could silently discard those fields.
+
+Responses separate minimal `rendered_context` from versioned selected-record,
+coverage, omission, freshness and per-channel bundle-count diagnostics. A
+projection receipt binds exact bytes and source versions for this invocation;
+it is not a durable provider-dispatch receipt. Provider handoff must still use
+the normal source-release and MR-06 dispatch receipt gates. Without explicit
+`evidence_requirements`, task sufficiency is unknown, not inferred from a
+nonempty result. Reviewed procedure candidates retain their scope and review
+record; unknown applicability/outcomes are labeled explicitly. Known failures
+require complete recorded origin lineage; a failure label alone is omitted
+with an evidence gap, and does not establish causal generalization.
+
+Projection caching never skips owner reads. Each invocation recomputes current
+scope, eligibility, temporal selection, collection dependencies and coverage on
+the owner. A cache hit reuses serialization only. Request identity includes the
+principal, scope, view, task, exact temporal coordinates, effective budgets,
+requirements, renderer/eligibility policy, collection and selected versions.
+Standby databases cannot certify current views. Empty selections retain their
+collection dependencies, and each invocation receives a new receipt identifier.
+
+`aimee memory claim_card <id> --store kb --json` projects a canonical memory
+record, exact version, authorship, authority, lineage uncertainty, visible
+contradictions and current freshness. `--expand-evidence` additionally reads up
+to sixteen accessible exact-version lineage records within a 16 KiB expansion
+allocation. It does not serve stale copied evidence. The card's `correction`
+descriptor targets the existing `memory.supersede` expected-version operation;
+that owner still decides whether replacement or a review proposal is authorized.
+Cards have no separately editable canonical text. Confidence calibration remains
+unknown unless the underlying owner can establish it.

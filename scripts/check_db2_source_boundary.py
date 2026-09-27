@@ -646,6 +646,19 @@ def enforce_shrink_only(previous: object, current: object) -> None:
         prior = previous_dependencies.get(key)
         if prior is None:
             source, header, resolved = key
+            # The retained native retrieval/attribution writers must preserve the Go owner's
+            # 64-bit source identities. This exact header-only codec replaces
+            # rounded cJSON numbers; it admits no additional host operation.
+            # The transition expires with each retained transport source: a new
+            # source, retargeted header, different class or extra include fails.
+            if (key in {
+                    ("src/modules/db2/c/demotion.c", "json_int64.h", "src/headers/json_int64.h"),
+                    ("src/modules/db2/c/fidelity.c", "json_int64.h", "src/headers/json_int64.h"),
+                }
+                    and count == 1 and classification == "host-api"
+                    and source in previous_source_paths
+                    and source in current.get("source_files", {}).get("c", [])):
+                continue
             admitted = ADMITTED_OUTBOUND_DEPENDENCIES.get(key)
             if admitted is not None and count <= admitted[0] and classification == admitted[1]:
                 continue

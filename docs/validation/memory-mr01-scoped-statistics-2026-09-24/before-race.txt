@@ -1,0 +1,15 @@
+--- FAIL: TestDomainPublicPostgres (0.26s)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    --- FAIL: TestDomainPublicPostgres/scoped_statistics_preserve_operator_lifecycle_coverage (0.00s)
+        public_domain_test.go:360: scoped statistics include foreign rows or omit retained states map[conflicts:301 kind_counts:[4 1 0 1 0 0 0 0 0 0] pagerank_avg_ms:0 pagerank_last_candidates:0 pagerank_last_edges:0 pagerank_last_ms:0 pagerank_max_ms:0 pagerank_samples:0 tier_counts:[0 1 5 0 0 0] total:6]
+    --- FAIL: TestDomainPublicPostgres/scoped_console_effectiveness (0.00s)
+        public_domain_test.go:367: console statistics widened the audience map[conflicts:301 effectiveness:map[avg_effectiveness:0.19999999999999998 high_impact:0 low_effectiveness:6 never_surfaced_l2:5] pagerank:map[avg_ms:0 candidate_samples:0 last_candidates:0 last_edges:0 last_ms:0 max_ms:0 recall_samples:0 samples:0] tiers:map[L0:0 L1:1 L2:5 L3:0 L4:0 L5:0] total:6]
+    --- FAIL: TestDomainPublicPostgres/scoped_dashboard_conflict_endpoints (0.00s)
+        public_domain_test.go:379: dashboard exposed foreign rows or hidden conflict endpoints 6 602
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.273s
+FAIL

@@ -1,0 +1,396 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+check-module-placement: ok (2 daemons, 127 placed stages, 0 known gap(s) recorded)
+check-provider-seams: ok (0 kb-consumed seam(s) registered; retired fact policy absent)
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 1.253s
+
+OK
+check-provider-registration: ok (2 daemons, 27 provider/daemon pairs, 5 recorded unreachable)
+/tmp/tmpf5ivtp82/schema.sql:5: example_apply closes its own changeset without kb_fact_commit_worm_seal(cid, ...)
+check_changeset_worm_seal: 1 of 1 close sites unsealed
+.....check_changeset_worm_seal: resolved 0 changeset close sites in /tmp/tmp7ddzdwdg/schema.sql -- the check is not looking at anything. Fix the pattern, do not delete the check.
+.
+----------------------------------------------------------------------
+Ran 6 tests in 0.058s
+
+OK
+check_changeset_worm_seal: 1 close sites, all sealed
+check_changeset_worm_seal: 5 close sites, all sealed
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.091s
+
+OK
+check_worm_worker_boundary: producer/worker privilege split verified
+gen-subject-corpus-sql: wrote scripts/gen/subject-corpus.sql (12 accepted, 20 refused)
+subject-corpus-check: ok
+check-native-tool-parity: ok (87 MCP tools, 45 native, 4 exempt, 66 pre-existing gaps to work off)
+guidance names 1 tool(s); 20 callable by name, 39 reachable only through a family
+check_guidance_tool_parity: ok (every named tool is callable as written)
+optional-tool ownership: 2 owned name(s) checked against 371 served tool name(s)
+check_optional_tool_ownership: ok (every owned tool name is a real tool)
+module-source-ownership: ok (15 contracts, 1 legacy root)
+go-package-ownership: ok (55 of 55 file(s) outside server-go/modules/ accounted for, 1 skipped as fixtures; 15 named non-module package(s), 5 of them debt)
+module-bus-boundary: ok (80 declared crossings remain)
+check_memory_c_boundary: ok
+memory-ownership: all original files/APIs and external findings classified; C bus retained
+check-module-egress: ok (6 bus-transport clients; direct sockets confined to network owners)
+check-module-egress: plant test passed
+check-core-network-contracts: ok (50 exact file/primitive boundaries constrained)
+check-core-network-contracts: plant test passed
+check_cleanup_ledger: ok (tests/baselines/refactor/cleanup-ledger.json)
+inc-check: ok (0 .inc pending migration to .c; target 0)
+line-check: WARN  cli_main.c has 2393 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes.c has 2364 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_b.c has 2495 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_c.c has 2461 lines (aim for <=1000)
+line-check: WARN  cli_v1_routes_d.c has 2431 lines (aim for <=1000)
+line-check: WARN  client_integrations.c has 2500 lines (aim for <=1000)
+line-check: WARN  cmd_agent_delegate.c has 2131 lines (aim for <=1000)
+line-check: WARN  db1_client/telemetry.c has 2101 lines (aim for <=1000)
+line-check: WARN  kb/http/kb_http.c has 2458 lines (aim for <=1000)
+line-check: WARN  kb/http/kb_http_code.c has 2245 lines (aim for <=1000)
+line-check: WARN  kb/kb.c has 2431 lines (aim for <=1000)
+line-check: WARN  kb/kb_main.c has 2461 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/canonical_index.c has 2054 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/db_postgres.c has 2002 lines (aim for <=1000)
+line-check: WARN  modules/db2/c/fact_mutation.c has 2056 lines (aim for <=1000)
+line-check: WARN  modules/git/git_verify.c has 2084 lines (aim for <=1000)
+line-check: WARN  modules/guardrails/guardrails_orchestrator.c has 2046 lines (aim for <=1000)
+line-check: WARN  modules/kb_client/kb_client.c has 2126 lines (aim for <=1000)
+line-check: WARN  modules/protocols/mcp/mcp_tools.c has 2040 lines (aim for <=1000)
+line-check: WARN  modules/roundtable/delegate_ensemble.c has 2459 lines (aim for <=1000)
+line-check: WARN  modules/skills/skill.c has 2400 lines (aim for <=1000)
+line-check: WARN  modules/tools/agent_tools.c has 2127 lines (aim for <=1000)
+line-check: WARN  modules/tools/agent_tools_dispatch.c has 2480 lines (aim for <=1000)
+line-check: WARN  modules/workflows/wfe_blocks.c has 2276 lines (aim for <=1000)
+line-check: WARN  modules/workspace/workspace.c has 2498 lines (aim for <=1000)
+line-check: WARN  posix/agent_bridge.c has 2050 lines (aim for <=1000)
+line-check: WARN  posix/agent_runtime.c has 2206 lines (aim for <=1000)
+line-check: WARN  server/agent_runtime.c has 2294 lines (aim for <=1000)
+line-check: WARN  server/openai_chat.c has 2033 lines (aim for <=1000)
+line-check: WARN  server/server.c has 2253 lines (aim for <=1000)
+line-check: WARN  server/server_compute.c has 2409 lines (aim for <=1000)
+line-check: WARN  server/server_http.c has 2499 lines (aim for <=1000)
+line-check: WARN  server/server_http_routes.c has 2426 lines (aim for <=1000)
+line-check: WARN  server/server_mcp.c has 2355 lines (aim for <=1000)
+line-check: WARN  server/server_mcp_call_table.c has 2280 lines (aim for <=1000)
+line-check: WARN  server/server_state.c has 2106 lines (aim for <=1000)
+line-check: warnings present (acceptable, but aim to reduce)
+line-check: ok
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.005s
+
+OK
+schema-sync: ok (246 shared tables, 108 DB1-only tables)
+check-schema-duplicates: ok (104 tables across 35 files)
+check-db1-client-contract: ok (471 call sites, 1 with computed arities, 19 kinds)
+check-module-descriptor-sources: EXEMPT while true -- db2 (11 files): descriptor declares no Go sources at all; mid-move under the ruling. Enforced automatically once it declares any
+check-module-descriptor-sources: EXEMPT while true -- mcp (4 files): no descriptor exists, so no principal ref and no event kinds; claiming it is an architectural decision
+check-module-descriptor-sources: ok (414 files claimed, 429 walked, 2 tree(s) currently exempt)
+check-log-prefix-ownership: ok (429 files, 35 module names)
+check-validation-record: ok (1 of 216 record(s) assert a check count and match their script; 214 assert none, 1 marked historical)
+check-lint-targets-reachable: ok (97 check targets; 27 documented as manual)
+check-cited-paths-exist: ok (106 citations resolve)
+check-declared-result-codes: ok (414 operations compared)
+charter-tables: ok (4 charter tables pinned, no rogue stores)
+charter-tables: ERROR rogue table 'learning_artifacts' looks like a parallel artifact/audit store; write into the charter tables instead
+charter-tables: ERROR charter table 'audit_events' declared 2 times in /tmp/tmph2frl92l/schema.sql (must be once)
+charter-tables: ok (4 charter tables pinned, no rogue stores)
+charter-tables: plant-test ok
+scripts/check_tier_deps.sh: PASS
+module-boundary: ok
+
+======================================================================
+PLANTED TEST MODE
+======================================================================
+
+PASS: planted violation correctly detected
+  Found 1 violation(s):
+    - server/server_test.c:1 includes 'kb_internal.h'
+module-boundary: ok
+check_module_inventory: ok (25 required, 10 optional; /home/virant/dev/aimee-pr2990/tests/baselines/modules/canonical-inventory.yaml)
+gen_db2_contract: ok (src/modules/db2/include/aimee/db2/module_api.h, src/modules/db2/include/aimee/db2/client.h, src/modules/db2/client/generated.c, server-go/db2/contract_generated.go, tests/baselines/modules/db2-wire-v1.json)
+gen_db2_extractor_support: ok
+gen_db2_declaration_ledger: ok (tests/baselines/db2/declarations-v1.json)
+check_db2_activation: ok
+background-skill-curator-absence: ok
+check_capability_ownership: ok (13 governance capabilities)
+panel-contract-boundary: ok
+published-compose-images: ok (4 compose image(s), 4 publisher(s))
+dispatch-caps: ok (254 methods, all covered)
+dispatch-caps plant: ok
+kb-v1-coverage: ok (0 legacy kb.* methods pinned; 0 directive RPC methods pinned)
+kb-v1-coverage plant: ok
+kb-target-isolation: ok
+kb-target-isolation plant: ok
+check-vault-only-container-env: ok
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 0.016s
+
+OK
+container-packaging: unified application and optional encrypted store checks passed
+container-packaging: mutation tests passed
+check-deploy-env-consumed: ok (12 emitted key(s) all consumed or recorded; 1 awaiting a consumer)
+check-deploy-env-consumed: plant-test ok (an unconsumed key is named)
+sidecar-clients:
+  embed-remote.py: ok
+  embed-remote.py --serving-id: ok
+  llm-chat.py: ok
+  llm-chat.py reasoning split: ok
+  no baked endpoint defaults: ok
+sidecar-clients: ok
+with a client certificate
+  ok    the handshake completes and the reply is read
+without one
+  ok    an anonymous client is refused
+partially configured
+  ok    missing SYNTHESIS_KEY_FILE is named, not ignored
+
+llm-chat mTLS: ok
+check-docs: ok (853 Markdown files, 140 maintained guides, 2 OpenAPI sources, 7 local images)
+gen-api-docs: docs/gen/api-v1.md up to date (no-op)
+gen-reference-docs: wrote docs/gen/cli-commands.md
+gen-reference-docs: wrote docs/gen/configuration.md
+gen-v1-route-descriptor: wrote 401 routes -> docs/gen/v1-route-descriptor.json
+gen-reference-docs: plant-test ok (unparseable source refused)
+docs-gen-check: ok
+api-conformance-check: ok (91 documented endpoints all routed)
+server-api-conformance-check: ok (379 documented endpoints all routed, no undocumented routes)
+check-v1-method-coverage: ok (249 dispatch methods — 239 op-routed, 13 dedicated, 8 excluded)
+check-cli-v1-routes: ok (all dispatchable methods reachable, marshalled and routed; the route map itself is served by the server)
+check-manifest-emitter-linkage: ok (5 caller->provider edges, 21 test-target linkages and 2 CMake list(s) verified)
+
+0 numeric mismatch(es)
+check-async-op-handlers: ok (16 async routes, 0 bound handlers across 0 file(s), all reply inline)
+check-v1-route-order: ok (401 routes, 1 order-dependent overlap(s), all specific-first: GET /v1/workflow/items/all -> '/v1/workflow/items/all' (over 2 matches))
+check-cli-help-coverage: ok (52/52 routed commands documented, 0 known gaps)
+check-schema-alter-order: ok (2 schema files, every ALTER follows its CREATE)
+check-kb-intelligence-surfaced: ok (9 routes surfaced via aimee-server, 0 kb-direct)
+curator_story:
+  PASS: happy_path: exit 0
+  PASS: happy_path: status ok
+  PASS: happy_path: >=1 character entity
+  PASS: happy_path: character has a name
+  PASS: happy_path: >=1 edge
+  PASS: happy_path: edge has src/dst/relation
+  PASS: happy_path: >=1 canon fact
+  PASS: happy_path: fact carries provenance
+  PASS: fenced_output: parsed through code fences
+  PASS: malformed_stdin: exit 1
+  PASS: malformed_stdin: JSON error envelope
+  PASS: malformed_stdin: no python traceback
+  PASS: non_json_llm: exit 1
+  PASS: non_json_llm: JSON error envelope
+  PASS: non_json_llm: no python traceback
+ok
+gcc -c -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/db2/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 -DAIMEE_VERSION='"v0.4.3-394-g08e95496f"' -DAIMEE_GIT_COMMIT_TIME=1790259890L  -I/home/virant/.local/share/aimee-dev-tools/postgresql/usr/include -DWITH_GZFILEOP -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE -fcf-protection=full -DWITH_PAM -DWITH_LIBSECRET -I/usr/include/libsecret-1 -I/usr/include/gio-unix-2.0 -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -DWITH_GZFILEOP -I/usr/include/libmount -I/usr/include/blkid -I/usr/include/sysprof-6 -pthread -I/usr/include/tss2 -fPIC -o curator-story-check 
+check_aimee_home: ok
+lint: ok (Debian clang-format version 19.1.7 (3+b1))
+validate-corpus: ok (108 queries, 8 categories)
+validate-corpus: ok (ablation matrix, 9 arms)
+validate-corpus: all checks passed
+check-proposal-links: ok (309 proposal links resolve across 121 file(s))
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 0.005s
+
+OK
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-04.tsv: 1 originals, 1 pending proposals, 0 drafted since the snapshot)
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-04.tsv: 1 originals, 2 pending proposals, 1 drafted since the snapshot)
+  not in the PENDING_AUDIT_2026-08-04.tsv snapshot: drafted-later.md
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-04.tsv: 1 originals, 0 pending proposals, 0 drafted since the snapshot)
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-04.tsv: 1 originals, 0 pending proposals, 0 drafted since the snapshot)
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-04.tsv: 1 originals, 1 pending proposals, 0 drafted since the snapshot)
+pending-audit-manifest: ok (PENDING_AUDIT_2026-08-13.tsv: 68 originals, 120 pending proposals, 63 drafted since the snapshot)
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: context-paging-not-compaction.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: context-paging-s2-s5.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: current-stack-roi-experiment-suite.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: dataset-benchmark-direct-track.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-as-a-go-module.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-daemon-side-tables.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-guardrail-state-shape.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-health-is-a-heartbeat-not-a-probe.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-identity-family-blockers.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-module-vendored-cjson.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-structured-payloads.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-the-connection-nobody-uses.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-the-go-wfe-still-opens-the-file.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-transactions-across-the-boundary.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db1-wire-capability-survey.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: db2-as-a-go-module.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: eval-temp-store-schema-relocation.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: governed-recall-decision-record-and-adversarial-memory-measurement.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: kb-optional-module-composition.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: langgraph-module-with-memory-and-delegate-interop.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: live-semantic-context-and-local-fallback.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-query-classification-and-fitted-route-weights.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-00-program.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-01-closeout.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-01-serving-inventory.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-01-unified-eligibility-and-validity.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-02-authority-preserving-mutations.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-03-final-payload-context-budgets.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-04-evidence-lineage-and-independent-support.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-05-context-sufficiency-and-bounded-recovery.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-06-ranking-traces-and-context-receipts.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-07-task-exploration-contracts.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-08-retrieval-health-telemetry.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-09-fair-hybrid-ranking-and-exposure.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-10-deterministic-utility-horizons.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-11-embedding-generations-and-index-freshness.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-12-served-memory-views-and-claim-cards.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-13-disposable-task-projections.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-14-proposal-only-memory-hygiene.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-15-procedure-outcomes-and-task-cost.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-16-evidence-bound-actions-and-composition.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-17-clean-retry-context.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-18-evaluation-parity-and-release-gates.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-delivery.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-g0-closeout.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-migration-history.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-requirements-coverage.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-reliability-retrieval-compatibility.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: memory-table-row-level-security.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: mirror-sync-fails-on-a-large-client-diff.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: module-egress-single-point.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: per-user-content-scope-visibility.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: plugin-modules-and-dynamic-command-registration.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: privacy-data-subject-rights-module.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: recursive-self-improvement-closing-the-loops.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: scoped-memory-and-database-encryption.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: security-compliance-audibility-governance-audit-2026-08-26.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: served-argspec-residual.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: server-driven-thin-client.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: server-served-thin-client.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: session-peer-messaging.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: vault-bus-only-access.md
+  not in the PENDING_AUDIT_2026-08-13.tsv snapshot: verification-last-mile-net-assessment.md
+check-proposal-reconcile: plant-test ok (A/B/C all caught)
+check-proposal-reconcile: 19 warning(s) (report-only):
+  docs/proposals/pending/db1-daemon-side-tables.md: State bullet unrecognised or missing ('RESOLVED. All three are migrated and served; no daemon source calls'); expected in_flight
+  docs/proposals/pending/db1-guardrail-state-shape.md: State bullet unrecognised or missing ('RESOLVED against its own recommendation. The flattened row was'); expected in_flight
+  docs/proposals/pending/db1-health-is-a-heartbeat-not-a-probe.md: State bullet unrecognised or missing ('RESOLVED, by the second option below. Found by running the migrated'); expected in_flight
+  docs/proposals/pending/db1-identity-family-blockers.md: State bullet unrecognised or missing ('PARTLY RESOLVED. remote_client_grant is migrated and served. The'); expected in_flight
+  docs/proposals/pending/db1-module-vendored-cjson.md: State bullet unrecognised or missing ('DECIDED. The second option is implemented. A descriptor may name'); expected in_flight
+  docs/proposals/pending/db1-structured-payloads.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/db1-the-connection-nobody-uses.md: State bullet unrecognised or missing ('RESOLVED. The daemon opens no database. Only the module does, plus'); expected in_flight
+  docs/proposals/pending/db1-the-go-wfe-still-opens-the-file.md: State bullet unrecognised or missing ('RESOLVED. The engine reaches DB1 through the module now, and'); expected in_flight
+  docs/proposals/pending/db1-transactions-across-the-boundary.md: State bullet unrecognised or missing ('OPEN, and narrower than it was written. This blocks ONE source,'); expected in_flight
+  docs/proposals/pending/db1-wire-capability-survey.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/kb-optional-module-composition.md: State bullet unrecognised or missing ('implemented in the 0.4.2 candidate; release validation and publication are in'); expected in_flight
+  docs/proposals/pending/memory-reliability-01-closeout.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-01-serving-inventory.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-delivery.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-g0-closeout.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-migration-history.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-requirements-coverage.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/memory-reliability-retrieval-compatibility.md: State bullet unrecognised or missing (None); expected in_flight
+  docs/proposals/pending/mirror-sync-fails-on-a-large-client-diff.md: State bullet unrecognised or missing ('OPEN. Reproduced and bounded, not diagnosed. Found while'); expected in_flight
+check-proposal-reconcile: 43 premise-drift finding(s) (report-only):
+  docs/proposals/pending/db1-module-vendored-cjson.md: references `src/modules/db1/support/cjson.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/db1-structured-payloads.md: references `scripts/survey_db1_wire.py` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/db1-wire-capability-survey.md: references `scripts/survey_db1_wire.py` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/db2-as-a-go-module.md: references `src/modules/db2/runtime/generated_dispatch.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/eval-temp-store-schema-relocation.md: references `src/modules/benchmarks/agent_eval_benchmarks.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/governance-policy-surface-and-posture.md: references `src/modules/config/config.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/governed-recall-decision-record-and-adversarial-memory-measurement.md: references `src/modules/memory/memory_pii_gate.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/governed-recall-decision-record-and-adversarial-memory-measurement.md: references `src/modules/memory/memory_fact_gate.h` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/memory-auto-population-phase4.md: references `src/modules/memory/memory_pii_gate.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/memory-auto-population-phase4.md: references `src/modules/memory/memory_fact_gate.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/memory-auto-population-phase4.md: references `src/db1/user_memory.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/memory-query-classification-and-fitted-route-weights.md: acceptance check TEST=test_memory_query_classification resolves to no test under src/tests/
+  docs/proposals/pending/memory-query-classification-and-fitted-route-weights.md: acceptance check TEST=test_memory_route_model_default_parity resolves to no test under src/tests/
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/check_optional_module.sh which does not exist
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/test_module_artifact_verification.sh which does not exist
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/test_module_sandbox_hosts.sh which does not exist
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/test_module_lifecycle.sh which does not exist
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/test_loader_safety_boundary.sh which does not exist
+  docs/proposals/pending/module-loader.md: acceptance check references scripts/test_loader_trust.sh which does not exist
+  docs/proposals/pending/plugin-modules-and-dynamic-command-registration.md: acceptance check TEST=test_cli_manifest_static_parity resolves to no test under src/tests/
+  docs/proposals/pending/plugin-modules-and-dynamic-command-registration.md: references `src/db1/mcp_osv_cache.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/privacy-data-subject-rights-module.md: references `src/modules/memory/memory_fact_gate.h` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/privacy-data-subject-rights-module.md: references `src/modules/privacy/module.yaml` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/proposal-evidence-provenance-tiers.md: references `src/tests/test_memory_provenance_integration.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/proposal-evidence-provenance-tiers.md: references `scripts/check_memory_provenance_ownership.py` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/recursive-self-improvement-closing-the-loops.md: references `src/modules/db1/eval.c` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/recursive-self-improvement-closing-the-loops.md: references `src/modules/db1/module.yaml` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/server-driven-thin-client.md: references `src/cli_help_data.h` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/standing-benchmark-cadence.md: references `.github/workflows/bench-nightly.yml` which does not exist in the tree (may be proposed-new)
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_capability_advertisement.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_surface_descriptors.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_static_thin_client.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_registration_chain.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_capability_advertisement.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_static_thin_client.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_advertisement_noninterference.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_surface_keys.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_descriptor_content_safety.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_projection_topology_nondisclosure.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/check_envelope_deadlines.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_capability_absent_indistinguishability.sh which does not exist
+  docs/proposals/pending/thin-client-capability-advertisement.md: acceptance check references scripts/test_static_thin_client_state.sh which does not exist
+  docs/proposals/pending/transactional-turn-rewind-and-session-recovery.md: references `src/db1/fsnap.c` which does not exist in the tree (may be proposed-new)
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.212s
+
+OK
+check-git-cred-centralized: plant-test ok (hand-rolled call detected)
+check-git-cred-centralized: ok (no hand-rolled credential calls in 1153 source file(s); all route through git_cred_inject)
+check-sanitizer-callsites: ok (1 call site(s), corpus covers all kinds)
+check-lessons-isolation: plant-test ok
+check-lessons-isolation: ok (11 recall/prune file(s) clean of lessons_ refs)
+check-md-store-retired: ok (no retired .md-store symbols/routes/files)
+models-dev-snapshot: ok (12 providers, 526 models)
+check_test_tmpdir: ok (89 files, 345 sites, ratchet holding)
+check_tests_are_run: ok (649 run, 50 exempt of 698 defined; 31 source(s) unbuilt)
+check_model_fallback_shadow: ok (4 fallback row(s), 526 catalogued models, no overlap)
+P1 tenant-guard check OK: 19 tenant entrypoints all call db2_tenant_require_pg()
+check_bus_blast_radius: event-bus archive unbuilt (allowed)
+check_bus_blast_radius: ok — connection shared by thin/server/KB; local event bus shared by server/KB only
+check-entrypoint-exit-report:
+  ok: SIGTERM'd server is reported as a termination, not a failure
+  ok: unsignalled exit 1 is still reported as a failure
+  ok: signalled and failed exits differ despite identical status
+  ok: wfe exit names aimee-wfe
+  ok: wfe termination names aimee-wfe
+  ok: empty first defaults to aimee-server
+check-entrypoint-exit-report: ok
+webchat-vault-migration-check: first-boot generation ok
+webchat-vault-migration-check: stdout clean
+webchat-vault-migration-check: ok
+config module boundary: ok (external pure-Go owner; caller contracts only)
+==> check-deployed-image verdicts
+  PASS  plain aimee-kb, current -> ok
+  PASS  aimee-kb-llm-e4b, current -> ok (not drift)
+  PASS  aimee-kb-nomic-llm-e2b, current -> ok
+  PASS  local pin off the repo -> PINNED
+  PASS  right repo, wrong tag -> OFF-CHANNEL
+  PASS  built locally, no registry digest -> drift
+  PASS  recreated without a pull -> STALE
+
+==> Summary: 7 passed, 0 failed
+check-deployed-image: all verdicts correct
+SILENT: 0 file(s)
+LOGGED: 0 file(s)
+FORKED: 0 file(s)
+check-memory-store-degradation: ok (0 memory files touch db2; 0 silent)
+check-actor-authz: plant-test ok (vacated authorization check detected)
+check-actor-authz: ok (9 per-actor authorization checks intact)
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.008s
+
+OK
+check_event_durability: ok (83 header kinds from 116 symbols, 119 declared: 97 ledger, 22 capture, 0 sampled)
+shell-quote-check: quoted-token API and argv-only git sink verified
+workflow-pin-check: all remote actions are commit-pinned
+build-input-integrity-check: executable downloads have digest/signature verification
+config-failopen-check: security accessors default to their safe state
+security-claims-check: 8 release-qualified claims
+lint: all 77 checks passed
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

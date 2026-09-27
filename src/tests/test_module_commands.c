@@ -98,8 +98,9 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
    {
       const char expected[] = "{\"authenticated\":true,\"principal\":\"user:alice\"}";
       assert(get32(req + 16) == sizeof(expected) - 1);
-      assert(body_len == header + 5 + get32(req + 12) + sizeof(expected) - 1);
-      assert(memcmp(req + header + 5 + get32(req + 12), expected, sizeof(expected) - 1) == 0);
+      assert(body_len == header + strlen(expect_verb) + get32(req + 12) + sizeof(expected) - 1);
+      assert(memcmp(req + header + strlen(expect_verb) + get32(req + 12), expected,
+                    sizeof(expected) - 1) == 0);
    }
    last_deadline = deadline;
    last_kind = kind;
@@ -203,6 +204,24 @@ int main(void)
    assert(aimee_module_commands_dispatch_internal_timeout("memory.embed_text", args, -1, &reply) ==
               -1 &&
           reply == NULL);
+
+   context = cJSON_Parse("{\"authenticated\":true,\"principal\":\"user:alice\"}");
+   expect_context = 1;
+   assert(aimee_module_commands_dispatch_internal_context_timeout("memory.embed_text", args,
+                                                                  context, 700, &reply) == 1);
+   assert(last_kind == 5896 && last_stage == 8 && last_deadline == 700);
+   cJSON_Delete(reply);
+   assert(aimee_module_commands_dispatch_internal_context_timeout("plugin.stats", args, context,
+                                                                  700, &reply) == 0 &&
+          !reply);
+   assert(aimee_module_commands_dispatch_internal_context_timeout("memory.stats", args, context,
+                                                                  700, &reply) == 0 &&
+          !reply);
+   assert(aimee_module_commands_dispatch_internal_context_timeout("memory.embed_text", args,
+                                                                  context, 0, &reply) == -1 &&
+          !reply);
+   cJSON_Delete(context);
+   expect_context = 0;
 
    for (malformed = 1; malformed <= 4; ++malformed)
    {

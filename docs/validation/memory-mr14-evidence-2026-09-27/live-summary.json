@@ -1,0 +1,8 @@
+{
+  "candidate": "6a5dc7630",
+  "complete": true,
+  "checks": 22,
+  "canonical_hygiene_writes": 0,
+  "model_calls": 0,
+  "scheduler_enabled_by_default": false
+}

@@ -1,0 +1,6 @@
+{
+  "test": "unit-test-kb-http-routes",
+  "exit_code": 0,
+  "configuration": "isolated HOME; config, module and memory fixtures; real TLS listener and client",
+  "log_sha256": "21a21656e138820961db69f36cf5e13abecdbfb2cb8f8b477eec2bbbfa5189e1"
+}

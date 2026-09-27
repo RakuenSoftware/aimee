@@ -1,0 +1,4 @@
+=== RUN   TestSharedIndexConcurrentClaims
+--- PASS: TestSharedIndexConcurrentClaims (0.42s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.437s

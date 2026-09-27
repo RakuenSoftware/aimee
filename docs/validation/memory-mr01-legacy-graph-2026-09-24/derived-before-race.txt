@@ -1,0 +1,15 @@
+--- FAIL: TestDomainPublicPostgres (0.26s)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    --- FAIL: TestDomainPublicPostgres/legacy_scoped_get_provenance (0.00s)
+        public_domain_test.go:345: public scoped derived read leaked private parent get_provenance [map[action:created created_at:2026-09-24 08:54:18.182613+00 details:secret id:2 memory_id:4 session_id:private]]
+    --- FAIL: TestDomainPublicPostgres/legacy_scoped_link_query (0.00s)
+        public_domain_test.go:345: public scoped derived read leaked private parent link_query [map[created_at:2026-09-24 08:54:18.182613+00 id:9.007199254740998e+15 relation:secret source_id:1 target_id:4]]
+    --- FAIL: TestDomainPublicPostgres/legacy_scoped_conflicts (0.01s)
+        public_domain_test.go:353: public scoped conflict read leaked private parent map[detected_at:2026-09-24 08:54:18.182613+00 id:301 memory_a:1 memory_b:4 resolution: resolved:0]
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.270s
+FAIL

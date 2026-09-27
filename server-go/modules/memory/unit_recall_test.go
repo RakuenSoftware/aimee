@@ -102,8 +102,8 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	// Several qualifying units from one parent must not crowd out another parent.
 	exec(`INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind) SELECT $1,'temporal',n::text,'opaque derived text',1,'episodic' FROM generate_series(1,4) n`, ids["temporal"])
 	exec(`UPDATE memory_units SET weight='NaN'::double precision WHERE id=$1`, units["nan"])
-	exec(embeddingInputs+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
- SELECT 'shared-recall-test',point_id,memory_id,input_hash,CASE WHEN record_type='unit' THEN $1::vector ELSE $2::vector END
+	exec(embeddingInputs()+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding,source_revision)
+ SELECT 'shared-recall-test',point_id,memory_id,input_hash,CASE WHEN record_type='unit' THEN $1::vector ELSE $2::vector END,record_revision
  FROM inputs WHERE scope_value LIKE 'unit-recall-%'`, string(weakJSON), string(offJSON))
 	exec(`UPDATE memory_embedding_versions SET embedding=$2::vector WHERE version='shared-recall-test' AND point_id=$1`, ids["both"], string(strongJSON))
 	exec(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, ids["suppressed"])
@@ -162,5 +162,28 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	raw, _ := json.Marshal(request)
 	if _, status := handler(bus.ModuleInvocation{StageID: StageData}, raw); status != bus.ModuleStatusInternal {
 		t.Fatal("unit query refusal hidden", status)
+	}
+}
+
+func TestUnitSemanticMergeKeepsVersionIdentity(t *testing.T) {
+	version := &MemoryRecordVersion{SchemaVersion: 1, OwnerID: "owner", RecordID: "7", RecordRevision: "1"}
+	other := *version
+	other.RecordRevision = "2"
+	whole := semanticCandidate{record: Record{ID: 7, observedVersion: version}, score: .8}
+	unit := semanticCandidate{record: Record{ID: 7, observedVersion: version}, score: 1.1}
+	req := DataRequest{Limit: 20, lanes: recallLanes{}}
+	got := mergeSemanticCandidates(req, false, []semanticCandidate{whole}, []semanticCandidate{unit})
+	if len(got) != 1 || got[0].observedVersion != version {
+		t.Fatal("unit winner lost source version", got)
+	}
+	graph := Record{ID: 7, Version: version}
+	if fused := fuseRanked(context.Background(), got, []Record{graph}, 20, "semantic", "graph"); len(fused) != 1 {
+		t.Fatal("same-version graph removed semantic winner", fused)
+	}
+	for _, bad := range []*MemoryRecordVersion{nil, &other} {
+		unit.record.observedVersion = bad
+		if got := mergeSemanticCandidates(req, false, []semanticCandidate{whole}, []semanticCandidate{unit}); len(got) != 0 {
+			t.Fatal("mixed or missing version admitted", got)
+		}
 	}
 }

@@ -11,11 +11,20 @@ type commandRoute struct {
 }
 
 var sharedCommandRoutes = []commandRoute{
+	{"memory", "serve", "Serve a named scoped memory view with exact projection accounting.", handleServedViewCommand, true},
+	{"memory", "claim_card", "Inspect a canonical memory claim and its governed correction descriptor.", handleServedViewCommand, true},
+	{"memory", "evidence", "Inspect scoped origin families and independent-support uncertainty.", handleLineageCommand, true},
+	{"memory", "validity", "Inspect the scoped serving decision for one record.", handleValidityCommand, true},
+	{"memory", "verify_receipt", "Compare a supplied prepared receipt with optional exact payload bytes.", handleReceiptVerification, true},
 	{"memory", "pack", "Manage memory profile packs.", handlePackCommand, true},
 	{"memory", "screen_content", "Screen content before transmission or export.", handleScreenCommand, true},
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "hygiene", "Inspect bounded scoped findings; dry-run is read-only, normal runs queue review proposals.", handleHygienePreview, true},
+	{"memory", "revalidate_sources", "Recheck scoped source versions before provider handoff.", handleSourceRevalidation, true},
+	{"memory", "correction_proposals", "Inspect scoped correction drafts outside recall.", handleCorrectionProposalCommand, true},
+	{"memory", "review_correction", "Approve or reject the exact scoped correction draft.", handleCorrectionProposalCommand, true},
 	{"memory", "benchmark", "Evaluate live scoped retrieval with complete per-case receipts.", handleLiveBenchmark, true},
 	{"memory", "audit", "Audit labelled queries against actual scoped candidate order.", handleLabelAudit, true},
 	{"memory", "calibrate", "Fit diagnostic multipliers without changing the serving ranker.", handleLabelAudit, true},
@@ -46,7 +55,7 @@ var kbCommandRoutes = []commandRoute{
 	{"memory", "explain_match", "Explain a memory's match to a query.", handleDiagnosticCommand, true},
 	{"maintenance", "anti_pattern_extract_from_feedback", "Learn anti-patterns from feedback.", handleRuntimeCommand, true},
 	{"maintenance", "anti_pattern_extract_from_failures", "Learn anti-patterns from failed decisions.", handleRuntimeCommand, true},
-	{"maintenance", "anti_pattern_escalate", "Promote repeated anti-patterns into rules.", handleRuntimeCommand, true},
+	{"maintenance", "anti_pattern_escalate", "Promote repeated anti-patterns into soft guidance.", handleRuntimeCommand, true},
 	{"maintenance", "memory_learn_style", "Learn response style preferences.", handleRuntimeCommand, true},
 	{"maintenance", "scan_conversations", "Import conversation observations.", handleRuntimeCommand, true},
 	{"memory", "find_facts_visible", "Find facts in the active project, workspace and global scope.", handleRecordCommand, true},

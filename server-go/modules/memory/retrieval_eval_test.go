@@ -57,8 +57,16 @@ func TestRetrievalCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories (
-id bigint PRIMARY KEY, scope_type text, scope_value text, tier text, kind text,
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memories (
+id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1, scope_type text, scope_value text, tier text, kind text,
 key text, content text, confidence double precision, lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,
 use_cases text DEFAULT '', updated_at timestamptz DEFAULT now(),valid_from text DEFAULT '',valid_until text DEFAULT '') ON COMMIT DROP`)
 	if err != nil {
@@ -110,7 +118,8 @@ VALUES($1,'global','_global',$2,$3,$4,$5,0.8)`, id, fixture.Tier, fixture.Kind, 
 			t.Fatal(err)
 		}
 	}
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories (id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,updated_at timestamptz DEFAULT now(),valid_until timestamptz) ON COMMIT DROP;
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memory_collection_generation(id int PRIMARY KEY,owner_id uuid); INSERT INTO user_memory_collection_generation VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE user_memories (id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,updated_at timestamptz DEFAULT now(),valid_until timestamptz) ON COMMIT DROP;
 INSERT INTO user_memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state) SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state FROM memories`)
 	if err != nil {
 		t.Fatal(err)

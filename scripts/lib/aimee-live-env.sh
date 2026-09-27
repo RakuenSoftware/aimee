@@ -295,12 +295,19 @@ live_env_pg_create() {
    # PG15+: the database owner still needs CREATE on public explicitly.
    pg_db -c "GRANT CREATE ON SCHEMA public TO $LIVE_OWNER" >/dev/null 2>&1
    pg_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
-   if ! pg_db -c "GRANT CONNECT ON DATABASE $LIVE_DB TO $LIVE_MIGRATOR; GRANT USAGE, CREATE ON SCHEMA public TO $LIVE_MIGRATOR; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO $LIVE_OWNER" >/dev/null; then
+   pg_db -f "$PWD/scripts/postgres-hygiene-role.sql" >/dev/null || {
+      echo "$LIVE_NAME: could not provision the KB hygiene worker role" >&2
+      exit 2
+   }
+   # Private and shared memory have independent guard and migration owners.
+   # Keep one disposable database, but give the private store its own namespace.
+   pg_db -c "CREATE SCHEMA aimee_private AUTHORIZATION $LIVE_MIGRATOR; GRANT USAGE ON SCHEMA aimee_private TO $LIVE_OWNER" >/dev/null || exit 2
+   if ! pg_db -c "GRANT CONNECT, CREATE ON DATABASE $LIVE_DB TO $LIVE_MIGRATOR; GRANT USAGE, CREATE ON SCHEMA aimee_private TO $LIVE_MIGRATOR; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA aimee_private GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA aimee_private GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA aimee_private GRANT EXECUTE ON FUNCTIONS TO $LIVE_OWNER" >/dev/null; then
       echo "$LIVE_NAME: could not separate the store migration and runtime authorities" >&2
       exit 2
    fi
-   if [ "$(pg_val "SELECT has_schema_privilege('$LIVE_MIGRATOR','public','CREATE')")" != "t" ]; then
-      echo "$LIVE_NAME: disposable store migrator has no CREATE authority on public" >&2
+   if [ "$(pg_val "SELECT has_schema_privilege('$LIVE_MIGRATOR','aimee_private','CREATE')")" != "t" ]; then
+      echo "$LIVE_NAME: disposable store migrator has no CREATE authority on aimee_private" >&2
       exit 2
    fi
    # BOTH tiers, exported HERE rather than beside the process that reads each.
@@ -312,12 +319,13 @@ live_env_pg_create() {
    # somewhere downstream. Not one of them named the DSN.
    #
    # They are the same database on purpose: a rig provisions ONE disposable
-   # database, and the two tiers own disjoint tables in it. TCP rather than the
+   # database, with shared objects in public and private objects in aimee_private.
+   # TCP rather than the
    # socket for the reason above -- kb runs as root here and peer auth would
    # present root.
    export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
-   export AIMEE_STORE_URL="$AIMEE_DB2_URL"
-   export AIMEE_STORE_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   export AIMEE_STORE_URL="$AIMEE_DB2_URL?search_path=aimee_private"
+   export AIMEE_STORE_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB?search_path=aimee_private"
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
 }
 

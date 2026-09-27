@@ -39,7 +39,7 @@ func handleReembedCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		if code := call("reembed-status", &status); code != bus.ModuleStatusOK {
 			return nil, code
 		}
-		result := map[string]any{"status": "ok", "active_version": status.ActiveVersion, "has_job": status.HasJob}
+		result := map[string]any{"status": "ok", "active_version": status.ActiveVersion, "has_job": status.HasJob, "active_generation": status.ActiveGeneration}
 		if status.Job != nil {
 			result["job"] = status.Job
 		}
@@ -77,31 +77,35 @@ func handleReembedCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		embedded, failed := 0, 0
 		// Each point commits independently. A deadline or restart leaves successful
 		// drafts reusable, and a later invocation retries failures and changed inputs.
-		for !invocation.Cancelled() && invocation.Remaining(10*time.Minute) > time.Second {
-			request.Limit = 64
-			var batch struct {
-				IDs []int64 `json:"ids"`
-			}
-			if code := call("reembed-next", &batch); code != bus.ModuleStatusOK {
-				return nil, code
-			}
-			if len(batch.IDs) == 0 {
-				break
-			}
-			for _, point := range batch.IDs {
-				if invocation.Cancelled() || invocation.Remaining(10*time.Minute) <= time.Second {
-					break
+		for _, recordType := range []string{"memory", "assertion"} {
+			request.RecordType = recordType
+			request.AfterID = 0
+			for !invocation.Cancelled() && invocation.Remaining(10*time.Minute) > time.Second {
+				request.Limit = 64
+				var batch struct {
+					IDs []int64 `json:"ids"`
 				}
-				request.ID = point
-				var reply EmbedResponse
-				if code := call("reembed-point", &reply); code != bus.ModuleStatusOK {
+				if code := call("reembed-next", &batch); code != bus.ModuleStatusOK {
 					return nil, code
 				}
-				request.AfterID = point
-				if reply.Embedded {
-					embedded++
-				} else {
-					failed++
+				if len(batch.IDs) == 0 {
+					break
+				}
+				for _, point := range batch.IDs {
+					if invocation.Cancelled() || invocation.Remaining(10*time.Minute) <= time.Second {
+						break
+					}
+					request.ID = point
+					var reply EmbedResponse
+					if code := call("reembed-point", &reply); code != bus.ModuleStatusOK {
+						return nil, code
+					}
+					request.AfterID = point
+					if reply.Embedded {
+						embedded++
+					} else {
+						failed++
+					}
 				}
 			}
 		}

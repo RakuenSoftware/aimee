@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 77
+Total commands: 79
 
 ## Core commands
 
@@ -161,10 +161,14 @@ Stored memory.
 Subcommands:
 
 ```
+  hygiene          Queue hygiene proposals (--scope type:value; --dry-run previews)
   search           Search stored memory
   store            Store a memory
   list             List memories
   get              Read a memory by id (--as-of <ts>: was it in force then?)
+  evidence <id>    Inspect authorized evidence lineage (--json)
+  health           Receipt-backed health (--window 24h --project P --workspace W --traces --json)
+  receipt <request-id>  Inspect durable provider attempts (--json)
   read             Assemble current memory context
 ```
 
@@ -322,6 +326,16 @@ Subcommands:
 ```
 
 ## Advanced commands
+
+### `aimee action`
+
+Durable action receipts.
+
+Subcommands:
+
+```
+  receipt <inspect|reconcile|cancel> --session_id ID --action_id ID
+```
 
 ### `aimee agent`
 
@@ -767,6 +781,18 @@ Subcommands:
 ### `aimee status`
 
 System health overview.
+
+### `aimee task`
+
+Owned disposable task projections.
+
+Subcommands:
+
+```
+  projection <operation> --session_id ID --task_id ID  Read or revise working state
+  Operations: describe, rebuild, get, discard, promotion_preview, promote
+  Changes require --expected_revision; promotion creates a private review draft
+```
 
 ### `aimee trajectory`
 

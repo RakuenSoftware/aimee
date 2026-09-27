@@ -6,7 +6,8 @@
  * memory/config subsystem: the module is stubbed DISABLED (gw_stage_memory_enabled
  * -> 0) with an inert transform, and config_present() reports "no config" so
  * enablement falls to that env default. With memory off the seam is a no-op and every byte-exact
- * assertion in those suites is unchanged. */
+ * assertion in those suites is unchanged. Explicitly enabling the test seam counts
+ * module-plan calls and records their query to verify the assembly boundary. */
 #include <aimee/ir/module_plan.h>
 #include "config.h"
 #include <stdlib.h>
@@ -17,6 +18,33 @@ static char g_test_session[80];
 static char g_test_persona[1024];
 static int g_test_delivery_state;
 static int g_test_claim_error_once;
+static int g_test_memory_enabled;
+static int g_test_context_calls;
+static int g_test_tools_calls;
+static char g_test_query[1024];
+static int g_test_guidance_provided;
+
+int ir_seam_test_guidance_provided(void)
+{
+   return g_test_guidance_provided;
+}
+
+void ir_seam_test_memory(int enabled)
+{
+   g_test_memory_enabled = enabled;
+   g_test_context_calls = g_test_tools_calls = 0;
+   g_test_query[0] = '\0';
+}
+
+int ir_seam_test_plan_calls(const char *phase)
+{
+   return strcmp(phase, "context") == 0 ? g_test_context_calls : g_test_tools_calls;
+}
+
+const char *ir_seam_test_query(void)
+{
+   return g_test_query;
+}
 
 void ir_seam_test_session(const char *session_id)
 {
@@ -38,7 +66,17 @@ void ir_seam_test_claim_error_once(void)
 int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
 {
    (void)ir;
-   (void)ud;
+   const aimee_ir_module_plan_t *plan = ud;
+   if (strcmp(plan->phase, "context") == 0)
+   {
+      g_test_context_calls++;
+      g_test_guidance_provided =
+          plan->provided_resources && strcmp(plan->provided_resources[0], "guidance") == 0;
+      snprintf(g_test_query, sizeof g_test_query, "%s",
+               plan->provided_query ? plan->provided_query : "");
+   }
+   else if (strcmp(plan->phase, "tools") == 0)
+      g_test_tools_calls++;
    return 0;
 }
 
@@ -99,7 +137,7 @@ char *persona_compose_primary_instructions(const char *name, const char *cwd)
 
 int server_ir_plan_enabled(const char *method, const char *operation, const char *value)
 {
-   return 0;
+   return g_test_memory_enabled;
 }
 
 /* aimee_ir_serve.c now asks config_present() + config_module_memory() instead of
@@ -134,3 +172,11 @@ void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls
 
 const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{NULL, NULL}};
 const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{NULL, NULL}};
+
+/* These shape-only fixtures use inert plans and no HTTP request context.
+ * Production refusal propagation is covered by test_ir_module_plan. */
+void server_ir_plan_refuse(const char *kind, void *context)
+{
+   (void)kind;
+   (void)context;
+}

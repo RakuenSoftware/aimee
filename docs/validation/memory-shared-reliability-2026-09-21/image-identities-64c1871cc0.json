@@ -1,0 +1,59 @@
+[
+  {
+    "name": "/aimee-e2e-server-4ec78ae2f2-aimee-embedder-1",
+    "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+  },
+  {
+    "name": "/aimee-e2e-server-4ec78ae2f2-aimee-server-1",
+    "image": "sha256:3a96cf69e0da22160b9054f670edd0019656fa814e5a4067756f651c3eb3f461",
+    "configured_image": "aimee:memory-proposals-64c1871cc0",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "/aimee-e2e-server-4ec78ae2f2-aimee-store-db-1",
+    "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+    "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+  },
+  {
+    "name": "/aimee-e2e-kb-6fb3a470ad-aimee-embedder-1",
+    "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+  },
+  {
+    "name": "/aimee-e2e-kb-6fb3a470ad-aimee-kb-1",
+    "image": "sha256:3a96cf69e0da22160b9054f670edd0019656fa814e5a4067756f651c3eb3f461",
+    "configured_image": "aimee:memory-proposals-64c1871cc0",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "/aimee-e2e-kb-6fb3a470ad-aimee-store-db-1",
+    "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+    "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+  },
+  {
+    "name": "/aimee-e2e-server-fd6bb1f73b-aimee-embedder-1",
+    "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+  },
+  {
+    "name": "/aimee-e2e-server-fd6bb1f73b-aimee-server-1",
+    "image": "sha256:3a96cf69e0da22160b9054f670edd0019656fa814e5a4067756f651c3eb3f461",
+    "configured_image": "aimee:memory-proposals-64c1871cc0",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "/aimee-e2e-server-fd6bb1f73b-aimee-store-db-1",
+    "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+    "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+  }
+]

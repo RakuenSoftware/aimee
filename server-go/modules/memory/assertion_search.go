@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,11 @@ type assertionEvidence struct {
 	ObservedAt string `json:"observed_at"`
 	Stance     string `json:"stance"`
 }
+
+func assertionRRFContribution(rank int) float64 {
+	return 1 / float64(60+max(1, rank))
+}
+
 type assertionTrace struct {
 	Channel string  `json:"channel"`
 	Raw     float64 `json:"raw_score"`
@@ -36,30 +42,37 @@ type assertionTrace struct {
 	Rank    int     `json:"rank"`
 }
 type assertionHit struct {
-	ID              int64               `json:"assertion_id"`
-	Version         int                 `json:"version"`
-	Subject         string              `json:"subject"`
-	Relation        string              `json:"relation"`
-	Object          string              `json:"object"`
-	Kind            string              `json:"assertion_kind"`
-	Lifecycle       string              `json:"lifecycle_state"`
-	Authority       int                 `json:"authority_rank"`
-	ConfidenceClass string              `json:"confidence_class"`
-	Confidence      float64             `json:"confidence"`
-	ValidFrom       string              `json:"valid_from"`
-	ValidUntil      string              `json:"valid_until"`
-	AssertedAt      string              `json:"asserted_at"`
-	SupersededAt    string              `json:"superseded_at"`
-	Historical      bool                `json:"historical"`
-	Support         int                 `json:"support_count"`
-	Contradiction   int                 `json:"contradiction_count"`
-	Evidence        []assertionEvidence `json:"evidence"`
-	Retrieval       []assertionTrace    `json:"retrieval"`
-	Hops            int                 `json:"hop_depth"`
-	Reason          string              `json:"inclusion_reason"`
-	StableID        string              `json:"stable_id"`
-	Rendered        string              `json:"rendered"`
-	raw, fused      float64
+	priorScore            *scorePriorResult
+	lexicalBase           float64
+	OriginState           string              `json:"source_origin_state,omitempty"`
+	PriorVersionID        string              `json:"prior_version_id,omitempty"`
+	ID                    int64               `json:"assertion_id"`
+	Version               int                 `json:"version"`
+	Subject               string              `json:"subject"`
+	Relation              string              `json:"relation"`
+	Object                string              `json:"object"`
+	Kind                  string              `json:"assertion_kind"`
+	Lifecycle             string              `json:"lifecycle_state"`
+	Authority             int                 `json:"authority_rank"`
+	ConfidenceClass       string              `json:"confidence_class"`
+	Confidence            float64             `json:"confidence"`
+	ValidFrom             string              `json:"valid_from"`
+	ValidUntil            string              `json:"valid_until"`
+	AssertedAt            string              `json:"asserted_at"`
+	SupersededAt          string              `json:"superseded_at"`
+	Historical            bool                `json:"historical"`
+	Support               int                 `json:"support_count"`
+	Contradiction         int                 `json:"contradiction_count"`
+	Evidence              []assertionEvidence `json:"evidence"`
+	Retrieval             []assertionTrace    `json:"retrieval"`
+	Hops                  int                 `json:"hop_depth"`
+	Reason                string              `json:"inclusion_reason"`
+	StableID              string              `json:"stable_id"`
+	Rendered              string              `json:"rendered"`
+	raw, fused            float64
+	ownerID               string
+	memoryParents         []MemoryRecordVersion
+	memoryParentsObserved bool
 }
 
 func assertionTimestamp(value string) bool {
@@ -147,14 +160,20 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 	return commandResult(response.Payload)
 }
 
-// Every live memory evidence locator must resolve to a visible, active parent.
+// Every live memory evidence locator must resolve to a visible parent under
+// the requested read policy. Explicit history permits retained old versions;
+// it never bypasses erasure, revocation, quarantine, or scope checks.
 // LEFT JOIN is intentional: RLS-hidden parents must deny the derived assertion,
 // including assertions with a second, visible source. Apply exact scope before
 // the candidate cap, even when the host has include-all authority.
-const assertionVisible = `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
- AND (m.id IS NULL OR ($5<>'' AND (m.scope_type<>$5 OR m.scope_value<>$6))))`
+func assertionParentPolicy() string {
+	return `(CASE WHEN $1<>'' OR $2<>'' THEN (` +
+		historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)") + `)
+ WHEN $3 THEN (` + historicalMemoryInspectionSQL("m.") + `) ELSE (` + currentMemorySQL("m.") + `) END)`
+}
+func assertionVisible() string {
+	return memoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true, assertionParentPolicy())
+}
 
 // Belief time and world-valid time are independent half-open intervals. Do not
 // truncate stored fractions or discard offsets when comparing either axis.
@@ -166,33 +185,64 @@ func assertionBeliefSQL(clock string) string {
 
 var assertionCurrent = `(` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `
  AND (e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `)))`
-var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycle_state IN ('persistent','promoted')
+
+func assertionFilter() string {
+	return `e.edge_class='semantic' AND e.suppressed=0 AND (e.lifecycle_state IN ('persistent','promoted') OR (($3 OR $1<>'' OR $2<>'') AND e.lifecycle_state='superseded'))
  AND ($1<>'' OR $3 OR (` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `))
  AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
  AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
- AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
-var assertionColumns = `e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+ AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible()
+}
+func assertionColumns() string {
+	return `e.id,e.version,COALESCE((SELECT predecessor.id::text FROM entity_edges predecessor
+ WHERE predecessor.id=e.prior_version_id AND ` + regexp.MustCompile(`\be\.`).ReplaceAllString(assertionFilter(), "predecessor.") + `),''),(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='contradicts')`
+}
+
+// Observe dependencies in the same MVCC snapshot as the assertion. The extra
+// row detects overflow instead of silently certifying a prefix of the parents.
+var assertionMemoryVersions = `COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id',p.id::text,
+ 'record_revision',p.record_revision::text) ORDER BY p.id) FROM (
+ SELECT DISTINCT m.id,m.record_revision FROM fact_evidence f CROSS JOIN LATERAL (
+ SELECT m.id,m.record_revision FROM memories m WHERE m.id=` + memoryLocatorIDSQL("f.source_id") + ` LIMIT 1) m
+ WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
+ ORDER BY m.id LIMIT ` + strconv.Itoa(maxTypedMemoryParents+1) + `) p),'[]'::jsonb)::text`
 
 func assertionParams(request DataRequest, exact Scope, query string) []any {
 	return []any{request.Assertions.BelievedAt, request.Assertions.ValidAt, request.Assertions.Historical, strings.ToLower(query), exact.Type, exact.Value}
 }
-func (s *postgresDataStore) assertionCandidates(ctx context.Context, request DataRequest, exact Scope, query string, limit int, vector string) ([]assertionHit, error) {
+func (s *postgresDataStore) assertionCandidates(ctx context.Context, request DataRequest, exact Scope, query string, limit int, vector string, generation ...string) ([]assertionHit, error) {
 	params := assertionParams(request, exact, query)
-	score := `(CASE WHEN lower(e.source)=$4 OR lower(e.target)=$4 THEN 4.0 WHEN lower(e.relation)=$4 THEN 3.5 ELSE 1.0 END+e.confidence+e.authority_rank::double precision/100.0)`
-	from := ` FROM entity_edges e WHERE ` + assertionFilter + ` AND (lower(e.source) LIKE '%'||$4||'%' OR lower(e.relation) LIKE '%'||$4||'%' OR lower(e.target) LIKE '%'||$4||'%' OR lower(e.source||' '||e.relation||' '||e.target) LIKE '%'||$4||'%')`
+	baseScore := `(CASE WHEN lower(e.source)=$4 OR lower(e.target)=$4 THEN 4.0 WHEN lower(e.relation)=$4 THEN 3.5 ELSE 1.0 END)`
+	score := `(` + baseScore + `+LEAST(0.125,GREATEST(-0.125,
+ LEAST(0.0625,GREATEST(-0.0625,e.confidence::double precision/16.0))+
+ LEAST(0.0625,GREATEST(-0.0625,e.authority_rank::double precision/1600.0)))))`
+	from := ` FROM entity_edges e WHERE ` + assertionFilter() + ` AND (lower(e.source) LIKE '%'||$4||'%' OR lower(e.relation) LIKE '%'||$4||'%' OR lower(e.target) LIKE '%'||$4||'%' OR lower(e.source||' '||e.relation||' '||e.target) LIKE '%'||$4||'%')`
 	order := ` ORDER BY score DESC,e.authority_rank DESC,e.id DESC LIMIT $7`
 	params = append(params, limit)
 	if vector != "" {
 		score = `1-(v.embedding <=> $8::vector)`
-		from = ` FROM entity_edges e JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' AND v.kind='assertion_v'||e.version::text WHERE ` + assertionFilter + ` AND $4::text IS NOT NULL`
+		if len(generation) != 1 || generation[0] == "" {
+			return nil, errors.New("assertion query requires a pinned generation")
+		}
+		from = ` FROM entity_edges e JOIN (` + assertionIndexInputsSQL() + `) i ON i.id=e.id
+ JOIN memory_assertion_embedding_versions v ON v.assertion_id=e.id AND v.assertion_revision=e.version AND v.input_hash=i.input_hash AND v.version=$9
+ WHERE ` + assertionFilter() + ` AND $4::text IS NOT NULL AND vector_dims(v.embedding)=vector_dims($8::vector) AND vector_norm(v.embedding)>0`
 		order = ` ORDER BY v.embedding <=> $8::vector,e.id DESC LIMIT $7`
-		params = append(params, vector)
+		params = append(params, vector, generation[0])
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+score+` AS score`+from+order, params...)
+	if role := request.recoveryRole; role != nil && vector == "" {
+		from = ` FROM entity_edges e WHERE ` + assertionFilter() + ` AND $4::text IS NOT NULL AND e.source=$8 AND e.relation=$9`
+		params = append(params, role.Subject, role.Relation)
+	}
+	parentsSQL := `'[]'::text`
+	if request.TypedContext != nil {
+		parentsSQL = assertionMemoryVersions
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns()+`,`+parentsSQL+`,`+baseScore+`,`+score+` AS score`+from+order, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +250,21 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	hits := []assertionHit{}
 	for rows.Next() {
 		h := assertionHit{Evidence: []assertionEvidence{}, Retrieval: []assertionTrace{}}
-		if err = rows.Scan(&h.ID, &h.Version, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &h.raw); err != nil {
+		var parents string
+		if err = rows.Scan(&h.ID, &h.Version, &h.PriorVersionID, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.lexicalBase, &h.raw); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(parents), &h.memoryParents); err != nil || len(h.memoryParents) > maxTypedMemoryParents {
+			return nil, errors.New("memory: assertion dependency versions exceed the bounded projection capacity or are unavailable")
+		}
+		h.memoryParentsObserved = request.TypedContext != nil
+		for i := range h.memoryParents {
+			h.memoryParents[i].SchemaVersion = 1
+			h.memoryParents[i].OwnerID = h.ownerID
+			id, err := strconv.ParseInt(h.memoryParents[i].RecordID, 10, 64)
+			if err != nil || !h.memoryParents[i].validFor(id) {
+				return nil, errors.New("memory: assertion dependency version is unavailable")
+			}
 		}
 		h.StableID = strconv.FormatInt(h.ID, 10)
 		h.Rendered = h.Subject + " " + h.Relation + " " + h.Object
@@ -210,6 +273,8 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 		}
 		h.Reason = "lexical semantic match after lifecycle, authority, and temporal filters"
 		if vector == "" {
+			proof := boundedScorePriors(assertionLexicalPriorPolicy, h.lexicalBase, assertionLexicalPriorBound, scorePriorAdjustment{Name: "confidence", Raw: h.Confidence / 16, Bound: .0625}, scorePriorAdjustment{Name: "authority", Raw: float64(h.Authority) / 1600, Bound: .0625})
+			h.priorScore = &proof
 			h.Retrieval = append(h.Retrieval, assertionTrace{Channel: "lexical", Raw: h.raw, Rank: len(hits) + 1})
 		}
 		hits = append(hits, h)
@@ -232,98 +297,74 @@ func (s *postgresDataStore) assertionEvidence(ctx context.Context, h *assertionH
 	return rows.Err()
 }
 
+// Recall never repairs a document backlog. The background owner and explicit
+// reembed operation publish exact-version rows; this path embeds one query only.
 func (s *postgresDataStore) assertionVectors(ctx context.Context, trace uint64, executor egress.Executor, request DataRequest, exact Scope) ([]assertionHit, int, error) {
+	observation := retrievalArmObservation{State: "unavailable", Reason: "assertion_embedding_or_index_fallback", Quota: min(64, request.Limit*4), IndexReadiness: "unavailable"}
+	defer func() { recordRetrievalArm(ctx, "dense", observation) }()
+
 	if executor == nil {
 		return nil, 0, errors.New("embedding unavailable")
 	}
-	command, err := s.embeddingCommand("")
+	var locked bool
+	if err := s.db.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock_shared($1)`, vectorRebuildLock).Scan(&locked); err != nil {
+		return nil, 0, err
+	}
+	if !locked {
+		observation.IndexReadiness = "rebuilding"
+		return nil, 0, errors.New("assertion generation rebuilding")
+	}
+	version, command, dimension, err := s.activeEmbeddingVersion(ctx)
+	if err != nil || version == "" {
+		return nil, 0, errors.New("assertion active generation unavailable")
+	}
+	var expected string
+	if err = s.db.QueryRow(ctx, `SELECT serving_id FROM memory_embedder_versions WHERE version=$1`, version).Scan(&expected); err != nil {
+		return nil, 0, err
+	}
+	observation.IndexVersion = version
+	observation.IdentityState = embeddingIdentityState(expected)
+	if expected == "" {
+		return nil, 0, errors.New("assertion embedding identity unavailable")
+	}
+	budget := 1500 * time.Millisecond
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)/2)
+	}
+	modelCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	before, err := versionServingIdentity(modelCtx, trace, executor, command, dimension)
+	if err != nil || before != expected {
+		observation.IndexReadiness = "identity_mismatch"
+		return nil, 0, errors.New("assertion embedding identity mismatch")
+	}
+	screened, err := screenMemoryText(request.Query)
 	if err != nil {
 		return nil, 0, err
 	}
-	dim, err := s.vectorDimension(ctx)
-	if err != nil {
-		return nil, 0, err
+	embedded := Embed(modelCtx, trace, executor, EmbedRequest{BaseURL: command, InputType: "query", Text: screened, MaxDim: dimension})
+	if embedded.Error != "" || embedded.Unavailable || embedded.Unauthorized || embedded.Truncated || len(embedded.Vector) != dimension {
+		return nil, 0, errors.New("assertion query embedding unavailable")
 	}
-	modelVersion := ""
-	if s.settings != nil {
-		settings, settingsErr := s.settings()
-		if settingsErr != nil {
-			return nil, 0, settingsErr
-		}
-		modelVersion, _ = settings["embedder_model"].(string)
-	}
-	params := assertionParams(request, exact, "")
-	rows, err := s.db.Query(ctx, `SELECT e.id,e.version,e.source||' '||e.relation||' '||e.target||' ['||e.assertion_kind||']' FROM entity_edges e LEFT JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' WHERE `+assertionFilter+` AND $4::text IS NOT NULL AND (v.point_id IS NULL OR v.kind<>'assertion_v'||e.version::text) ORDER BY e.id LIMIT 256`, params...)
-	if err != nil {
-		return nil, 0, err
-	}
-	type candidate struct {
-		id      int64
-		version int
-		text    string
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err = rows.Scan(&c.id, &c.version, &c.text); err != nil {
-			rows.Close()
-			return nil, 0, err
-		}
-		candidates = append(candidates, c)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, 0, err
-	}
-	indexed := 0
-	for _, c := range candidates {
-		if c.id <= 0 || c.id > int64(^uint64(0)>>1)-assertionPointOffset {
-			return nil, indexed, errors.New("assertion vector ID overflow")
-		}
-		if len(c.text) > maxDataBody {
-			return nil, indexed, errors.New("assertion embedding input exceeds capacity")
-		}
-		screened, screenErr := screenMemoryText(c.text)
-		if screenErr != nil {
-			return nil, indexed, screenErr
-		}
-		embedded := Embed(ctx, trace, executor, EmbedRequest{BaseURL: command, InputType: "document", Text: screened, MaxDim: 4000})
-		if embedded.Error != "" || embedded.Dim != dim || embedded.Truncated {
-			return nil, indexed, errors.New("assertion embedding unavailable")
-		}
-		literal, err := vectorLiteral(embedded.Vector)
-		if err != nil {
-			return nil, indexed, err
-		}
-		payload, _ := json.Marshal(map[string]any{"record_type": "semantic_assertion", "assertion_id": c.id, "assertion_version": c.version, "canonical_rendering": c.text, "model_version": modelVersion})
-		// Serialize publication with edits, then verify the exact version/content
-		// selected before embedding. A late provider reply cannot revive stale data.
-		tag, err := s.db.Exec(ctx, `WITH locked AS MATERIALIZED (SELECT id,version,source,relation,target,assertion_kind,lifecycle_state,suppressed FROM entity_edges WHERE id=$1 FOR UPDATE)
- INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,workspace,project,kind,payload_json)
- SELECT id+2000000000000,$2::vector,'semantic_assertion','','','','assertion_v'||version::text,$3 FROM locked
- WHERE version=$4 AND source||' '||relation||' '||target||' ['||assertion_kind||']'=$5 AND suppressed=0 AND lifecycle_state IN ('persistent','promoted')
- ON CONFLICT(point_id) DO UPDATE SET embedding=EXCLUDED.embedding,record_type=EXCLUDED.record_type,primary_scope='',workspace='',project='',kind=EXCLUDED.kind,payload_json=EXCLUDED.payload_json`, c.id, literal, string(payload), c.version, c.text)
-		if err != nil {
-			return nil, indexed, err
-		}
-		indexed += int(tag.RowsAffected())
-	}
-	screened, screenErr := screenMemoryText(request.Query)
-	if screenErr != nil {
-		return nil, indexed, screenErr
-	}
-	embedded := Embed(ctx, trace, executor, EmbedRequest{BaseURL: command, InputType: "query", Text: screened, MaxDim: 4000})
-	if embedded.Error != "" || embedded.Dim != dim || embedded.Truncated {
-		return nil, indexed, errors.New("assertion query embedding unavailable")
+	after, err := versionServingIdentity(modelCtx, trace, executor, command, dimension)
+	if err != nil || after != expected {
+		observation.IndexReadiness = "identity_mismatch"
+		return nil, 0, errors.New("assertion embedding identity mismatch")
 	}
 	literal, err := vectorLiteral(embedded.Vector)
 	if err != nil {
-		return nil, indexed, err
+		return nil, 0, err
 	}
-	hits, err := s.assertionCandidates(ctx, request, exact, request.Query, min(64, request.Limit*4), literal)
-	return hits, indexed, err
+	hits, err := s.assertionCandidates(ctx, request, exact, request.Query, min(64, request.Limit*4), literal, version)
+	if err == nil {
+		observation.State = "available"
+		observation.Reason = "generation_pinned_assertions; coverage_not_proven"
+		observation.Candidates = len(hits)
+		observation.IndexReadiness = "lagging"
+	}
+	return hits, 0, err
 }
+
 func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, executor egress.Executor, request DataRequest, explicit bool) (map[string]any, error) {
 	exact := Scope{}
 	if explicit {
@@ -333,7 +374,8 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 	if err != nil {
 		return nil, err
 	}
-	// Optional vector errors roll back only derived indexing. They must not abort
+	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "eligible_temporal_assertions", Candidates: len(hits), Quota: request.Limit, IndexReadiness: "query_executed"})
+	// Optional vector errors roll back only the read lane. They must not abort
 	// the request transaction or turn successful lexical retrieval into empty data.
 	if _, err = s.db.Exec(ctx, `SAVEPOINT assertion_vectors`); err != nil {
 		return nil, err
@@ -364,47 +406,72 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 			}
 			at := find(h.ID)
 			if at < 0 {
-				if len(hits) >= request.Limit {
-					continue
-				}
 				h.Reason = "vector semantic match after lifecycle, authority, scope, and temporal filters"
 				hits = append(hits, h)
 				at = len(hits) - 1
 			} else {
+				if hits[at].Version != h.Version || hits[at].ownerID != h.ownerID {
+					return nil, errors.New("memory: assertion changed during candidate collection")
+				}
 				overlap++
 			}
 			hits[at].Retrieval = append(hits[at].Retrieval, assertionTrace{Channel: "vector", Raw: h.raw, Rank: i + 1})
 		}
 	}
+	// Graph admission has its own candidate and lookup budgets. A full
+	// lexical/dense union cannot consume this arm's slots before fusion.
+	graphCount, expansions := 0, 0
+	maxExpansions := min(64, 2*request.Limit)
+	seenAnchors := map[string]bool{}
 	start, end := 0, len(hits)
-	for hop := 1; hop <= request.Assertions.Hops && start < end; hop++ {
-		for i := start; i < end && len(hits) < request.Limit; i++ {
+	for hop := 1; hop <= request.Assertions.Hops && start < end && expansions < maxExpansions; hop++ {
+		for i := start; i < end && graphCount < request.Limit && expansions < maxExpansions; i++ {
 			for _, anchor := range []string{hits[i].Subject, hits[i].Object} {
+				if graphCount >= request.Limit {
+					break
+				}
+				if seenAnchors[anchor] || expansions >= maxExpansions {
+					continue
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				seenAnchors[anchor] = true
+				expansions++
 				expanded, err := s.assertionCandidates(ctx, request, exact, anchor, 16, "")
 				if err != nil {
 					return nil, err
 				}
 				for _, h := range expanded {
-					if len(hits) >= request.Limit {
+					if graphCount >= request.Limit {
 						break
 					}
 					if find(h.ID) >= 0 || h.Subject != anchor && h.Object != anchor {
 						continue
 					}
 					h.Hops = hop
+					h.priorScore = nil
 					h.Reason = fmt.Sprintf("bounded semantic hop %d with temporal and scope filters reapplied", hop)
-					h.Retrieval = append(h.Retrieval, assertionTrace{Channel: "semantic_graph", Raw: 1 / float64(hop+1), Rank: len(hits) + 1})
+					graphCount++
+					// The anchor lookup is a graph vote, not lexical evidence
+					// for the original user query. Its rank belongs to this arm.
+					h.Retrieval = []assertionTrace{{Channel: "semantic_graph", Raw: 1 / float64(hop+1), Rank: graphCount}}
 					hits = append(hits, h)
 				}
 			}
 		}
 		start, end = end, len(hits)
 	}
+	if request.Assertions.Hops > 0 {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "available", Reason: "bounded_temporal_assertion_hops", Candidates: graphCount, Quota: request.Limit, IndexReadiness: "parent_and_temporal_filtered"})
+	} else {
+		recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "not_executed", Reason: "zero_requested_hops"})
+	}
 	lexicalOnly, vectorOnly := 0, 0
 	for i := range hits {
 		lexical, vector := false, false
 		for _, r := range hits[i].Retrieval {
-			hits[i].fused += 1 / float64(60+max(1, r.Rank))
+			hits[i].fused += assertionRRFContribution(r.Rank)
 			lexical = lexical || r.Channel == "lexical"
 			vector = vector || r.Channel == "vector"
 		}
@@ -417,9 +484,6 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 		for j := range hits[i].Retrieval {
 			hits[i].Retrieval[j].Fused = hits[i].fused
 		}
-		if err = s.assertionEvidence(ctx, &hits[i]); err != nil {
-			return nil, err
-		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].fused != hits[j].fused {
@@ -430,11 +494,30 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 		}
 		return hits[i].ID > hits[j].ID
 	})
-	result := map[string]any{"status": "ok", "channel": "semantic_assertion", "mode": "hybrid_shadow", "channel_status": "ok", "assertions": hits, "max_hops": request.Assertions.Hops, "indexed_assertions": indexed, "shadow_delta": map[string]int{"lexical_only": lexicalOnly, "vector_only": vectorOnly, "overlap": overlap}, "valid_at": request.Assertions.ValidAt, "believed_at": request.Assertions.BelievedAt, "include_historical": request.Assertions.Historical}
+	candidateCount := len(hits)
+	if len(hits) > request.Limit {
+		hits = hits[:request.Limit]
+	}
+	for i := range hits {
+		if err = s.assertionEvidence(ctx, &hits[i]); err != nil {
+			return nil, err
+		}
+	}
+	result := map[string]any{"status": "ok", "channel": "semantic_assertion", "mode": "hybrid_shadow", "channel_status": "ok", "assertions": hits, "max_hops": request.Assertions.Hops, "indexed_assertions": indexed, "candidate_count": candidateCount, "candidate_scope": "independent_arm_union", "candidate_policy": "assertion-arm-union-v1", "graph_budget_exhausted": request.Assertions.Hops > 0 && (graphCount >= request.Limit || expansions >= maxExpansions), "graph_candidates": graphCount, "graph_expansions": expansions, "shadow_delta": map[string]int{"lexical_only": lexicalOnly, "vector_only": vectorOnly, "overlap": overlap}, "valid_at": request.Assertions.ValidAt, "believed_at": request.Assertions.BelievedAt, "include_historical": request.Assertions.Historical}
 	if vectorErr != nil {
 		result["mode"] = "lexical_degraded"
 		result["channel_status"] = "degraded"
 		result["degraded_reason"] = "embedding or vector index unavailable"
+	}
+	priorTraces := map[string]*scorePriorResult{}
+	for _, hit := range hits {
+		if hit.priorScore != nil {
+			priorTraces[hit.StableID] = hit.priorScore
+		}
+	}
+	result["score_prior_traces"] = priorTraces
+	if capabilities := observedRetrievalCapabilities(ctx); capabilities != nil {
+		result["retrieval_capabilities"] = capabilities
 	}
 	return result, nil
 }

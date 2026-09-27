@@ -1,0 +1,27 @@
+[
+  {
+    "name": "KB application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB boots with standardized PostgreSQL and local embedding",
+    "passed": true
+  },
+  {
+    "name": "KB shared memory module stores a record",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene accepts its authenticated action envelope",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene still rejects domain mutation arguments",
+    "passed": false
+  },
+  {
+    "name": "topology completed",
+    "passed": false,
+    "error": "Direct KB hygiene still rejects domain mutation arguments"
+  }
+]

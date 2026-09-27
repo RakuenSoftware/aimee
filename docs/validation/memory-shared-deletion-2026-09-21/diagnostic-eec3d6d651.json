@@ -1,0 +1,116 @@
+{
+  "source_revision": "eec3d6d6515e4bdaeb6e5230d052ed75c0995f6d",
+  "diagnostic": true,
+  "results": {
+    "t2": {
+      "local-memory.json": {
+        "checks": 195,
+        "failed": []
+      },
+      "correction-review.json": {
+        "checks": 29,
+        "failed": []
+      },
+      "topology.json": {
+        "checks": 77,
+        "failed": [
+          "topology completed"
+        ]
+      },
+      "shared-memory.json": {
+        "checks": 130,
+        "failed": []
+      }
+    },
+    "t3": {
+      "exploratory-memory.json": {
+        "checks": 21,
+        "failed": []
+      },
+      "semantic-memory.json": {
+        "checks": 15,
+        "failed": []
+      },
+      "local-memory.json": {
+        "checks": 195,
+        "failed": []
+      },
+      "native-async.json": {
+        "checks": 37,
+        "failed": []
+      },
+      "topology.json": {
+        "checks": 7,
+        "failed": []
+      },
+      "provider-boundary.json": {
+        "checks": 298,
+        "failed": []
+      }
+    }
+  },
+  "images": [
+    {
+      "name": "/aimee-e2e-kb-64328745f4-aimee-embedder-1",
+      "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+      "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+    },
+    {
+      "name": "/aimee-e2e-kb-64328745f4-aimee-kb-1",
+      "image": "sha256:97b3ba3036dec16e13d85584e53a886a75cba955b69a487b9d1b635ee094057a",
+      "configured_image": "aimee:memory-proposals-eec3d6d651",
+      "provider_context_limits": {
+        "schema_version": 1,
+        "max_request_bytes": 32768
+      }
+    },
+    {
+      "name": "/aimee-e2e-kb-64328745f4-aimee-store-db-1",
+      "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+      "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+    },
+    {
+      "name": "/aimee-e2e-server-bf445d8d4a-aimee-embedder-1",
+      "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+      "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+    },
+    {
+      "name": "/aimee-e2e-server-bf445d8d4a-aimee-server-1",
+      "image": "sha256:97b3ba3036dec16e13d85584e53a886a75cba955b69a487b9d1b635ee094057a",
+      "configured_image": "aimee:memory-proposals-eec3d6d651",
+      "provider_context_limits": {
+        "schema_version": 1,
+        "max_request_bytes": 32768
+      }
+    },
+    {
+      "name": "/aimee-e2e-server-bf445d8d4a-aimee-store-db-1",
+      "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+      "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+    },
+    {
+      "name": "/aimee-e2e-server-bb571b7517-aimee-embedder-1",
+      "image": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+      "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+    },
+    {
+      "name": "/aimee-e2e-server-bb571b7517-aimee-server-1",
+      "image": "sha256:97b3ba3036dec16e13d85584e53a886a75cba955b69a487b9d1b635ee094057a",
+      "configured_image": "aimee:memory-proposals-eec3d6d651",
+      "provider_context_limits": {
+        "schema_version": 1,
+        "max_request_bytes": 32768
+      }
+    },
+    {
+      "name": "/aimee-e2e-server-bb571b7517-aimee-store-db-1",
+      "image": "sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f",
+      "configured_image": "aimee-postgres:memory-f5c3a6f2c2"
+    }
+  ],
+  "cleanup": {
+    "containers": 9,
+    "networks": 9,
+    "preserved": "images, volumes, raw receipts"
+  }
+}

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +14,12 @@ type Diagnostic struct {
 }
 
 type DiagnosticParts struct {
+	PriorPolicy    *rankPriorPolicy `json:"prior_policy,omitempty"`
+	PriorBaseRank  int              `json:"prior_base_rank,omitempty"`
+	PriorFinalRank int              `json:"prior_final_rank,omitempty"`
+	ScoreEvidence  string           `json:"score_evidence,omitempty"`
+	RankingSteps   []rankingStep    `json:"ranking_steps,omitempty"`
+
 	RankingPolicy string  `json:"ranking_policy,omitempty"`
 	RetrievalBase float64 `json:"retrieval_base,omitempty"`
 	Entity        float64 `json:"entity"`
@@ -81,15 +88,25 @@ func recallItems(records []Record) []RecallRecord {
 func (s *postgresDataStore) recallSource() string {
 	if s.placement == PlacementServer {
 		return `(SELECT id, 'user'::text AS scope_type, '_user'::text AS scope_value,
- tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state,
+ tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state, record_revision,
  0 AS activation_suppressed FROM user_memories
- WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
+ WHERE (valid_until IS NULL OR valid_until > now()) AND ` + utilityHorizonSQL("", true) + `) AS recall_memories`
 	}
-	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + `) AS recall_memories`
+	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + ` AND ` + utilityHorizonSQL("", false) + ` AND ` + currentDerivedMemoryInputsSQL("", false) + `) AS recall_memories`
+}
+
+// Owner and revision travel with the payload in the same statement snapshot.
+// They describe the observed row; dispatch eligibility is checked separately.
+func (s *postgresDataStore) recallVersionColumns() string {
+	owner := "memory_collection_owner"
+	if s.placement == PlacementServer {
+		owner = "user_memory_collection_generation"
+	}
+	return ",(SELECT owner_id::text FROM " + owner + " WHERE id=1),record_revision::text"
 }
 
 func (s *postgresDataStore) recallRecords(ctx context.Context, where string, limit int, args ...any) ([]Record, error) {
-	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
 FROM %s WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
 ORDER BY `+queryScopeOrder+`,confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
 	args = append(args, limit)
@@ -105,13 +122,23 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 	items := make([]Record, 0)
 	for rows.Next() {
 		var item Record
+		item.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		item.currentRead = true
 		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
+			&item.Kind, &item.Key, &item.Content, &item.Confidence, &item.Version.OwnerID, &item.Version.RecordRevision); err != nil {
 			return nil, err
+		}
+		item.Version.RecordID = strconv.FormatInt(item.ID, 10)
+		if !item.Version.validFor(item.ID) {
+			return nil, fmt.Errorf("invalid recalled memory version")
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return items, s.annotateUtilityHorizons(ctx, items, "current")
 }
 
 func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, query, blockType string, limit int) (string, error) {
@@ -126,18 +153,35 @@ func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, qu
 }
 
 func renderMemoryContext(records []Record, blockType string) string {
+	text, _ := renderMemoryContextBounded(records, blockType, nil)
+	return text
+}
+
+// A byte allocation retains a whole prefix in retrieval order. Each row is
+// formatted once; headers and the terminal newline count toward the allocation.
+func renderMemoryContextBounded(records []Record, blockType string, limit *int) (string, int) {
 	var out strings.Builder
-	out.WriteString("# Memory Context\n")
+	header := "# Memory Context\n"
 	if blockType != "" {
-		fmt.Fprintf(&out, "\nType: %s\n", blockType)
+		header += fmt.Sprintf("\nType: %s\n", blockType)
 	}
+	if limit != nil && len(header) > *limit {
+		return "", 0
+	}
+	out.WriteString(header)
+	count := 0
 	for _, item := range records {
-		fmt.Fprintf(&out, "\n- [#%d] %s: %s", item.ID, item.Key, item.Content)
+		line := fmt.Sprintf("\n- [#%d] %s: %s", item.ID, item.Key, item.Content)
+		if limit != nil && out.Len()+len(line)+1 > *limit {
+			break
+		}
+		out.WriteString(line)
+		count++
 	}
-	if len(records) > 0 {
+	if count > 0 {
 		out.WriteByte('\n')
 	}
-	return out.String()
+	return out.String(), count
 }
 
 // Confidence is display metadata and cannot cross the ranking input boundary.
@@ -165,17 +209,37 @@ func rankText(input rankingInput, query string) DiagnosticParts {
 }
 
 func diagnosticFor(record Record, query string) Diagnostic {
-	parts := rankText(rankingInput{record.Key, record.Content}, query)
+	parts := DiagnosticParts{}
+	if len(record.rankingSteps) == 0 && !record.pageRankApplied {
+		parts = rankText(rankingInput{record.Key, record.Content}, query)
+		parts.ScoreEvidence = "text_match_estimate"
+	}
+	if len(record.rankingSteps) > 0 {
+		parts = DiagnosticParts{ScoreEvidence: "observed_final_score", RankingPolicy: "ordered-rrf60-v1",
+			Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
+	}
 	parts.Confidence = record.Confidence
 	parts.GraphScore, parts.CodeProximity = record.graphScore, record.codeProximity
 	if record.pageRankApplied {
 		parts = DiagnosticParts{RankingPolicy: pageRankRecallPolicy, RetrievalBase: record.retrievalBase, PageRank: record.pageRankBonus, Confidence: record.Confidence, Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
 	}
+	if record.pageRankApplied {
+		policy := nativeRankingPriorPolicy()
+		parts.PriorPolicy = &policy
+		parts.PriorBaseRank = record.priorBaseRank
+		parts.PriorFinalRank = record.priorFinalRank
+	}
+	if len(record.rankingSteps) > 0 {
+		parts.ScoreEvidence = "observed_ranking_steps"
+		parts.RankingSteps = record.rankingSteps
+	} else if record.pageRankApplied {
+		parts.ScoreEvidence = "observed_final_score"
+	}
 	return Diagnostic{Memory: record, Parts: parts}
 }
 
 func (s *postgresDataStore) Diagnose(ctx context.Context, scope Scope, query string, limit int) ([]Diagnostic, error) {
-	records, err := s.Search(ctx, scope, query, "", "", limit)
+	records, err := s.Search(withRankingTrace(ctx), scope, query, "", "", limit)
 	if err != nil {
 		return nil, err
 	}

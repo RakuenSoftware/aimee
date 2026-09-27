@@ -10,6 +10,7 @@ import (
 	"time"
 
 	configclient "github.com/JBailes/aimee/server-go/config"
+	store "github.com/JBailes/aimee/server-go/db"
 )
 
 type processConfigCaller struct {
@@ -84,5 +85,48 @@ func TestProcessHandlerRequiresPlacementAndStore(t *testing.T) {
 		if handler, err = NewProcessHandler(context.Background(), "", placement); handler != nil || err == nil {
 			t.Fatal("missing socket accepted")
 		}
+	}
+}
+
+// The handler cannot advertise private memory while the independent schema
+// owner is still installing/replaying the surviving erasure contract.
+type replayStartupStore struct {
+	store.Store
+	attempts int
+	failures int
+}
+
+func (s *replayStartupStore) QueryRow(_ context.Context, query string, _ ...any) store.Row {
+	s.attempts++
+	return replayStartupRow{fail: s.attempts <= s.failures, query: query}
+}
+
+type replayStartupRow struct {
+	fail  bool
+	query string
+}
+
+func (r replayStartupRow) Scan(dest ...any) error {
+	if r.query != "SELECT user_memory_replay_erasure_intents()" {
+		return errors.New("wrong replay contract")
+	}
+	if r.fail {
+		return errors.New("schema not ready")
+	}
+	*dest[0].(*int64) = 3
+	return nil
+}
+func TestPrivateErasureStartupBarrier(t *testing.T) {
+	db := &replayStartupStore{failures: 1}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := waitPrivateErasureReplay(ctx, db); err != nil || db.attempts != 2 {
+		t.Fatal(db.attempts, err)
+	}
+	db = &replayStartupStore{failures: 1000}
+	blocked, cancelBlocked := context.WithCancel(context.Background())
+	cancelBlocked()
+	if err := waitPrivateErasureReplay(blocked, db); !errors.Is(err, context.Canceled) {
+		t.Fatal("failed replay admitted readiness", err)
 	}
 }

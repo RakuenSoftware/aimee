@@ -1,0 +1,14 @@
+{
+  "memory-provider-boundary": {
+    "exit_code": 0,
+    "elapsed_seconds": 121.44
+  },
+  "memory-native-async": {
+    "exit_code": 0,
+    "elapsed_seconds": 264.278
+  },
+  "memory-health": {
+    "exit_code": 1,
+    "elapsed_seconds": 1.366
+  }
+}

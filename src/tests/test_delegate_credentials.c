@@ -6,6 +6,8 @@
 #include <unistd.h>
 
 #include <aimee/delegates/delegate_credentials.h>
+#include <aimee/delegates/delegate_credential_retry.h>
+#include "agent_exec.h"
 
 static agent_credential_t make_cred(const char *name, const char *env_var)
 {
@@ -474,8 +476,89 @@ static void test_save_load_v2_roundtrips_principal(void)
    printf("  PASS: test_save_load_v2_roundtrips_principal\n");
 }
 
+/* Controlled executor results; the credential retry/pool implementations are
+ * real. Exercise refusal both initially and after one real provider failure. */
+static int context_attempts, provider_failure_first;
+static int context_attempt(agent_result_t *result)
+{
+   memset(result, 0, sizeof(*result));
+   context_attempts++;
+   if (provider_failure_first && context_attempts == 1)
+   {
+      snprintf(result->error, sizeof(result->error), "HTTP 429 rate limit");
+      return -1;
+   }
+   snprintf(result->error, sizeof(result->error), "memory context refused: HTTP 429 rate limit");
+   return AGENT_RC_CONTEXT_REFUSED;
+}
+int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
+                                       const char *system_prompt, const char *user_prompt,
+                                       int max_tokens, int enforce_writes, agent_result_t *out)
+{
+   (void)cfg;
+   (void)role;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)enforce_writes;
+   return context_attempt(out);
+}
+int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
+              const char *user_prompt, int max_tokens, agent_result_t *out)
+{
+   (void)cfg;
+   (void)role;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   return context_attempt(out);
+}
+void agent_run_force_no_tools(int force)
+{
+   (void)force;
+}
+static void test_context_refusal_does_not_rotate_credentials(void)
+{
+   for (int first = 0; first < 2; first++)
+      for (int tools = 0; tools < 2; tools++)
+      {
+         delegate_credentials_reset_for_test();
+         agent_config_t cfg = {0};
+         agent_t agent = {0};
+         snprintf(agent.name, sizeof(agent.name), "context-refusal");
+         snprintf(agent.provider, sizeof(agent.provider), "openai");
+         agent.credential_count = 3;
+         agent.credentials[0] = make_cred("main", "FIXTURE_MAIN");
+         agent.credentials[1] = make_cred("backup", "FIXTURE_BACKUP");
+         agent.credentials[2] = make_cred("third", "FIXTURE_THIRD");
+         char name[32], env[64];
+         assert(delegate_credentials_acquire("", agent.name, agent.credentials, 3, name,
+                                             sizeof(name), env, sizeof(env)) == 0);
+         context_attempts = 0;
+         provider_failure_first = first;
+         agent_result_t result;
+         int rc = delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128,
+                                                     tools, 0, name, sizeof(name), NULL, &result);
+         assert(rc == AGENT_RC_CONTEXT_REFUSED);
+         assert(context_attempts == 1 + first);
+         assert(strcmp(name, first ? "backup" : "main") == 0);
+         delegate_credential_snapshot_t snapshots[3];
+         int count = delegate_credentials_snapshot(agent.name, snapshots, 3);
+         int found = 0;
+         for (int i = 0; i < count; i++)
+            if (strcmp(snapshots[i].cred_name, name) == 0)
+            {
+               assert(snapshots[i].status == DELEGATE_CRED_STATUS_OK);
+               found++;
+            }
+         assert(found == 1);
+         delegate_credentials_release("", agent.name, name);
+      }
+   puts("  PASS: context refusal keeps credentials and stops retries");
+}
 int main(void)
 {
+   test_context_refusal_does_not_rotate_credentials();
    printf("delegate_credentials:\n");
    test_acquire_round_robin();
    test_release_makes_credential_available();

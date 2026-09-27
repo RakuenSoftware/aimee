@@ -1,0 +1,1134 @@
+{
+  "identity.json": [
+    {
+      "name": "server persists its first-boot identity",
+      "passed": true
+    },
+    {
+      "name": "server rejects a role change without modifying its identity",
+      "passed": true
+    },
+    {
+      "name": "server accepts the same image and role on restart",
+      "passed": true
+    },
+    {
+      "name": "kb persists its first-boot identity",
+      "passed": true
+    },
+    {
+      "name": "kb rejects a role change without modifying its identity",
+      "passed": true
+    },
+    {
+      "name": "kb accepts the same image and role on restart",
+      "passed": true
+    }
+  ],
+  "local-memory.json": [
+    {
+      "name": "KB-free local store",
+      "passed": true
+    },
+    {
+      "name": "HTTP store commits personal invalidation",
+      "passed": true
+    },
+    {
+      "name": "personal store retry",
+      "passed": true
+    },
+    {
+      "name": "identical HTTP upsert preserves identity and invalidation progress",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {}",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "personal recall tolerates brief database contention",
+      "passed": true
+    },
+    {
+      "name": "delayed recall preserves personal text and scoped handle",
+      "passed": true
+    },
+    {
+      "name": "KB-free session recall without hint",
+      "passed": true
+    },
+    {
+      "name": "KB-free CLI recall",
+      "passed": true
+    },
+    {
+      "name": "KB-free MCP recall",
+      "passed": true
+    },
+    {
+      "name": "recall rejects invalid store",
+      "passed": true
+    },
+    {
+      "name": "HTTP CLI MCP recall leaves personal invalidations unchanged",
+      "passed": true
+    },
+    {
+      "name": "HTTP mutation refuses failed invalidation commit",
+      "passed": true
+    },
+    {
+      "name": "personal content after failed invalidation",
+      "passed": true
+    },
+    {
+      "name": "failed invalidation preserves canonical content and progress",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall survives restart",
+      "passed": true
+    },
+    {
+      "name": "personal invalidations survive application restart",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall reports unavailable local store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall recovers",
+      "passed": true
+    },
+    {
+      "name": "personal invalidations survive storage restart",
+      "passed": true
+    },
+    {
+      "name": "KB-free local retirement",
+      "passed": true
+    },
+    {
+      "name": "HTTP retirement commits a new personal invalidation",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall after retirement",
+      "passed": true
+    },
+    {
+      "name": "retired personal record excluded from recall",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 0",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 0",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 1",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 1",
+      "passed": true
+    }
+  ],
+  "shared-memory.json": [
+    {
+      "name": "local store",
+      "passed": true
+    },
+    {
+      "name": "local store leaves KB unchanged",
+      "passed": true
+    },
+    {
+      "name": "local get",
+      "passed": true
+    },
+    {
+      "name": "get returns exact local content for colliding ID",
+      "passed": true
+    },
+    {
+      "name": "explicit KB get",
+      "passed": true
+    },
+    {
+      "name": "explicit KB get selects the other record",
+      "passed": true
+    },
+    {
+      "name": "MCP store defaults to user",
+      "passed": true
+    },
+    {
+      "name": "MCP personal content stays local",
+      "passed": true
+    },
+    {
+      "name": "MCP update uses local ID",
+      "passed": true
+    },
+    {
+      "name": "MCP forget retires local ID",
+      "passed": true
+    },
+    {
+      "name": "CLI default get selects user",
+      "passed": true
+    },
+    {
+      "name": "CLI explicit get selects KB",
+      "passed": true
+    },
+    {
+      "name": "CLI store identifies local scope",
+      "passed": true
+    },
+    {
+      "name": "CLI supersede updates local record",
+      "passed": true
+    },
+    {
+      "name": "CLI mutations leave KB unchanged",
+      "passed": true
+    },
+    {
+      "name": "local stats",
+      "passed": true
+    },
+    {
+      "name": "invalid store rejected 'both'",
+      "passed": true
+    },
+    {
+      "name": "invalid store rejected ''",
+      "passed": true
+    },
+    {
+      "name": "invalid store rejected 1",
+      "passed": true
+    },
+    {
+      "name": "invalid selectors leave KB unchanged",
+      "passed": true
+    },
+    {
+      "name": "local list",
+      "passed": true
+    },
+    {
+      "name": "list returns local fixture",
+      "passed": true
+    },
+    {
+      "name": "local review",
+      "passed": true
+    },
+    {
+      "name": "review returns local fixture",
+      "passed": true
+    },
+    {
+      "name": "local search",
+      "passed": true
+    },
+    {
+      "name": "search returns local fixture",
+      "passed": true
+    },
+    {
+      "name": "MCP get preserves selected store {'id': 37}",
+      "passed": true
+    },
+    {
+      "name": "MCP get preserves selected store {'handle': 'memory:37', 'scope': 'all'}",
+      "passed": true
+    },
+    {
+      "name": "local preference fixture",
+      "passed": true
+    },
+    {
+      "name": "explicit shared recall",
+      "passed": true
+    },
+    {
+      "name": "explicit shared recall excludes personal preferences",
+      "passed": true
+    },
+    {
+      "name": "local supersede",
+      "passed": true
+    },
+    {
+      "name": "local mutation leaves colliding KB record unchanged",
+      "passed": true
+    },
+    {
+      "name": "get corrected local memory",
+      "passed": true
+    },
+    {
+      "name": "local replacement content",
+      "passed": true
+    },
+    {
+      "name": "local memory survives restart",
+      "passed": true
+    },
+    {
+      "name": "restart preserves corrected value",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails list",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails get",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails recall",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails store",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails supersede",
+      "passed": true
+    },
+    {
+      "name": "local dependency outage fails delete",
+      "passed": true
+    },
+    {
+      "name": "local outage never writes KB",
+      "passed": true
+    },
+    {
+      "name": "local dependency recovers",
+      "passed": true
+    },
+    {
+      "name": "local get works with KB offline",
+      "passed": true
+    },
+    {
+      "name": "local recall works with KB offline",
+      "passed": true
+    },
+    {
+      "name": "local recall retains scoped ID and prompt text",
+      "passed": true
+    },
+    {
+      "name": "local session recall needs no hint or KB",
+      "passed": true
+    },
+    {
+      "name": "CLI recall works with KB offline",
+      "passed": true
+    },
+    {
+      "name": "MCP recall works with KB offline",
+      "passed": true
+    },
+    {
+      "name": "local store works with KB offline",
+      "passed": true
+    },
+    {
+      "name": "explicit KB outage is an HTTP failure",
+      "passed": true
+    },
+    {
+      "name": "KB recovers",
+      "passed": true
+    },
+    {
+      "name": "KB memory process outage fails list",
+      "passed": true
+    },
+    {
+      "name": "KB memory process outage fails get",
+      "passed": true
+    },
+    {
+      "name": "user store works during KB memory process outage",
+      "passed": true
+    },
+    {
+      "name": "KB memory process recovers",
+      "passed": true
+    },
+    {
+      "name": "local retirement",
+      "passed": true
+    },
+    {
+      "name": "retired local ID never resolves to KB collision",
+      "passed": true
+    },
+    {
+      "name": "local retirement leaves KB content unchanged",
+      "passed": true
+    },
+    {
+      "name": "MCP creates model-authored shared correction fixture",
+      "passed": true
+    },
+    {
+      "name": "MCP versioned get owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP versioned get preserves exact target",
+      "passed": true
+    },
+    {
+      "name": "MCP private correction precondition owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP private placement refuses unsupported correction preconditions",
+      "passed": true
+    },
+    {
+      "name": "MCP keyed update owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP update returns canonical commit receipt",
+      "passed": true
+    },
+    {
+      "name": "MCP update preserves confidence and model authority",
+      "passed": true
+    },
+    {
+      "name": "MCP keyed update retry owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP replay preserves commit without requesting another host audit",
+      "passed": true
+    },
+    {
+      "name": "MCP changed retry payload owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP refuses changed idempotency payload",
+      "passed": true
+    },
+    {
+      "name": "MCP stale update version owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP forwards and enforces expected version",
+      "passed": true
+    },
+    {
+      "name": "MCP retired update retry owner envelope",
+      "passed": true
+    },
+    {
+      "name": "MCP retry never releases retired content",
+      "passed": true
+    },
+    {
+      "name": "MCP retries retain exactly one replacement",
+      "passed": true
+    },
+    {
+      "name": "shared journal HTTP store",
+      "passed": true
+    },
+    {
+      "name": "shared versioned HTTP get",
+      "passed": true
+    },
+    {
+      "name": "shared version binds exact identity and owner",
+      "passed": true
+    },
+    {
+      "name": "shared version binds current revision",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP store commits invalidation",
+      "passed": true
+    },
+    {
+      "name": "shared journal identical retry",
+      "passed": true
+    },
+    {
+      "name": "shared retry preserves identity and journal",
+      "passed": true
+    },
+    {
+      "name": "shared tag batch invalidates its parent once",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP rejects stale expected version",
+      "passed": true
+    },
+    {
+      "name": "shared refreshed versioned HTTP get",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP replacement refuses failed tag copy",
+      "passed": true
+    },
+    {
+      "name": "shared original after failed copy",
+      "passed": true
+    },
+    {
+      "name": "failed tag copy preserves original and invalidation",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP version replacement",
+      "passed": true
+    },
+    {
+      "name": "shared correction returns canonical commit receipt",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP idempotent correction replay",
+      "passed": true
+    },
+    {
+      "name": "shared correction replay preserves identity and commit",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP refuses idempotency key reuse",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP correction retry conflicts without duplicating",
+      "passed": true
+    },
+    {
+      "name": "shared replacement creates a new identity",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP correction retains verified user authorship",
+      "passed": true
+    },
+    {
+      "name": "shared replacement preserves visible tags",
+      "passed": true
+    },
+    {
+      "name": "shared replacement and copied tags have durable revisions",
+      "passed": true
+    },
+    {
+      "name": "shared replacement get",
+      "passed": true
+    },
+    {
+      "name": "shared direct read leaves invalidations unchanged",
+      "passed": true
+    },
+    {
+      "name": "shared replacement survives KB restart",
+      "passed": true
+    },
+    {
+      "name": "shared journal owner and events survive KB restart",
+      "passed": true
+    },
+    {
+      "name": "shared correction receipt survives KB restart",
+      "passed": true
+    },
+    {
+      "name": "shared restarted correction never duplicates result",
+      "passed": true
+    },
+    {
+      "name": "shared HTTP retry refuses retired result without cached content",
+      "passed": true
+    },
+    {
+      "name": "explicit long KB store",
+      "passed": true
+    },
+    {
+      "name": "explicit long KB get",
+      "passed": true
+    },
+    {
+      "name": "KB get preserves full long Unicode content",
+      "passed": true
+    },
+    {
+      "name": "ordinary KB get hides retired record",
+      "passed": true
+    },
+    {
+      "name": "historical retired KB get 2026-03-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "historical KB get preserves content and validity 2026-03-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "historical retired KB get 2026-07-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "historical KB get preserves content and validity 2026-07-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "versioned historical HTTP read 2026-01-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "versioned historical HTTP read 2026-03-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "versioned historical HTTP excludes 2026-06-01T00:00:00Z",
+      "passed": true
+    },
+    {
+      "name": "versioned historical HTTP excludes 2025-12-31T23:59:59Z",
+      "passed": true
+    },
+    {
+      "name": "explicit HTTP read refusal user unsupported_version",
+      "passed": true
+    },
+    {
+      "name": "explicit HTTP read refusal user unsupported_mode",
+      "passed": true
+    },
+    {
+      "name": "explicit HTTP read refusal kb unsupported_version",
+      "passed": true
+    },
+    {
+      "name": "explicit HTTP read refusal kb unsupported_mode",
+      "passed": true
+    },
+    {
+      "name": "versioned personal current fixture",
+      "passed": true
+    },
+    {
+      "name": "versioned personal current HTTP read",
+      "passed": true
+    },
+    {
+      "name": "personal current HTTP reports applied policy",
+      "passed": true
+    },
+    {
+      "name": "personal historical HTTP refuses unsupported reconstruction",
+      "passed": true
+    },
+    {
+      "name": "personal email canaries absent from all KB tables",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "user HTTP rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP store rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP update rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user MCP supersede rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 0",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 0",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "user stores confidence 1",
+      "passed": true
+    },
+    {
+      "name": "user preserves confidence 1",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "kb HTTP rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "kb MCP store rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "kb MCP update rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "kb MCP supersede rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "kb stores confidence 0",
+      "passed": true
+    },
+    {
+      "name": "kb preserves confidence 0",
+      "passed": true
+    },
+    {
+      "name": "kb stores confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "kb preserves confidence 0.25",
+      "passed": true
+    },
+    {
+      "name": "kb stores confidence 1",
+      "passed": true
+    },
+    {
+      "name": "kb preserves confidence 1",
+      "passed": true
+    }
+  ],
+  "topology.json": [
+    {
+      "name": "KB application metadata contains no database or enrollment credential",
+      "passed": true
+    },
+    {
+      "name": "KB boots with standardized PostgreSQL and local embedding",
+      "passed": true
+    },
+    {
+      "name": "KB shared memory module stores a record",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence 1.01",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence 'invalid'",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "Direct KB store rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "KB ranked search uses its local embedding service",
+      "passed": true
+    },
+    {
+      "name": "KB graph and memory retrieval survives the deepest worker path",
+      "passed": true
+    },
+    {
+      "name": "Server boots without a KB connection",
+      "passed": true
+    },
+    {
+      "name": "Server application metadata contains no database or enrollment credential",
+      "passed": true
+    },
+    {
+      "name": "KB-free personal memory regression gate",
+      "passed": true
+    },
+    {
+      "name": "Enrolled optional KB, scope isolation, restart and outage regressions",
+      "passed": true
+    },
+    {
+      "name": "One application image and immutable first-boot identities",
+      "passed": true
+    }
+  ]
+}

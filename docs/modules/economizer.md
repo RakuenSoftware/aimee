@@ -20,8 +20,9 @@ Two properties shape the whole module:
   provider prompt cache goes cold. That is why the module carries a cJSON-compatible
   printer rather than using `encoding/json`, which reorders object keys and HTML-escapes.
 
-It does not decide *whether* to call a provider, does not talk to providers, and does not
-predict cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
+The host chooses provider calls and routes. The Go admission stage enforces declared
+limits on the final serialized request; the module does not call providers or predict
+cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
 authorization requires a signed registry entry, and the production registry is empty by
 design.
 
@@ -39,6 +40,9 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 | `economizer-tool-recall` | 11011 | bounded spill-directory/ref wire | result header plus recalled raw bytes |
 | `economizer-tool-stats` | 11012 | empty | fixed process-counter snapshot |
 | `economizer-record-build` | 11013 | session messages and range | record-derived files/errors/decisions plus Coordinate Closet |
+| `economizer-post-status` | 11014 | session, provider status and mutation/stream facts | restore/resend decision and breaker result |
+| `economizer-stats` | 11015 | snapshot operation | reduction telemetry |
+| `economizer-request-budget` | 11016 | final body length/digest, route and explicit limits | admission decision bound to the complete metadata |
 
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
@@ -78,25 +82,55 @@ unattached module are therefore not presented as genuine zero activity.
 
 ## Providers and readiness
 
-The module serves five bus stages and calls no provider itself, so it has no upstream to be
+The module serves eight bus stages and calls no provider itself, so it has no upstream to be
 ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
 reports whether an `aimee-module-economizer` process is attached to the bus.
 
-When it is not attached, `econ_module_reduce` returns non-zero immediately and the caller
-dispatches its original prompt. That is the designed steady state for any deployment that
-has not enabled the module. A missing economizer costs tokens, never correctness.
+When it is not attached, optional `econ_module_reduce` returns non-zero immediately
+and the caller retains its original prompt. Final request admission has a different
+contract: a request declaring a hard context limit fails closed if the process is
+unavailable, without dispatching to the provider.
 
 ## Configuration and activation
 
-Every lever is default-off and resolved by the caller from `econ_preset`, so the module
+Every reduction lever is default-off and resolved by the caller from `econ_preset`, so the module
 reads no ambient config. The request carries the resolved values; the module applies them.
 
 That includes the freeze cost guardrail, which takes the three provider **rates** rather
 than a model name, so the pricing table stays with whoever owns it.
 
+- `enabled_by_default`: `true`. Server starts the process so declared final request
+  limits can be enforced even when optional reduction is off.
 - `runtime_toggle.supported`: `false`. Activation is the presence of the module process,
   not a runtime flag, because flipping one mid-conversation would strand reducer state
   that the caller is still persisting across turns.
+
+`AIMEE_PROVIDER_CONTEXT_LIMITS` supplies an optional deployment-owned final
+provider byte ceiling, for example
+`{"schema_version":1,"max_request_bytes":65536}`. The shipped Server/KB Compose
+configuration forwards this nonsecret value. Set it before starting the host;
+changes require recreating the container or restarting a native host with the
+new environment. Empty or unset means no deployment ceiling. A JSON byte cap of
+zero is literal zero.
+
+The host forwards this value unchanged to Go admission. Requests without
+`X-Aimee-Context-Limits` inherit it; a caller's explicit byte cap can only tighten
+it. With a deployment cap, `{"schema_version":1}` in the request header explicitly
+inherits it. Oversized requests fail with `request_budget_exceeded` and never
+reach the provider, including streaming and native host calls without HTTP
+context. Invalid deployment policy (including unsupported token caps/reserves)
+fails with `request_budget_policy_invalid` / HTTP 503. Invalid caller limits keep
+their HTTP 400 contract. Reduction settings cannot disable this admission.
+
+This setting applies at the common serialization fence used by Server Chat,
+Responses and Messages, plus native agent primary/fallback calls.
+
+Stage 8 metadata version 2 carries independent caller/operator lengths followed
+by their opaque JSON values; an absent caller has length zero. The response
+commitment binds both policy layers to the final body length, digest and route.
+Version 1 caller-only metadata remains supported. Requests with neither policy
+layer avoid the admission RPC. Task-composition inheritance, exact provider token
+counting and protected repacking remain separate acceptance work.
 
 ## Surfaces
 

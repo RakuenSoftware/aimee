@@ -111,6 +111,19 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 		closeConnection()
 		return nil, err
 	}
+	// Private memory also opens the store directly. It must not race the Aimee
+	// owner's migration/replay and serve a content snapshot before surviving
+	// erasure intents have been applied. Both owners use the storage contract;
+	// neither imports the other's migration or admission implementation.
+	if placement == PlacementServer {
+		replayCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err = waitPrivateErasureReplay(replayCtx, resources)
+		cancel()
+		if err != nil {
+			closeConnection()
+			return nil, fmt.Errorf("memory: private erasure replay: %w", err)
+		}
+	}
 	// As before, governed model/embedding execution may be unavailable while
 	// deterministic memory operations remain usable. Operations requiring egress
 	// report its absence through the normal owner contracts.
@@ -119,4 +132,23 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	StartSharedIndex(ctx, data, executor)
 	log.Printf("memory module: placement=%s storage=postgres", placement)
 	return NewHandler(executor, WithDataStore(placement, data), func(options *handlerOptions) { options.dataContext = ctx }), nil
+}
+
+func waitPrivateErasureReplay(ctx context.Context, db store.Store) error {
+	for {
+		var removed int64
+		err := db.QueryRow(ctx, `SELECT user_memory_replay_erasure_intents()`).Scan(&removed)
+		if err == nil {
+			return nil
+		}
+		// On a fresh store the Aimee owner may still be installing the contract.
+		// No memory handler or index worker is published during this wait.
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("%w (last storage error: %v)", ctx.Err(), err)
+		case <-timer.C:
+		}
+	}
 }

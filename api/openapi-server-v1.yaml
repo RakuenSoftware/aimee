@@ -3600,6 +3600,234 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/receipt/forget:
+    post:
+      summary: Remove the authenticated principal's encrypted replay payloads for a request
+      description: Requires memory write authority. Preserves the durable receipt and its chain inclusion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200":
+          description: Removal status for each attempt, including explicit pending failures
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/health:
+    post:
+      summary: Aggregate the authenticated principal's receipt-backed retrieval health
+      description: >-
+        Optional collection requires AIMEE_MEMORY_HEALTH_ENABLED=1 on the serving
+        owner. Scans at most 256 principal-owned requests through a verified local
+        ledger head, reconciles attempts into bounded private PostgreSQL state,
+        and reports one exact project/workspace/purpose/query-class population.
+        Windows use prepared-at timestamps with stages reconciled through the
+        verified ledger snapshot. Windows up to 12 hours also scan an adjacent
+        baseline; longer comparisons exceed the 24-hour retention bound.
+        Alerts require complete unsampled windows and at least 30 labels per
+        window, and describe observed adverse rate changes rather than
+        statistical significance. Concentration alone never triggers an alert.
+        No cross-principal aggregation is offered. Raw queries, memory text,
+        record IDs, family IDs and task IDs are not returned. Older receipts with
+        missing metadata report unknown metrics. Truncation, import failures,
+        unknown dispatch and incomplete windows are explicit. Required receipts
+        and serving decisions are unchanged when collection is disabled.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                window: { type: string, default: 24h, description: Positive Go duration at most 24 hours. }
+                traces: { type: boolean, default: false, description: Include at most 16 receipt references owned by this principal in the exact report population. }
+                project: { type: string, default: '' }
+                workspace: { type: string, default: '' }
+                purpose: { type: string, default: provider_input }
+                query_class: { type: string, default: unclassified }
+                stage: { type: string, enum: [dispatched, assembled_unsent, unknown_dispatch, network_uncertain], default: dispatched }
+      responses:
+        "200":
+          description: Aggregate, collection coverage and readable text, or explicit disabled/unavailable state
+          content:
+            application/json:
+              schema: { type: object }
+  /learning/application:
+    post:
+      summary: Attribute explicit user feedback to a delivered procedure version
+      description: >-
+        The server reads the authenticated principal's existing provider receipt.
+        It accepts no caller-supplied exposure or chain-integrity claim. Learning
+        validates application and verifier evidence, records immutable events,
+        and returns versioned experience. Model self-reports cannot establish
+        application or success. No fitted policy or canonical procedure is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+                event: { type: object, description: Version 1 learning ProcedureEvent with authority user_feedback. }
+                event_json: { type: string, maxLength: 65536, description: CLI encoding of event; use event for structured clients. }
+      responses:
+        "200":
+          description: Governed event reference and experience, or explicit refusal
+          content:
+            application/json:
+              schema: { type: object }
+  /learning/task_cost:
+    post:
+      summary: Report declared complete-task costs through economizer
+      description: >-
+        Returns actual and estimated nanodollars separately, every unpriced call,
+        stage coverage and attempt identities. Integer amounts are decimal strings.
+        Caller-declared completeness is not independently verified completeness.
+        This observe-only report never admits a cost intervention or claims savings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cost: { type: object, description: Economizer version 1 TaskCostRequest. }
+                cost_json: { type: string, maxLength: 2097152, description: CLI encoding of cost. }
+      responses:
+        "200":
+          description: Cost report or explicit refusal
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/receipt:
+    post:
+      summary: Inspect the authenticated principal's durable provider attempt receipts
+      description: >-
+        Returns bounded complete attempt stages from the local WORM ledger.
+        Distinguishes resolved preparation without dispatch, active ownership,
+        admitted uncertainty and acknowledged transport. Commitment-only receipts
+        cannot reconstruct payloads. Ledger inclusion, local checkpoint status,
+        source availability and external effect confirmation are independent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+                replay: { type: boolean, default: false, description: Return available matching retained payload bytes as base64. }
+      responses:
+        "200":
+          description: Receipt stages or an explicit unavailable response
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/validity:
+    post:
+      summary: Inspect the serving eligibility decision for one memory
+      description: >-
+        Requires an authenticated user diagnostic purpose. Reports the serving
+        predicate, checked revision and exclusion reasons without memory text.
+        Missing and unauthorized records have the same response. Evidence and
+        authority remain unknown unless established separately. This observation
+        does not authorize a later provider dispatch. Historical mode requires
+        an absolute valid_at and is currently supported by the KB placement;
+        unsupported temporal reconstruction returns unsupported_mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id]
+              properties:
+                id: { type: string, pattern: '^[1-9][0-9]*$' }
+                store: { type: string, enum: [user, kb], default: user }
+                mode: { type: string, enum: [current, historical], default: current }
+                valid_at: { type: string }
+                believed_at: { type: string, description: Unsupported reconstruction is refused explicitly. }
+                project: { type: string }
+                workspace: { type: string }
+                scope:
+                  type: object
+                  required: [type]
+                  properties:
+                    type: { type: string, enum: [global, project, workspace] }
+                    value: { type: string }
+      responses:
+        "200":
+          description: Versioned eligibility decision; no record payload
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid arguments or unsupported temporal mode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "401":
+          description: Diagnostic purpose not authorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable; no fallback decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/hygiene:
+    post:
+      summary: Inspect bounded hygiene findings and queue review proposals
+      description: >-
+        Dry runs create no proposals. Normal runs queue immutable, version-bound learning proposals; neither mode changes canonical memory.
+        Row and content limits bound the compared window; partial coverage and
+        unvisited content are explicit. Findings carry expected source versions
+        and remain candidates requiring review. No auto-apply mode is available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scope]
+              properties:
+                dry_run: { type: boolean, default: false }
+                cursor: { type: string, maxLength: 4096, description: "Owner/scope/generation-bound continuation; changed evidence requires restarting the scan." }
+                scope:
+                  type: object
+                  required: [type, value]
+                  properties:
+                    type: { type: string, enum: [project, workspace, global] }
+                    value: { type: string, minLength: 1, maxLength: 1024, description: "Explicit scope value; global requires _global." }
+                max_rows: { type: integer, minimum: 1, maximum: 128, default: 64 }
+                max_content_bytes: { type: integer, minimum: 1, maximum: 32768, default: 16384 }
+      responses:
+        "200":
+          description: Bounded findings with scope, revisions, budgets, coverage and proposal receipts
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid scope, budgets, mutation option or unsupported argument
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Owner unavailable; no coverage result is asserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/search:
     post:
       summary: Keyword-search memories
@@ -3676,6 +3904,56 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/correction_proposals:
+    post:
+      summary: Inspect correction drafts outside recall
+      description: Select store=user for private drafts or store=kb for scoped shared drafts. The default is kb.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 50 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Draft references; an exact proposal_id also includes its screened payload
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/review_correction:
+    post:
+      summary: Approve or reject an exact correction draft
+      description: Requires authenticated user authority, an exact target version and payload digest. Approval preserves model authorship and confidence; retries reuse the durable decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposal_id, payload_digest, expected_version, action]
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                payload_digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+                expected_version: { type: object }
+                action: { type: string, enum: [approve, reject] }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Durable review decision and resulting version when approved
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Draft, target version or prior decision no longer matches
   /memory/reject:
     post:
       summary: Reject a memory and create a durable exact-value tombstone
@@ -3728,23 +4006,24 @@ paths:
               schema: { type: object }
   /memory/delete:
     post:
-      summary: Delete a memory by id
+      summary: Retire a private memory or delete a shared memory by id
       description: >
-        Removes a memory permanently. Prefer /memory/supersede when a belief has
-        merely been replaced: the supersession chain is walked by
-        memory.list_superseded_keys and memory.fact_history, and deleting breaks
-        provenance and the negative examples effectiveness scoring relies on.
-        Delete is for content that should not exist at all, such as a credential, PII
-        under an erasure request, or data written to the wrong store.
-        Requires the memory-write capability.
+        Defaults to store=user: retirement removes a private memory from current
+        recall while retaining governed history and reports destroyed=false.
+        A model cannot retire user-authored or unknown-origin private content.
+        The expected_version precondition binds the owner, record ID and current revision.
+        With idempotency_key, an authenticated identical retry returns its original
+        mutation_receipt without another transition. Reactivated, changed or erased
+        results are not retired again; changed retry payloads conflict. The receipt
+        contains no retained content. Private retirement is not permanent erasure.
 
-        Whether the row is DESTROYED or merely retired depends on the connection,
-        not on the capability. A caller the transport attested as a person (a
-        local UDS peer, or a webuser over the trusted socket) destroys the row and
-        its provenance irreversibly. Any other caller that clears the capability
-        gate, including a bearer over TCP, retires it instead: it stops answering
-        recall under its key but stays readable through memory.fact_history. The
-        response reports which happened as `destroyed`.
+        Select store=kb explicitly for the shared deletion contract. Its existing
+        authority and retention rules determine whether the record is retired or
+        destroyed. Shared conditional deletion supports the same precondition and retry
+        key. Its schema-version-2 receipt names the target_version and outcome
+        (retired or destroyed). Retirement includes the resulting version;
+        destruction has no current version. A changed, restored or hidden result
+        cannot be deleted again through an old receipt. Requires memory-admin.
       requestBody:
         required: true
         content:
@@ -3753,7 +4032,26 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                store: { type: string, enum: [user, kb], default: user }
+                id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                expected_version:
+                  type: object
+                  additionalProperties: false
+                  required: [schema_version, owner_id, record_id, record_revision]
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    owner_id: { type: string, format: uuid }
+                    record_id: { type: string, pattern: '^[1-9][0-9]*$' }
+                    record_revision: { type: string, pattern: '^[1-9][0-9]*$' }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
+                  description: Requires expected_version, an authenticated principal and an identical retry payload.
       responses:
         "200":
           description: Deletion result ({ id, deleted, destroyed })
@@ -3762,6 +4060,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing or non-positive id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Stale version, changed retry payload, unavailable committed result or authority conflict
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3774,9 +4077,13 @@ paths:
     post:
       summary: Replace a memory with a corrected one, linking the two
       description: >
-        The preferred correction: the old memory is retained and linked to its
-        replacement, so provenance and retrieval history stay intact.
-        Requires the memory-write capability.
+        Correct memory in the selected store. Private memory retains the stable ID
+        and prior revision; shared KB memory links the old and replacement records.
+        expected_version binds the owner, ID and revision. With idempotency_key,
+        identical authenticated retries return the original mutation_receipt after
+        checking current result eligibility and version. Changed payloads conflict;
+        hidden or changed results are not repeated. A model correction requiring
+        review returns a durable proposal reference. Requires memory-write capability.
       requestBody:
         required: true
         content:
@@ -3785,7 +4092,26 @@ paths:
               type: object
               required: [old_id, new_content]
               properties:
-                old_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                store: { type: string, enum: [user, kb], default: user }
+                old_id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                expected_version:
+                  type: object
+                  additionalProperties: false
+                  required: [schema_version, owner_id, record_id, record_revision]
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    owner_id: { type: string, format: uuid }
+                    record_id: { type: string, pattern: '^[1-9][0-9]*$' }
+                    record_revision: { type: string, pattern: '^[1-9][0-9]*$' }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
+                  description: Requires expected_version. Reuse only for the identical correction.
                 new_content: { type: string }
                 confidence: { type: number, minimum: 0, maximum: 1 }
                 session_id: { type: string }
@@ -3797,6 +4123,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing old_id or empty new_content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Version, retry payload, unavailable committed result or review-required conflict
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3961,6 +4292,213 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         "503":
           description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /action/receipt:
+    post:
+      summary: Inspect or reconcile an owned durable action receipt
+      description: >-
+        Requires tool-execution capability and ownership of the session lineage.
+        Reconciliation verifies the original destination and payload through the
+        tool owner. Supplied outcome assertions never count as verification.
+        Currently exact postcondition verification supports local write_file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, session_id, action_id]
+              properties:
+                operation: {type: string, enum: [inspect, reconcile, cancel]}
+                session_id: {type: string}
+                action_id: {type: string}
+                directory: {type: string, description: Original absolute host directory}
+                arguments_json: {type: string, description: Original effective tool arguments for owner verification}
+      responses:
+        '200':
+          description: Owned receipt or an explicit unavailable or unverified result
+          content:
+            application/json:
+              schema: {type: object}
+  /task/projection:
+    post:
+      summary: Operate on disposable state for the owned session's active task
+      description: >-
+        Host-only state ownership with compare-and-swap revisions. Rebuilds and
+        releases use fresh memory-owner evidence. Promotion previews bind an
+        exact claim and existing private target; promote submits a review draft,
+        never an authoritative insert. Shared-store promotion is unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, session_id, task_id]
+              properties:
+                operation:
+                  type: string
+                  enum: [describe, rebuild, get, discard, cleanup_expired, promotion_preview, promote]
+                session_id: {type: string}
+                task_id: {type: string, pattern: '^[1-9][0-9]*$'}
+                expected_revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                binding:
+                  type: object
+                  required: [store, project, task, view]
+                  properties:
+                    store: {type: string, enum: [user, kb]}
+                    project: {type: string}
+                    task: {type: string}
+                    view: {type: string, enum: [briefing]}
+                ttl_seconds: {type: integer, minimum: 1, maximum: 86400}
+                max_context_bytes: {type: integer, minimum: 0, maximum: 65536}
+                items:
+                  type: array
+                  maxItems: 32
+                  items:
+                    type: object
+                    required: [kind, text]
+                    properties:
+                      kind: {type: string, enum: [hypothesis, planned_action, working_decision, open_question]}
+                      text: {type: string, maxLength: 4096}
+                events:
+                  type: array
+                  maxItems: 32
+                  items: {type: string, pattern: '^[1-9][0-9]*$'}
+                target_id: {type: string, pattern: '^[1-9][0-9]*$'}
+                claim_index: {type: integer, minimum: 0, maximum: 31}
+                preview_digest: {type: string}
+      responses:
+        "200":
+          description: Non-authoritative projection, review draft, or explicit conflict/unavailable state
+          content:
+            application/json:
+              schema: {type: object}
+        "503":
+          description: Owner unavailable or request refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /memory/serve:
+    post:
+      summary: Serve a named authorized memory view
+      description: >-
+        Runs in the selected memory owner. Recomputes eligibility and temporal
+        selection on every request, including projection-cache reuse. Returns
+        exact memory-envelope byte accounting and an invocation receipt;
+        provider dispatch is a separate operation. Unavailable placement
+        capabilities are explicit omissions, never filled from another store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [view, task]
+              properties:
+                view:
+                  type: string
+                  enum: [briefing, active_constraints, current_state, recent_decisions, relevant_context, known_failures, reviewed_procedures, open_contradictions, historical_context]
+                task: { type: string, minLength: 1, maxLength: 8192 }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+                valid_at: { type: string }
+                believed_at: { type: string }
+                limit: { type: integer, minimum: 0, maximum: 64 }
+                context_limits: { type: object }
+                evidence_requirements: { type: object }
+      responses:
+        "200":
+          description: Authorized projection or explicit empty/degraded result
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid view or unsupported budget/temporal request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/claim-card:
+    post:
+      summary: Inspect a canonical memory claim card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, pattern: '^[1-9][0-9]*$' }
+                expand_evidence: { type: boolean, default: false }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200":
+          description: Version-bound card and governed canonical correction descriptor
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Claim unavailable in the current authorized scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/evidence:
+    post:
+      summary: Inspect authorized memory evidence lineage
+      description: >-
+        Uses a stable scoped snapshot. Inaccessible or unresolved ancestry
+        withholds counts and references. Distinct creation events do not prove
+        independent corroboration; unknown independent counts remain null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200":
+          description: Scoped lineage diagnostics and authorized evidence references
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid identity or scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Memory unavailable in the selected scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Evidence owner unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4129,7 +4667,14 @@ paths:
   /memory/store:
     post:
       summary: Store a memory (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
+      description: >
+        Mutating route; reachable only on the local Unix-domain socket. Shared writes
+        require an active project/workspace or explicit scope=all. Optional authenticated
+        idempotency_key binds the admitted request and authority to one durable outcome;
+        identical retries return that result without repeating extraction or invalidation.
+        Existing same-key replacement and review rules still apply. Changed requests
+        conflict; hidden, expired, superseded or erased results are unavailable.
+        Creation does not accept expected_version.
       requestBody:
         required: true
         content:
@@ -4140,9 +4685,21 @@ paths:
               properties:
                 key: { type: string }
                 content: { type: string }
+                store: { type: string, enum: [user, kb], default: user }
+                tier: { type: string }
+                kind: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
       responses:
         "200":
-          description: Stored memory envelope
+          description: Stored memory envelope; keyed outcomes include schema-2 mutation_receipt with stored/unchanged outcome, commit_id, exact version and replayed flag, or a linked review proposal
           content:
             application/json:
               schema: { type: object }
@@ -4551,7 +5108,7 @@ paths:
       summary: Native streaming chat (aimee event stream)
       description: >
         Stream a chat turn as newline-delimited aimee events
-        (turn_start / text / thinking / turn_end / session / usage / done /
+        (turn_start / text / thinking / turn_end / session / retry_attempt / usage / done /
         error), the same event shape the NDJSON socket emits. Used by the
         first-party webchat UI; distinct from the OpenAI-shaped
         /chat/completions. Requires CAP_CHAT (UDS, or an unscoped TCP bearer).
@@ -4567,6 +5124,18 @@ paths:
                 aimee_session_id: { type: string }
                 claude_session_id: { type: string }
                 cwd: { type: string }
+                clean_retry:
+                  type: object
+                  additionalProperties: false
+                  description: >
+                    Opt in to operator-enabled durable native retry tracking. An empty
+                    object starts an attempt. To retry a failed attempt, provide the
+                    retry_attempt event ID and complete current constraints in message.
+                    History speculation is omitted; workspace effects are not restored.
+                    Unsupported providers, unavailable baselines and unknown writes refuse.
+                  properties:
+                    previous_attempt: { type: string }
+                    replace_constraints: { type: boolean }
       responses:
         "200":
           description: Newline-delimited aimee chat events (read until close)

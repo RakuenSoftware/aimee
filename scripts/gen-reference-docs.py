@@ -717,6 +717,14 @@ ENV_DESC = {
     "AIMEE_ACTIVE_TOOLSET": ("Client & session", "Active toolset (tool allowlist) for the session."),
     "AIMEE_SESSION_START_VERBOSE": ("Client & session", "Verbose logging during session start."),
     # Server runtime
+    "AIMEE_PROVIDER_CONTEXT_LIMITS": (
+        "Server runtime",
+        "Deployment-owned final provider byte ceiling, e.g. "
+        '`{"schema_version":1,"max_request_bytes":65536}`. Empty/unset means no deployment cap; '
+        "JSON zero is literal. Go admission applies the stricter deployment/caller limit and "
+        "fails closed on malformed policy or overflow. Set before starting the host; recreate "
+        "the container or restart the native host to change it. Token caps are not yet supported."
+    ),
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
     "AIMEE_RUNTIME_WEB_ENABLED": ("Server runtime", "Enable the browser runtime and its optional runtime-web process. The shipped container default is on; `0`, `false`, `off`, or `no` disables both unless `AIMEE_MODULE_RUNTIME_WEB` explicitly enables the process."),
@@ -912,6 +920,7 @@ ENV_DESC = {
     "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED": ("Memory", "Enable the async cognify pipeline."),
     "AIMEE_MEMORY_COREF_MODE": ("Memory", "Coreference-resolution mode."),
     "AIMEE_MEMORY_DECOMPOSE_HEURISTIC": ("Memory", "Override the heuristic sub-query expansion stage during recall (0 disables it)."),
+    "AIMEE_MEMORY_HEALTH_ENABLED": ("Memory", "Set to 1 to opt into bounded receipt health collection and optional serving metadata. Default off; disabling it preserves required provider receipts."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS": ("Memory", "Inserts before a maintenance cycle triggers."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),

@@ -1,0 +1,42 @@
+=== RUN   TestCorpusValidation
+--- PASS: TestCorpusValidation (0.00s)
+=== RUN   TestCorpusIsolatedSemanticReplay
+2026/09/27 08:46:06 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestCorpusIsolatedSemanticReplay (2.67s)
+=== RUN   TestBaselineAtomicAndDenominator
+--- PASS: TestBaselineAtomicAndDenominator (0.00s)
+=== RUN   TestCorpusCommandReplayAndBaselineFailure
+--- PASS: TestCorpusCommandReplayAndBaselineFailure (6.35s)
+=== RUN   TestCorpusReadErrors
+--- PASS: TestCorpusReadErrors (0.04s)
+=== RUN   TestCorpusCancellationStopsQueryEmbedding
+2026/09/27 08:46:13 memory data failure operation="other" trace=0 status=2 class=internal
+--- PASS: TestCorpusCancellationStopsQueryEmbedding (1.24s)
+=== RUN   TestFrozenRepositoryCorpus
+--- PASS: TestFrozenRepositoryCorpus (0.00s)
+=== RUN   TestDatasetParsingAndDenominators
+--- PASS: TestDatasetParsingAndDenominators (0.00s)
+=== RUN   TestDatasetIsolatedGoReplay
+--- PASS: TestDatasetIsolatedGoReplay (8.24s)
+=== RUN   TestUnanswerableRetrievalPreservesCasesAndNullMetrics
+--- PASS: TestUnanswerableRetrievalPreservesCasesAndNullMetrics (1.55s)
+=== RUN   TestEvaluationTransportRefusesMalformedFrames
+--- PASS: TestEvaluationTransportRefusesMalformedFrames (0.01s)
+=== RUN   TestEvaluationTransportPreservesOwnerFailure
+--- PASS: TestEvaluationTransportPreservesOwnerFailure (0.00s)
+=== RUN   TestEvaluationSharedOwnerReplay
+--- PASS: TestEvaluationSharedOwnerReplay (1.74s)
+=== RUN   TestQADatasetValidation
+--- PASS: TestQADatasetValidation (0.00s)
+=== RUN   TestQAUsesIsolatedModuleAndScoredFailureAttempt
+--- PASS: TestQAUsesIsolatedModuleAndScoredFailureAttempt (5.79s)
+=== RUN   TestLongMemQAAndModuleMissReports
+--- PASS: TestLongMemQAAndModuleMissReports (5.67s)
+=== RUN   TestSessionSupportLabelsFollowEvidenceSessions
+--- PASS: TestSessionSupportLabelsFollowEvidenceSessions (0.00s)
+=== RUN   TestAgentModelUsesExistingCLIWithoutShell
+--- PASS: TestAgentModelUsesExistingCLIWithoutShell (0.00s)
+=== RUN   TestAgentModelBoundsOutput
+--- PASS: TestAgentModelBoundsOutput (0.03s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-eval	34.343s

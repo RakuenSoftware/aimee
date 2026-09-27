@@ -1,0 +1,680 @@
+{
+  "schema_version": 1,
+  "source_commit": "60022abc176425b06721798c81898c0202046931",
+  "query_class": "code_navigation_function_location",
+  "kind": "controlled_source_excerpt_pilot",
+  "representative_native_workload": false,
+  "scope": "offline routing/exposure policy fit; model answers measured; serving pipeline promotion forbidden from this pilot alone",
+  "synthetic_features": [
+    "candidate arm assignment",
+    "base rank",
+    "serving counts",
+    "mandatory flag"
+  ],
+  "max_items": 2,
+  "max_context_bytes": 12000,
+  "fit_objective": "maximize gold evidence retention; ties prefer no adaptation then all arms",
+  "grid": {
+    "routes": [
+      "all",
+      "lexical"
+    ],
+    "exposure_penalties": [
+      0,
+      1,
+      3
+    ]
+  },
+  "estimated_cost_model": {
+    "label": "estimated cost; hypothetical normalized rates, not actual billing or vendor pricing",
+    "currency": "USD",
+    "input_per_million_tokens": 1,
+    "output_per_million_tokens": 1,
+    "cached_input_per_million_tokens": 1
+  },
+  "gates": {
+    "minimum_heldout_pairs": 200,
+    "maximum_p95_latency_ratio": 1.1,
+    "maximum_estimated_cost_ratio": 1,
+    "require_native_representative_workload": true,
+    "require_strict_fit_improvement": true
+  },
+  "cases": [
+    {
+      "id": "nav-1",
+      "split": "fit",
+      "question": "Choose the function that supplies different default recall token allocations for session starts and other turns, then clamps the allocation.",
+      "gold_symbol": "recallTokenLimit",
+      "gold_path": "server-go/modules/memory/recall.go",
+      "candidates": [
+        {
+          "id": "source-0",
+          "symbol": "recallTokenLimit",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func recallTokenLimit(tokens int, sessionStart bool) int {\n\tif tokens <= 0 {\n\t\tif sessionStart {\n\t\t\ttokens = 1800\n\t\t} else {\n\t\t\ttokens = 600\n\t\t}\n\t}\n\treturn min(max(tokens, 64), 8192)\n}\n",
+          "source_sha256": "5600d6305e321e335b22e2a91011053b56f777ffc85886231c819945bc780e9d",
+          "arm": "lexical",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": true
+        },
+        {
+          "id": "source-1",
+          "symbol": "assertionTimestamp",
+          "path": "server-go/modules/memory/assertion_search.go",
+          "source": "func assertionTimestamp(value string) bool {\n\tif value == \"\" {\n\t\treturn true\n\t}\n\tif len(value) != 19 && len(value) != 20 {\n\t\treturn false\n\t}\n\tif len(value) == 20 && value[19] != 'Z' {\n\t\treturn false\n\t}\n\tnormalized := strings.ReplaceAll(strings.TrimSuffix(value, \"Z\"), \"T\", \" \")\n\tstamp, err := time.Parse(\"2006-01-02 15:04:05\", normalized)\n\treturn err == nil && stamp.Year() > 0 && stamp.Format(\"2006-01-02 15:04:05\") == normalized\n}\n",
+          "source_sha256": "74c1f456a058624d885740dcbe9f63b0c1569bbefdf16bd6fb26bec8edfcb253",
+          "arm": "dense",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-2",
+          "symbol": "typedEstimate",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedEstimate(text string) int {\n\tif text == \"\" {\n\t\treturn 0\n\t}\n\treturn len(text)/4 + 1\n}\n",
+          "source_sha256": "c154af6640fe207253a46a0e30afbee50204ade4810cd23739b5469c13cdd27a",
+          "arm": "graph",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-3",
+          "symbol": "coherentPredecessor",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func coherentPredecessor(current, old assertionHit) bool {\n\tif current.PriorVersionID != old.StableID || current.Subject != old.Subject || current.Relation != old.Relation || current.Object == old.Object || !old.Historical {\n\t\treturn false\n\t}\n\tstart, ok := evidenceTime(current.AssertedAt)\n\tif !ok {\n\t\treturn false\n\t}\n\tend, ok := evidenceTime(old.SupersededAt)\n\tif !ok || end.After(start) {\n\t\treturn false\n\t}\n\tbefore, ok := evidenceTime(old.AssertedAt)\n\tif !ok || before.After(start) {\n\t\treturn false\n\t}\n\t// If both world-time bounds were stated, they must also be ordered. Belief\n\t// corrections alone do not invent a migration date.\n\tif old.ValidUntil != \"\" && current.ValidFrom != \"\" {\n\t\tend, ok = evidenceTime(old.ValidUntil)\n\t\tif !ok {\n\t\t\treturn false\n\t\t}\n\t\tstart, ok = evidenceTime(current.ValidFrom)\n\t\tif !ok || end.After(start) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n",
+          "source_sha256": "53b7e829accbfaa7d3518bb2ca9abd00984e6b7fbefd354b70cbdcef9ec1967d",
+          "arm": "lexical",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-2",
+      "split": "fit",
+      "question": "Choose the function that accepts empty assertion timestamps and otherwise requires second-precision UTC date-time strings.",
+      "gold_symbol": "assertionTimestamp",
+      "gold_path": "server-go/modules/memory/assertion_search.go",
+      "candidates": [
+        {
+          "id": "source-1",
+          "symbol": "assertionTimestamp",
+          "path": "server-go/modules/memory/assertion_search.go",
+          "source": "func assertionTimestamp(value string) bool {\n\tif value == \"\" {\n\t\treturn true\n\t}\n\tif len(value) != 19 && len(value) != 20 {\n\t\treturn false\n\t}\n\tif len(value) == 20 && value[19] != 'Z' {\n\t\treturn false\n\t}\n\tnormalized := strings.ReplaceAll(strings.TrimSuffix(value, \"Z\"), \"T\", \" \")\n\tstamp, err := time.Parse(\"2006-01-02 15:04:05\", normalized)\n\treturn err == nil && stamp.Year() > 0 && stamp.Format(\"2006-01-02 15:04:05\") == normalized\n}\n",
+          "source_sha256": "74c1f456a058624d885740dcbe9f63b0c1569bbefdf16bd6fb26bec8edfcb253",
+          "arm": "dense",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-2",
+          "symbol": "typedEstimate",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedEstimate(text string) int {\n\tif text == \"\" {\n\t\treturn 0\n\t}\n\treturn len(text)/4 + 1\n}\n",
+          "source_sha256": "c154af6640fe207253a46a0e30afbee50204ade4810cd23739b5469c13cdd27a",
+          "arm": "graph",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-3",
+          "symbol": "coherentPredecessor",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func coherentPredecessor(current, old assertionHit) bool {\n\tif current.PriorVersionID != old.StableID || current.Subject != old.Subject || current.Relation != old.Relation || current.Object == old.Object || !old.Historical {\n\t\treturn false\n\t}\n\tstart, ok := evidenceTime(current.AssertedAt)\n\tif !ok {\n\t\treturn false\n\t}\n\tend, ok := evidenceTime(old.SupersededAt)\n\tif !ok || end.After(start) {\n\t\treturn false\n\t}\n\tbefore, ok := evidenceTime(old.AssertedAt)\n\tif !ok || before.After(start) {\n\t\treturn false\n\t}\n\t// If both world-time bounds were stated, they must also be ordered. Belief\n\t// corrections alone do not invent a migration date.\n\tif old.ValidUntil != \"\" && current.ValidFrom != \"\" {\n\t\tend, ok = evidenceTime(old.ValidUntil)\n\t\tif !ok {\n\t\t\treturn false\n\t\t}\n\t\tstart, ok = evidenceTime(current.ValidFrom)\n\t\tif !ok || end.After(start) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n",
+          "source_sha256": "53b7e829accbfaa7d3518bb2ca9abd00984e6b7fbefd354b70cbdcef9ec1967d",
+          "arm": "lexical",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-4",
+          "symbol": "healthFamilyFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamilyFromEvidence(raw json.RawMessage, source *typedSourceVersion) string {\n\tif source == nil || source.Kind != \"user_memory_record\" {\n\t\treturn \"\"\n\t}\n\tfamilies := healthFamiliesFromEvidence(raw, source)\n\tif len(families) == 1 {\n\t\treturn families[0]\n\t}\n\treturn \"\"\n}\n",
+          "source_sha256": "94bd3126ab33f82226a982e6caf5e26660d48ba8fe087f01a3a54a2154184047",
+          "arm": "dense",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-3",
+      "split": "fit",
+      "question": "Choose the function that returns zero for empty text and otherwise a byte-length divided by four plus one estimate.",
+      "gold_symbol": "typedEstimate",
+      "gold_path": "server-go/modules/memory/typed_context.go",
+      "candidates": [
+        {
+          "id": "source-2",
+          "symbol": "typedEstimate",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedEstimate(text string) int {\n\tif text == \"\" {\n\t\treturn 0\n\t}\n\treturn len(text)/4 + 1\n}\n",
+          "source_sha256": "c154af6640fe207253a46a0e30afbee50204ade4810cd23739b5469c13cdd27a",
+          "arm": "graph",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": false
+        },
+        {
+          "id": "source-3",
+          "symbol": "coherentPredecessor",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func coherentPredecessor(current, old assertionHit) bool {\n\tif current.PriorVersionID != old.StableID || current.Subject != old.Subject || current.Relation != old.Relation || current.Object == old.Object || !old.Historical {\n\t\treturn false\n\t}\n\tstart, ok := evidenceTime(current.AssertedAt)\n\tif !ok {\n\t\treturn false\n\t}\n\tend, ok := evidenceTime(old.SupersededAt)\n\tif !ok || end.After(start) {\n\t\treturn false\n\t}\n\tbefore, ok := evidenceTime(old.AssertedAt)\n\tif !ok || before.After(start) {\n\t\treturn false\n\t}\n\t// If both world-time bounds were stated, they must also be ordered. Belief\n\t// corrections alone do not invent a migration date.\n\tif old.ValidUntil != \"\" && current.ValidFrom != \"\" {\n\t\tend, ok = evidenceTime(old.ValidUntil)\n\t\tif !ok {\n\t\t\treturn false\n\t\t}\n\t\tstart, ok = evidenceTime(current.ValidFrom)\n\t\tif !ok || end.After(start) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n",
+          "source_sha256": "53b7e829accbfaa7d3518bb2ca9abd00984e6b7fbefd354b70cbdcef9ec1967d",
+          "arm": "lexical",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-4",
+          "symbol": "healthFamilyFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamilyFromEvidence(raw json.RawMessage, source *typedSourceVersion) string {\n\tif source == nil || source.Kind != \"user_memory_record\" {\n\t\treturn \"\"\n\t}\n\tfamilies := healthFamiliesFromEvidence(raw, source)\n\tif len(families) == 1 {\n\t\treturn families[0]\n\t}\n\treturn \"\"\n}\n",
+          "source_sha256": "94bd3126ab33f82226a982e6caf5e26660d48ba8fe087f01a3a54a2154184047",
+          "arm": "dense",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-5",
+          "symbol": "graphConfidence",
+          "path": "server-go/modules/memory/graph_score.go",
+          "source": "func graphConfidence(class string) float64 {\n\tswitch strings.ToUpper(class) {\n\tcase \"\", \"A\":\n\t\treturn 1\n\tcase \"B\":\n\t\treturn .75\n\tdefault:\n\t\treturn .5\n\t}\n}\n",
+          "source_sha256": "e5ab39b9ce270a7d9a06372969fe2602fbbda64e9e2b9082dbac28c63bd8d88c",
+          "arm": "graph",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-4",
+      "split": "fit",
+      "question": "Choose the function that checks a canonical predecessor edge between two assertions, including changed objects and ordered time bounds.",
+      "gold_symbol": "coherentPredecessor",
+      "gold_path": "server-go/modules/memory/evidence_tasks.go",
+      "candidates": [
+        {
+          "id": "source-3",
+          "symbol": "coherentPredecessor",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func coherentPredecessor(current, old assertionHit) bool {\n\tif current.PriorVersionID != old.StableID || current.Subject != old.Subject || current.Relation != old.Relation || current.Object == old.Object || !old.Historical {\n\t\treturn false\n\t}\n\tstart, ok := evidenceTime(current.AssertedAt)\n\tif !ok {\n\t\treturn false\n\t}\n\tend, ok := evidenceTime(old.SupersededAt)\n\tif !ok || end.After(start) {\n\t\treturn false\n\t}\n\tbefore, ok := evidenceTime(old.AssertedAt)\n\tif !ok || before.After(start) {\n\t\treturn false\n\t}\n\t// If both world-time bounds were stated, they must also be ordered. Belief\n\t// corrections alone do not invent a migration date.\n\tif old.ValidUntil != \"\" && current.ValidFrom != \"\" {\n\t\tend, ok = evidenceTime(old.ValidUntil)\n\t\tif !ok {\n\t\t\treturn false\n\t\t}\n\t\tstart, ok = evidenceTime(current.ValidFrom)\n\t\tif !ok || end.After(start) {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n",
+          "source_sha256": "53b7e829accbfaa7d3518bb2ca9abd00984e6b7fbefd354b70cbdcef9ec1967d",
+          "arm": "lexical",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-4",
+          "symbol": "healthFamilyFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamilyFromEvidence(raw json.RawMessage, source *typedSourceVersion) string {\n\tif source == nil || source.Kind != \"user_memory_record\" {\n\t\treturn \"\"\n\t}\n\tfamilies := healthFamiliesFromEvidence(raw, source)\n\tif len(families) == 1 {\n\t\treturn families[0]\n\t}\n\treturn \"\"\n}\n",
+          "source_sha256": "94bd3126ab33f82226a982e6caf5e26660d48ba8fe087f01a3a54a2154184047",
+          "arm": "dense",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-5",
+          "symbol": "graphConfidence",
+          "path": "server-go/modules/memory/graph_score.go",
+          "source": "func graphConfidence(class string) float64 {\n\tswitch strings.ToUpper(class) {\n\tcase \"\", \"A\":\n\t\treturn 1\n\tcase \"B\":\n\t\treturn .75\n\tdefault:\n\t\treturn .5\n\t}\n}\n",
+          "source_sha256": "e5ab39b9ce270a7d9a06372969fe2602fbbda64e9e2b9082dbac28c63bd8d88c",
+          "arm": "graph",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-6",
+          "symbol": "protectedRecallOverflow",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func protectedRecallOverflow() error {\n\treturn &contextBudgetError{\"protected_context_overflow\", \"complete hard rules exceed the recall allocation\"}\n}\n",
+          "source_sha256": "dcd8fea9363e652b6daa1bc2f5c24e06052f14729977156f7dbd46376b226607",
+          "arm": "lexical",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-5",
+      "split": "fit",
+      "question": "Choose the function that returns a single canonical family only for a personal memory source.",
+      "gold_symbol": "healthFamilyFromEvidence",
+      "gold_path": "server-go/modules/memory/retrieval_health_families.go",
+      "candidates": [
+        {
+          "id": "source-4",
+          "symbol": "healthFamilyFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamilyFromEvidence(raw json.RawMessage, source *typedSourceVersion) string {\n\tif source == nil || source.Kind != \"user_memory_record\" {\n\t\treturn \"\"\n\t}\n\tfamilies := healthFamiliesFromEvidence(raw, source)\n\tif len(families) == 1 {\n\t\treturn families[0]\n\t}\n\treturn \"\"\n}\n",
+          "source_sha256": "94bd3126ab33f82226a982e6caf5e26660d48ba8fe087f01a3a54a2154184047",
+          "arm": "dense",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": true
+        },
+        {
+          "id": "source-5",
+          "symbol": "graphConfidence",
+          "path": "server-go/modules/memory/graph_score.go",
+          "source": "func graphConfidence(class string) float64 {\n\tswitch strings.ToUpper(class) {\n\tcase \"\", \"A\":\n\t\treturn 1\n\tcase \"B\":\n\t\treturn .75\n\tdefault:\n\t\treturn .5\n\t}\n}\n",
+          "source_sha256": "e5ab39b9ce270a7d9a06372969fe2602fbbda64e9e2b9082dbac28c63bd8d88c",
+          "arm": "graph",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-6",
+          "symbol": "protectedRecallOverflow",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func protectedRecallOverflow() error {\n\treturn &contextBudgetError{\"protected_context_overflow\", \"complete hard rules exceed the recall allocation\"}\n}\n",
+          "source_sha256": "dcd8fea9363e652b6daa1bc2f5c24e06052f14729977156f7dbd46376b226607",
+          "arm": "lexical",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-7",
+          "symbol": "validEvidenceRole",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func validEvidenceRole(role string) bool {\n\tswitch role {\n\tcase \"\", \"current_state\", \"historical_predecessor\", \"temporal_anchor\", \"claim_support\", \"active_constraint\", \"independent_support\", \"approved_procedure\", \"source_group\", \"counterexample\":\n\t\treturn true\n\t}\n\treturn false\n}\n",
+          "source_sha256": "307cfe794035521f31eac1606324cb10a9af01e2a43bc548ec399e713aa88a52",
+          "arm": "dense",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-6",
+      "split": "fit",
+      "question": "Choose the function that maps confidence class labels to numeric graph confidence factors.",
+      "gold_symbol": "graphConfidence",
+      "gold_path": "server-go/modules/memory/graph_score.go",
+      "candidates": [
+        {
+          "id": "source-5",
+          "symbol": "graphConfidence",
+          "path": "server-go/modules/memory/graph_score.go",
+          "source": "func graphConfidence(class string) float64 {\n\tswitch strings.ToUpper(class) {\n\tcase \"\", \"A\":\n\t\treturn 1\n\tcase \"B\":\n\t\treturn .75\n\tdefault:\n\t\treturn .5\n\t}\n}\n",
+          "source_sha256": "e5ab39b9ce270a7d9a06372969fe2602fbbda64e9e2b9082dbac28c63bd8d88c",
+          "arm": "graph",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-6",
+          "symbol": "protectedRecallOverflow",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func protectedRecallOverflow() error {\n\treturn &contextBudgetError{\"protected_context_overflow\", \"complete hard rules exceed the recall allocation\"}\n}\n",
+          "source_sha256": "dcd8fea9363e652b6daa1bc2f5c24e06052f14729977156f7dbd46376b226607",
+          "arm": "lexical",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-7",
+          "symbol": "validEvidenceRole",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func validEvidenceRole(role string) bool {\n\tswitch role {\n\tcase \"\", \"current_state\", \"historical_predecessor\", \"temporal_anchor\", \"claim_support\", \"active_constraint\", \"independent_support\", \"approved_procedure\", \"source_group\", \"counterexample\":\n\t\treturn true\n\t}\n\treturn false\n}\n",
+          "source_sha256": "307cfe794035521f31eac1606324cb10a9af01e2a43bc548ec399e713aa88a52",
+          "arm": "dense",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-8",
+          "symbol": "evidenceTime",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func evidenceTime(value string) (time.Time, bool) {\n\tfor _, layout := range []string{\"2006-01-02\", time.RFC3339Nano, \"2006-01-02 15:04:05.999999999\", \"2006-01-02T15:04:05.999999999\"} {\n\t\tif stamp, err := time.Parse(layout, value); err == nil {\n\t\t\treturn stamp, true\n\t\t}\n\t}\n\treturn time.Time{}, false\n}\n",
+          "source_sha256": "b548174242c2fde647a2e29f7af46711d22a657255120408750c053253e8a13d",
+          "arm": "graph",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-7",
+      "split": "heldout",
+      "question": "Choose the function that constructs an explicit error when complete hard rules exceed a recall allocation.",
+      "gold_symbol": "protectedRecallOverflow",
+      "gold_path": "server-go/modules/memory/recall.go",
+      "candidates": [
+        {
+          "id": "source-6",
+          "symbol": "protectedRecallOverflow",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func protectedRecallOverflow() error {\n\treturn &contextBudgetError{\"protected_context_overflow\", \"complete hard rules exceed the recall allocation\"}\n}\n",
+          "source_sha256": "dcd8fea9363e652b6daa1bc2f5c24e06052f14729977156f7dbd46376b226607",
+          "arm": "lexical",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": false
+        },
+        {
+          "id": "source-7",
+          "symbol": "validEvidenceRole",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func validEvidenceRole(role string) bool {\n\tswitch role {\n\tcase \"\", \"current_state\", \"historical_predecessor\", \"temporal_anchor\", \"claim_support\", \"active_constraint\", \"independent_support\", \"approved_procedure\", \"source_group\", \"counterexample\":\n\t\treturn true\n\t}\n\treturn false\n}\n",
+          "source_sha256": "307cfe794035521f31eac1606324cb10a9af01e2a43bc548ec399e713aa88a52",
+          "arm": "dense",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-8",
+          "symbol": "evidenceTime",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func evidenceTime(value string) (time.Time, bool) {\n\tfor _, layout := range []string{\"2006-01-02\", time.RFC3339Nano, \"2006-01-02 15:04:05.999999999\", \"2006-01-02T15:04:05.999999999\"} {\n\t\tif stamp, err := time.Parse(layout, value); err == nil {\n\t\t\treturn stamp, true\n\t\t}\n\t}\n\treturn time.Time{}, false\n}\n",
+          "source_sha256": "b548174242c2fde647a2e29f7af46711d22a657255120408750c053253e8a13d",
+          "arm": "graph",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-9",
+          "symbol": "typedSelectionDigest",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedSelectionDigest(projection string, retained []typedProjectionRef) string {\n\tvalue := struct {\n\t\tVersion    int                  `json:\"schema_version\"`\n\t\tProjection string               `json:\"projection_digest\"`\n\t\tRetained   []typedProjectionRef `json:\"retained_items\"`\n\t}{1, projection, retained}\n\traw, _ := json.Marshal(value)\n\treturn fmt.Sprintf(\"sha256:%x\", sha256.Sum256(raw))\n}\n",
+          "source_sha256": "a224bef48e397847e385e49f37e0e3ae6340e28ecf04e5129adcf3366c2ca5d0",
+          "arm": "lexical",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-8",
+      "split": "heldout",
+      "question": "Choose the function that recognizes the supported evidence-role names and rejects other names.",
+      "gold_symbol": "validEvidenceRole",
+      "gold_path": "server-go/modules/memory/evidence_tasks.go",
+      "candidates": [
+        {
+          "id": "source-7",
+          "symbol": "validEvidenceRole",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func validEvidenceRole(role string) bool {\n\tswitch role {\n\tcase \"\", \"current_state\", \"historical_predecessor\", \"temporal_anchor\", \"claim_support\", \"active_constraint\", \"independent_support\", \"approved_procedure\", \"source_group\", \"counterexample\":\n\t\treturn true\n\t}\n\treturn false\n}\n",
+          "source_sha256": "307cfe794035521f31eac1606324cb10a9af01e2a43bc548ec399e713aa88a52",
+          "arm": "dense",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-8",
+          "symbol": "evidenceTime",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func evidenceTime(value string) (time.Time, bool) {\n\tfor _, layout := range []string{\"2006-01-02\", time.RFC3339Nano, \"2006-01-02 15:04:05.999999999\", \"2006-01-02T15:04:05.999999999\"} {\n\t\tif stamp, err := time.Parse(layout, value); err == nil {\n\t\t\treturn stamp, true\n\t\t}\n\t}\n\treturn time.Time{}, false\n}\n",
+          "source_sha256": "b548174242c2fde647a2e29f7af46711d22a657255120408750c053253e8a13d",
+          "arm": "graph",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-9",
+          "symbol": "typedSelectionDigest",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedSelectionDigest(projection string, retained []typedProjectionRef) string {\n\tvalue := struct {\n\t\tVersion    int                  `json:\"schema_version\"`\n\t\tProjection string               `json:\"projection_digest\"`\n\t\tRetained   []typedProjectionRef `json:\"retained_items\"`\n\t}{1, projection, retained}\n\traw, _ := json.Marshal(value)\n\treturn fmt.Sprintf(\"sha256:%x\", sha256.Sum256(raw))\n}\n",
+          "source_sha256": "a224bef48e397847e385e49f37e0e3ae6340e28ecf04e5129adcf3366c2ca5d0",
+          "arm": "lexical",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-10",
+          "symbol": "healthFamiliesFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamiliesFromEvidence(raw json.RawMessage, source *typedSourceVersion) []string {\n\tif source == nil || (source.Kind != \"user_memory_record\" && source.Kind != \"memory_record\") {\n\t\treturn nil\n\t}\n\tvar e struct {\n\t\tStatus   string   `json:\"status\"`\n\t\tOwner    string   `json:\"owner_id\"`\n\t\tRecord   string   `json:\"record_id\"`\n\t\tState    string   `json:\"lineage_state\"`\n\t\tUnknown  *int     `json:\"unknown_origin_count\"`\n\t\tFamilies []string `json:\"origin_families\"`\n\t\tEvidence []struct {\n\t\t\tID       string `json:\"record_id\"`\n\t\t\tRevision string `json:\"record_revision\"`\n\t\t} `json:\"evidence\"`\n\t}\n\tif json.Unmarshal(raw, &e) != nil || e.Status != \"ok\" || e.Owner != source.Version.OwnerID || e.Record != source.Version.RecordID || e.State != \"complete\" || e.Unknown == nil || *e.Unknown != 0 {\n\t\treturn nil\n\t}\n\tfamilies := validHealthFamilies(e.Families)\n\tfor _, v := range e.Evidence {\n\t\tif v.ID == source.Version.RecordID && v.Revision == source.Version.RecordRevision {\n\t\t\treturn families\n\t\t}\n\t}\n\treturn nil\n}\n",
+          "source_sha256": "c6a9c35e6a5a2af238b278ac50cb47f5e7e6c069142cd33583b2e2455efffc7c",
+          "arm": "dense",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-9",
+      "split": "heldout",
+      "question": "Choose the function that tries multiple timestamp layouts and returns a parsed time with a success boolean.",
+      "gold_symbol": "evidenceTime",
+      "gold_path": "server-go/modules/memory/evidence_tasks.go",
+      "candidates": [
+        {
+          "id": "source-8",
+          "symbol": "evidenceTime",
+          "path": "server-go/modules/memory/evidence_tasks.go",
+          "source": "func evidenceTime(value string) (time.Time, bool) {\n\tfor _, layout := range []string{\"2006-01-02\", time.RFC3339Nano, \"2006-01-02 15:04:05.999999999\", \"2006-01-02T15:04:05.999999999\"} {\n\t\tif stamp, err := time.Parse(layout, value); err == nil {\n\t\t\treturn stamp, true\n\t\t}\n\t}\n\treturn time.Time{}, false\n}\n",
+          "source_sha256": "b548174242c2fde647a2e29f7af46711d22a657255120408750c053253e8a13d",
+          "arm": "graph",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": true
+        },
+        {
+          "id": "source-9",
+          "symbol": "typedSelectionDigest",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedSelectionDigest(projection string, retained []typedProjectionRef) string {\n\tvalue := struct {\n\t\tVersion    int                  `json:\"schema_version\"`\n\t\tProjection string               `json:\"projection_digest\"`\n\t\tRetained   []typedProjectionRef `json:\"retained_items\"`\n\t}{1, projection, retained}\n\traw, _ := json.Marshal(value)\n\treturn fmt.Sprintf(\"sha256:%x\", sha256.Sum256(raw))\n}\n",
+          "source_sha256": "a224bef48e397847e385e49f37e0e3ae6340e28ecf04e5129adcf3366c2ca5d0",
+          "arm": "lexical",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-10",
+          "symbol": "healthFamiliesFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamiliesFromEvidence(raw json.RawMessage, source *typedSourceVersion) []string {\n\tif source == nil || (source.Kind != \"user_memory_record\" && source.Kind != \"memory_record\") {\n\t\treturn nil\n\t}\n\tvar e struct {\n\t\tStatus   string   `json:\"status\"`\n\t\tOwner    string   `json:\"owner_id\"`\n\t\tRecord   string   `json:\"record_id\"`\n\t\tState    string   `json:\"lineage_state\"`\n\t\tUnknown  *int     `json:\"unknown_origin_count\"`\n\t\tFamilies []string `json:\"origin_families\"`\n\t\tEvidence []struct {\n\t\t\tID       string `json:\"record_id\"`\n\t\t\tRevision string `json:\"record_revision\"`\n\t\t} `json:\"evidence\"`\n\t}\n\tif json.Unmarshal(raw, &e) != nil || e.Status != \"ok\" || e.Owner != source.Version.OwnerID || e.Record != source.Version.RecordID || e.State != \"complete\" || e.Unknown == nil || *e.Unknown != 0 {\n\t\treturn nil\n\t}\n\tfamilies := validHealthFamilies(e.Families)\n\tfor _, v := range e.Evidence {\n\t\tif v.ID == source.Version.RecordID && v.Revision == source.Version.RecordRevision {\n\t\t\treturn families\n\t\t}\n\t}\n\treturn nil\n}\n",
+          "source_sha256": "c6a9c35e6a5a2af238b278ac50cb47f5e7e6c069142cd33583b2e2455efffc7c",
+          "arm": "dense",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-11",
+          "symbol": "validHealthFamilies",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func validHealthFamilies(families []string) []string {\n\tif len(families) == 0 || len(families) > 16 {\n\t\treturn nil\n\t}\n\tresult := []string{}\n\tseen := map[string]bool{}\n\tfor _, family := range families {\n\t\tif !strings.HasPrefix(family, \"sha256:\") || !receiptDigestValid(strings.TrimPrefix(family, \"sha256:\")) {\n\t\t\treturn nil\n\t\t}\n\t\tif !seen[family] {\n\t\t\tresult = append(result, family)\n\t\t\tseen[family] = true\n\t\t}\n\t}\n\tsort.Strings(result)\n\treturn result\n}\n",
+          "source_sha256": "25d515d08381e41d1926475df8e8af6af8acab2b68d9dafd2591e2ff2fc0d786",
+          "arm": "graph",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-10",
+      "split": "heldout",
+      "question": "Choose the function that hashes a projection digest together with retained source references and a schema version.",
+      "gold_symbol": "typedSelectionDigest",
+      "gold_path": "server-go/modules/memory/typed_context.go",
+      "candidates": [
+        {
+          "id": "source-9",
+          "symbol": "typedSelectionDigest",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedSelectionDigest(projection string, retained []typedProjectionRef) string {\n\tvalue := struct {\n\t\tVersion    int                  `json:\"schema_version\"`\n\t\tProjection string               `json:\"projection_digest\"`\n\t\tRetained   []typedProjectionRef `json:\"retained_items\"`\n\t}{1, projection, retained}\n\traw, _ := json.Marshal(value)\n\treturn fmt.Sprintf(\"sha256:%x\", sha256.Sum256(raw))\n}\n",
+          "source_sha256": "a224bef48e397847e385e49f37e0e3ae6340e28ecf04e5129adcf3366c2ca5d0",
+          "arm": "lexical",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-10",
+          "symbol": "healthFamiliesFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamiliesFromEvidence(raw json.RawMessage, source *typedSourceVersion) []string {\n\tif source == nil || (source.Kind != \"user_memory_record\" && source.Kind != \"memory_record\") {\n\t\treturn nil\n\t}\n\tvar e struct {\n\t\tStatus   string   `json:\"status\"`\n\t\tOwner    string   `json:\"owner_id\"`\n\t\tRecord   string   `json:\"record_id\"`\n\t\tState    string   `json:\"lineage_state\"`\n\t\tUnknown  *int     `json:\"unknown_origin_count\"`\n\t\tFamilies []string `json:\"origin_families\"`\n\t\tEvidence []struct {\n\t\t\tID       string `json:\"record_id\"`\n\t\t\tRevision string `json:\"record_revision\"`\n\t\t} `json:\"evidence\"`\n\t}\n\tif json.Unmarshal(raw, &e) != nil || e.Status != \"ok\" || e.Owner != source.Version.OwnerID || e.Record != source.Version.RecordID || e.State != \"complete\" || e.Unknown == nil || *e.Unknown != 0 {\n\t\treturn nil\n\t}\n\tfamilies := validHealthFamilies(e.Families)\n\tfor _, v := range e.Evidence {\n\t\tif v.ID == source.Version.RecordID && v.Revision == source.Version.RecordRevision {\n\t\t\treturn families\n\t\t}\n\t}\n\treturn nil\n}\n",
+          "source_sha256": "c6a9c35e6a5a2af238b278ac50cb47f5e7e6c069142cd33583b2e2455efffc7c",
+          "arm": "dense",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-11",
+          "symbol": "validHealthFamilies",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func validHealthFamilies(families []string) []string {\n\tif len(families) == 0 || len(families) > 16 {\n\t\treturn nil\n\t}\n\tresult := []string{}\n\tseen := map[string]bool{}\n\tfor _, family := range families {\n\t\tif !strings.HasPrefix(family, \"sha256:\") || !receiptDigestValid(strings.TrimPrefix(family, \"sha256:\")) {\n\t\t\treturn nil\n\t\t}\n\t\tif !seen[family] {\n\t\t\tresult = append(result, family)\n\t\t\tseen[family] = true\n\t\t}\n\t}\n\tsort.Strings(result)\n\treturn result\n}\n",
+          "source_sha256": "25d515d08381e41d1926475df8e8af6af8acab2b68d9dafd2591e2ff2fc0d786",
+          "arm": "graph",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-0",
+          "symbol": "recallTokenLimit",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func recallTokenLimit(tokens int, sessionStart bool) int {\n\tif tokens <= 0 {\n\t\tif sessionStart {\n\t\t\ttokens = 1800\n\t\t} else {\n\t\t\ttokens = 600\n\t\t}\n\t}\n\treturn min(max(tokens, 64), 8192)\n}\n",
+          "source_sha256": "5600d6305e321e335b22e2a91011053b56f777ffc85886231c819945bc780e9d",
+          "arm": "lexical",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-11",
+      "split": "heldout",
+      "question": "Choose the function that verifies owner, record, complete lineage and exact revision before returning origin families.",
+      "gold_symbol": "healthFamiliesFromEvidence",
+      "gold_path": "server-go/modules/memory/retrieval_health_families.go",
+      "candidates": [
+        {
+          "id": "source-10",
+          "symbol": "healthFamiliesFromEvidence",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func healthFamiliesFromEvidence(raw json.RawMessage, source *typedSourceVersion) []string {\n\tif source == nil || (source.Kind != \"user_memory_record\" && source.Kind != \"memory_record\") {\n\t\treturn nil\n\t}\n\tvar e struct {\n\t\tStatus   string   `json:\"status\"`\n\t\tOwner    string   `json:\"owner_id\"`\n\t\tRecord   string   `json:\"record_id\"`\n\t\tState    string   `json:\"lineage_state\"`\n\t\tUnknown  *int     `json:\"unknown_origin_count\"`\n\t\tFamilies []string `json:\"origin_families\"`\n\t\tEvidence []struct {\n\t\t\tID       string `json:\"record_id\"`\n\t\t\tRevision string `json:\"record_revision\"`\n\t\t} `json:\"evidence\"`\n\t}\n\tif json.Unmarshal(raw, &e) != nil || e.Status != \"ok\" || e.Owner != source.Version.OwnerID || e.Record != source.Version.RecordID || e.State != \"complete\" || e.Unknown == nil || *e.Unknown != 0 {\n\t\treturn nil\n\t}\n\tfamilies := validHealthFamilies(e.Families)\n\tfor _, v := range e.Evidence {\n\t\tif v.ID == source.Version.RecordID && v.Revision == source.Version.RecordRevision {\n\t\t\treturn families\n\t\t}\n\t}\n\treturn nil\n}\n",
+          "source_sha256": "c6a9c35e6a5a2af238b278ac50cb47f5e7e6c069142cd33583b2e2455efffc7c",
+          "arm": "dense",
+          "base_rank": 1,
+          "served_count": 30,
+          "mandatory": false
+        },
+        {
+          "id": "source-11",
+          "symbol": "validHealthFamilies",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func validHealthFamilies(families []string) []string {\n\tif len(families) == 0 || len(families) > 16 {\n\t\treturn nil\n\t}\n\tresult := []string{}\n\tseen := map[string]bool{}\n\tfor _, family := range families {\n\t\tif !strings.HasPrefix(family, \"sha256:\") || !receiptDigestValid(strings.TrimPrefix(family, \"sha256:\")) {\n\t\t\treturn nil\n\t\t}\n\t\tif !seen[family] {\n\t\t\tresult = append(result, family)\n\t\t\tseen[family] = true\n\t\t}\n\t}\n\tsort.Strings(result)\n\treturn result\n}\n",
+          "source_sha256": "25d515d08381e41d1926475df8e8af6af8acab2b68d9dafd2591e2ff2fc0d786",
+          "arm": "graph",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-0",
+          "symbol": "recallTokenLimit",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func recallTokenLimit(tokens int, sessionStart bool) int {\n\tif tokens <= 0 {\n\t\tif sessionStart {\n\t\t\ttokens = 1800\n\t\t} else {\n\t\t\ttokens = 600\n\t\t}\n\t}\n\treturn min(max(tokens, 64), 8192)\n}\n",
+          "source_sha256": "5600d6305e321e335b22e2a91011053b56f777ffc85886231c819945bc780e9d",
+          "arm": "lexical",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-1",
+          "symbol": "assertionTimestamp",
+          "path": "server-go/modules/memory/assertion_search.go",
+          "source": "func assertionTimestamp(value string) bool {\n\tif value == \"\" {\n\t\treturn true\n\t}\n\tif len(value) != 19 && len(value) != 20 {\n\t\treturn false\n\t}\n\tif len(value) == 20 && value[19] != 'Z' {\n\t\treturn false\n\t}\n\tnormalized := strings.ReplaceAll(strings.TrimSuffix(value, \"Z\"), \"T\", \" \")\n\tstamp, err := time.Parse(\"2006-01-02 15:04:05\", normalized)\n\treturn err == nil && stamp.Year() > 0 && stamp.Format(\"2006-01-02 15:04:05\") == normalized\n}\n",
+          "source_sha256": "74c1f456a058624d885740dcbe9f63b0c1569bbefdf16bd6fb26bec8edfcb253",
+          "arm": "dense",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    },
+    {
+      "id": "nav-12",
+      "split": "heldout",
+      "question": "Choose the function that validates bounded SHA-256 family identifiers, deduplicates them and sorts the result.",
+      "gold_symbol": "validHealthFamilies",
+      "gold_path": "server-go/modules/memory/retrieval_health_families.go",
+      "candidates": [
+        {
+          "id": "source-11",
+          "symbol": "validHealthFamilies",
+          "path": "server-go/modules/memory/retrieval_health_families.go",
+          "source": "func validHealthFamilies(families []string) []string {\n\tif len(families) == 0 || len(families) > 16 {\n\t\treturn nil\n\t}\n\tresult := []string{}\n\tseen := map[string]bool{}\n\tfor _, family := range families {\n\t\tif !strings.HasPrefix(family, \"sha256:\") || !receiptDigestValid(strings.TrimPrefix(family, \"sha256:\")) {\n\t\t\treturn nil\n\t\t}\n\t\tif !seen[family] {\n\t\t\tresult = append(result, family)\n\t\t\tseen[family] = true\n\t\t}\n\t}\n\tsort.Strings(result)\n\treturn result\n}\n",
+          "source_sha256": "25d515d08381e41d1926475df8e8af6af8acab2b68d9dafd2591e2ff2fc0d786",
+          "arm": "graph",
+          "base_rank": 1,
+          "served_count": 0,
+          "mandatory": false
+        },
+        {
+          "id": "source-0",
+          "symbol": "recallTokenLimit",
+          "path": "server-go/modules/memory/recall.go",
+          "source": "func recallTokenLimit(tokens int, sessionStart bool) int {\n\tif tokens <= 0 {\n\t\tif sessionStart {\n\t\t\ttokens = 1800\n\t\t} else {\n\t\t\ttokens = 600\n\t\t}\n\t}\n\treturn min(max(tokens, 64), 8192)\n}\n",
+          "source_sha256": "5600d6305e321e335b22e2a91011053b56f777ffc85886231c819945bc780e9d",
+          "arm": "lexical",
+          "base_rank": 2,
+          "served_count": 1,
+          "mandatory": false
+        },
+        {
+          "id": "source-1",
+          "symbol": "assertionTimestamp",
+          "path": "server-go/modules/memory/assertion_search.go",
+          "source": "func assertionTimestamp(value string) bool {\n\tif value == \"\" {\n\t\treturn true\n\t}\n\tif len(value) != 19 && len(value) != 20 {\n\t\treturn false\n\t}\n\tif len(value) == 20 && value[19] != 'Z' {\n\t\treturn false\n\t}\n\tnormalized := strings.ReplaceAll(strings.TrimSuffix(value, \"Z\"), \"T\", \" \")\n\tstamp, err := time.Parse(\"2006-01-02 15:04:05\", normalized)\n\treturn err == nil && stamp.Year() > 0 && stamp.Format(\"2006-01-02 15:04:05\") == normalized\n}\n",
+          "source_sha256": "74c1f456a058624d885740dcbe9f63b0c1569bbefdf16bd6fb26bec8edfcb253",
+          "arm": "dense",
+          "base_rank": 3,
+          "served_count": 2,
+          "mandatory": false
+        },
+        {
+          "id": "source-2",
+          "symbol": "typedEstimate",
+          "path": "server-go/modules/memory/typed_context.go",
+          "source": "func typedEstimate(text string) int {\n\tif text == \"\" {\n\t\treturn 0\n\t}\n\treturn len(text)/4 + 1\n}\n",
+          "source_sha256": "c154af6640fe207253a46a0e30afbee50204ade4810cd23739b5469c13cdd27a",
+          "arm": "graph",
+          "base_rank": 4,
+          "served_count": 3,
+          "mandatory": false
+        }
+      ]
+    }
+  ]
+}

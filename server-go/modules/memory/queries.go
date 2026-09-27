@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -82,21 +83,25 @@ ORDER BY id LIMIT 1`, key, kind).Scan(&id)
 	return id, err
 }
 
-func scanRecordRows(rows store.Rows) ([]Record, error) {
+func scanRecordRows(rows store.Rows, current bool) ([]Record, error) {
 	defer rows.Close()
 	items := make([]Record, 0)
 	for rows.Next() {
 		var item Record
+		item.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
+		item.currentRead = current
 		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
+			&item.Kind, &item.Key, &item.Content, &item.Confidence, &item.observedVersion.OwnerID, &item.observedVersion.RecordRevision); err != nil {
 			return nil, err
 		}
+		item.observedVersion.RecordID = strconv.FormatInt(item.ID, 10)
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-const queryRecordColumns = `id,scope_type,scope_value,tier,kind,key,content,confidence`
+const queryRecordColumns = `id,scope_type,scope_value,tier,kind,key,content,confidence,
+(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text`
 
 // Scope priority belongs ahead of relevance and LIMIT on scoped session reads.
 // The transaction installs these values alongside RLS; missing context promotes
@@ -114,28 +119,28 @@ func (s *postgresDataStore) QueryRecords(ctx context.Context, mode, pattern stri
 	switch mode {
 	case "like":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
+WHERE `+currentMemorySQL("")+` AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
 ORDER BY `+queryScopeOrder+`,
  CASE WHEN lower(key)=lower($1) THEN 0 WHEN lower(content)=lower($1) THEN 1
  WHEN lower(key) LIKE lower($1)||'%' THEN 2 ELSE 3 END,tier DESC,use_count DESC LIMIT $2`, pattern, limit)
 	case "top-l2":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier='L2' AND kind='fact'
+WHERE `+currentMemorySQL("")+` AND tier='L2' AND kind='fact'
 ORDER BY `+queryScopeOrder+`,use_count DESC,confidence DESC,id DESC LIMIT $1`, limit)
 	case "session-priority":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L1','L2','L3') AND
+WHERE `+currentMemorySQL("")+` AND tier IN ('L1','L2','L3') AND
 ($1='' OR key ILIKE $1 OR content ILIKE $1)
 ORDER BY `+queryScopeOrder+`,CASE kind WHEN 'workflow' THEN 0 WHEN 'decision' THEN 1 ELSE 2 END,
 CASE tier WHEN 'L3' THEN 0 WHEN 'L2' THEN 1 ELSE 2 END,use_count DESC,id DESC LIMIT $2`, pattern, limit)
 	case "facts-patterns":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L2','L3','L5') AND kind IN ('fact','pattern')
+WHERE `+currentMemorySQL("")+` AND tier IN ('L2','L3','L5') AND kind IN ('fact','pattern')
 AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
 ORDER BY confidence DESC,use_count DESC,id DESC LIMIT $2`, pattern, limit)
 	case "eval":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L1','L2','L3') AND kind<>'scratch'
+WHERE `+currentMemorySQL("")+` AND tier IN ('L1','L2','L3') AND kind<>'scratch'
 ORDER BY CASE WHEN tier='L2' AND kind='fact' THEN 0 WHEN kind='fact' THEN 1 ELSE 2 END,
 confidence DESC,id DESC LIMIT $1`, limit)
 	default:
@@ -144,7 +149,7 @@ confidence DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanRecordRows(rows)
+	return scanRecordRows(rows, true)
 }
 
 func (s *postgresDataStore) LowEffectiveness(ctx context.Context, threshold float64, limit int) ([]LowEffectiveness, error) {
@@ -175,7 +180,7 @@ ORDER BY created_at,id LIMIT $2`, days, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanRecordRows(rows)
+	return scanRecordRows(rows, false)
 }
 
 func (s *postgresDataStore) SupersededKeys(ctx context.Context, minVersions, limit int) ([]SupersededKey, error) {
@@ -241,6 +246,7 @@ func (s *postgresDataStore) Restore(ctx context.Context, id int64, actor string)
 	var restored int
 	err = s.db.QueryRow(ctx, `WITH target AS (
  SELECT key,content,scope_type,scope_value FROM memories WHERE id=$1
+ AND COALESCE(to_jsonb(memories)->>'cognified_memory_kind','')<>'compaction_origin'
 ), tomb AS (
  UPDATE memory_rejection_tombstones t SET active=0,restored_at=pg_now_text(),restored_by=$2
  FROM target x WHERE t.object_kind='memory' AND t.active=1 AND t.memory_key=x.key
@@ -260,8 +266,9 @@ updated_at=pg_now_text() WHERE id=$1`, id, kind, ref, hash)
 }
 
 func (s *postgresDataStore) Summaries(ctx context.Context, id int64, limit int) ([]MemorySummary, error) {
-	rows, err := s.db.Query(ctx, `SELECT scope,summary FROM memory_summaries
-WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
+	rows, err := s.db.Query(ctx, `SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id
+WHERE summary.memory_id=$1 AND `+currentMemorySQL("m.")+` AND `+summaryCurrentInputsSQL("summary", "m")+`
+ORDER BY summary.id LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +286,7 @@ WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
 
 func (s *postgresDataStore) Scenes(ctx context.Context, limit int) ([]MemoryScene, error) {
 	rows, err := s.db.Query(ctx, `SELECT s.id,s.workspace_id,s.turn_count,s.created_at FROM memory_scenes s
-WHERE EXISTS(SELECT 1 FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=s.id AND m.lifecycle_state='active')
+WHERE EXISTS(SELECT 1 FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=s.id AND `+currentMemorySQL("m.")+`)
 ORDER BY s.created_at DESC,s.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -298,7 +305,7 @@ ORDER BY s.created_at DESC,s.id DESC LIMIT $1`, limit)
 
 func (s *postgresDataStore) SceneMembers(ctx context.Context, sceneID int64, limit int) ([]SceneMember, error) {
 	rows, err := s.db.Query(ctx, `SELECT sm.memory_id,m.key,sm.membership_strength
-FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1 AND m.lifecycle_state='active'
+FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1 AND `+currentMemorySQL("m.")+`
 ORDER BY sm.membership_strength DESC,sm.memory_id LIMIT $2`, sceneID, limit)
 	if err != nil {
 		return nil, err

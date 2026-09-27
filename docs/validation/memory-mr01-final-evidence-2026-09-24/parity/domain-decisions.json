@@ -1,0 +1,292 @@
+[
+  {
+    "state": "current",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": true,
+      "reason_codes": [
+        "eligible"
+      ],
+      "lifecycle": "active",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": true,
+      "reason_codes": [
+        "eligible"
+      ],
+      "lifecycle": "active",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "expired",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "expired"
+      ],
+      "lifecycle": "active",
+      "temporal_applicability": "expired",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "expired"
+      ],
+      "lifecycle": "active",
+      "temporal_applicability": "expired",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "superseded",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "superseded",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "superseded",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "archived",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "archived",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "archived",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "quarantined",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "quarantined",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "quarantined",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "deleted",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "deleted",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "deleted",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "revoked",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "revoked",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "revoked",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "rejected",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "rejected",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "rejected",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "retired",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "retired",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "retired",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  },
+  {
+    "state": "unknown",
+    "server": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "unknown",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    },
+    "kb": {
+      "schema_version": 1,
+      "policy_version": "current-validity-v11",
+      "mode": "current",
+      "eligible": false,
+      "reason_codes": [
+        "lifecycle_excluded"
+      ],
+      "lifecycle": "unknown",
+      "temporal_applicability": "applicable",
+      "evidence_state": "unknown",
+      "authority_class": "unknown"
+    }
+  }
+]

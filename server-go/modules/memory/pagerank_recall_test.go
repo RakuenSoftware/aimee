@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -164,6 +165,9 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	for _, r := range got.Records {
 		if r.ID == ids["neighbor"] {
 			found = true
+			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != "unrelated payload" {
+				t.Fatalf("unversioned neighbor: %+v", r)
+			}
 		}
 		if r.ID == ids["ignored"] || r.ID == ids["private"] || r.ID == ids["suppressed"] || r.ID == ids["archived"] || r.ID == ids["wrong-kind"] || r.ID == ids["wrong-tier"] {
 			t.Fatal("ineligible endpoint admitted", r)
@@ -172,10 +176,43 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if !found {
 		t.Fatal("one-hop neighbor omitted")
 	}
+	exec("SAVEPOINT pagerank_neighbor_version")
+	exec("UPDATE memories SET content='revised unrelated payload' WHERE id=$1", ids["neighbor"])
+	revised, revisedStatus := call(handler)
+	if revisedStatus != bus.ModuleStatusOK {
+		t.Fatal(revisedStatus)
+	}
+	found = false
+	for _, r := range revised.Records {
+		if r.ID == ids["neighbor"] {
+			found = true
+			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "2" || r.Content != "revised unrelated payload" {
+				t.Fatalf("neighbor correction snapshot: %+v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("corrected neighbor missing")
+	}
+	exec("ROLLBACK TO SAVEPOINT pagerank_neighbor_version; RELEASE SAVEPOINT pagerank_neighbor_version")
 	req.Operation = "diagnose"
 	got, status = call(handler)
 	if status != bus.ModuleStatusOK || len(got.Diagnostics) != 6 {
 		t.Fatal(got, status)
+	}
+	if got.RankingTrace == nil || len(got.RankingTrace.Candidates) < 6 {
+		t.Fatal("graph candidate trace missing", got)
+	}
+	graphObserved := false
+	for _, candidate := range got.RankingTrace.Candidates {
+		for _, step := range candidate.Steps {
+			if step.Operation == "pagerank" {
+				graphObserved = true
+			}
+		}
+	}
+	if !graphObserved {
+		t.Fatal("actual graph contribution missing", got.RankingTrace)
 	}
 	for _, d := range got.Diagnostics {
 		p := d.Parts
@@ -211,6 +248,28 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal("request scope leaked", got, status)
 	}
 	req.Project = "pagerank-recall-local"
+	// A completely full initial pool still lets a graph-only endpoint compete.
+	exec("SAVEPOINT full_initial_pool")
+	exec(`RESET ROLE; INSERT INTO memories(id,tier,kind,key,content,scope_type,scope_value,lifecycle_state,updated_at)
+ SELECT 9007199254780000+i,'L2','fact','fair-distractor-'||i,'rankneedle','project','pagerank-recall-local','active','2026-01-01' FROM generate_series(1,123) i;
+ SET LOCAL ROLE aimee_store_runtime`)
+	req.Operation, req.Limit = "diagnose", 100
+	got, status = call(handler)
+	admittedNeighbor := false
+	if got.RankingTrace != nil {
+		for _, candidate := range got.RankingTrace.Candidates {
+			if candidate.ID == strconv.FormatInt(ids["neighbor"], 10) {
+				for _, step := range candidate.Steps {
+					admittedNeighbor = admittedNeighbor || step.Operation == "pagerank"
+				}
+			}
+		}
+	}
+	if status != bus.ModuleStatusOK || !admittedNeighbor || len(got.Diagnostics) > 100 || got.RetrievalCapabilities == nil {
+		t.Fatal("full lexical pool vetoed graph or exceeded caller cap", status, got)
+	}
+	exec("ROLLBACK TO SAVEPOINT full_initial_pool; RELEASE SAVEPOINT full_initial_pool")
+	req.Operation, req.Limit = "search", 20
 	// The graph scorer may finish but the request must commit before counting it.
 	failing := bound
 	failing.db = pageRankFailCommitDB{runtimeRoleDB{evalQueryer{tx}, t}}

@@ -135,6 +135,46 @@ static cJSON *mcph_list_facts(struct mcp_call *c)
 {
    return tool_list_facts(c->jargs);
 }
+static cJSON *mcph_served_memory(struct mcp_call *c, int card)
+{
+   cJSON *reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   cJSON *content = text_content(raw ? raw : "{\"status\":\"error\",\"kind\":\"unavailable\"}");
+   free(raw);
+   cJSON_Delete(reply);
+   return content;
+}
+
+static cJSON *mcph_memory_hygiene(struct mcp_call *c)
+{
+   cJSON *reply = memory_hygiene_command(c->jargs);
+   char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   cJSON *content = text_content(raw ? raw : "{\"status\":\"unavailable\"}");
+   free(raw);
+   cJSON_Delete(reply);
+   return content;
+}
+
+static cJSON *mcph_task_projection(struct mcp_call *c)
+{
+   cJSON *reply = task_projection_command(c->jargs);
+   char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   cJSON *content = text_content(raw ? raw : "{\"status\":\"unavailable\"}");
+   free(raw);
+   cJSON_Delete(reply);
+   return content;
+}
+
+static cJSON *mcph_memory_serve(struct mcp_call *c)
+{
+   return mcph_served_memory(c, 0);
+}
+
+static cJSON *mcph_memory_claim_card(struct mcp_call *c)
+{
+   return mcph_served_memory(c, 1);
+}
+
 static cJSON *mcph_memory_briefing(struct mcp_call *c)
 {
    return tool_memory_briefing(c->jargs);
@@ -300,6 +340,17 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
    else
       envelope = server_user_memory_recall_json(task_hint, limit_tokens, session_start);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
+   /* Preserve the owner's explicit refusal before optional session guidance.
+    * An overflow must not become a successful empty recall or a generic error. */
+   const char *recall_status =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "status"));
+   if (recall_status && strcmp(recall_status, "ok") != 0)
+   {
+      cJSON *failure = text_content(envelope);
+      free(envelope);
+      cJSON_Delete(resp);
+      return failure;
+   }
    free(envelope);
    cJSON *recall = resp ? cJSON_GetObjectItemCaseSensitive(resp, "recall") : NULL;
    char *rendered = NULL;
@@ -2108,6 +2159,10 @@ static const struct
     {"memory_get", mcph_memory_get, NULL},
     {"list_facts", mcph_list_facts, NULL},
     {"memory_briefing", mcph_memory_briefing, NULL},
+    {"memory_serve", mcph_memory_serve, "core,review_indexed"},
+    {"task_projection", mcph_task_projection, "core,review_indexed"},
+    {"memory_hygiene", mcph_memory_hygiene, "core,review_indexed"},
+    {"memory_claim_card", mcph_memory_claim_card, "core,review_indexed"},
     {"get_identity", mcph_get_identity, NULL},
     {"list_curiosity_items", mcph_list_curiosity_items, NULL},
     {"create_prospective_memory", mcph_create_prospective_memory, NULL},

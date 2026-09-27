@@ -1,0 +1,55 @@
+import hashlib,http.client,json,socket,sqlite3,sys,threading
+from pathlib import Path
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+request=json.loads(sys.stdin.readline());fixtures=request['fixtures'];mode=request['mode'];checks=[];captures=[];observations=[]
+def check(name,value):
+ checks.append(dict(name=name,passed=bool(value)))
+ if not value:raise RuntimeError(name)
+class Local(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(120);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+def api(path,body):
+ c=Local('localhost');c.request('POST',path,json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+ try:d=json.loads(raw)
+ except ValueError:d=raw.decode()
+ return r.status,d
+class Provider(BaseHTTPRequestHandler):
+ def log_message(self,*args):pass
+ def do_POST(self):
+  raw=self.rfile.read(int(self.headers['Content-Length']));digest=hashlib.sha256(raw).hexdigest();observations.append(dict(payload_sha256=digest,payload_bytes=len(raw),fixture_presence={f['store']+'/'+f['role']:f['key'].encode() in raw for f in fixtures}))
+  try:
+   if mode=='enforce':check('provider payload excludes all elapsed transient records',all(f['key'].encode() not in raw for f in fixtures if f['transient']))
+   else:check('shadow positive control delivers transient identity context',any(f['key'].encode() in raw for f in fixtures if f['transient'] and f['kind']=='fact'))
+   if mode=='enforce':check('provider payload retains eligible durable fixture context',any(f['key'].encode() in raw for f in fixtures if not f['transient']))
+   with sqlite3.connect('file:/var/lib/aimee/audit/worm-live.db?mode=ro',uri=True) as audit:
+    row=audit.execute("SELECT subject,detail FROM audit_event WHERE actor_role='host' AND actor_principal='uid:1000' AND action='memory.provider.prepared' AND json_extract(detail,'$.binding.payload_sha256')=? ORDER BY seq DESC LIMIT 1",(digest,)).fetchone()
+    check('exact provider bytes have a committed preparation receipt',row is not None)
+    prepared=json.loads(row[1]);sources=prepared['binding']['sources']
+    collections=[r.get('source_version',{}) for r in sources if r.get('source_version',{}).get('record_kind') in ['memory_collection','user_memory_collection']]
+    check('dispatch preparation binds effective horizon policy on collections',bool(collections) and all(c.get('utility_horizon_policy_digest','').startswith('sha256:') for c in collections))
+    captures.append(dict(attempt=row[0],payload_sha256=digest,payload_bytes=len(raw),binding_sha256=prepared['binding_sha256']))
+  except Exception:pass
+  response=json.dumps(dict(id='mr10',object='chat.completion',model='mr10',usage=dict(prompt_tokens=1,completion_tokens=1,total_tokens=2),choices=[dict(index=0,finish_reason='stop',message=dict(role='assistant',content='MR10_PROVIDER_OK'))])).encode()
+  self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(response)));self.end_headers();self.wfile.write(response)
+provider=ThreadingHTTPServer(('127.0.0.1',0),Provider);threading.Thread(target=provider.serve_forever,daemon=True).start()
+roster=Path('/var/lib/aimee/models.json');prior=roster.read_bytes() if roster.exists() else None;name='mr10-horizon-provider';saved_config={}
+try:
+ for key in ['memory_recall_limit_tokens_session','memory_recall_limit_tokens_turn']:
+  status,d=api('/v1/config/get',dict(key=key));check('read bounded recall fixture config '+key,status==200 and 'value' in d);saved_config[key]=d['value']
+  status,d=api('/v1/config/set',dict(key=key,value=8192));check('set bounded recall fixture config '+key,status==200 and d.get('status')=='ok')
+ roster.write_text(json.dumps(dict(default_agent=name,default_delegate=name,fallback_chain=[],models=[dict(name=name,model='mr10',provider='openai',auth_type='none',endpoint=f'http://127.0.0.1:{provider.server_port}/v1',roles=['all'],enabled=True,tools_enabled=True,context_window=16384,max_tokens=4096,max_output=4096,max_parallel=1,max_turns=1)])))
+ status,d=api('/v1/sessions/create',dict(client_type=name));check('provider fixture session created',status==200);session=d['session_id']
+ status,d=api('/v1/sessions/'+session+'/primary',dict(agent=name));check('provider fixture route selected',status==200 and d.get('agent')==name)
+ status,d=api('/v1/chat/stream',dict(message='MR10_HORIZON_FIXTURE',aimee_session_id=session,cwd='/var/lib/aimee/mr07-activated-fixture/repository',model=name))
+ check('native turn completes through the actual provider boundary',status==200 and 'MR10_PROVIDER_OK' in str(d) and len(captures)==1)
+ with sqlite3.connect('file:/var/lib/aimee/audit/worm-live.db?mode=ro',uri=True) as audit:
+  row=audit.execute("SELECT detail FROM audit_event WHERE action='memory.provider.dispatch_started' AND subject=? ORDER BY seq DESC LIMIT 1",(captures[0]['attempt'],)).fetchone()
+  check('provider dispatch has a durable started receipt',row is not None)
+finally:
+ for key,value in saved_config.items():
+  status,d=api('/v1/config/set',dict(key=key,value=value));check('restore recall fixture config '+key,status==200 and d.get('status')=='ok')
+ if prior is None:roster.unlink(missing_ok=True)
+ else:roster.write_bytes(prior)
+ provider.shutdown()
+ print(json.dumps(dict(checks=checks,captures=captures,observations=observations,measurement='synthetic functional provider at fixed 8192-token recall allocation; not a quality or billing measurement')))
+if not checks or not all(c['passed'] for c in checks):raise SystemExit(1)

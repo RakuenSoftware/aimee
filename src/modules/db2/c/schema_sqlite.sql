@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS collab_rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,
 CREATE TABLE IF NOT EXISTS collab_rules_meta (  key TEXT PRIMARY KEY,  value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_meta (  key TEXT PRIMARY KEY,  value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_documents (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),  file_path TEXT NOT NULL,  file_hash TEXT NOT NULL,  chunk_index INTEGER NOT NULL,  heading_path TEXT NOT NULL DEFAULT '',  line_start INTEGER NOT NULL DEFAULT 0,  line_end INTEGER NOT NULL DEFAULT 0,  content TEXT NOT NULL,  token_count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')), prev_chunk_id INTEGER DEFAULT NULL, next_chunk_id INTEGER DEFAULT NULL,  chunk_strategy TEXT NOT NULL DEFAULT 'heading',  doc_kind TEXT NOT NULL DEFAULT '',  chunk_context TEXT NOT NULL DEFAULT '',  page_start INTEGER DEFAULT NULL,  page_end INTEGER DEFAULT NULL,  sensitivity_class TEXT NOT NULL DEFAULT '',  quarantine_state TEXT NOT NULL DEFAULT '',  tsr_state TEXT NOT NULL DEFAULT '', owner_principal TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (request_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', memory_count INTEGER NOT NULL DEFAULT 0, document_count INTEGER NOT NULL DEFAULT 0, db1_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (request_id TEXT PRIMARY KEY, coverage_policy TEXT NOT NULL DEFAULT 'legacy', subject_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', memory_count INTEGER NOT NULL DEFAULT 0, document_count INTEGER NOT NULL DEFAULT 0, db1_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT NOT NULL DEFAULT '');
 -- structured-pdf Phase 1: per-line coordinate evidence index (see db2/schema.sql).
 CREATE TABLE IF NOT EXISTS kb_doc_regions (  id INTEGER PRIMARY KEY AUTOINCREMENT,  chunk_id INTEGER NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  x0 REAL NOT NULL DEFAULT 0,  y0 REAL NOT NULL DEFAULT 0,  x1 REAL NOT NULL DEFAULT 0,  y1 REAL NOT NULL DEFAULT 0,  quote TEXT NOT NULL DEFAULT '',  line_index INTEGER NOT NULL DEFAULT 0,  content_type TEXT NOT NULL DEFAULT 'text',  sensitivity_class TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_table_cells (  id INTEGER PRIMARY KEY AUTOINCREMENT,  region_id INTEGER NOT NULL REFERENCES kb_doc_regions(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  cell_row INTEGER NOT NULL DEFAULT 0,  cell_col INTEGER NOT NULL DEFAULT 0,  cell_text TEXT NOT NULL DEFAULT '',  subject TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  tsr_confidence INTEGER NOT NULL DEFAULT 0,  source_type TEXT NOT NULL DEFAULT 'table_cell',  sensitivity_class TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -196,12 +196,12 @@ CREATE TABLE IF NOT EXISTS memory_aliases (  id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS memory_entities (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  entity TEXT NOT NULL,  role TEXT NOT NULL DEFAULT 'mention',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, entity, role));
 CREATE TABLE IF NOT EXISTS memory_temporal_refs (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  ref_key TEXT NOT NULL,  granularity TEXT NOT NULL DEFAULT 'relative',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, ref_key, granularity));
 CREATE TABLE IF NOT EXISTS memory_event_frames (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  actor TEXT NOT NULL DEFAULT '',  action TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  location TEXT NOT NULL DEFAULT '',  event_time TEXT NOT NULL DEFAULT '',  evidence_kind TEXT NOT NULL DEFAULT 'derived',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS memory_summaries (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope TEXT NOT NULL DEFAULT 'headline',  summary TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, scope));
+CREATE TABLE IF NOT EXISTS memory_summaries (  id INTEGER PRIMARY KEY AUTOINCREMENT,  record_revision INTEGER NOT NULL DEFAULT 1,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope TEXT NOT NULL DEFAULT 'headline',  summary TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, scope));
 CREATE TABLE IF NOT EXISTS retrieval_shortcuts (  normalized_query TEXT PRIMARY KEY,  target_ids TEXT NOT NULL DEFAULT '',  hit_count INTEGER NOT NULL DEFAULT 0,  promoted INTEGER NOT NULL DEFAULT 0,  last_used_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_chunks (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  chunk_index INTEGER NOT NULL DEFAULT 0,  chunk_text TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, chunk_index));
 CREATE TABLE IF NOT EXISTS memory_units (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  unit_type TEXT NOT NULL,  unit_key TEXT NOT NULL DEFAULT '',  unit_text TEXT NOT NULL,  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')), memory_kind TEXT NOT NULL DEFAULT 'episodic', is_episode_card INTEGER NOT NULL DEFAULT 0,  UNIQUE(memory_id, unit_type, unit_key, unit_text));
 CREATE TABLE IF NOT EXISTS memory_unit_edges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  src_unit_id INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,  dst_unit_id INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,  edge_type TEXT NOT NULL DEFAULT 'related',  weight REAL NOT NULL DEFAULT 1.0);
-CREATE TABLE IF NOT EXISTS memory_episodes (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_key TEXT NOT NULL,  episode_text TEXT NOT NULL,  source_session TEXT NOT NULL DEFAULT '',  reference_time TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS memory_episodes (  id INTEGER PRIMARY KEY AUTOINCREMENT,  record_revision INTEGER NOT NULL DEFAULT 1,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_key TEXT NOT NULL,  episode_text TEXT NOT NULL,  source_session TEXT NOT NULL DEFAULT '',  reference_time TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_relations (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_id INTEGER DEFAULT 0,  src_entity TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  dst_entity TEXT NOT NULL DEFAULT '',  fact_text TEXT NOT NULL DEFAULT '',  valid_at TEXT NOT NULL DEFAULT '',  invalid_at TEXT NOT NULL DEFAULT '',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_scopes (  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope_type TEXT NOT NULL,  scope_value TEXT NOT NULL,  PRIMARY KEY(memory_id, scope_type, scope_value));
 CREATE TABLE IF NOT EXISTS entity_profiles (  entity_id TEXT NOT NULL PRIMARY KEY,  canonical_name TEXT NOT NULL,  observation_count INTEGER NOT NULL DEFAULT 0,  card_json TEXT NOT NULL DEFAULT '{}',  last_refreshed TEXT NOT NULL,  created_at TEXT NOT NULL);
@@ -215,6 +215,15 @@ CREATE TABLE IF NOT EXISTS memory_reembed_progress (  id             INTEGER PRI
 CREATE TABLE IF NOT EXISTS memory_embedder_versions (
  version TEXT PRIMARY KEY, command TEXT NOT NULL, dimension INTEGER NOT NULL,
  serving_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Shape only: SQLite has no vector generation serving implementation.
+CREATE TABLE IF NOT EXISTS memory_assertion_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version),
+ assertion_id INTEGER NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE,
+ assertion_revision INTEGER NOT NULL CHECK(assertion_revision>0),
+ input_hash TEXT NOT NULL, embedding TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+ PRIMARY KEY(version,assertion_id)
 );
 CREATE TABLE IF NOT EXISTS memory_embedding_versions (
  version TEXT NOT NULL REFERENCES memory_embedder_versions(version), point_id INTEGER NOT NULL,
@@ -239,7 +248,7 @@ CREATE TABLE IF NOT EXISTS learning_proposals (  id INTEGER PRIMARY KEY AUTOINCR
 CREATE TABLE IF NOT EXISTS learning_proposal_fate (  proposal_id INTEGER PRIMARY KEY REFERENCES learning_proposals(id) ON DELETE CASCADE,  fate TEXT NOT NULL DEFAULT 'standing',  reason TEXT NOT NULL DEFAULT '',  recorded_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS learning_observations ( observation_id TEXT PRIMARY KEY, scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', observation_type TEXT NOT NULL CHECK (observation_type IN ('recurring_failure','failed_strategy','successful_recovery','missing_precondition','tool_misuse','environment_mismatch','unstable_procedure')), title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate','active','retired','rejected')), confidence REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0), evidence_window_start TEXT NOT NULL DEFAULT '', evidence_window_end TEXT NOT NULL DEFAULT '', synthesis_policy_version TEXT NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0, independent_session_count INTEGER NOT NULL DEFAULT 0, supersedes TEXT NOT NULL DEFAULT '', superseded_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), refreshed_at TEXT NOT NULL DEFAULT (datetime('now')), retired_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS learning_observation_evidence ( observation_id TEXT NOT NULL REFERENCES learning_observations(observation_id) ON DELETE CASCADE, evidence_kind TEXT NOT NULL DEFAULT 'interaction_event', source_event_id INTEGER NOT NULL REFERENCES interaction_event_embeddings(source_event_id) ON DELETE CASCADE, source_span TEXT NOT NULL DEFAULT '', stance TEXT NOT NULL DEFAULT 'supports' CHECK (stance IN ('supports','contradicts')), observed_at TEXT NOT NULL DEFAULT '', PRIMARY KEY (observation_id, evidence_kind, source_event_id, source_span, stance));
-CREATE TABLE IF NOT EXISTS learning_application_events ( application_id TEXT PRIMARY KEY, source_event_id INTEGER NOT NULL REFERENCES interaction_event_embeddings(source_event_id) ON DELETE CASCADE, session_id TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', task_family TEXT NOT NULL DEFAULT '', observation_id TEXT NOT NULL DEFAULT '', procedure_artifact_id TEXT NOT NULL DEFAULT '', proposal_id INTEGER NOT NULL DEFAULT 0, retrieved INTEGER NOT NULL DEFAULT 0, rendered INTEGER NOT NULL DEFAULT 0, selected INTEGER NOT NULL DEFAULT 0, applied INTEGER NOT NULL DEFAULT 0, outcome TEXT NOT NULL DEFAULT 'unknown' CHECK (outcome IN ('unknown','success','failure','corrected','abandoned')), failure_class TEXT NOT NULL DEFAULT '', human_correction TEXT NOT NULL DEFAULT '', latency_ms INTEGER NOT NULL DEFAULT 0, tool_count INTEGER NOT NULL DEFAULT 0, turn_count INTEGER NOT NULL DEFAULT 0, token_count INTEGER NOT NULL DEFAULT 0, retrieved_refs TEXT NOT NULL DEFAULT '[]', rendered_refs TEXT NOT NULL DEFAULT '[]', selected_refs TEXT NOT NULL DEFAULT '[]', applied_refs TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS learning_application_events ( application_id TEXT PRIMARY KEY, source_event_id INTEGER REFERENCES interaction_event_embeddings(source_event_id) ON DELETE CASCADE, session_id TEXT NOT NULL DEFAULT '', scope_kind TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT NOT NULL DEFAULT '', task_family TEXT NOT NULL DEFAULT '', observation_id TEXT NOT NULL DEFAULT '', procedure_artifact_id TEXT NOT NULL DEFAULT '', proposal_id INTEGER NOT NULL DEFAULT 0, retrieved INTEGER NOT NULL DEFAULT 0, rendered INTEGER NOT NULL DEFAULT 0, selected INTEGER NOT NULL DEFAULT 0, applied INTEGER NOT NULL DEFAULT 0, outcome TEXT NOT NULL DEFAULT 'unknown' CHECK (outcome IN ('unknown','success','failure','corrected','abandoned')), failure_class TEXT NOT NULL DEFAULT '', human_correction TEXT NOT NULL DEFAULT '', latency_ms INTEGER NOT NULL DEFAULT 0, tool_count INTEGER NOT NULL DEFAULT 0, turn_count INTEGER NOT NULL DEFAULT 0, token_count INTEGER NOT NULL DEFAULT 0, retrieved_refs TEXT NOT NULL DEFAULT '[]', rendered_refs TEXT NOT NULL DEFAULT '[]', selected_refs TEXT NOT NULL DEFAULT '[]', applied_refs TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), governed_event TEXT, experience_projection TEXT, governed_sequence INTEGER);
 CREATE INDEX IF NOT EXISTS idx_learning_application_procedure ON learning_application_events(procedure_artifact_id, applied, outcome, created_at);
 CREATE INDEX IF NOT EXISTS idx_learning_application_observation ON learning_application_events(observation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_kb_async_jobs_status ON kb_async_jobs(status, id);
@@ -415,7 +424,7 @@ CREATE TABLE IF NOT EXISTS report_enrichments (  subject_type TEXT NOT NULL,  su
 CREATE INDEX IF NOT EXISTS idx_report_enrichments_subject ON report_enrichments (subject_type, subject_id);
 CREATE INDEX IF NOT EXISTS idx_report_enrichments_kind_ts ON report_enrichments (enrichment_kind, computed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_surface ON audit_events (target_surface, applied_at);
-CREATE TABLE IF NOT EXISTS bandit_decisions (  id TEXT NOT NULL PRIMARY KEY,  decision_point TEXT NOT NULL,  arm_id TEXT NOT NULL,  context_hash TEXT NOT NULL DEFAULT '',  propensity REAL NOT NULL DEFAULT 1.0,  reward REAL,  decided_at TEXT NOT NULL,  closed_at TEXT NOT NULL DEFAULT '',  is_exploration INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS bandit_decisions (  id TEXT NOT NULL PRIMARY KEY,  decision_point TEXT NOT NULL,  arm_id TEXT NOT NULL,  result_count INTEGER, result_truncated INTEGER, context_hash TEXT NOT NULL DEFAULT '',  propensity REAL NOT NULL DEFAULT 1.0,  reward REAL,  decided_at TEXT NOT NULL,  closed_at TEXT NOT NULL DEFAULT '',  is_exploration INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_bandit_decisions_point ON bandit_decisions (decision_point, arm_id, decided_at);
 CREATE INDEX IF NOT EXISTS idx_bandit_decisions_explore ON bandit_decisions (decision_point, decided_at, is_exploration);
 CREATE TABLE IF NOT EXISTS bandit_arm_stats (  decision_point TEXT NOT NULL,  arm_id TEXT NOT NULL,  n_decisions INTEGER NOT NULL DEFAULT 0,  n_rewards INTEGER NOT NULL DEFAULT 0,  sum_reward REAL NOT NULL DEFAULT 0.0,  sum_reward_sq REAL NOT NULL DEFAULT 0.0,  posterior_alpha REAL NOT NULL DEFAULT 1.0,  posterior_beta REAL NOT NULL DEFAULT 1.0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (decision_point, arm_id));
@@ -773,7 +782,7 @@ CREATE TABLE IF NOT EXISTS derived_memory_registry (
 CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   id INTEGER PRIMARY KEY AUTOINCREMENT, derived_kind TEXT NOT NULL,
   derived_memory_id TEXT NOT NULL, input_kind TEXT NOT NULL CHECK(input_kind IN
-    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+    ('document','document_version','assertion','memory','code_unit','outcome','entity','rule')),
   input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '',
   source_hash TEXT NOT NULL DEFAULT '', extractor_version TEXT NOT NULL DEFAULT '',
   derivation_policy_version TEXT NOT NULL DEFAULT '',
@@ -873,7 +882,8 @@ CREATE TABLE IF NOT EXISTS recall_traces (
   turn_id TEXT NOT NULL DEFAULT '', query_fingerprint TEXT NOT NULL DEFAULT '',
   scope_kind TEXT NOT NULL DEFAULT 'global', scope_id TEXT NOT NULL DEFAULT '',
   sensitivity TEXT NOT NULL DEFAULT 'normal', persisted INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  candidate_metadata TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS recall_trace_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -898,4 +908,75 @@ CREATE TABLE IF NOT EXISTS recall_trace_results (
   staleness_status TEXT NOT NULL DEFAULT 'not-computed', stale_input TEXT NOT NULL DEFAULT '',
   rejected INTEGER NOT NULL DEFAULT 0, rejection_gate TEXT NOT NULL DEFAULT '',
   UNIQUE(trace_id,subject_kind,subject_id,lane,rejected)
+);
+
+-- Shape parity only: durable memory invalidation runs in PostgreSQL.
+CREATE TABLE IF NOT EXISTS memory_collection_owner (id INTEGER PRIMARY KEY,owner_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memory_collection_generations (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(scope_type,scope_value));
+CREATE TABLE IF NOT EXISTS memory_projection_generations (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,memory_id INTEGER NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(scope_type,scope_value,memory_id));
+CREATE TABLE IF NOT EXISTS memory_invalidation_outbox (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,memory_id INTEGER NOT NULL,record_revision INTEGER NOT NULL,operation TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(scope_type,scope_value,generation));
+
+-- Memory retry receipt shape; the shipping Go owner uses the Postgres transaction.
+CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
+ owner_id TEXT NOT NULL, actor_principal TEXT NOT NULL,
+ key_hash TEXT NOT NULL, request_hash TEXT NOT NULL,
+ commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
+ result_id INTEGER NOT NULL, result_revision INTEGER NOT NULL,
+ proposal_id TEXT,
+ operation TEXT NOT NULL DEFAULT 'correction',target_revision INTEGER NOT NULL DEFAULT 0,
+ scope_type TEXT NOT NULL DEFAULT '',scope_value TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(owner_id,actor_principal,key_hash)
+);
+
+CREATE TABLE IF NOT EXISTS memory_correction_proposals (
+ proposal_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+ target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ target_revision INTEGER NOT NULL, actor_principal TEXT NOT NULL,
+ payload TEXT NOT NULL, payload_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+ reviewer_principal TEXT NOT NULL DEFAULT '', decision_id TEXT NOT NULL DEFAULT '',
+ review_commit_id TEXT REFERENCES fact_graph_commits(commit_id),
+ result_id INTEGER NOT NULL DEFAULT 0, result_revision INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(owner_id,target_id,target_revision,payload_digest)
+);
+
+-- Erasure control metadata mirrors the PostgreSQL storage owner. The SQLite
+-- shim is not a production erasure coordinator.
+CREATE TABLE IF NOT EXISTS memory_erasure_epoch (
+ id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO memory_erasure_epoch(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS memory_erasure_intents (
+ memory_id INTEGER PRIMARY KEY, scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+ payload_digest TEXT NOT NULL, erased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx ON memory_erasure_intents(scope_type,scope_value,payload_digest);
+
+CREATE TABLE IF NOT EXISTS memory_erasure_sessions (session_digest TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
+ request_id TEXT NOT NULL REFERENCES kb_subject_erasure_request(request_id),owner_id TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'pending',policy_revision TEXT NOT NULL DEFAULT 'memory-erasure-v2',
+ deleted_count INTEGER NOT NULL DEFAULT 0,verified_at TEXT,PRIMARY KEY(request_id,owner_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_evidence_recovery (
+ actor_principal TEXT NOT NULL,
+ task_hash TEXT NOT NULL,
+ requirement_hash TEXT NOT NULL,
+ admitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ duplicate_attempts INTEGER NOT NULL DEFAULT 0,
+ outcome TEXT NOT NULL DEFAULT '{"state":"pending"}',
+ PRIMARY KEY(actor_principal,task_hash)
+);
+
+-- Metadata mirror of the PostgreSQL-owned bounded hygiene job receipts.
+CREATE TABLE IF NOT EXISTS memory_hygiene_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_key TEXT NOT NULL UNIQUE,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,
+ owner_id TEXT NOT NULL,generation TEXT NOT NULL,policy TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('running','complete','partial')),
+ resume_cursor TEXT NOT NULL DEFAULT '',rows_inspected INTEGER NOT NULL DEFAULT 0,
+ proposal_writes INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ finished_at TEXT
 );

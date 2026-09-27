@@ -924,6 +924,9 @@ jobs:
       # they deliberately drop a relation to exercise unavailable storage.
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
       AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
+      # Tiny temporary-table fixtures have intentionally artificial row estimates;
+      # compiling their plans dominates the full replay without testing SQL behavior.
+      PGOPTIONS: '-c jit=off'
       EMBEDDER_DIMS: "384"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -2071,7 +2074,7 @@ jobs:
           for attempt in 1 2 3; do
             if timeout 240 sudo apt-get install -y -q gcc make \
               libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-              libpq-dev; then
+              libpq-dev postgresql-client; then
               break
             fi
             test "$attempt" -lt 3 || exit 1
@@ -2080,6 +2083,23 @@ jobs:
           done
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
+      - name: Frozen memory reliability invariants (no skipped cases)
+        env:
+          PGPASSWORD: aimee
+          AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
+          AIMEE_DB2_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
+          AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
+          AIMEE_DB_TEST_REQUIRED: '1'
+          AIMEE_MEMORY_REPLAY_REQUIRED: '1'
+          PGOPTIONS: '-c jit=off'
+        run: |
+          createdb -h 127.0.0.1 -U aimee memory_replay
+          createdb -h 127.0.0.1 -U aimee memory_db1
+          psql -h 127.0.0.1 -U aimee -d memory_replay -v ON_ERROR_STOP=1 -f scripts/postgres-hygiene-role.sql > /tmp/memory-replay-bootstrap.log
+          sed 's/__EMBED_DIM__/3/g' src/modules/db2/c/schema.sql | psql -h 127.0.0.1 -U aimee -d memory_replay --single-transaction -v ON_ERROR_STOP=1 >> /tmp/memory-replay-bootstrap.log
+          python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment scripts.tests.test_memory_reliability_release
+          python3 scripts/check_memory_reliability_release.py --output /tmp/memory-reliability-release.json
 
   # Every role uses the candidate application and standardized encrypted store.
   e2e-docker:

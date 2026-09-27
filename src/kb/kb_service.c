@@ -1,3 +1,4 @@
+#include "json_wire.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
@@ -668,6 +669,7 @@ static const struct
     {"collab_rules.inject", kb_handle_collab_rules_inject},
     {"learning.propose_signal", kb_handle_learning_propose_signal},
     {"learning.record_application", kb_handle_learning_record_application},
+    {"learning.record_governed_application", kb_handle_learning_record_application},
     {"agent.outcome_record", kb_handle_agent_outcome_record},
     {"agent.hint_consume", kb_handle_agent_hint_consume},
 
@@ -736,7 +738,7 @@ static const struct
 
 /* Only verifier-owned request state becomes command context. User arguments
  * remain a separate field on the wire and cannot replace this identity. */
-static cJSON *kb_command_context(void)
+cJSON *kb_service_command_context(void)
 {
    cJSON *context = cJSON_CreateObject();
    if (!context)
@@ -750,19 +752,73 @@ static cJSON *kb_command_context(void)
    const kb_request_context_t *resolved = kb_reqctx_resolved();
    if (authenticated && resolved && resolved->has_transport)
       (void)kb_identity_key(&resolved->transport, transport, sizeof(transport));
+   const char *scope_kind = NULL, *scope_id = NULL;
+   int verified_scope = kb_reqctx_verified_scope(&scope_kind, &scope_id);
+   /* Scoped credentials authenticate a transport even when they identify no
+    * human actor. Preserve their restriction without granting user authority. */
+   if (!authenticated && verified_scope && scope_kind && scope_kind[0] && scope_id && scope_id[0])
+   {
+      authenticated = 1;
+      snprintf(principal, sizeof(principal), "kb-scope:%s:%s", scope_kind, scope_id);
+   }
    if (!transport[0])
       snprintf(transport, sizeof(transport), "%s", principal);
    cJSON_AddBoolToObject(context, "authenticated", authenticated);
    cJSON_AddBoolToObject(context, "user_authority", user_authority);
    cJSON_AddStringToObject(context, "principal", authenticated ? principal : "");
    cJSON_AddStringToObject(context, "transport_identity", authenticated ? transport : "");
-   const char *scope_kind = NULL, *scope_id = NULL;
-   if (authenticated && kb_reqctx_verified_scope(&scope_kind, &scope_id))
+   if (authenticated && verified_scope)
    {
       cJSON_AddStringToObject(context, "scope_kind", scope_kind ? scope_kind : "");
       cJSON_AddStringToObject(context, "scope_id", scope_id ? scope_id : "");
    }
    return context;
+}
+
+/* Preserve public runtime-view envelopes while forwarding untrusted arguments
+ * and verifier-owned authority separately to the Go memory owner. */
+static int kb_handle_memory_runtime_view(int fd, cJSON *req, const char *operation,
+                                         const char *field, const char *public_field)
+{
+   cJSON *args = cJSON_Duplicate(req, 1);
+   cJSON *context = kb_service_command_context();
+   cJSON *response = NULL;
+   if (!args || !context)
+   {
+      cJSON_Delete(args);
+      cJSON_Delete(context);
+      return kb_send_error(fd, "command context unavailable");
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "operation");
+   cJSON_AddStringToObject(args, "operation", operation);
+   int dispatched = aimee_module_commands_dispatch_internal_context_timeout(
+       "memory.runtime", args, context, 60000, &response);
+   cJSON_Delete(args);
+   cJSON_Delete(context);
+   if (dispatched <= 0)
+   {
+      cJSON_Delete(response);
+      return kb_send_error(fd, "command module unavailable");
+   }
+   cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(response, field);
+   if (payload)
+      cJSON_AddItemToObject(response, public_field, payload);
+   return kb_reply_or_error(fd, response, "failed to fetch memory runtime view");
+}
+
+int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "stats-dashboard", "dashboard", "payload");
+}
+
+int kb_handle_session_briefing_directives(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "directive-briefing", "block", "body");
+}
+
+int kb_handle_session_briefing_commitments(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "prospective-briefing", "block", "body");
 }
 
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
@@ -801,7 +857,7 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
          return kb_rpc_table[i].fn(fd, req);
 
    cJSON *module_response = NULL;
-   cJSON *command_context = kb_command_context();
+   cJSON *command_context = kb_service_command_context();
    if (!command_context)
       return kb_send_error(fd, "command context unavailable");
    int dispatched = aimee_module_commands_dispatch_raw_context(method->valuestring, req,
@@ -841,6 +897,21 @@ int kb_dispatch_action_json(const char *action, const char *body, int body_len, 
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
       return 503;
+   }
+
+   /* These actions carry exact source identities. cJSON strings cannot retain
+    * embedded NULs, so reject them before parsing can turn an invalid ID into
+    * a valid prefix. Other actions retain their existing body contract. */
+   int evidence_identity = strncmp(action, "evidence.", 9) == 0 ||
+                           strcmp(action, "memory.record_retrieval_outcome") == 0 ||
+                           strcmp(action, "ranker.record_outcome") == 0 ||
+                           strcmp(action, "ranker.emit_event") == 0;
+   if (evidence_identity && body && body_len > 0 &&
+       (memchr(body, 0, (size_t)body_len) || json_wire_has_nul_escape(body, (size_t)body_len)))
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"message\":\"evidence identity cannot contain NUL\"}");
+      return 400;
    }
 
    cJSON *req = NULL;

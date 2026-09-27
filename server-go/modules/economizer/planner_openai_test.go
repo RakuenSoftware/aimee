@@ -1,7 +1,9 @@
 package economizer
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -33,7 +35,7 @@ func evidence(json string, tokens uint64) *TokenEvidence {
 	return &TokenEvidence{
 		Provider: ProviderOpenAI, EndpointID: uint32(OpenAIResponses),
 		ModelSnapshotID: 11, TokenizerID: 22,
-		SerializedSize: len(json), InputTokens: tokens, Source: TokenSourceLocalExact,
+		SerializedSize: len(json), SerializedDigest: sha256.Sum256([]byte(json)), InputTokens: tokens, Source: TokenSourceLocalExact,
 	}
 }
 
@@ -73,6 +75,8 @@ func TestOpenAIPlanRequiresBindingLocalEvidence(t *testing.T) {
 		want   Reason
 	}{
 		{"missing evidence", func(p *OpenAIPlanInput) { p.BaselineTokens = nil }, ReasonTokenizerNotLocalExact},
+		{"missing digest", func(p *OpenAIPlanInput) { p.BaselineTokens.SerializedDigest = [sha256.Size]byte{} }, ReasonTokenizerNotLocalExact},
+		{"wrong digest", func(p *OpenAIPlanInput) { p.CandidateTokens.SerializedDigest[0] ^= 1 }, ReasonTokenizerNotLocalExact},
 		{"wrong size", func(p *OpenAIPlanInput) { p.BaselineTokens.SerializedSize++ }, ReasonTokenizerNotLocalExact},
 		{"wrong model", func(p *OpenAIPlanInput) { p.BaselineTokens.ModelSnapshotID = 999 }, ReasonTokenizerNotLocalExact},
 		{"wrong tokenizer", func(p *OpenAIPlanInput) { p.BaselineTokens.TokenizerID = 999 }, ReasonTokenizerNotLocalExact},
@@ -217,5 +221,31 @@ func TestOpenAILongContextPricing(t *testing.T) {
 	out, ok := outputCost(100, 80, true)
 	if !ok || out != 100*120 {
 		t.Errorf("long-context output = %d, want 12000 (1.5x)", out)
+	}
+}
+
+// Equal-sized provider bodies can have different content and token counts.
+// Evidence measured before a rewrite must not certify the rewritten request.
+func TestOpenAIPlanRejectsSameLengthRequestSubstitution(t *testing.T) {
+	for _, side := range []string{"baseline", "candidate"} {
+		t.Run(side, func(t *testing.T) {
+			in := planInput(10000, 1000)
+			original := strings.TrimSuffix(in.BaselineJSON, "}") + `,"messages":[{"role":"user","content":"limit=7"}]}`
+			in.BaselineJSON, in.CandidateJSON = original, original
+			in.BaselineTokens, in.CandidateTokens = evidence(original, 10000), evidence(original, 1000)
+			changed := strings.Replace(original, "limit=7", "limit=9", 1)
+			if len(original) != len(changed) || original == changed {
+				t.Fatal("invalid same-length fixture")
+			}
+			if side == "baseline" {
+				in.BaselineJSON = changed
+			} else {
+				in.CandidateJSON = changed
+			}
+			got := OpenAIGPT56Plan(in)
+			if got.Reason != ReasonTokenizerNotLocalExact || got.CostVerdict != CostIndeterminate {
+				t.Fatalf("stale token evidence accepted after %s rewrite: %v/%v", side, got.CostVerdict, got.Reason)
+			}
+		})
 	}
 }

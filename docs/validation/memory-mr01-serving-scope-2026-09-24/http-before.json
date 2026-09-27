@@ -1,0 +1,15 @@
+[
+  {
+    "name": "project verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 1",
+    "passed": false
+  },
+  {
+    "name": "scoped HTTP regression completed",
+    "passed": false,
+    "error": "project foreign record withheld 1"
+  }
+]

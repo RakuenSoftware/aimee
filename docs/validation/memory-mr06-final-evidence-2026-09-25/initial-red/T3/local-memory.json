@@ -1,0 +1,1325 @@
+[
+  {
+    "name": "KB-free local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP store commits personal invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal store retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "identical HTTP upsert preserves identity and invalidation progress",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall {}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall returns personal text and scoped handle {}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall {'store': 'user'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall returns personal text and scoped handle {'store': 'user'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal recall tolerates brief database contention",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "delayed recall preserves personal text and scoped handle",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free session recall without hint",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free CLI recall",
+    "passed": true,
+    "detail": {
+      "recall": {
+        "collection_source": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "52d3d658-6286-4a4b-92ed-073f6ed9eb34",
+            "record_id": "1",
+            "record_revision": "2"
+          },
+          "memory_parent_state": "observed"
+        },
+        "always_on_rules": [],
+        "activation_held": 0,
+        "identity": [],
+        "preferences": [],
+        "active_context": [
+          {
+            "why": "recent active context",
+            "version": {
+              "schema_version": 1,
+              "owner_id": "52d3d658-6286-4a4b-92ed-073f6ed9eb34",
+              "record_id": "1",
+              "record_revision": "1"
+            },
+            "id": 1,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-0983acf583",
+            "content": "Personal local-only fixture person@local.invalid 🦊",
+            "confidence": 1,
+            "memory_id": 1,
+            "text": "Personal local-only fixture person@local.invalid 🦊",
+            "store": "user",
+            "handle": "user:memory:1"
+          }
+        ],
+        "open_commitments": [],
+        "reminders": [],
+        "directives": [],
+        "limit_tokens": 1024,
+        "used_tokens": 232,
+        "approx_tokens": 232,
+        "elapsed_ms": 122.349,
+        "session_start": false,
+        "explain": []
+      },
+      "store": "user"
+    }
+  },
+  {
+    "name": "KB-free MCP recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall rejects invalid store",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory store must be user or kb"
+      }
+    ]
+  },
+  {
+    "name": "HTTP CLI MCP recall leaves personal invalidations unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP mutation refuses failed invalidation commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal content after failed invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "failed invalidation preserves canonical content and progress",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal invalidations survive application restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall reports unavailable local store",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "kind": "unavailable",
+        "message": "memory recall unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "KB-free recall recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal invalidations survive storage restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free local retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP retirement commits a new personal invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall after retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retired personal record excluded from recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user HTTP rejects confidence -1",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence False",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence None",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence []",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence {}",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user stores confidence 0",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 34,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-0983acf583-confidence-0",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 0.25",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 35,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-0983acf583-confidence-0.25",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0.25
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 36,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-0983acf583-confidence-1",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 1
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "personal history fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal HTTP versioned get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal validity HTTP decision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal validity matches serving revision without disclosing text",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal validity CLI agrees with HTTP",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal version uses owner and exact decimal identifiers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal same-key correction",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal explicit historical get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "same-key correction retains labelled original revision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal HTTP correction rejects stale version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP versioned get owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP authoritative correction refusal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP cannot replace HTTP-authored content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal HTTP authorized versioned correction",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal authorized correction returns committed revision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private HTTP captures verified user authorship",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP model fixture owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal model version owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP cannot forge user provenance or certainty",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP model correction owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP can correct model content with version admission",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP model history owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private model history retains original authorship",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP authoritative store refusal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP store cannot mutate user content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP authoritative forget refusal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP forget cannot mutate user content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private authority refusals leave canonical revision unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP stale retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP rejects stale correction retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal MCP historical get owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP history preserves exact second revision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal history rejects another owner",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private runtime cannot rewrite retained history",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private runtime cannot bypass retirement with physical erase",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private runtime cannot rewrite invalidation progress",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private runtime cannot invoke protected trigger helpers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal versions survive restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retained private history survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart retains current and original private versions",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "history persistence failure refuses correction",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal version after history failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "history failure rolls back content version and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "parent erasure removes private history payloads",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "erased private revision cannot be retrieved",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review original version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP correction draft owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private refusal links a non-serving model draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private parent after draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private draft leaves serving version and journal unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private repeated draft owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private proposal retry preserves original draft identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private exact draft inspection",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private inspection returns screened model payload",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review refuses a different draft digest",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review refuses late decision persistence failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private parent after failed review",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "failed private review rolls back content history and journal",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private exact draft approval",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private reviewed memory",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private approval preserves model origin and records the reviewer",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private history after reviewed correction",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "reviewed private correction retains human source revision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private approved decision retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private decision retry has no second canonical effect",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private reviewed content still requires review owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private correction rejection",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private rejected suggestion retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private rejected draft cannot reopen or alter recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review recovery after restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private decision survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart preserves reviewed version author and decision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private reviewed memory retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private review retry cannot release a retired result",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private parent erasure removes correction drafts",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private erased proposal cannot be reviewed again",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed correction parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed original version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed correction refuses receipt failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed parent after failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private receipt failure rolls back content and journal",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed correction commits",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private receipt binds stable ID and new version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed HTTP retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private HTTP retry preserves one commit and canonical effect",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private HTTP retry rejects changed payload",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed result after restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed retry after restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retry receipt survives Server restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed result retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retry cannot release retired content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private erasure does not free a committed retry key",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed model fixture owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private model retry version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed MCP correction owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed MCP retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP preserves durable receipt and capped model authority",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed proposal parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed proposal version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed model proposal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed model proposal retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private proposal retry retains non-serving identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed changed draft owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private proposal retry rejects changed draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed proposal rejection",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed rejected proposal retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed rejected proposal cannot reopen",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed erased proposal retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private erased proposal key cannot repeat a mutation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement expected version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement refuses receipt failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement rollback parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement rolls back content and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private conditional retirement commits",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement receipt binds a non-destructive transition",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private conditional retirement removes current recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement HTTP retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement retry preserves one commit and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement rejects changed retry version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement retry after Server restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement receipt survives restart without another effect",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retired history stays governed",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private authorized reactivation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private retirement retry cannot retire reactivated content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private erasure retains retirement retry identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private model retirement parent owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private model retirement version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed MCP retirement owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private keyed MCP retirement retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private MCP retirement returns one non-destructive receipt",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private protected retirement parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private protected retirement version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "model conditional retirement of user assertion owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "model retirement cannot claim user authority",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "private protected retirement cleanup",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user keyed HTTP creation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation receipt binds exact result",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user keyed HTTP creation replay",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user replay preserves commit and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user changed creation retry conflicts",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation result survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation replay survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user restart preserves creation commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user keyed MCP creation owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user MCP creation has a durable receipt",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user MCP creation replay owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user MCP retry identifies original commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user model creation read",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user keyed MCP creation retains confidence ceiling",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation proposal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation proposal replay owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user creation retry preserves review admission",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user keyed creation retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user retired creation cannot be recreated by retry",
+    "passed": true,
+    "detail": null
+  }
+]

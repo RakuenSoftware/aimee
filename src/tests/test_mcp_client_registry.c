@@ -550,7 +550,7 @@ static void test_osv_offline_cache_miss_allows(void)
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 54
+#define MCP_TOOLS_GOLDEN_COUNT 56
 #ifdef AIMEE_WINDOWS
 #define MCP_LSP_GOLDEN "lsp {col,command,file,line,workspace} req:command\n"
 #else
@@ -595,8 +595,11 @@ static void test_osv_offline_cache_miss_allows(void)
    "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
    "target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"        \
    "list_curiosity_items {limit,state} req:\n" MCP_LSP_GOLDEN "memory "                            \
-   "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
-   "project,query,reason,scope,store,tier,verb,workspace} req:command\n"                           \
+   "{as_of,at_version,believed_at,command,confidence,content,context_limits,cwd,dry_run,"          \
+   "evidence_requirements,expand_evidence,expected_version,force,handle,id,idempotency_key,"       \
+   "include_version,key,kind,limit,memory_id,modes,project,query,reason,scope,store,task,tier,"    \
+   "valid_at,verb,view,workspace} req:command\n"                                                   \
+   "memory_hygiene {cursor,dry_run,max_content_bytes,max_rows,scope} req:scope\n"                  \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,store,task_hint,workspace} req:\n" \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
@@ -631,6 +634,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "req:action,name\n"                                                                             \
    "store_workflow {project,rule,signal_type} req:rule,signal_type\n"                              \
    "task_list {limit,session_id,state} req:\n"                                                     \
+   "task_projection {binding,claim_index,events,expected_revision,items,max_context_bytes,"        \
+   "operation,preview_digest,session_id,target_id,task_id,ttl_seconds} "                           \
+   "req:operation,session_id,task_id\n"                                                            \
    "workflow_run {proposal_md,repo,workflow} req:proposal_md\n"
 
 /* --- mcp_build_tools_list surface net ---

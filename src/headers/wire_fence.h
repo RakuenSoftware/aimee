@@ -35,11 +35,38 @@ extern "C"
    int wire_fence_create(wire_fence_route_t route, const void *pristine, size_t pristine_len,
                          wire_fence_t **out);
 
+   /* A refused required context operation is distinct from a provider failure. */
+#define WIRE_FENCE_CONTEXT_REFUSED (-2)
+
    /* OFF bypasses allocation and registry work, returning the caller's pristine
     * bytes directly. PROOF_GATED creates one immutable snapshot. */
    int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pristine,
                          size_t pristine_len, wire_fence_t **snapshot,
                          wire_fence_bytes_t *selected);
+
+   /* External backends hide provider serialization. Refuse declared hard
+    * limits there instead of claiming an unobservable request was counted. */
+   int wire_fence_external_backend(void);
+
+   /* Relay the source owner's current admission before resending frozen bytes. */
+   int wire_fence_revalidate_sources(void);
+
+   /* Buffered provider transport with one durable admission per actual attempt. */
+   int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                       char **response_buf, int timeout_ms, const char *extra_headers,
+                       int max_attempts, int base_ms, int max_ms, const char *provider,
+                       const char *model, const char *session_id, wire_fence_route_t route);
+
+   typedef int (*wire_fence_stream_cb)(const char *data, size_t len, void *userdata);
+   int wire_fence_post_stream(const char *url, const char *auth_header, const void *body,
+                              size_t body_len, wire_fence_stream_cb callback, void *userdata,
+                              int timeout_ms, const char *extra_headers, const char *provider,
+                              const char *model, wire_fence_route_t route);
+
+   /* Stable failure kind for the current thread's last selection attempt. */
+   const char *wire_fence_last_error(void);
+   int wire_fence_error_http_status(const char *error);
+   const char *wire_fence_error_type(const char *error);
 
    wire_fence_route_t econ_wire_snapshot_route(const wire_fence_t *snapshot);
    wire_fence_bytes_t wire_fence_bytes(const wire_fence_t *snapshot);

@@ -1,0 +1,14 @@
+PASS owned evidence action session created
+MR16_SESSION d8f79fba-3175-edfd-a0ea-73ad80f71f13
+PASS controlled provider selected
+PASS fresh actual provider request has a durable receipt
+PASS fresh exact provider payload retained controlled procedure
+PASS memory-bound native read is acknowledged
+PASS receipt names rewritten owned worktree object
+PASS memory-bound write reports exact verified effect
+PASS fresh governed model turn completes
+PASS durable action binds exact memory receipt and guarded evidence
+PASS stale actual provider request has a durable receipt
+PASS stale exact provider payload retained controlled procedure
+MR16_MUTATE_PROCEDURE
+PASS committed procedure correction prevents stale external effect

@@ -22,6 +22,25 @@
 #include "index.h" /* code_search_hit_t */
 #include <stddef.h>
 
+/* Authenticated transport for Go-owned source revalidation at the wire fence. */
+int ingress_preinject_revalidate_sources(void);
+int ingress_preinject_acquire_send_guard(void **state);
+void ingress_preinject_release_send_guard(void *state);
+int ingress_preinject_accept_native_projection(const cJSON *projection);
+void ingress_preinject_finish_sources(void);
+/* Bind one final provider attempt through Go and synchronously accept its
+ * preparation/admission in the existing WORM owner. Empty attempt means the
+ * request did not require a memory receipt; no receipt coverage is implied. */
+int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
+                                      const char *provider, const char *model, char attempt[33]);
+cJSON *ingress_preinject_receipt_options(const char *request_id, int forget, int include_payload);
+cJSON *ingress_preinject_receipt(const char *request_id);
+int ingress_preinject_started_attempt(const char *attempt);
+int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,
+                                      size_t response_len);
+int ingress_preinject_observe_commitment(const char *attempt, int http_status, const char *digest,
+                                         size_t response_len, const char *representation);
+
 /* Extract the recall seed query from a parsed chat `messages` array: the text
  * of the last user-role message. Returns a malloc'd string (caller frees) or
  * NULL when there is no usable user text. Pure (no kb). */
@@ -37,7 +56,10 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * `ingress_preinject_enabled` (config) and `request_disabled` (per-request
  * override): returns NULL when disabled, when query is blank, or when recall
  * yields no context. Otherwise runs the recall/context-block path, derives a
- * confidence tier, and returns a malloc'd <aimee-context> envelope. */
+ * confidence tier, and returns a malloc'd <aimee-context> envelope.
+ * HTTP callers install a request_context_t before assembly. Required plan or
+ * assembly failures mark that request refused for final provider dispatch;
+ * successful inactive/empty plans may return NULL without refusing. */
 char *ingress_preinject_build(const char *query, int request_disabled);
 
 /* Merge `envelope` with `instructions` (the request system prompt), returning a
@@ -78,6 +100,8 @@ void ingress_preinject_set_request_disabled(int disabled);
  * every request. */
 int ingress_preinject_mint_turn_id(char *buf, size_t len);
 void ingress_preinject_set_turn_id(const char *turn_id);
+/* Host-owned primary turn identity for optional receipt health metadata. */
+void ingress_preinject_set_health_turn_id(const char *turn_id);
 const char *ingress_preinject_turn_id(void);
 
 /* Per-turn aimee session id, recovered at HTTP ingress from the primary provider's
@@ -86,6 +110,12 @@ const char *ingress_preinject_turn_id(void);
  * so a reused worker thread never leaks one turn's session onto the next. "" when
  * the request carries no aimee-session token (a non-primary / unidentified turn). */
 void ingress_preinject_set_session_id(const char *session_id);
+/* Host native-turn adapter forwards task obligations from the user request.
+ * Bounded copy; NULL clears. Validation and coverage remain Go-owned. */
+void ingress_preinject_set_task_requirements(const cJSON *request);
+/* Assemble explicitly requested task evidence for a native primary turn.
+ * NULL means no replacement; caller retains instructions. Owned allocation. */
+char *ingress_preinject_task_instructions(const char *instructions, const char *query);
 const char *ingress_preinject_session_id(void);
 
 /* Resolve the current request's thread-local working directory to the same

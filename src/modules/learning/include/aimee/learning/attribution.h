@@ -1,10 +1,9 @@
 /* attribution.h: measured credit for a capability, from counterfactuals the
  * harness already runs (recursive-self-improvement S2).
  *
- * Every reward in the system is a proxy. kb_bandit_recall_sufficiency_reward()
- * says so in its own comment. eval_feedback_loop() reinforces a rule on WORD
- * OVERLAP with a failed task and, separately, with a passed one — the same rule
- * bumped for opposite outcomes, with no causal claim behind either.
+ * Result count is an availability/truncation feature, not a task-quality reward.
+ * eval_feedback_loop() reinforces a rule on WORD OVERLAP with a failed task and, separately, with a
+ * passed one — the same rule bumped for opposite outcomes, with no causal claim behind either.
  *
  * The fix does not need a new experiment. `aimee eval run --ablation all`
  * already runs every task once per preset, each preset removing exactly one

@@ -53,7 +53,7 @@ func TestRequiredPolicyDecisions(t *testing.T) {
 		{"ordinary action allowed", base("read_file", map[string]any{"path": "/safe/a.txt"}), true},
 		{"forbidden command denied", base("bash", map[string]any{"command": "rm -rf build"}), false},
 		{"path tool denied", base("write_file", map[string]any{"path": "/safe/a.txt"}), false},
-		{"source discovery denied", base("bash", map[string]any{"command": "rg policy_check_tool"}), false},
+		{"source discovery observed", base("bash", map[string]any{"command": "rg policy_check_tool"}), true},
 		{"specific file search allowed", base("bash", map[string]any{"command": "rg needle src/file.c"}), true},
 	}
 	for _, test := range tests {
@@ -90,6 +90,18 @@ func TestSourceDiscoveryParity(t *testing.T) {
 		command string
 		blocked bool
 	}{
+		{"rg foo; touch result", false},
+		{"rg foo && printf done > result", false},
+		{"rg foo | tee result", false},
+		{"rg $(touch result)", false},
+		{"find src -delete", false},
+		{`find src -de"le"te`, false},
+		{"find src -exec touch result", false},
+		{"find src -fprint result", false},
+		{"rg --pre=processor foo", false},
+		{"grep", false},
+		{"rg", false},
+		{"ripgrep", false},
 		{"grep -r foo src/", true},
 		{"grep -rn TODO .", true},
 		{"grep foo_func src/agent_policy.c", false},
@@ -152,5 +164,36 @@ func TestPolicyLoadFailureAndMalformedInputFailClosed(t *testing.T) {
 	invalidArguments["arguments"] = nil
 	if invoke(t, newHandler(func() (*operatorPolicy, error) { return nil, nil }), invalidArguments).Allowed {
 		t.Fatal("null arguments allowed action")
+	}
+}
+
+func TestIncompleteSearchKeepsOperatorPolicy(t *testing.T) {
+	for _, command := range []string{"grep", "rg", "ripgrep"} {
+		t.Run(command, func(t *testing.T) {
+			handler := newHandler(func() (*operatorPolicy, error) { return nil, nil })
+			if got := invoke(t, handler, base("bash", map[string]any{"command": command})); !got.Allowed {
+				t.Fatal(got)
+			}
+			handler = newHandler(func() (*operatorPolicy, error) { return &operatorPolicy{ForbiddenCommands: []string{command}}, nil })
+			if got := invoke(t, handler, base("bash", map[string]any{"command": command})); got.Allowed || got.Reason != "command matches forbidden pattern: "+command {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+func TestDiscoveryObserveNeverOverridesBaseline(t *testing.T) {
+	for _, tool := range []string{"bash", "Bash", "terminal", "shell", "exec_command", "execute_command"} {
+		for _, field := range []string{"command", "cmd"} {
+			req := request{Tool: tool, Arguments: json.RawMessage(`{"` + field + `":"rg secret"}`)}
+			observed := evaluate(req, nil)
+			if !observed.Allowed || observed.Exploration == nil || observed.Exploration.Mode != "observe" {
+				t.Fatalf("%s: %+v", tool, observed)
+			}
+			denied := evaluate(req, &operatorPolicy{ForbiddenCommands: []string{"secret"}})
+			if denied.Allowed || denied.Reason != "command matches forbidden pattern: secret" {
+				t.Fatalf("%s: %+v", tool, denied)
+			}
+		}
 	}
 }

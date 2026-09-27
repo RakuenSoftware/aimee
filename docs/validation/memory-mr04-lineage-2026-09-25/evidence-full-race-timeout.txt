@@ -1,0 +1,236 @@
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:27 memory data failure operation="other" trace=0 status=5 class=internal
+--- FAIL: TestPublicCommandDiscovery (0.00s)
+    command_routes_test.go:55: private commands shadowed shared KB commands map[embed_text:true evidence:true pack:true runtime:true screen_content:true validity:true verify_receipt:true]
+2026/09/25 10:00:43 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:46 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:00:46 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:00:47 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:00:48 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:00:48 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:00:51 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:51 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:51 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:51 memory data failure operation="delete" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:51 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:51 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:00:52 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:01:03 memory data failure operation="other" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:01:03 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:01:03 memory data failure operation="get" trace=73 status=5 class=internal
+2026/09/25 10:01:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 10:01:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:20 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 10:01:20 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:20 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:26 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/25 10:01:26 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:26 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:01:36 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:37 memory data failure operation="other" trace=0 status=5 class=sqlstate_42P01
+2026/09/25 10:01:37 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:01:37 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:01:40 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:01:40 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:01:40 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:01:40 memory data failure operation="insert-epistemic" trace=0 status=5 class=internal
+2026/09/25 10:01:40 memory data failure operation="supersede" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:01:40 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/25 10:01:40 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/25 10:01:40 memory data failure operation="update-as" trace=73 status=5 class=internal
+2026/09/25 10:01:41 memory data failure operation="get" trace=0 status=5 class=sqlstate_42P01
+2026/09/25 10:01:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="store" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="delete" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:01:41 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/25 10:01:41 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/25 10:01:41 memory data failure operation="compose-recall" trace=0 status=5 class=sqlstate_42P01
+2026/09/25 10:01:41 memory data failure operation="recall-bundle" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="vector-rebuild" trace=0 status=5 class=internal
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:37 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:37 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:37 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:37 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:37 memory data failure operation="delete-as" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="delete-as" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="insert-epistemic" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="insert-epistemic" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:38 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:38 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:39 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:39 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22008
+2026/09/25 10:04:39 memory data failure operation="assertion-search" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:39 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:41 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:42 memory data failure operation="insert-epistemic" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:42 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:45 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:46 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:47 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:48 memory data failure operation="recall-bundle" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:04:48 memory data failure operation="recall-bundle" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:48 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+2026/09/25 10:04:48 memory audit: 1 mutation observations not delivered
+2026/09/25 10:04:48 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:49 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:04:49 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:04:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:04:50 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/25 10:04:50 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 10:04:51 memory data failure operation="other" trace=73 status=5 class=sqlstate_42703
+2026/09/25 10:04:51 memory data failure operation="get" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:51 memory data failure operation="other" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="get" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="other" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="get" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="other" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="get" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="other" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="get" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="other" trace=73 status=5 class=sqlstate_22007
+2026/09/25 10:04:52 memory data failure operation="get" trace=73 status=5 class=sqlstate_22008
+2026/09/25 10:04:52 memory data failure operation="other" trace=73 status=5 class=sqlstate_22008
+2026/09/25 10:04:52 memory data failure operation="rebuild-derived" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:06:53 memory data failure operation="rebuild-derived" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:07:12 memory data failure operation="rebuild-derived" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:07:18 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 10:07:24 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:24 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:07:28 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:36 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 10:07:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:37 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 10:07:37 memory data failure operation="insert-epistemic" trace=0 status=5 class=internal
+2026/09/25 10:07:37 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/25 10:07:37 memory data failure operation="other" trace=0 status=5 class=internal
+panic: test timed out after 10m0s
+	running tests:
+		TestHardRuleSourceObservationsPostgres (2m31s)
+
+goroutine 1118 [running]:
+testing.(*M).startAlarm.func1()
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2802 +0x605
+created by time.goFunc
+	/home/virant/.local/share/aimee-dev-tools/go/src/time/sleep.go:215 +0x45
+
+goroutine 1 [chan receive, 2 minutes]:
+testing.(*T).Run(0xc000236248, {0x14e70c9, 0x26}, 0x1579e80)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2109 +0xb3e
+testing.runTests.func1(0xc000236248)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2585 +0x85
+testing.tRunner(0xc000236248, 0xc000055ad0)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2036 +0x21d
+testing.runTests({0x14df552, 0x22}, {0x14f890e, 0x31}, 0xc000016180, {0x1fe9700, 0x19c, 0x19c}, {0xc2a5a8f9c505362f, 0x8bb31a7fba, ...})
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2583 +0x9ea
+testing.(*M).Run(0xc0000e7680)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2443 +0xf4c
+main.main()
+	_testmain.go:886 +0x165
+
+goroutine 1117 [IO wait]:
+internal/poll.runtime_pollWait(0x7f30a93cc800, 0x72)
+	/home/virant/.local/share/aimee-dev-tools/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc000ca6120, 0x72, 0x0)
+	/home/virant/.local/share/aimee-dev-tools/go/src/internal/poll/fd_poll_runtime.go:84 +0xb1
+internal/poll.(*pollDesc).waitRead(...)
+	/home/virant/.local/share/aimee-dev-tools/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000ca6100, {0xc0002da000, 0x2000, 0x2000})
+	/home/virant/.local/share/aimee-dev-tools/go/src/internal/poll/fd_unix.go:165 +0x499
+net.(*netFD).Read(0xc000ca6100, {0xc0002da000, 0x2000, 0x2000})
+	/home/virant/.local/share/aimee-dev-tools/go/src/net/fd_posix.go:68 +0x4b
+net.(*conn).Read(0xc000800160, {0xc0002da000, 0x2000, 0x2000})
+	/home/virant/.local/share/aimee-dev-tools/go/src/net/net.go:196 +0xad
+github.com/jackc/pgx/v5/pgconn/internal/bgreader.(*BGReader).Read(0xc00046af00, {0xc0002da000, 0x2000, 0x2000})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/internal/bgreader/bgreader.go:100 +0x1db
+io.ReadAtLeast({0x158d160, 0xc00046af00}, {0xc0002da000, 0x2000, 0x2000}, 0x5)
+	/home/virant/.local/share/aimee-dev-tools/go/src/io/io.go:335 +0xd1
+github.com/jackc/pgx/v5/pgproto3.(*chunkReader).Next(0xc001b808a0, 0x5)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgproto3/chunkreader.go:80 +0x82f
+github.com/jackc/pgx/v5/pgproto3.(*Frontend).Receive(0xc0001c2908)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgproto3/frontend.go:313 +0x85
+github.com/jackc/pgx/v5/pgconn.(*PgConn).peekMessage(0xc0002b8008)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:645 +0x1f8
+github.com/jackc/pgx/v5/pgconn.(*PgConn).receiveMessage(0xc0002b8008)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:669 +0xc6
+github.com/jackc/pgx/v5/pgconn.(*ResultReader).receiveMessage(0xc0002b80c0)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:1872 +0x95
+github.com/jackc/pgx/v5/pgconn.(*ResultReader).readUntilRowDescription(0xc0002b80c0, 0xc000d003c0, {0xc000604320, 0x1, 0x10})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:1839 +0x85
+github.com/jackc/pgx/v5/pgconn.(*PgConn).execExtendedSuffix(0xc0002b8008, 0xc0002b80c0, 0xc000d003c0, {0xc000604320, 0x1, 0x10})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:1375 +0x365
+github.com/jackc/pgx/v5/pgconn.(*PgConn).ExecStatement(0xc0002b8008, {0x1596680, 0x2010540}, 0xc000d003c0, {0xc0002e42a0, 0x3, 0x4}, {0xc00070d938, 0x3, 0x4}, ...)
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/pgconn/pgconn.go:1318 +0x267
+github.com/jackc/pgx/v5.(*Conn).Query(0xc0007bfa40, {0x1596680, 0x2010540}, {0xc000400000, 0x17978}, {0xc0002de030, 0x3, 0x3})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/conn.go:848 +0x2116
+github.com/jackc/pgx/v5.(*dbTx).Query(0xc0002de2d0, {0x1596680, 0x2010540}, {0xc000400000, 0x17978}, {0xc0002de030, 0x3, 0x3})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/tx.go:251 +0x1ce
+github.com/jackc/pgx/v5.(*dbTx).QueryRow(0xc0002de2d0, {0x1596680, 0x2010540}, {0xc000400000, 0x17978}, {0xc0002de030, 0x3, 0x3})
+	/home/virant/go/pkg/mod/github.com/jackc/pgx/v5@v5.10.0/tx.go:256 +0x85
+github.com/JBailes/aimee/server-go/modules/memory.evalQueryer.QueryRow(...)
+	/home/virant/dev/aimee-pr2990/server-go/modules/memory/retrieval_eval_test.go:27
+github.com/JBailes/aimee/server-go/modules/memory.(*postgresDataStore).revalidateSources(0xc00025fcd8, {0x1596680, 0x2010540}, 0xc00046afc0, {{0x0?, 0x11bca3b?}, {0x0?, 0x1596680?}})
+	/home/virant/dev/aimee-pr2990/server-go/modules/memory/source_revalidation.go:72 +0x97e
+github.com/JBailes/aimee/server-go/modules/memory.TestHardRuleSourceObservationsPostgres.func3(0xc00046afc0, 0x0)
+	/home/virant/dev/aimee-pr2990/server-go/modules/memory/source_release_test.go:804 +0x8d
+github.com/JBailes/aimee/server-go/modules/memory.TestHardRuleSourceObservationsPostgres(0xc00054b448)
+	/home/virant/dev/aimee-pr2990/server-go/modules/memory/source_release_test.go:832 +0xa74
+testing.tRunner(0xc00054b448, 0x1579e80)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2036 +0x21d
+created by testing.(*T).Run in goroutine 1
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2101 +0xb13
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	600.024s
+FAIL

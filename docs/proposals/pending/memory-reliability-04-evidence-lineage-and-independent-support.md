@@ -1,6 +1,6 @@
 # MR-04: Evidence lineage, independent corroboration and retraction
 
-- **State:** Proposed
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P1: evidence foundation
 - **Owner:** Go memory lineage and freshness, with existing provenance/storage owners
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md)
@@ -76,3 +76,9 @@ Erasure covers derived text, indexes, embeddings, prompt caches, task projection
 Compute lineage/support in shadow before using it for ranking. Enable hard revocation and erasure propagation as correctness gates. Reverting support-based ranking must not remove tombstones, authored history or dependency invalidation.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+Implementation and all eight acceptance clauses are certified in the
+[MR-04 final closeout](../../validation/memory-mr04-closeout-2026-09-25.md).
+The [producer inventory](memory-reliability-04-producer-inventory.md) records
+retained-copy ownership, observed inputs and erasure boundaries. Earlier component
+checkpoints remain historical evidence; final status is recorded in the closeout.

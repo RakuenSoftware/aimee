@@ -160,7 +160,15 @@ func TestKBGraphFusionUsesInstancePolicyAndVisibility(t *testing.T) {
 	t.Setenv("AIMEE_GRAPH_FUSION", "on")
 	ctx, _, db := codeFixture(t)
 	_, err := db.Exec(ctx, `CREATE FUNCTION pg_now_text() RETURNS text LANGUAGE sql AS 'SELECT to_char(now(), ''YYYY-MM-DD HH24:MI:SS'')';
-CREATE TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,
+CREATE TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-0000-0000-000000000001');
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TABLE memories(id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,content text,
  confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now(),valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TABLE memory_entities(memory_id bigint,entity text,weight double precision DEFAULT 1);
 CREATE TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text);
@@ -190,7 +198,7 @@ INSERT INTO entity_edges(id,source,target,confidence_class,utility_score) VALUES
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 {
+	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 || !on[1].Version.validFor(2) || on[1].Version.RecordRevision != "1" {
 		t.Fatalf("KB graph or visibility: %+v", on)
 	}
 	t.Setenv("AIMEE_GRAPH_FUSION", "off")
@@ -273,6 +281,117 @@ func TestCodeVectorsRejectStaleContentAndModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	search(0)
+}
+
+func TestCodeGenerationResumeRollbackAndFallback(t *testing.T) {
+	t.Setenv("AIMEE_GRAPH_FUSION", "off")
+	ctx, s, db := codeFixture(t)
+	files := []CodeFile{{Path: "anchor.c", Content: "quasar"}}
+	scanID := 0
+	publish := func() {
+		scanID++
+		t.Helper()
+		for _, phase := range []string{"begin", "stage", "seal"} {
+			req := CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Phase: phase, ScanID: fmt.Sprintf("generation-%d", scanID), ExpectedFiles: len(files)}
+			if phase == "stage" {
+				req.Files = files
+			}
+			if _, err := s.CodeIndex(ctx, req); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	publish()
+	executor := &vectorTestEgress{serving: "model-a"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	batch := func() {
+		t.Helper()
+		if err := p.indexCodeBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := func() string {
+		t.Helper()
+		var value string
+		if err := db.QueryRow(ctx, `SELECT generation FROM user_code_embedding_active WHERE project='alpha'`).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	search := func(query string, want int, readiness string) {
+		t.Helper()
+		before := len(executor.seen)
+		raw, err := s.searchCode(ctx, "alpha", query, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reply struct {
+			Hits             []json.RawMessage
+			IndexGenerations []struct{ Readiness string } `json:"index_generations"`
+		}
+		if err = json.Unmarshal(raw, &reply); err != nil {
+			t.Fatal(err)
+		}
+		if len(reply.Hits) != want {
+			t.Fatalf("hits: %s", raw)
+		}
+		if readiness != "" && (len(reply.IndexGenerations) != 1 || reply.IndexGenerations[0].Readiness != readiness) {
+			t.Fatalf("readiness: %s", raw)
+		}
+		if len(executor.seen) != before+1 {
+			t.Fatal("query performed document maintenance")
+		}
+	}
+	batch()
+	old := active()
+	for i := 0; i < 20; i++ {
+		files = append(files, CodeFile{Path: fmt.Sprintf("file-%02d.c", i), Content: "worker"})
+	}
+	publish()
+	executor.serving = "model-b"
+	batch()
+	if active() != old {
+		t.Fatal("partial generation activated")
+	}
+	search("semantic question", 0, "identity_mismatch")
+	before := len(executor.seen)
+	// Restart the worker and reuse its exact-version completed work.
+	p = &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	batch()
+	if active() != codeGenerationID("model-b") || len(executor.seen)-before != 5 {
+		t.Fatal("backfill failed to resume without duplicate work")
+	}
+	search("semantic question", 21, "ready")
+	// Remove an indexed source before rollback. Its vectors must be removed from
+	// every retained generation, and the old generation must catch up first.
+	files = files[1:]
+	publish()
+	search("semantic question", 0, "lagging")
+	executor.serving = "model-a"
+	batch()
+	if active() != codeGenerationID("model-b") {
+		t.Fatal("incomplete rollback activated")
+	}
+	batch()
+	if active() != old {
+		t.Fatal("rollback did not activate")
+	}
+	search("semantic question", 20, "ready")
+	var erased int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_embedding_versions WHERE path='anchor.c'`).Scan(&erased); err != nil || erased != 0 {
+		t.Fatal("deleted vectors survived rollback", erased, err)
+	}
+	if _, err := db.Exec(ctx, `ALTER TABLE user_code_embedding_versions RENAME TO unavailable_code_vectors`); err != nil {
+		t.Fatal(err)
+	}
+	search("worker", 20, "")
+	// The optional SQL failure did not poison the caller's transaction.
+	var one int
+	if err := db.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil || one != 1 {
+		t.Fatal(err)
+	}
 }
 
 func TestPrivateCodeIndexLargeGraphAndMissingFile(t *testing.T) {

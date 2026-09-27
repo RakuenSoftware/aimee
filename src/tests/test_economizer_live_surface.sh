@@ -42,13 +42,13 @@ if grep -n -E 'cache_control|prompt_cache_key|count_tokens' \
     fail "economizer controls provider caching or remote token counting"
 fi
 
-grep -q 'http_retry_post_context_bytes' posix/agent_runtime.c ||
+grep -q 'wire_fence_post' posix/agent_runtime.c ||
     fail "delegate retries do not use the exact-length snapshot transport"
-grep -q 'http_retry_post_context_bytes' server/openai_chat.c ||
+grep -q 'wire_fence_post' server/openai_chat.c ||
     fail "OpenAI ingress does not use the exact-length snapshot transport"
-grep -q 'agent_http_post_bytes' server/anthropic_http.c ||
+grep -q 'wire_fence_post' server/anthropic_http.c ||
     fail "Anthropic buffered ingress does not use the exact-length snapshot transport"
-grep -q 'agent_http_post_stream_bytes' server/anthropic_http.c ||
+grep -q 'wire_fence_post_stream' server/anthropic_http.c ||
     fail "Anthropic streaming ingress does not use the exact-length snapshot transport"
 
 echo "economizer live-surface: ok"

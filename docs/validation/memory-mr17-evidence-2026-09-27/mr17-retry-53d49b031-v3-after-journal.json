@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "principal": "uid:1000",
+  "root_id": "session:dc9c067a-2736-7c9b-ec45-65a3661bc521",
+  "started": "2026-09-27T06:23:36.645822356Z",
+  "attempts": [
+    {
+      "attempt_id": "258cb13e90faeb4e0d72a8aab03ad4b2be6cbd40513e4f766ea83dd25d129fb1",
+      "request_id": "773-39",
+      "input_sha256": "d7b487b4915d5b14b51e8e0d32738454bf5b1ecea622fb10147ddabdcc8afdca",
+      "input_expires": "2026-09-27T06:43:36.645822356Z",
+      "policy_generation": "20d9b28ae97ade61ae21bc2f4445d60f455f726513366ae2c1a2790257921df7",
+      "projection_revision": "",
+      "renderer_version": "clean-retry-v1",
+      "plan_revision": "258cb13e90faeb4e0d72a8aab03ad4b2be6cbd40513e4f766ea83dd25d129fb1:plan:1",
+      "started": "2026-09-27T06:23:36.645822356Z",
+      "state": "failed",
+      "failure_class": "execution_failure",
+      "provider_calls": [
+        {
+          "id": "98fe9c8056e0c6e201810bc3f9bbd39f09d9673a3e5f433251f87da9bfdb0b87",
+          "reserved_bytes": 39992,
+          "reserved_nanodollars": 39992,
+          "nanodollars_per_byte": 1,
+          "payload_sha256": "6835d96de4be82d4a24ebd1b5f655611b3b9e92cbb89c5428095c75462cf495f",
+          "receipt_reference": "f8e7725c4b1a6f9c3d49a478aafcaa5e",
+          "source_reference": "391115b1878840ccff5864b938486a07e33fe321057ec3ee70c2f7a9fb3ba478"
+        },
+        {
+          "id": "e21a9041e60fe01350204649f0a677617fd108cdf4f6ac2cba11d52dd5cd8feb",
+          "reserved_bytes": 40687,
+          "reserved_nanodollars": 40687,
+          "nanodollars_per_byte": 1,
+          "payload_sha256": "43b8b471b5c674a8d5679202d562cb5aa6ecf8fe911904548bf186035f47fdd0",
+          "receipt_reference": "66a4ead76d5071d69779457b6d181c25",
+          "source_reference": "391115b1878840ccff5864b938486a07e33fe321057ec3ee70c2f7a9fb3ba478"
+        },
+        {
+          "id": "2f4f211aba4f00e007233f662c9129246c604bcea0676ef14ac8ddfa430638cd",
+          "reserved_bytes": 42004,
+          "reserved_nanodollars": 42004,
+          "nanodollars_per_byte": 1,
+          "payload_sha256": "ffb3fb847aad69f3766a086df0dea2450337ffe96c1d31db4a9459ed2327b903",
+          "receipt_reference": "b7cc33188e24bdfc3900138adce87a3c",
+          "source_reference": "391115b1878840ccff5864b938486a07e33fe321057ec3ee70c2f7a9fb3ba478"
+        }
+      ]
+    },
+    {
+      "attempt_id": "b239d62896bf0d532905a1f1b8215a52074e6819bb561631cae76ab4ea67637b",
+      "request_id": "748-15",
+      "parent_attempt": "258cb13e90faeb4e0d72a8aab03ad4b2be6cbd40513e4f766ea83dd25d129fb1",
+      "input_sha256": "76517e6960ae7cae36f9d486f4a4529894a8021f3005f0b9ff6ea462afdca8a5",
+      "input_expires": "2026-09-27T06:44:36.720655049Z",
+      "policy_generation": "20d9b28ae97ade61ae21bc2f4445d60f455f726513366ae2c1a2790257921df7",
+      "projection_revision": "",
+      "renderer_version": "clean-retry-v1",
+      "plan_revision": "b239d62896bf0d532905a1f1b8215a52074e6819bb561631cae76ab4ea67637b:plan:1",
+      "started": "2026-09-27T06:24:36.720655049Z",
+      "state": "completed",
+      "failure_class": "completed",
+      "provider_calls": [
+        {
+          "id": "1e15ed0dd16d7a7c11e6315c544802320c2d7f192f37dedcfec8ee61fb9831f0",
+          "reserved_bytes": 41076,
+          "reserved_nanodollars": 41076,
+          "nanodollars_per_byte": 1,
+          "payload_sha256": "bde08258ca9509e8dedcb4209185845f98f6eda76a1c66d5fe5711844e4f4cdc",
+          "receipt_reference": "6ec0651171027548d5645af9da8160b9",
+          "source_reference": "b68a063550e82702660f5a5a27e565a527efa5c43b56172cb4ec651941f3dca1"
+        },
+        {
+          "id": "f760f382677ca4b1a33e53e014871761342f5242a3bb246a0e61506d479a48dc",
+          "reserved_bytes": 41803,
+          "reserved_nanodollars": 41803,
+          "nanodollars_per_byte": 1,
+          "payload_sha256": "e9086cfff53bfaaec436865bc5d94b54cf9a470119c6b7253a8030a6db7f9e39",
+          "receipt_reference": "13c011037a5be1ebb577e95077a5afd9",
+          "source_reference": "b68a063550e82702660f5a5a27e565a527efa5c43b56172cb4ec651941f3dca1"
+        }
+      ]
+    }
+  ],
+  "reserved_bytes": 205562,
+  "reserved_nanodollars": 205562
+}

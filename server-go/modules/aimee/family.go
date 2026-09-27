@@ -31,6 +31,8 @@ type OpDBFunc func(ctx context.Context, db DB, fields []string) (uint32, []strin
 
 // Op is one operation in a family.
 type Op struct {
+	// HostOnly restricts private state mutation to the authenticated C host bus principal.
+	HostOnly bool
 	// Name is the catalog's name for this op, used only in logs.
 	Name string
 	// Args is the exact number of request fields the op expects. A frame with
@@ -92,7 +94,7 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		spec, known := f.Ops[op]
-		if !known {
+		if !known || (spec.HostOnly && invocation.PrincipalRef != 0) {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		if !ValidFields(fields) {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -85,6 +86,126 @@ SET LOCAL ROLE aimee_store_runtime`)
 		}
 		check(verb, args)
 	}
+	// Reuse this exact lifecycle/scope population in independent dense-only and
+	// graph-only lanes. Perfect vectors and graph links cannot admit a record
+	// that the lexical lane excludes.
+	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true)`)
+	var dimension int
+	if err := tx.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid='memory_embeddings'::regclass AND attname='embedding'`).Scan(&dimension); err != nil {
+		t.Fatal(err)
+	}
+	vector := make([]float64, dimension)
+	vector[0] = 1
+	encodedVector, _ := json.Marshal(vector)
+	eligibleVector := append([]float64(nil), vector...)
+	eligibleVector[0], eligibleVector[1] = 0.8, 0.6
+	encodedEligibleVector, _ := json.Marshal(eligibleVector)
+	allIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		allIDs = append(allIDs, id)
+		encoded := encodedVector
+		if id == ids["open"] || id == ids["utc-boundary"] || id == ids["offset-boundary"] {
+			encoded = encodedEligibleVector
+		}
+		exec(`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,project,kind,payload_json)
+ SELECT id,$2::vector,'memory',scope_type,scope_value,kind,'{}' FROM memories WHERE id=$1`, id, string(encoded))
+		if id != ids["open"] {
+			exec(`INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'depends_on')`, ids["open"], id)
+		}
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','eligibility-local',true),set_config('aimee.memory_project','eligibility-local',true); SET LOCAL ROLE aimee_store_runtime`)
+	expectedIDs := map[int64]bool{ids["open"]: true, ids["utc-boundary"]: true, ids["offset-boundary"]: true}
+	dense, err := bound.SearchVectors(ctx, vector, "memory", "", "eligibility-local", false, len(expectedIDs))
+	if err != nil || len(dense) != len(expectedIDs) {
+		t.Fatal("common fixture dense-only eligibility", dense, err)
+	}
+	for _, hit := range dense {
+		if !expectedIDs[hit.ID] {
+			t.Fatal("dense-only lane admitted excluded fixture", hit)
+		}
+	}
+	graph, err := bound.pageRank(ctx, DataRequest{Scope: Scope{Type: ScopeProject, Value: "eligibility-local"}, Project: "eligibility-local", PageRank: &pageRankRequest{IDs: allIDs, Iterations: 8, Weight: 1, Relations: []string{"depends_on"}}}, true)
+	if err != nil || len(graph.Scores) != len(expectedIDs) || graph.Candidates != len(expectedIDs) || graph.Edges != 4 {
+		t.Fatal("common fixture graph-only eligibility", graph, err)
+	}
+	for _, score := range graph.Scores {
+		if !expectedIDs[score.ID] {
+			t.Fatal("graph-only lane admitted excluded fixture", score)
+		}
+	}
+	// Legacy session/query modes must apply the same gate before their limit.
+	// Ineligible rows have equal priority and later IDs; filtering after LIMIT
+	// would starve the three eligible fixtures rather than returning them.
+	exec(`UPDATE memories SET confidence=1,use_count=1000000 WHERE key LIKE 'eligibility-%'`)
+	for _, mode := range []string{"like", "top-l2", "session-priority", "facts-patterns", "eval"} {
+		records, err := bound.QueryRecords(ctx, mode, "%eligibilityneedle%", 0, 3)
+		if err != nil {
+			t.Fatal(mode, err)
+		}
+		got := []string{}
+		for _, record := range records {
+			got = append(got, record.Key)
+		}
+		sort.Strings(got)
+		if strings.Join(got, ",") != "eligibility-offset-boundary,eligibility-open,eligibility-utc-boundary" {
+			t.Fatal("query mode current eligibility", mode, got)
+		}
+	}
+	for _, verb := range []string{"top_l2_facts", "load_eval_corpus", "list_session_scope_priority", "list_session_scope_priority_like", "search_facts_patterns_by_keyword"} {
+		args, _ := json.Marshal(map[string]any{"scope_context": true, "project": "eligibility-local", "max": 3, "pattern": "%eligibilityneedle%", "keyword": "%eligibilityneedle%"})
+		result := runPublicCommand(t, client, verb, string(args))
+		rows, ok := result["memories"].([]any)
+		if result["status"] != "ok" || !ok || len(rows) != len(expectedIDs) {
+			t.Fatal("common fixture public query lane", verb, result)
+		}
+		for _, row := range rows {
+			if !expectedIDs[int64(row.(map[string]any)["id"].(float64))] {
+				t.Fatal("public query lane admitted excluded fixture", verb, row)
+			}
+		}
+	}
+	argsDiagnostic, _ := json.Marshal(map[string]any{"query": "eligibilityneedle", "scope_type": "project", "scope_value": "eligibility-local", "limit": 64})
+	diagnostic := runPublicCommand(t, client, "diagnose_scoped", string(argsDiagnostic))
+	diagnosticRows, ok := diagnostic["rows"].([]any)
+	if diagnostic["status"] != "ok" || !ok || len(diagnosticRows) != len(expectedIDs) {
+		t.Fatal("common fixture diagnostic lane", diagnostic)
+	}
+	for _, row := range diagnosticRows {
+		if !expectedIDs[int64(row.(map[string]any)["memory"].(map[string]any)["id"].(float64))] {
+			t.Fatal("diagnostic admitted excluded fixture", row)
+		}
+	}
+	// History is a retained-version view, not an escape hatch for erased or
+	// unauthorized content. Exercise explicit scope on the public command.
+	for key := range ids {
+		allowed := key == "open" || key == "utc-boundary" || key == "offset-boundary" || key == "expired" || key == "future" || key == "superseded" || key == "archived" || key == "retired"
+		args, _ := json.Marshal(map[string]any{"key": "eligibility-" + key, "max": 1, "scope_context": true, "project": "eligibility-local"})
+		result := runPublicCommand(t, client, "fact_history", string(args))
+		if result["status"] != "ok" {
+			t.Fatal("history eligibility", key, result)
+		}
+		rows, ok := result["history"].([]any)
+		if !ok || (len(rows) == 1) != allowed || len(rows) > 1 {
+			t.Fatal("history eligibility or scope", key, result)
+		}
+	}
+	exec(`SAVEPOINT historical_limit; UPDATE memories SET key='historical-eligibility#v'||id::text WHERE key LIKE 'eligibility-%'`)
+	args, _ := json.Marshal(map[string]any{"key": "historical-eligibility", "max": 3, "scope_context": true, "project": "eligibility-local"})
+	result := runPublicCommand(t, client, "fact_history", string(args))
+	if result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	rows, ok := result["history"].([]any)
+	if !ok || len(rows) != 3 {
+		t.Fatal("excluded history crowded out retained versions", result)
+	}
+	expected := map[int64]bool{ids["retired"]: true, ids["archived"]: true, ids["superseded"]: true}
+	for _, row := range rows {
+		if !expected[int64(row.(map[string]any)["id"].(float64))] {
+			t.Fatal("history limit preceded eligibility", result)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT historical_limit; RELEASE SAVEPOINT historical_limit`)
 	// An exact ID must not bypass the same current-state gates as a search.
 	// Legacy as_of is a labeled inspection of an old version, but never grants
 	// access to erased, revoked, quarantined, rejected or cross-scope content.
@@ -107,6 +228,7 @@ SET LOCAL ROLE aimee_store_runtime`)
 			}
 		}
 	}
+	exerciseReadPolicyReplay(t, ctx, tx, client, ids)
 	// Serving suppression must not make an otherwise admitted retirement
 	// impossible. The mutation path owns its own author and scope checks.
 	if changed, err := bound.Delete(ctx, Scope{Type: ScopeProject, Value: "eligibility-local"}, ids["suppressed"]); err != nil || !changed {
@@ -130,4 +252,59 @@ SET LOCAL ROLE aimee_store_runtime`)
 	}
 	exec(`UPDATE memories SET valid_from=NULL WHERE key='eligibility-open'`)
 	check("search", map[string]any{"view": "server", "keywords": []string{"eligibilityneedle"}, "project": "eligibility-local", "scope_context": true, "limit": 32})
+}
+
+func exerciseReadPolicyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, client *Client, ids map[string]int64) {
+	t.Helper()
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"current", "historical"} {
+		for key, id := range ids {
+			policy := MemoryReadPolicy{SchemaVersion: 1, Mode: mode}
+			allowed := key == "open" || key == "utc-boundary" || key == "offset-boundary"
+			if mode == "historical" {
+				// The session timezone is Tokyo; send another explicit offset.
+				policy.ValidAt = now.In(time.FixedZone("fixture", -7*60*60)).Format(time.RFC3339Nano)
+				allowed = allowed || key == "superseded" || key == "archived" || key == "retired"
+			}
+			raw, _ := json.Marshal(map[string]any{"id": id, "scope_context": true, "project": "eligibility-local", "read_policy": policy})
+			got := runPublicCommand(t, client, "get", string(raw))
+			if !allowed {
+				if got["kind"] != "not_found" || got["memory"] != nil || got["read"] != nil {
+					t.Fatalf("versioned %s leaked %s: %v", mode, key, got)
+				}
+				continue
+			}
+			if got["status"] != "ok" || got["memory"] == nil || got["read"] == nil {
+				t.Fatalf("versioned %s excluded %s: %v", mode, key, got)
+			}
+			decision := got["read"].(map[string]any)
+			if decision["mode"] != mode || decision["schema_version"] != float64(1) || decision["policy_version"] != currentEligibilityPolicy {
+				t.Fatal("wrong applied policy", decision)
+			}
+			if mode == "historical" && decision["valid_at"] != now.UTC().Format(time.RFC3339Nano) {
+				t.Fatal("historical clock not normalized", decision)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		key     string
+		offset  time.Duration
+		allowed bool
+	}{
+		{"expired", -time.Microsecond, true}, {"expired", 0, false},
+		{"utc-boundary", -time.Microsecond, false}, {"utc-boundary", 0, true},
+		{"future", time.Second - time.Microsecond, false}, {"future", time.Second, true},
+		{"revoked", -time.Hour, false}, {"quarantined", -time.Hour, false}, {"private", -time.Hour, false},
+	} {
+		raw, _ := json.Marshal(map[string]any{"id": ids[tc.key], "scope_context": true, "project": "eligibility-local", "read_policy": MemoryReadPolicy{
+			SchemaVersion: 1, Mode: "historical", ValidAt: now.Add(tc.offset).UTC().Format(time.RFC3339Nano),
+		}})
+		got := runPublicCommand(t, client, "get", string(raw))
+		if (got["status"] == "ok") != tc.allowed || (!tc.allowed && (got["kind"] != "not_found" || got["memory"] != nil)) {
+			t.Fatalf("historical boundary %s offset=%s: %v", tc.key, tc.offset, got)
+		}
+	}
 }

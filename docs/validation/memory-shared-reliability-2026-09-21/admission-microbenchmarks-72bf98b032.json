@@ -1,0 +1,72 @@
+{
+  "source_revision": "72bf98b032dd55af100c845c80affc358cd26d8d",
+  "os": "linux",
+  "arch": "amd64",
+  "cpu": "Intel Core i7-14700K",
+  "scope": "Go handler only; excludes hashing, transport and providers",
+  "samples": [
+    {
+      "benchmark": "BenchmarkRequestBudgetAdmission-8",
+      "iterations": 490662,
+      "ns_per_op": 2442.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetAdmission-8",
+      "iterations": 491832,
+      "ns_per_op": 2405.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetAdmission-8",
+      "iterations": 541756,
+      "ns_per_op": 2344.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/inherited-8",
+      "iterations": 492200,
+      "ns_per_op": 2345.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/inherited-8",
+      "iterations": 499567,
+      "ns_per_op": 2343.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/inherited-8",
+      "iterations": 492542,
+      "ns_per_op": 2384.0,
+      "bytes_per_op": 2072,
+      "allocations_per_op": 34
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/tightened-8",
+      "iterations": 295032,
+      "ns_per_op": 4280.0,
+      "bytes_per_op": 4096,
+      "allocations_per_op": 67
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/tightened-8",
+      "iterations": 270540,
+      "ns_per_op": 4290.0,
+      "bytes_per_op": 4096,
+      "allocations_per_op": 67
+    },
+    {
+      "benchmark": "BenchmarkRequestBudgetOperatorAdmission/tightened-8",
+      "iterations": 275272,
+      "ns_per_op": 4208.0,
+      "bytes_per_op": 4096,
+      "allocations_per_op": 67
+    }
+  ]
+}

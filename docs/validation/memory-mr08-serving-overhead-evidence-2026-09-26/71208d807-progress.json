@@ -1,0 +1,310 @@
+[
+  {
+    "label": "off-current-a",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.116442221973557,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.1573662720038556,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.0067573779961094,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 2.907035339041613,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.3584876229870133,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.277866731979884,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.1464465979952365,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.007493027020246,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.1664666369906627,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.1056942520081066,
+    "completed": true
+  },
+  {
+    "label": "off-current-a",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.141377895954065,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.2684832660015672,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.0038658850244246,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 2.9844499960308895,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.318386194994673,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.141113451041747,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.1279846430406906,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.173796223010868,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.1146840309957042,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.0737608920317143,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.1611750299925916,
+    "completed": true
+  },
+  {
+    "label": "on-current-a",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.117017913958989,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.035674323036801,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.20618707902031,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.2283241180120967,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.149674865009729,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.1639741309918463,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.259333685040474,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.215603383956477,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.233030965027865,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.2886987169622444,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.147162149020005,
+    "completed": true
+  },
+  {
+    "label": "on-current-b",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.2686242979834788,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.1502871839911677,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.241931003984064,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.003821134043392,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.2182533919694833,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.199063916981686,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.1884003030136228,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.1621150840073824,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.183766286005266,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.1702163810259663,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.2227722580428235,
+    "completed": true
+  },
+  {
+    "label": "off-current-b",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.0706837569596246,
+    "completed": true
+  }
+]

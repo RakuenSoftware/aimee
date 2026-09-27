@@ -31,9 +31,12 @@ func (s *postgresDataStore) DashboardStats(ctx context.Context) (json.RawMessage
 ), primary_scopes AS (
  SELECT memory_id,MAX(CASE scope_type WHEN 'project' THEN 3 WHEN 'workspace' THEN 2 WHEN 'global' THEN 1 ELSE 0 END) AS level
  FROM tags GROUP BY memory_id
+), authorized_conflicts AS (
+ SELECT memory_a,memory_b FROM memory_conflicts WHERE resolved=0
+ AND memory_a IN (SELECT id FROM memories) AND memory_b IN (SELECT id FROM memories)
 ), conflicts AS (
- SELECT memory_a AS memory_id FROM memory_conflicts WHERE resolved=0
- UNION ALL SELECT memory_b FROM memory_conflicts WHERE resolved=0
+ SELECT memory_a AS memory_id FROM authorized_conflicts
+ UNION ALL SELECT memory_b FROM authorized_conflicts
 )
 SELECT level,
  (SELECT count(*) FROM primary_scopes p JOIN memories m ON m.id=p.memory_id WHERE p.level=levels.level),

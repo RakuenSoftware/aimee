@@ -61,11 +61,23 @@ const (
 
 // Serving typed facts requires every memory source to remain current and
 // visible. Review/history queries retain their separate operator semantics.
-var currentFactRecallSQL = `e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted')
+func currentFactRecallSQL() string {
+	return `e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted')
  AND e.suppressed=0 AND ` + assertionCurrent + `
- AND NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND ` + currentMemorySQL("m.") + `
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND m.id IS NULL)`
+ AND ` + currentMemoryEvidenceSQL("e", "", false)
+}
+
+// Shared by plain compatibility recall and versioned fact selection.
+func factRecallLine(relation, target string, confidence float64, sensitive bool) string {
+	if relation == "" || target == "" || !ShouldInject(RelSensitivityOf(relation), confidence, sensitive) {
+		return ""
+	}
+	line := fmt.Sprintf("- %s: %s\n", relation, target)
+	if len(line) >= factRecallLineCap {
+		return ""
+	}
+	return line
+}
 
 // recallFactBlock owns typed-fact selection, ordering, formatting, and PII
 // policy. C callers receive the finished block over the event bus and do not
@@ -73,7 +85,7 @@ var currentFactRecallSQL = `e.edge_class='semantic' AND e.lifecycle_state IN ('p
 func (s *postgresDataStore) recallFactBlock(ctx context.Context, entity string,
 	turnRequestsSensitive bool, capacity int) (string, int, error) {
 	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges e
-WHERE source = $1 AND `+currentFactRecallSQL+`
+WHERE source = $1 AND `+currentFactRecallSQL()+`
 ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	if err != nil {
 		return "", 0, err
@@ -88,12 +100,8 @@ ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 		if err := rows.Scan(&relation, &target, &confidence); err != nil {
 			return "", 0, err
 		}
-		if relation == "" || target == "" ||
-			!ShouldInject(RelSensitivityOf(relation), confidence, turnRequestsSensitive) {
-			continue
-		}
-		line := fmt.Sprintf("- %s: %s\n", relation, target)
-		if len(line) >= factRecallLineCap {
+		line := factRecallLine(relation, target, confidence, turnRequestsSensitive)
+		if line == "" {
 			continue
 		}
 		// The legacy ABI capacity includes the trailing NUL. Preserve that
@@ -149,7 +157,7 @@ LIMIT $2`, query, factRecallMaxEntities)
 		return names, nil
 	}
 	rows, err = s.db.Query(ctx, `SELECT DISTINCT source FROM entity_edges e
-WHERE source <> 'user' AND length(source) >= 3 AND `+currentFactRecallSQL+`
+WHERE source <> 'user' AND length(source) >= 3 AND `+currentFactRecallSQL()+`
   AND lower($1) LIKE '%' || lower(source) || '%'
 ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 	if err != nil {

@@ -1,0 +1,354 @@
+[
+  {
+    "name": "Legacy query current eligibility before limits: top_l2_facts",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: list_session_scope_priority",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: list_session_scope_priority_like",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: search_facts_patterns_by_keyword",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: load_eval_corpus",
+    "passed": true
+  },
+  {
+    "name": "Historical eligibility and explicit scope before limit 64",
+    "passed": true
+  },
+  {
+    "name": "Historical eligibility and explicit scope before limit 3",
+    "passed": true
+  },
+  {
+    "name": "History treats wildcard characters as literal identity",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  }
+]

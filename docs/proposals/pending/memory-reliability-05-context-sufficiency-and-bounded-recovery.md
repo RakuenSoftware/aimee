@@ -1,12 +1,21 @@
 # MR-05: Requirement-based context sufficiency and bounded recovery
 
-- **State:** Proposed
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P0 for honest sufficiency; P1 for recovery
 - **Owner:** Go memory requirements and coverage, with host-governed recovery execution
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for independence requirements
 - **Delivery:** Three implementation slices
 
 ## Problem and intended result
+
+Typed context now separates retrieval availability from task coverage. Nonempty
+results report unknown sufficiency until versioned requirements are evaluated;
+an unavailable channel is distinct from a successful empty retrieval. This removes
+the previous nonempty-to-complete shortcut but does not implement requirement
+planning, final-host packing feedback, source-chain coherence or bounded recovery.
+The benchmark result schema and temporal fixture validator accept `UNKNOWN`;
+report buckets keep unassessed coverage separate from assessed missing evidence
+for both correct and incorrect answers.
 
 A nonempty result is not necessarily sufficient. A temporal question may require an old state and its correction; a comparison needs evidence for both sides; a current-state claim may require the latest applicable record. A maximum confidence value across retrieved records does not measure support for the combined answer.
 
@@ -51,3 +60,24 @@ Unavailable indexing and no matching evidence are distinct states. An unresolved
 Ship truthful states before adding restrictive exploration. Shadow the requirement planner against reviewed fixtures and real task samples. Recovery starts opt-in with low bounded work. A rollback may disable automatic recovery but must retain honest missing/degraded states.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+The [current-state coverage slice](../../validation/memory-evidence-coverage-2026-09-23.md)
+adds an opt-in bounded requirement set, owner-versioned retained-assertion role
+checks and post-packing reevaluation. Unsupported query shapes remain unknown.
+Timeline planning, independent-origin roles, bounded recovery and broader host
+integration remain open; this does not certify MR-05.
+
+The [bounded recovery planner](../../validation/memory-recovery-plans-2026-09-23.md)
+now emits opt-in current-state lookup proposals with work ceilings, stable attempt
+keys and explicit host-admission status. Outer packing regenerates proposals;
+strict requirement decoding rejects ambiguous inputs. Host execution, durable
+attempt/outcome tracking and the complete recovery-loop gate remain open.
+
+## Final acceptance — 2026-09-25
+
+All seven acceptance clauses are validated in the
+[MR-05 closeout and evidence](../../validation/memory-mr05-closeout-2026-09-25.md).
+Earlier slice notes above preserve their historical scope; the final closeout
+records the delivered behavior, conservative rollout bounds and passing receipts.
