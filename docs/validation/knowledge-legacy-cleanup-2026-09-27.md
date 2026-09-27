@@ -61,8 +61,9 @@ in-place downgrade.
 - All 634 script tests pass (one CMake test skipped because CMake is absent
   locally, then passed independently on CT109); all 19 semantic context checks
   and eight memory reliability checks pass.
-- Native daemon builds pass. Native unit tests and standalone ASan/UBSan
-  executables are exercised on CT109.
+- Native daemon builds and native unit targets pass on CT109, including an
+  isolated retry of the resolver-cancellation test after a timing failure in
+  the complete run. All 18 standalone knowledge ASan/UBSan executables pass.
 - CT109 on .253: both published-0.4.5 stores pass all 12 upgrade checks,
   including identity, retained rows, new writes and container recreation.
   Restoring the matching original database/home passes for both roles.
