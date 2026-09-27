@@ -1,7 +1,7 @@
 #include "org_vault_key_use.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <string.h>
@@ -11,7 +11,7 @@
 static int classified_error(const char *err)
 {
    if (err && strstr(err, "org_vault_control: sealed"))
-      return DB2_VAULT_KEY_USE_SEALED;
+      return KB_STORE_VAULT_KEY_USE_SEALED;
    return err && (strstr(err, "org_vault_key_use_candidate: invalid input") ||
                   strstr(err, "org_vault_key_use_candidate: not authorized") ||
                   strstr(err, "org_vault_key_use_candidate: unstable key binding") ||
@@ -20,8 +20,8 @@ static int classified_error(const char *err)
                   strstr(err, "org_vault_key_use_admit: replay mismatch") ||
                   strstr(err, "org_vault_key_use_admit: unstable key binding") ||
                   strstr(err, "org_vault_key_use_admit: attestation mismatch"))
-              ? DB2_VAULT_KEY_USE_INTEGRITY
-              : DB2_VAULT_KEY_USE_ERROR;
+              ? KB_STORE_VAULT_KEY_USE_INTEGRITY
+              : KB_STORE_VAULT_KEY_USE_ERROR;
 }
 
 static int valid_text(const char *s, size_t max)
@@ -43,7 +43,7 @@ static int copy_blob(aimee_pg_stmt_t *st, int col, uint8_t *dst, size_t cap, siz
 }
 
 static int read_envelope(aimee_pg_stmt_t *st, int first, int64_t version,
-                         db2_vault_key_use_envelope_t *out)
+                         kb_store_vault_key_use_envelope_t *out)
 {
    memset(out, 0, sizeof(*out));
    out->version = version;
@@ -62,30 +62,30 @@ static int read_envelope(aimee_pg_stmt_t *st, int first, int64_t version,
    return 0;
 }
 
-int db2_vault_control_startup_begin(int64_t *epoch_out, int *sealed_out)
+int kb_store_vault_control_startup_begin(int64_t *epoch_out, int *sealed_out)
 {
    if (epoch_out)
       *epoch_out = 0;
    if (sealed_out)
       *sealed_out = 0;
    if (!epoch_out || !sealed_out)
-      return DB2_VAULT_KEY_USE_ERROR;
-   if (db2_tenant_require_pg() != 0)
-      return DB2_VAULT_KEY_USE_ERROR;
+      return KB_STORE_VAULT_KEY_USE_ERROR;
+   if (kb_store_tenant_require_pg() != 0)
+      return KB_STORE_VAULT_KEY_USE_ERROR;
 
    char err[USE_ERR] = "";
-   if (aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err)) != 0)
-      return DB2_VAULT_KEY_USE_ERROR;
+   if (aimee_pg_exec(kb_store_conn(), "BEGIN", err, sizeof(err)) != 0)
+      return KB_STORE_VAULT_KEY_USE_ERROR;
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT seal_epoch,sealed FROM public.org_vault_control_startup_status()", err,
-       sizeof(err));
+       kb_store_conn(), "SELECT seal_epoch,sealed FROM public.org_vault_control_startup_status()",
+       err, sizeof(err));
    if (!st)
    {
-      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
-      return DB2_VAULT_KEY_USE_ERROR;
+      (void)aimee_pg_exec(kb_store_conn(), "ROLLBACK", err, sizeof(err));
+      return KB_STORE_VAULT_KEY_USE_ERROR;
    }
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   int rc = DB2_VAULT_KEY_USE_ERROR;
+   int rc = KB_STORE_VAULT_KEY_USE_ERROR;
    if (step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) && aimee_pg_column_int64(st, 0) > 0)
    {
       const char *sealed = aimee_pg_column_text(st, 1);
@@ -105,33 +105,33 @@ int db2_vault_control_startup_begin(int64_t *epoch_out, int *sealed_out)
    }
    aimee_pg_finalize(st);
    if (rc != 0)
-      (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
+      (void)aimee_pg_exec(kb_store_conn(), "ROLLBACK", err, sizeof(err));
    return rc;
 }
 
-int db2_vault_control_startup_end(int commit)
+int kb_store_vault_control_startup_end(int commit)
 {
-   if (db2_tenant_require_pg() != 0)
-      return DB2_VAULT_KEY_USE_ERROR;
+   if (kb_store_tenant_require_pg() != 0)
+      return KB_STORE_VAULT_KEY_USE_ERROR;
    char err[USE_ERR] = "";
-   if (commit && aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0)
+   if (commit && aimee_pg_exec(kb_store_conn(), "COMMIT", err, sizeof(err)) == 0)
       return 0;
-   (void)aimee_pg_exec(db2_conn(), "ROLLBACK", err, sizeof(err));
-   return commit ? DB2_VAULT_KEY_USE_ERROR : 0;
+   (void)aimee_pg_exec(kb_store_conn(), "ROLLBACK", err, sizeof(err));
+   return commit ? KB_STORE_VAULT_KEY_USE_ERROR : 0;
 }
 
-int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,
-                                const char *principal, const char *agent, const char *cred,
-                                int64_t version, db2_vault_key_use_envelope_t *out)
+int kb_store_vault_key_use_candidate(const char *actor, int64_t team_id, const char *key_id,
+                                     const char *principal, const char *agent, const char *cred,
+                                     int64_t version, kb_store_vault_key_use_envelope_t *out)
 {
-   if (db2_tenant_require_pg() != 0 || !valid_text(actor, 575) || team_id < 1 ||
+   if (kb_store_tenant_require_pg() != 0 || !valid_text(actor, 575) || team_id < 1 ||
        !valid_text(key_id, 600) || !valid_text(principal, 600) || !agent || strlen(agent) > 255 ||
        !cred || strlen(cred) > 255 || version < 1 || !out)
       return -1;
    memset(out, 0, sizeof(*out));
    char err[USE_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_key_use_candidate(?1,?2,?3,?4,?5,?6,?7)", err,
+       kb_store_conn(), "SELECT * FROM org_vault_key_use_candidate(?1,?2,?3,?4,?5,?6,?7)", err,
        sizeof(err));
    if (!st)
       return -1;
@@ -144,31 +144,32 @@ int db2_vault_key_use_candidate(const char *actor, int64_t team_id, const char *
    aimee_pg_bind_int64(st, "?7", version);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    int rc = step == AIMEE_PG_ROW
-                ? (read_envelope(st, 0, version, out) == 0 ? 0 : DB2_VAULT_KEY_USE_INTEGRITY)
-                : (step == AIMEE_PG_DONE ? DB2_VAULT_KEY_USE_MISSING : classified_error(err));
+                ? (read_envelope(st, 0, version, out) == 0 ? 0 : KB_STORE_VAULT_KEY_USE_INTEGRITY)
+                : (step == AIMEE_PG_DONE ? KB_STORE_VAULT_KEY_USE_MISSING : classified_error(err));
    aimee_pg_finalize(st);
    return rc;
 }
 
-int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *authenticated_origin,
-                            const char *use_id, const char *key_id, const char *principal,
-                            const char *agent, const char *cred, int64_t version,
-                            const char *request_digest, const char *provider, const char *model,
-                            const char *operation, const uint8_t *hwm_attestation,
-                            size_t hwm_attestation_len, db2_vault_key_use_envelope_t *out)
+int kb_store_vault_key_use_admit(const char *actor, int64_t team_id,
+                                 const char *authenticated_origin, const char *use_id,
+                                 const char *key_id, const char *principal, const char *agent,
+                                 const char *cred, int64_t version, const char *request_digest,
+                                 const char *provider, const char *model, const char *operation,
+                                 const uint8_t *hwm_attestation, size_t hwm_attestation_len,
+                                 kb_store_vault_key_use_envelope_t *out)
 {
-   if (db2_tenant_require_pg() != 0 || !valid_text(actor, 575) || team_id < 1 ||
+   if (kb_store_tenant_require_pg() != 0 || !valid_text(actor, 575) || team_id < 1 ||
        !valid_text(authenticated_origin, 575) || !valid_text(use_id, 200) ||
        !valid_text(key_id, 600) || !valid_text(principal, 600) || !agent || strlen(agent) > 255 ||
        !cred || strlen(cred) > 255 || version < 1 || !valid_text(request_digest, 64) ||
        strlen(request_digest) != 64 || !valid_text(provider, 64) || !valid_text(model, 255) ||
        !valid_text(operation, 64) || !hwm_attestation || hwm_attestation_len == 0 ||
-       hwm_attestation_len > DB2_VAULT_KEY_USE_ATTEST_MAX || !out)
+       hwm_attestation_len > KB_STORE_VAULT_KEY_USE_ATTEST_MAX || !out)
       return -1;
    memset(out, 0, sizeof(*out));
    char err[USE_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT * FROM org_vault_key_use_admit(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", err,
        sizeof(err));
    if (!st)
@@ -197,12 +198,12 @@ int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *auth
    if (!b)
    {
       aimee_pg_finalize(st);
-      return DB2_VAULT_KEY_USE_INTEGRITY;
+      return KB_STORE_VAULT_KEY_USE_INTEGRITY;
    }
    int newly_admitted = b[0] == 't' || b[0] == '1';
    int rc = 0;
    if (aimee_pg_column_is_null(st, 1) || aimee_pg_column_int64(st, 1) < 1)
-      rc = DB2_VAULT_KEY_USE_INTEGRITY;
+      rc = KB_STORE_VAULT_KEY_USE_INTEGRITY;
    else
       out->seal_epoch = aimee_pg_column_int64(st, 1);
    if (newly_admitted)
@@ -211,12 +212,12 @@ int db2_vault_key_use_admit(const char *actor, int64_t team_id, const char *auth
       if (rc == 0 && read_envelope(st, 2, version, out) == 0)
          out->seal_epoch = seal_epoch;
       else
-         rc = DB2_VAULT_KEY_USE_INTEGRITY;
+         rc = KB_STORE_VAULT_KEY_USE_INTEGRITY;
    }
    else
       for (int col = 2; col <= 6; col++)
          if (!aimee_pg_column_is_null(st, col))
-            rc = DB2_VAULT_KEY_USE_INTEGRITY;
+            rc = KB_STORE_VAULT_KEY_USE_INTEGRITY;
    aimee_pg_finalize(st);
    return rc == 0 ? newly_admitted : rc;
 }

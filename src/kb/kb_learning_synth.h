@@ -7,7 +7,7 @@
  * judge -> promote machinery can act on them unchanged.
  *
  * Heavy work (the LLM call) runs here on the kb scheduler, never on the
- * interactive capture hot path. DB2 only; no DB1 access.
+ * interactive capture hot path. KB_STORE only; no DB1 access.
  *
  * See docs/proposals/pending/cross-source-learning-pipeline.md */
 #ifndef KB_LEARNING_SYNTH_H

@@ -41,7 +41,7 @@ func TestFidelityPostgresModule(t *testing.T) {
 		}
 		t.Skip("requires disposable PostgreSQL admin DSN")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	ctx := context.Background()
 	db, err := postgres.OpenEvaluationStore(ctx, `CREATE TABLE artifacts(id text PRIMARY KEY,kind text,turn_id text,created_at text,payload jsonb)`)
 	if err != nil {

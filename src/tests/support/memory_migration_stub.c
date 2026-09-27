@@ -1,29 +1,29 @@
-/* Narrow test doubles for legacy DB2 callers whose memory providers moved to Go. */
+/* Narrow test doubles for legacy KB_STORE callers whose memory providers moved to Go. */
 #include "aimee.h"
 
 #include <stdio.h>
 
-int64_t db2_memory_count(void)
+int64_t kb_store_memory_count(void)
 {
    return 0;
 }
 
-int db2_memory_count_l2(void)
+int kb_store_memory_count_l2(void)
 {
    return 0;
 }
 
-int db2_memory_count_l3(void)
+int kb_store_memory_count_l3(void)
 {
    return 0;
 }
 
-int db2_memory_count_orphaned_l0(void)
+int kb_store_memory_count_orphaned_l0(void)
 {
    return 0;
 }
 
-/* Unconfigured module transport for legacy DB2-only fixtures. Consumer-specific
+/* Unconfigured module transport for legacy KB_STORE-only fixtures. Consumer-specific
  * tests supply a strong transport mock and assert the Go response contract. */
 __attribute__((weak)) int aimee_module_commands_dispatch_internal(const char *method,
                                                                   const cJSON *args, cJSON **result)

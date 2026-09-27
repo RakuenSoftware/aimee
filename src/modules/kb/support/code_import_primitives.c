@@ -1,9 +1,9 @@
-#include "db2_code_import.h"
+#include "kb_store_code_import.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define DB2_CODE_IMPORT_PATH_MAX 4096
+#define KB_STORE_CODE_IMPORT_PATH_MAX 4096
 
 static void slash_normalize(const char *in, char *out, size_t out_cap)
 {
@@ -27,7 +27,7 @@ int code_path_import_identity(const char *path, char *out, size_t out_cap)
 {
    if (!path || !out || out_cap == 0)
       return -1;
-   char normalized[DB2_CODE_IMPORT_PATH_MAX];
+   char normalized[KB_STORE_CODE_IMPORT_PATH_MAX];
    slash_normalize(path, normalized, sizeof(normalized));
    size_t len = strlen(normalized);
    if (len > 3 && strcmp(normalized + len - 3, ".py") == 0)
@@ -58,7 +58,7 @@ int code_import_identity(const char *importer_path, const char *raw_import, char
       return out[0] ? 0 : -1;
    }
 
-   char package[DB2_CODE_IMPORT_PATH_MAX];
+   char package[KB_STORE_CODE_IMPORT_PATH_MAX];
    slash_normalize(importer_path, package, sizeof(package));
    char *slash = strrchr(package, '/');
    if (slash)
@@ -93,8 +93,8 @@ int code_import_resolves_path(const char *importer_path, const char *raw_import,
 {
    if (!importer_path || !raw_import || !target_path)
       return 0;
-   char import_id[DB2_CODE_IMPORT_PATH_MAX];
-   char target_id[DB2_CODE_IMPORT_PATH_MAX];
+   char import_id[KB_STORE_CODE_IMPORT_PATH_MAX];
+   char target_id[KB_STORE_CODE_IMPORT_PATH_MAX];
    if (code_import_identity(importer_path, raw_import, import_id, sizeof(import_id)) != 0 ||
        code_path_import_identity(target_path, target_id, sizeof(target_id)) != 0)
       return 0;

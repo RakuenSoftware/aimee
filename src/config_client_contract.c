@@ -732,6 +732,9 @@ void config_secret_writer_set(config_secret_writer_fn writer)
 
 int config_secret_store(const char *name, const char *value)
 {
+   /* Retired credentials remain classified for redaction, never provisioned. */
+   if (name && strcmp(name, "AIMEE_DB2_URL") == 0)
+      return -1;
    return g_secret_writer ? g_secret_writer(name, value) : -1;
 }
 

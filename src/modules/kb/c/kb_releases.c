@@ -1,9 +1,9 @@
-/* db2/kb_releases.c: aimee-kb corpus staging — doc_releases accessors (DB2).
+/* kb_store/kb_releases.c: aimee-kb corpus staging — doc_releases accessors (KB_STORE).
  *
  * See docs/proposals/pending/aimee-kb-ingest-api-and-corpus-staging.md */
 
 #include "kb_releases.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_runtime_state.h"
 
@@ -12,9 +12,9 @@
 #include <string.h>
 #include <stdint.h>
 
-int64_t db2_kb_release_create(const char *name)
+int64_t kb_store_kb_release_create(const char *name)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !name)
       return -1;
 
@@ -35,9 +35,9 @@ int64_t db2_kb_release_create(const char *name)
    return id;
 }
 
-int db2_kb_release_read(int64_t id, db2_kb_release_t *out)
+int kb_store_kb_release_read(int64_t id, kb_store_kb_release_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -80,9 +80,9 @@ int db2_kb_release_read(int64_t id, db2_kb_release_t *out)
    return 0;
 }
 
-int db2_kb_release_set_state(int64_t id, const char *state, const char *ts_field)
+int kb_store_kb_release_set_state(int64_t id, const char *state, const char *ts_field)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !state)
       return -1;
 
@@ -130,32 +130,32 @@ int db2_kb_release_set_state(int64_t id, const char *state, const char *ts_field
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_kb_release_promote(int64_t id)
+int kb_store_kb_release_promote(int64_t id)
 {
-   int64_t current_active = db2_kb_release_get_active();
+   int64_t current_active = kb_store_kb_release_get_active();
    if (current_active > 0)
    {
-      if (db2_kb_release_set_state(current_active, "retired", "retired_at") != 0)
+      if (kb_store_kb_release_set_state(current_active, "retired", "retired_at") != 0)
          return -1;
    }
 
-   if (db2_kb_release_set_state(id, "active", "promoted_at") != 0)
+   if (kb_store_kb_release_set_state(id, "active", "promoted_at") != 0)
       return -1;
 
    char id_str[32];
    snprintf(id_str, sizeof(id_str), "%lld", (long long)id);
-   if (db2_kb_runtime_state_set("active_release_id", id_str) != 0)
+   if (kb_store_kb_runtime_state_set("active_release_id", id_str) != 0)
       return -1;
 
    return 0;
 }
 
-int db2_kb_release_rollback(int64_t target_id)
+int kb_store_kb_release_rollback(int64_t target_id)
 {
    if (target_id > 0)
-      return db2_kb_release_promote(target_id);
+      return kb_store_kb_release_promote(target_id);
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -175,21 +175,21 @@ int db2_kb_release_rollback(int64_t target_id)
    if (found_id <= 0)
       return -1;
 
-   return db2_kb_release_promote(found_id);
+   return kb_store_kb_release_promote(found_id);
 }
 
-int64_t db2_kb_release_get_active(void)
+int64_t kb_store_kb_release_get_active(void)
 {
    char val[32] = "";
-   if (db2_kb_runtime_state_get("active_release_id", val, sizeof(val)) != 0 || !val[0])
+   if (kb_store_kb_runtime_state_get("active_release_id", val, sizeof(val)) != 0 || !val[0])
       return 0;
    int64_t id = (int64_t)atoll(val);
    return id > 0 ? id : 0;
 }
 
-int db2_kb_release_add_doc(int64_t release_id, int64_t doc_id)
+int kb_store_kb_release_add_doc(int64_t release_id, int64_t doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

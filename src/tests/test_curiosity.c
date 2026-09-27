@@ -6,22 +6,22 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_service_backend.h"
 #include "memory.h"
 #include "../modules/kb/c/curiosity.h"
 #include "../modules/kb/c/db_postgres.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "support/store_module_fixture.h"
 
 /* Each test block needs the curiosity_items, memories, memory_directives,
- * failed_queries tables on the *same* DB2 connection so the cross-tier
- * paths (sweep_failed_queries, route_top) see the same rows. The DB2
+ * failed_queries tables on the *same* KB_STORE connection so the cross-tier
+ * paths (sweep_failed_queries, route_top) see the same rows. The KB_STORE
  * test shim helper opens one in-memory backing per block. */
 static void setup(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 }
 
 /* Point config at a temp dir this test owns and write the keys the case needs.
@@ -58,41 +58,41 @@ int main(void)
    /* DB1 is still required by the maintenance cycle (maintenance_state). */
    /* --- canonicality + state validity --- */
    {
-      assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_MISSING_FACT));
-      assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_CONTRADICTION));
-      assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_STALE_FACT));
-      assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_WEAK_COVERAGE));
-      assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_UNVERIFIED_ASSUMPTION));
-      assert(!db2_curiosity_gap_type_is_canonical("bogus"));
-      assert(!db2_curiosity_gap_type_is_canonical(""));
-      assert(!db2_curiosity_gap_type_is_canonical(NULL));
+      assert(kb_store_curiosity_gap_type_is_canonical(CURIOSITY_GAP_MISSING_FACT));
+      assert(kb_store_curiosity_gap_type_is_canonical(CURIOSITY_GAP_CONTRADICTION));
+      assert(kb_store_curiosity_gap_type_is_canonical(CURIOSITY_GAP_STALE_FACT));
+      assert(kb_store_curiosity_gap_type_is_canonical(CURIOSITY_GAP_WEAK_COVERAGE));
+      assert(kb_store_curiosity_gap_type_is_canonical(CURIOSITY_GAP_UNVERIFIED_ASSUMPTION));
+      assert(!kb_store_curiosity_gap_type_is_canonical("bogus"));
+      assert(!kb_store_curiosity_gap_type_is_canonical(""));
+      assert(!kb_store_curiosity_gap_type_is_canonical(NULL));
 
-      assert(db2_curiosity_state_is_valid(CURIOSITY_STATE_OPEN));
-      assert(db2_curiosity_state_is_valid(CURIOSITY_STATE_IN_PROGRESS));
-      assert(db2_curiosity_state_is_valid(CURIOSITY_STATE_RESOLVED));
-      assert(db2_curiosity_state_is_valid(CURIOSITY_STATE_SUPPRESSED));
-      assert(!db2_curiosity_state_is_valid("archived"));
+      assert(kb_store_curiosity_state_is_valid(CURIOSITY_STATE_OPEN));
+      assert(kb_store_curiosity_state_is_valid(CURIOSITY_STATE_IN_PROGRESS));
+      assert(kb_store_curiosity_state_is_valid(CURIOSITY_STATE_RESOLVED));
+      assert(kb_store_curiosity_state_is_valid(CURIOSITY_STATE_SUPPRESSED));
+      assert(!kb_store_curiosity_state_is_valid("archived"));
    }
 
    /* --- create + get + list round-trip --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       curiosity_item_t created;
-      assert(db2_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Alice", "biography",
-                                  "only two facts", 0.4, 0.6, "", &created) == 0);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Alice", "biography",
+                                       "only two facts", 0.4, 0.6, "", &created) == 0);
       assert(created.id > 0);
       assert(strcmp(created.gap_type, CURIOSITY_GAP_WEAK_COVERAGE) == 0);
       assert(strcmp(created.state, CURIOSITY_STATE_OPEN) == 0);
 
       curiosity_item_t got;
-      assert(db2_curiosity_get(created.id, &got) == 1);
+      assert(kb_store_curiosity_get(created.id, &got) == 1);
       assert(strcmp(got.target_entity, "Alice") == 0);
       assert(strcmp(got.target_topic, "biography") == 0);
       assert(got.importance > 0.39 && got.importance < 0.41);
 
       curiosity_item_t rows[8];
-      int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
+      int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
       assert(n == 1);
       assert(rows[0].id == created.id);
    }
@@ -100,46 +100,47 @@ int main(void)
    /* --- unknown gap_type rejected --- */
    {
       setup();
-      db2_curiosity_reset();
-      assert(db2_curiosity_create("not_a_gap_type", "", "something", "", 0, 0, "", NULL) == -1);
-      assert(db2_curiosity_create("", "", "something", "", 0, 0, "", NULL) == -1);
+      kb_store_curiosity_reset();
+      assert(kb_store_curiosity_create("not_a_gap_type", "", "something", "", 0, 0, "", NULL) ==
+             -1);
+      assert(kb_store_curiosity_create("", "", "something", "", 0, 0, "", NULL) == -1);
    }
 
    /* --- state transitions --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       curiosity_item_t c;
-      assert(db2_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Bob", "role", "", 0, 0, "", &c) ==
-             0);
-      assert(db2_curiosity_update_state(c.id, CURIOSITY_STATE_IN_PROGRESS) == 0);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Bob", "role", "", 0, 0, "",
+                                       &c) == 0);
+      assert(kb_store_curiosity_update_state(c.id, CURIOSITY_STATE_IN_PROGRESS) == 0);
       curiosity_item_t got;
-      assert(db2_curiosity_get(c.id, &got) == 1);
+      assert(kb_store_curiosity_get(c.id, &got) == 1);
       assert(strcmp(got.state, CURIOSITY_STATE_IN_PROGRESS) == 0);
 
-      assert(db2_curiosity_update_state(c.id, CURIOSITY_STATE_RESOLVED) == 0);
-      assert(db2_curiosity_get(c.id, &got) == 1);
+      assert(kb_store_curiosity_update_state(c.id, CURIOSITY_STATE_RESOLVED) == 0);
+      assert(kb_store_curiosity_get(c.id, &got) == 1);
       assert(strcmp(got.state, CURIOSITY_STATE_RESOLVED) == 0);
 
       /* unknown state rejected */
-      assert(db2_curiosity_update_state(c.id, "mystery") == -1);
+      assert(kb_store_curiosity_update_state(c.id, "mystery") == -1);
    }
 
    /* --- state filter: list returns only matching rows --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       curiosity_item_t a, b;
-      db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "alpha-topic", "", 0, 0, "", &a);
-      db2_curiosity_create(CURIOSITY_GAP_STALE_FACT, "Carol", "", "", 0, 0, "", &b);
-      db2_curiosity_update_state(b.id, CURIOSITY_STATE_SUPPRESSED);
+      kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "alpha-topic", "", 0, 0, "", &a);
+      kb_store_curiosity_create(CURIOSITY_GAP_STALE_FACT, "Carol", "", "", 0, 0, "", &b);
+      kb_store_curiosity_update_state(b.id, CURIOSITY_STATE_SUPPRESSED);
 
       curiosity_item_t rows[4];
-      assert(db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4) == 1);
+      assert(kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4) == 1);
       assert(rows[0].id == a.id);
-      assert(db2_curiosity_list(CURIOSITY_STATE_SUPPRESSED, rows, 4) == 1);
+      assert(kb_store_curiosity_list(CURIOSITY_STATE_SUPPRESSED, rows, 4) == 1);
       assert(rows[0].id == b.id);
-      assert(db2_curiosity_list(NULL, rows, 4) == 2);
+      assert(kb_store_curiosity_list(NULL, rows, 4) == 2);
    }
 
    /* --- dedup: creating an open missing_fact twice for the same topic
@@ -147,34 +148,34 @@ int main(void)
     *     unique index --- */
    {
       setup();
-      db2_curiosity_reset();
-      assert(db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "first", 0, 0, "",
-                                  NULL) == 0);
-      assert(db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "second", 0, 0, "",
-                                  NULL) == -1);
+      kb_store_curiosity_reset();
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "first", 0, 0,
+                                       "", NULL) == 0);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "second", 0, 0,
+                                       "", NULL) == -1);
       /* But resolving the first one frees up the slot. */
       curiosity_item_t rows[4];
-      int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
+      int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
       assert(n == 1);
-      db2_curiosity_update_state(rows[0].id, CURIOSITY_STATE_RESOLVED);
-      assert(db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "third", 0, 0, "",
-                                  NULL) == 0);
+      kb_store_curiosity_update_state(rows[0].id, CURIOSITY_STATE_RESOLVED);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "dedupe-me", "third", 0, 0,
+                                       "", NULL) == 0);
    }
 
    /* --- sweep failed_queries: creates items, idempotent on rerun --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       /* Seed failed_queries (it's part of the baseline schema). */
       const char *seed = "INSERT INTO failed_queries (query_norm, failure_count) VALUES"
                          " ('where does alice live', 3),"
                          " ('what did bob eat last tuesday', 1)";
       char seed_err[128] = {0};
-      assert(aimee_pg_exec(db2_conn(), seed, seed_err, sizeof(seed_err)) == 0);
+      assert(aimee_pg_exec(kb_store_conn(), seed, seed_err, sizeof(seed_err)) == 0);
 
-      assert(db2_curiosity_sweep_failed_queries() == 2);
+      assert(kb_store_curiosity_sweep_failed_queries() == 2);
       curiosity_item_t rows[8];
-      int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
+      int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
       assert(n == 2);
       int seen_alice = 0, seen_bob = 0;
       for (int i = 0; i < n; i++)
@@ -190,35 +191,36 @@ int main(void)
 
       /* Rerunning the sweep without changing failed_queries is a no-op
        * because the dedup index blocks re-insertion. */
-      assert(db2_curiosity_sweep_failed_queries() == 0);
+      assert(kb_store_curiosity_sweep_failed_queries() == 0);
    }
 
    /* --- reset wipes everything --- */
    {
       setup();
-      db2_curiosity_reset();
-      db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "gone", "", 0, 0, "", NULL);
-      assert(db2_curiosity_reset() == 0);
+      kb_store_curiosity_reset();
+      kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "gone", "", 0, 0, "", NULL);
+      assert(kb_store_curiosity_reset() == 0);
       curiosity_item_t rows[4];
-      assert(db2_curiosity_list(NULL, rows, 4) == 0);
+      assert(kb_store_curiosity_list(NULL, rows, 4) == 0);
    }
 
    /* --- rescore: populates scoring columns for open items --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       curiosity_item_t a, b, c;
-      db2_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Eve", "", "two facts conflict", 0, 0, "",
-                           &a);
-      db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "weather last tuesday", "", 0, 0, "",
-                           &b);
-      db2_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Frank", "", "only one fact", 0, 0, "", &c);
+      kb_store_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Eve", "", "two facts conflict", 0, 0,
+                                "", &a);
+      kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "weather last tuesday", "", 0, 0,
+                                "", &b);
+      kb_store_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Frank", "", "only one fact", 0, 0, "",
+                                &c);
 
-      int rescored = db2_curiosity_rescore_all();
+      int rescored = kb_store_curiosity_rescore_all();
       assert(rescored == 3);
 
       curiosity_item_t rows[8];
-      int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
+      int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
       assert(n == 3);
       for (int i = 0; i < n; i++)
       {
@@ -247,18 +249,18 @@ int main(void)
     *     to in_progress --- */
    {
       setup();
-      db2_curiosity_reset();
-      db2_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Eve", "role", "", 0, 0, "", NULL);
-      db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "weather", "", 0, 0, "", NULL);
-      db2_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Frank", "", "", 0, 0, "", NULL);
+      kb_store_curiosity_reset();
+      kb_store_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Eve", "role", "", 0, 0, "", NULL);
+      kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "weather", "", 0, 0, "", NULL);
+      kb_store_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "Frank", "", "", 0, 0, "", NULL);
 
-      int rescored = db2_curiosity_rescore_all();
+      int rescored = kb_store_curiosity_rescore_all();
       assert(rescored == 3);
 
       /* curiosity_route_top moved to the kb-side backend in #1038. The
        * route_top JSON helper exercises the same logic directly without
        * round-tripping through the kb_client RPC layer. */
-      cJSON *route_resp = db2_kb_service_curiosity_route_top_json(2, "");
+      cJSON *route_resp = kb_store_kb_service_curiosity_route_top_json(2, "");
       assert(route_resp);
       cJSON *routed_j = cJSON_GetObjectItemCaseSensitive(route_resp, "routed");
       assert(cJSON_IsNumber(routed_j) && (int)routed_j->valuedouble == 2);
@@ -266,15 +268,16 @@ int main(void)
 
       /* Two items should be in_progress, one still open. */
       curiosity_item_t rows[8];
-      int in_progress = db2_curiosity_list(CURIOSITY_STATE_IN_PROGRESS, rows, 8);
-      int open = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
+      int in_progress = kb_store_curiosity_list(CURIOSITY_STATE_IN_PROGRESS, rows, 8);
+      int open = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 8);
       assert(in_progress == 2);
       assert(open == 1);
 
       /* At least one directive was written for the top items. */
       char count_err[128] = {0};
-      aimee_pg_stmt_t *q = aimee_pg_prepare(db2_conn(), "SELECT COUNT(*) FROM epistemic_directives",
-                                            count_err, sizeof(count_err));
+      aimee_pg_stmt_t *q =
+          aimee_pg_prepare(kb_store_conn(), "SELECT COUNT(*) FROM epistemic_directives", count_err,
+                           sizeof(count_err));
       assert(q);
       assert(aimee_pg_step(q, count_err, sizeof(count_err)) == AIMEE_PG_ROW);
       int dir_count = aimee_pg_column_int(q, 0);
@@ -306,7 +309,7 @@ int main(void)
 
       /* Rerunning route is idempotent because the items are no
        * longer open. */
-      cJSON *route_resp2 = db2_kb_service_curiosity_route_top_json(2, "");
+      cJSON *route_resp2 = kb_store_kb_service_curiosity_route_top_json(2, "");
       assert(route_resp2);
       cJSON *routed2_j = cJSON_GetObjectItemCaseSensitive(route_resp2, "routed");
       assert(cJSON_IsNumber(routed2_j) && (int)routed2_j->valuedouble == 1);
@@ -317,11 +320,11 @@ int main(void)
     *     frontier gaps as the corpus grows --- */
    {
       setup();
-      db2_curiosity_reset();
-      assert(db2_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "", "known-topic", "", 0, 0, "",
-                                  NULL) == 0);
-      assert(db2_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "", "frontier-topic",
-                                  "single weak hint", 0, 0, "", NULL) == 0);
+      kb_store_curiosity_reset();
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "", "known-topic", "", 0, 0, "",
+                                       NULL) == 0);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "", "frontier-topic",
+                                       "single weak hint", 0, 0, "", NULL) == 0);
 
       memory_t seeded;
       for (int i = 0; i < 8; i++)
@@ -333,9 +336,9 @@ int main(void)
          memory_insert(TIER_L2, KIND_FACT, key, content, 0.8, "s1", &seeded);
       }
 
-      assert(db2_curiosity_rescore_all() == 2);
+      assert(kb_store_curiosity_rescore_all() == 2);
       curiosity_item_t rows[4];
-      int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
+      int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
       assert(n == 2);
       double early_known = 0.0;
       double early_frontier = 0.0;
@@ -358,8 +361,8 @@ int main(void)
          memory_insert(TIER_L2, KIND_FACT, key, content, 0.6, "s1", &bulk);
       }
 
-      assert(db2_curiosity_rescore_all() == 2);
-      n = db2_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
+      assert(kb_store_curiosity_rescore_all() == 2);
+      n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, rows, 4);
       assert(n == 2);
       double late_known = 0.0;
       double late_frontier = 0.0;
@@ -382,10 +385,10 @@ int main(void)
     *     guard skipped the immediate scheduler hot path --- */
    {
       setup();
-      db2_curiosity_reset();
+      kb_store_curiosity_reset();
       curiosity_item_t created;
-      assert(db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "scheduler-topic", "", 0, 0, "",
-                                  &created) == 0);
+      assert(kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "scheduler-topic", "", 0, 0,
+                                       "", &created) == 0);
       assert(created.routing_score == 0.0);
 
       write_test_config("memory_maintenance:\n  enabled: true\n  interval_seconds: 3600\n");
@@ -397,7 +400,7 @@ int main(void)
       assert(first.rescored == 1);
 
       curiosity_item_t rescored;
-      assert(db2_curiosity_get(created.id, &rescored) == 1);
+      assert(kb_store_curiosity_get(created.id, &rescored) == 1);
       assert(rescored.routing_score > 0.0);
 
       memory_maintenance_summary_t second;

@@ -33,9 +33,9 @@ int vault_hwm_verify(const char *k, uint64_t v, const uint8_t *a, size_t n)
 {
    return !k || v != 3 || n != 3 || memcmp(a, "att", 3);
 }
-int db2_management_status_key_candidate(db2_management_status_key_ctx_t *db, const char *k,
-                                        const char *wire, int64_t v,
-                                        db2_vault_key_use_envelope_t *e)
+int kb_store_management_status_key_candidate(kb_store_management_status_key_ctx_t *db,
+                                             const char *k, const char *wire, int64_t v,
+                                             kb_store_vault_key_use_envelope_t *e)
 {
    if (!db || !k || strcmp(wire, "status-1") || v != 3)
       return -1;
@@ -46,9 +46,9 @@ int db2_management_status_key_candidate(db2_management_status_key_ctx_t *db, con
    e->hwm_attestation_len = 3;
    return 0;
 }
-int db2_management_status_key_admit(db2_management_status_key_ctx_t *db,
-                                    const db2_management_status_admission_t *p,
-                                    db2_vault_key_use_envelope_t *e)
+int kb_store_management_status_key_admit(kb_store_management_status_key_ctx_t *db,
+                                         const kb_store_management_status_admission_t *p,
+                                         kb_store_vault_key_use_envelope_t *e)
 {
    assert(db && p && strlen(p->use_id) == 64 && strlen(p->request_digest) == 64);
    if (g_admit != 1)
@@ -61,14 +61,14 @@ int db2_management_status_key_admit(db2_management_status_key_ctx_t *db,
    e->hwm_attestation_len = 3;
    return 1;
 }
-int db2_management_status_key_guard_begin(db2_management_status_key_ctx_t *db, int64_t e)
+int kb_store_management_status_key_guard_begin(kb_store_management_status_key_ctx_t *db, int64_t e)
 {
    if (!db || g_guard_fail == 1 || e != 9)
       return -1;
    g_guard_open = 1;
    return 0;
 }
-int db2_management_status_key_guard_end(db2_management_status_key_ctx_t *db, int commit)
+int kb_store_management_status_key_guard_end(kb_store_management_status_key_ctx_t *db, int commit)
 {
    assert(db && g_guard_open);
    g_guard_open = 0;
@@ -76,7 +76,7 @@ int db2_management_status_key_guard_end(db2_management_status_key_ctx_t *db, int
 }
 kb_vault_key_use_status_t kb_vault_protected_use(uint64_t epoch, const char *p, const char *a,
                                                  const char *c,
-                                                 const db2_vault_key_use_envelope_t *e,
+                                                 const kb_store_vault_key_use_envelope_t *e,
                                                  kb_vault_key_use_fn fn, void *ctx)
 {
    unsigned char seed[32] = {1};
@@ -130,7 +130,7 @@ static void *sign_thread(void *opaque)
 
 int main(void)
 {
-   db2_management_status_key_ctx_t db = {.connection = &db};
+   kb_store_management_status_key_ctx_t db = {.connection = &db};
    kb_mgmt_status_custody_t c = {.custody_key_id = "platform:p5-status", .database = &db};
    kb_mgmt_status_t s = status();
    assert(kb_mgmt_status_custody_sign(&s, &c) == 0 && !g_guard_open);

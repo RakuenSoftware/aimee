@@ -107,7 +107,7 @@ extern "C"
    /* Ingest an already-parsed-and-normalized doc into kb_documents + kb_doc_regions under
     * (project, file_path, file_hash), stamping `sensitivity_class` on every chunk + region.
     * A `restricted` document is marked `quarantine_state='pending'`. Replaces any existing
-    * rows for (project, file_path) first (db2_kb_documents_delete_for_file; regions cascade),
+    * rows for (project, file_path) first (kb_store_kb_documents_delete_for_file; regions cascade),
     * all in one transaction; the 0-chunk case writes nothing (never wipes prior rows).
     * Phase 1b does NOT enqueue embeddings for PDF chunks — embedding + access-controlled
     * retrieval land together in Phase 2, so PDF content is never vector-searchable before its

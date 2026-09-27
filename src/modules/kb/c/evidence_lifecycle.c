@@ -1,7 +1,7 @@
 /* evidence_lifecycle.c: authenticated JSON operations for the P1-P9 layer. */
 #include "evidence_lifecycle.h"
 
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -87,8 +87,8 @@ static int el_set_context(void *conn, const fact_actor_t *actor, char *err, size
    return ok ? 0 : -1;
 }
 
-int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
-                                const char *const *args, int nargs, char *out, int out_cap)
+int kb_store_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
+                                     const char *const *args, int nargs, char *out, int out_cap)
 {
    if (!actor || !actor->principal[0] || !actor->role[0] || !out || out_cap < 3)
       return -1;
@@ -97,7 +97,7 @@ int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op
    if (!spec || nargs != spec->nargs || nargs > EL_MAX_ARGS || (nargs && !args) ||
        (spec->operator_only && actor->rank != FACT_ACTOR_OPERATOR))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[EL_ERR_MAX] = "";
@@ -130,12 +130,13 @@ rollback:
    return -1;
 }
 
-int db2_work_outcomes_for_retrieval_json(const char *retrieval_event_id, char *out, int out_cap)
+int kb_store_work_outcomes_for_retrieval_json(const char *retrieval_event_id, char *out,
+                                              int out_cap)
 {
    if (!retrieval_event_id || !retrieval_event_id[0] || !out || out_cap < 3)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[EL_ERR_MAX] = "";

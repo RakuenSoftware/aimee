@@ -76,7 +76,7 @@ void kb_curator_append_sidecar_error(const char *out, char *errbuf, size_t errle
  * kb_curator_next_attempt_at. */
 int kb_curator_retry_delay_seconds(int attempts);
 
-/* Canonical DB2 UTC text ("YYYY-MM-DD HH:MM:SS") for now + the backoff for
+/* Canonical KB_STORE UTC text ("YYYY-MM-DD HH:MM:SS") for now + the backoff for
  * `attempts`, with up to +/-10%% jitter. Written into next_attempt_at.
  *
  * Computed in C and bound as a parameter rather than built with the pg_now_text()
@@ -85,7 +85,7 @@ int kb_curator_retry_delay_seconds(int attempts);
  * canonical format sorts lexicographically. */
 void kb_curator_next_attempt_at(int attempts, char *out, size_t outlen);
 
-/* Canonical DB2 UTC text for "now" — the right-hand side of the claim query's
+/* Canonical KB_STORE UTC text for "now" — the right-hand side of the claim query's
  * next_attempt_at comparison. Same reasoning as above. */
 void kb_curator_now_text(char *out, size_t outlen);
 

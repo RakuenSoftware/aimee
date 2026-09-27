@@ -46,7 +46,7 @@ def check(extra: str = "") -> list[str]:
         failures.append(f"provisioner closure omits {obj}")
     for variable in (
         "KB_OBJS",
-        "KB_DB2_OBJS",
+        "KB_KB_STORE_OBJS",
         "SERVER_OBJS",
         "STATUS_PROVISIONER_OBJS",
         "STATUS_AUTHORITY_OBJS",

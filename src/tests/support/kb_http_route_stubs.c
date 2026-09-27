@@ -18,7 +18,7 @@
 #include <string.h>
 
 /* kb_tls_serve links the primary-authoritative per-request enrollment seam.
- * Route tests do not provision DB2 enrollment state, so model an active peer. */
+ * Route tests do not provision KB_STORE enrollment state, so model an active peer. */
 static int g_enrollment_authority = 1;
 
 void test_kb_enrollment_authority_set(int status)
@@ -26,7 +26,8 @@ void test_kb_enrollment_authority_set(int status)
    g_enrollment_authority = status;
 }
 
-int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max)
+int kb_store_memory_review_list(const char *state, int limit, kb_store_memory_review_row_t *out,
+                                int max)
 {
    (void)state;
    (void)limit;
@@ -35,7 +36,7 @@ int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t
    return 0;
 }
 
-int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
 {
    (void)cert_issuer;
    (void)cert_serial_norm;
@@ -137,8 +138,9 @@ int g_test_registry_heartbeat_allow;
 char g_test_registry_server_id[128], g_test_registry_issuer[601], g_test_registry_serial[129],
     g_test_registry_fingerprint[65];
 
-int db2_server_registry_heartbeat(const char *server_id, const char *issuer, const char *serial,
-                                  const char *fingerprint, const char *health, const char *version)
+int kb_store_server_registry_heartbeat(const char *server_id, const char *issuer,
+                                       const char *serial, const char *fingerprint,
+                                       const char *health, const char *version)
 {
    snprintf(g_test_registry_server_id, sizeof(g_test_registry_server_id), "%s", server_id);
    snprintf(g_test_registry_issuer, sizeof(g_test_registry_issuer), "%s", issuer);
@@ -151,8 +153,8 @@ int db2_server_registry_heartbeat(const char *server_id, const char *issuer, con
 
 int g_test_registry_client_match = 1;
 
-int db2_server_registry_client_match(const char *server_id, int64_t team, const char *issuer,
-                                     const char *serial, const char *fingerprint)
+int kb_store_server_registry_client_match(const char *server_id, int64_t team, const char *issuer,
+                                          const char *serial, const char *fingerprint)
 {
    snprintf(g_test_registry_server_id, sizeof(g_test_registry_server_id), "%s", server_id);
    snprintf(g_test_registry_issuer, sizeof(g_test_registry_issuer), "%s", issuer);
@@ -238,9 +240,9 @@ kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
  * rather than proceeding against a fabricated authority. The real behaviour is
  * covered by test_kb_http_identity_login.c (route ordering) and the P1 RLS gate
  * plus scripts/run-identity-mint-e2e.sh (the SQL and the mint). */
-db2_management_action_result_t db2_identity_login_context(const kb_principal_t *principal,
-                                                          int64_t team_id, char installation_id[33],
-                                                          char kid[DB2_IDENTITY_KID_MAX + 1])
+kb_store_management_action_result_t
+kb_store_identity_login_context(const kb_principal_t *principal, int64_t team_id,
+                                char installation_id[33], char kid[KB_STORE_IDENTITY_KID_MAX + 1])
 {
    (void)principal;
    (void)team_id;
@@ -248,14 +250,13 @@ db2_management_action_result_t db2_identity_login_context(const kb_principal_t *
       installation_id[0] = '\0';
    if (kid)
       kid[0] = '\0';
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
 
-db2_management_action_result_t
-db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id,
-                                   db2_identity_auth_mode_t auth_mode, const char *token_issuer,
-                                   const char *kid, int ttl_seconds, const char *installation_id,
-                                   db2_identity_intent_operation_t *out)
+kb_store_management_action_result_t kb_store_identity_intent_operation_init(
+    int64_t team_id, const char *target_server_id, kb_store_identity_auth_mode_t auth_mode,
+    const char *token_issuer, const char *kid, int ttl_seconds, const char *installation_id,
+    kb_store_identity_intent_operation_t *out)
 {
    (void)team_id;
    (void)target_server_id;
@@ -266,18 +267,19 @@ db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id
    (void)installation_id;
    if (out)
       memset(out, 0, sizeof(*out));
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
 
-db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *principal,
-                                                         const db2_identity_intent_operation_t *op,
-                                                         db2_identity_intent_t *out)
+kb_store_management_action_result_t
+kb_store_identity_intent_start(const kb_principal_t *principal,
+                               const kb_store_identity_intent_operation_t *op,
+                               kb_store_identity_intent_t *out)
 {
    (void)principal;
    (void)op;
    if (out)
       memset(out, 0, sizeof(*out));
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
 
 /* The write-tier grant seam. Refusing stubs, like the others above: this test's focus is
@@ -285,9 +287,10 @@ db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *p
  * through those routes fails closed rather than proceeding against a fabricated table.
  * The real behaviour is covered by test_kb_http_grants.c (routing and validation) and the
  * P1 RLS gate (the SQL and its authorization). */
-int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
-                                       kb_identity_tier_t tier, const char *granted_by,
-                                       db2_write_tier_grant_report_t *out)
+int kb_store_write_tier_grant_set_reporting(const char *server_id, int64_t team_id,
+                                            const char *subject, kb_identity_tier_t tier,
+                                            const char *granted_by,
+                                            kb_store_write_tier_grant_report_t *out)
 {
    (void)server_id;
    (void)team_id;
@@ -299,7 +302,7 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
    return -1;
 }
 
-int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
+int kb_store_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
 {
    (void)server_id;
    (void)team_id;
@@ -307,9 +310,9 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
    return -1;
 }
 
-int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
-                                 size_t *count)
+int kb_store_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
+                                      const char *subject, kb_store_write_tier_grant_row_t *out,
+                                      size_t cap, size_t *count)
 {
    (void)server_id;
    (void)team_id;
@@ -325,8 +328,8 @@ int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int inc
 /* The revoke route now derives `found` from an exact lookup rather than scanning a listing
  * (a review found the scan reported found:false for a subject sorting beyond the row cap).
  * Refusing stub, like the others here: this test never revokes a grant. */
-int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
-                                kb_identity_tier_t *out)
+int kb_store_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                     kb_identity_tier_t *out)
 {
    (void)server_id;
    (void)team_id;
@@ -336,8 +339,8 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
 }
 
 /* Typed-fact console storage seams.  The focused HTTP route suite does not open
- * DB2.  Keep reads empty and mutations fail-closed; lifecycle/entity integration
- * is exercised by its dedicated DB2 tests and the real full-stack browser E2E. */
+ * KB_STORE.  Keep reads empty and mutations fail-closed; lifecycle/entity integration
+ * is exercised by its dedicated KB_STORE tests and the real full-stack browser E2E. */
 
 static int g_fact_actor_enabled;
 
@@ -346,7 +349,7 @@ void test_kb_fact_actor_set(int enabled)
    g_fact_actor_enabled = enabled;
 }
 
-int db2_fact_actor_from_request(int require_operator, fact_actor_t *out)
+int kb_store_fact_actor_from_request(int require_operator, fact_actor_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -360,8 +363,8 @@ int db2_fact_actor_from_request(int require_operator, fact_actor_t *out)
    return 0;
 }
 
-int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
-                                const char *const *args, int nargs, char *out, int out_cap)
+int kb_store_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
+                                     const char *const *args, int nargs, char *out, int out_cap)
 {
    (void)actor;
    (void)op;
@@ -372,8 +375,8 @@ int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op
    return 0;
 }
 
-int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
-                             fact_review_action_t action, fact_mutation_result_t *out)
+int kb_store_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
+                                  fact_review_action_t action, fact_mutation_result_t *out)
 {
    (void)actor;
    (void)assertion_id;
@@ -382,7 +385,7 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    return -1;
 }
 
-int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max)
+int kb_store_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max)
 {
    (void)commit_id;
    (void)out;
@@ -390,8 +393,8 @@ int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, in
    return -1;
 }
 
-int db2_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
-                             char rollback_commit_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
+                                  char rollback_commit_id[FACT_COMMIT_ID_MAX])
 {
    (void)actor;
    (void)commit_id;
@@ -400,7 +403,7 @@ int db2_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
    return -1;
 }
 
-int db2_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max)
+int kb_store_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max)
 {
    (void)ingest_run_id;
    (void)out;
@@ -408,8 +411,8 @@ int db2_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t 
    return -1;
 }
 
-int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
-                                 char rollback_commit_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
+                                      char rollback_commit_id[FACT_COMMIT_ID_MAX])
 {
    (void)actor;
    (void)ingest_run_id;
@@ -418,8 +421,8 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
    return -1;
 }
 
-int db2_fact_erasure_preview(const char *source, const char *relation, const char *target,
-                             fact_erasure_impact_t *out)
+int kb_store_fact_erasure_preview(const char *source, const char *relation, const char *target,
+                                  fact_erasure_impact_t *out)
 {
    (void)source;
    (void)relation;
@@ -429,9 +432,9 @@ int db2_fact_erasure_preview(const char *source, const char *relation, const cha
    return -1;
 }
 
-int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, const char *relation,
-                             const char *target, fact_erasure_impact_t *out,
-                             char commit_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_erasure_execute(const fact_actor_t *actor, const char *source,
+                                  const char *relation, const char *target,
+                                  fact_erasure_impact_t *out, char commit_id[FACT_COMMIT_ID_MAX])
 {
    (void)actor;
    (void)source;

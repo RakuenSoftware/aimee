@@ -1,10 +1,10 @@
-/* db2/curiosity.c: curiosity backlog — Postgres via libpq.
+/* kb_store/curiosity.c: curiosity backlog — Postgres via libpq.
  *
- * Implements the typed db2_curiosity_* API declared in curiosity.h. */
+ * Implements the typed kb_store_curiosity_* API declared in curiosity.h. */
 
 #include "curiosity.h"
 #include "util.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <math.h>
@@ -23,7 +23,7 @@ static const char *CANONICAL_STATES[] = {CURIOSITY_STATE_OPEN, CURIOSITY_STATE_I
                                          CURIOSITY_STATE_RESOLVED, CURIOSITY_STATE_SUPPRESSED,
                                          NULL};
 
-int db2_curiosity_gap_type_is_canonical(const char *gap_type)
+int kb_store_curiosity_gap_type_is_canonical(const char *gap_type)
 {
    if (!gap_type || !gap_type[0])
       return 0;
@@ -33,7 +33,7 @@ int db2_curiosity_gap_type_is_canonical(const char *gap_type)
    return 0;
 }
 
-int db2_curiosity_state_is_valid(const char *state)
+int kb_store_curiosity_state_is_valid(const char *state)
 {
    if (!state || !state[0])
       return 0;
@@ -51,28 +51,28 @@ static void row_to_item_pg(aimee_pg_stmt_t *st, curiosity_item_t *out)
 {
    memset(out, 0, sizeof(*out));
    out->id = aimee_pg_column_int64(st, 0);
-   db2_copy_col_text(out->gap_type, sizeof(out->gap_type), st, 1);
-   db2_copy_col_text(out->target_entity, sizeof(out->target_entity), st, 2);
-   db2_copy_col_text(out->target_topic, sizeof(out->target_topic), st, 3);
-   db2_copy_col_text(out->evidence, sizeof(out->evidence), st, 4);
+   kb_store_copy_col_text(out->gap_type, sizeof(out->gap_type), st, 1);
+   kb_store_copy_col_text(out->target_entity, sizeof(out->target_entity), st, 2);
+   kb_store_copy_col_text(out->target_topic, sizeof(out->target_topic), st, 3);
+   kb_store_copy_col_text(out->evidence, sizeof(out->evidence), st, 4);
    out->importance = aimee_pg_column_double(st, 5);
    out->novelty = aimee_pg_column_double(st, 6);
    out->progress = aimee_pg_column_double(st, 7);
    out->routing_score = aimee_pg_column_double(st, 8);
-   db2_copy_col_text(out->state, sizeof(out->state), st, 9);
-   db2_copy_col_text(out->source_session, sizeof(out->source_session), st, 10);
-   db2_copy_col_text(out->created_at, sizeof(out->created_at), st, 11);
-   db2_copy_col_text(out->updated_at, sizeof(out->updated_at), st, 12);
+   kb_store_copy_col_text(out->state, sizeof(out->state), st, 9);
+   kb_store_copy_col_text(out->source_session, sizeof(out->source_session), st, 10);
+   kb_store_copy_col_text(out->created_at, sizeof(out->created_at), st, 11);
+   kb_store_copy_col_text(out->updated_at, sizeof(out->updated_at), st, 12);
 }
 
-int db2_curiosity_create(const char *gap_type, const char *target_entity, const char *target_topic,
-                         const char *evidence, double importance, double novelty,
-                         const char *source_session, curiosity_item_t *out)
+int kb_store_curiosity_create(const char *gap_type, const char *target_entity,
+                              const char *target_topic, const char *evidence, double importance,
+                              double novelty, const char *source_session, curiosity_item_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !gap_type || !gap_type[0])
       return -1;
-   if (!db2_curiosity_gap_type_is_canonical(gap_type))
+   if (!kb_store_curiosity_gap_type_is_canonical(gap_type))
       return -1;
 
    /* The partial unique index on (gap_type='missing_fact', target_topic,
@@ -87,7 +87,7 @@ int db2_curiosity_create(const char *gap_type, const char *target_entity, const 
    if (!st)
       return -1;
    char ts[32];
-   db2_now_utc(ts, sizeof(ts));
+   kb_store_now_utc(ts, sizeof(ts));
    aimee_pg_bind_text(st, "?1", gap_type);
    aimee_pg_bind_text(st, "?2", target_entity ? target_entity : "");
    aimee_pg_bind_text(st, "?3", target_topic ? target_topic : "");
@@ -106,13 +106,13 @@ int db2_curiosity_create(const char *gap_type, const char *target_entity, const 
       return -1;
 
    if (out)
-      return db2_curiosity_get(new_id, out) == 1 ? 0 : -1;
+      return kb_store_curiosity_get(new_id, out) == 1 ? 0 : -1;
    return 0;
 }
 
-int db2_curiosity_list(const char *state, curiosity_item_t *out, int max)
+int kb_store_curiosity_list(const char *state, curiosity_item_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
 
@@ -145,9 +145,9 @@ int db2_curiosity_list(const char *state, curiosity_item_t *out, int max)
    return n;
 }
 
-int db2_curiosity_list_top_open_by_score(curiosity_item_t *out, int max)
+int kb_store_curiosity_list_top_open_by_score(curiosity_item_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
 
@@ -165,9 +165,9 @@ int db2_curiosity_list_top_open_by_score(curiosity_item_t *out, int max)
    return n;
 }
 
-int db2_curiosity_get(int64_t id, curiosity_item_t *out)
+int kb_store_curiosity_get(int64_t id, curiosity_item_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -188,10 +188,10 @@ int db2_curiosity_get(int64_t id, curiosity_item_t *out)
    return rc == AIMEE_PG_DONE ? 0 : -1;
 }
 
-int db2_curiosity_update_state(int64_t id, const char *new_state)
+int kb_store_curiosity_update_state(int64_t id, const char *new_state)
 {
-   void *conn = db2_conn();
-   if (!conn || !db2_curiosity_state_is_valid(new_state))
+   void *conn = kb_store_conn();
+   if (!conn || !kb_store_curiosity_state_is_valid(new_state))
       return -1;
 
    const char *sql = "UPDATE curiosity_items SET state = ?1, updated_at = ?2 WHERE id = ?3";
@@ -200,7 +200,7 @@ int db2_curiosity_update_state(int64_t id, const char *new_state)
    if (!st)
       return -1;
    char ts[32];
-   db2_now_utc(ts, sizeof(ts));
+   kb_store_now_utc(ts, sizeof(ts));
    aimee_pg_bind_text(st, "?1", new_state);
    aimee_pg_bind_text(st, "?2", ts);
    aimee_pg_bind_int64(st, "?3", id);
@@ -209,14 +209,14 @@ int db2_curiosity_update_state(int64_t id, const char *new_state)
    return rc;
 }
 
-int db2_curiosity_sweep_failed_queries(void)
+int kb_store_curiosity_sweep_failed_queries(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
    /* Materialize the SELECT result so we don't have a SELECT and the
-    * inner db2_curiosity_create INSERT pending on the same connection
+    * inner kb_store_curiosity_create INSERT pending on the same connection
     * at the same time. */
    const char *select_sql =
        "SELECT query_norm FROM failed_queries"
@@ -259,8 +259,8 @@ int db2_curiosity_sweep_failed_queries(void)
    int created = 0;
    for (size_t i = 0; i < count; i++)
    {
-      if (db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", items[i],
-                               "auto-populated from failed_queries", 0.0, 0.0, "", NULL) == 0)
+      if (kb_store_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", items[i],
+                                    "auto-populated from failed_queries", 0.0, 0.0, "", NULL) == 0)
          created++;
       free(items[i]);
    }
@@ -268,9 +268,9 @@ int db2_curiosity_sweep_failed_queries(void)
    return created;
 }
 
-int db2_curiosity_reset(void)
+int kb_store_curiosity_reset(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CUR_ERRBUF] = "";
@@ -281,7 +281,7 @@ int db2_curiosity_reset(void)
 
 /* --- Rescore helpers --------------------------------------------------------
  *
- * These reach DB2 `memories` for a coarse project/org-level novelty proxy. */
+ * These reach KB_STORE `memories` for a coarse project/org-level novelty proxy. */
 
 static double clamp01(double v)
 {
@@ -374,9 +374,9 @@ typedef struct
    char updated_at[32];
 } curiosity_rescore_row_t;
 
-int db2_curiosity_rescore_all(void)
+int kb_store_curiosity_rescore_all(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -477,8 +477,8 @@ int db2_curiosity_rescore_all(void)
    return rescored;
 }
 
-int db2_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_kind,
-                                     const char *subject, const char *evidence_ref)
+int kb_store_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_kind,
+                                          const char *subject, const char *evidence_ref)
 {
    if (!artifact_id || !gap_kind || !subject)
       return -1;
@@ -491,7 +491,7 @@ int db2_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_ki
    else
       curiosity_gap_type = CURIOSITY_GAP_MISSING_FACT;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -512,7 +512,7 @@ int db2_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_ki
    if (already)
       return 0;
 
-   return db2_curiosity_create(curiosity_gap_type, subject, subject,
-                               evidence_ref ? evidence_ref : artifact_id, 0.5, 0.7, "corpus.gaps",
-                               NULL);
+   return kb_store_curiosity_create(curiosity_gap_type, subject, subject,
+                                    evidence_ref ? evidence_ref : artifact_id, 0.5, 0.7,
+                                    "corpus.gaps", NULL);
 }

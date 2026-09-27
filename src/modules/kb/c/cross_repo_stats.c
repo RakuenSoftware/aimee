@@ -1,14 +1,14 @@
 /* cross_repo_stats.c: DB-backed stats / data-gathering for the cross-repo
- * resolver (S3). Portable SQL over db2 (Postgres in prod; sqlite test shim).
+ * resolver (S3). Portable SQL over kb_store (Postgres in prod; sqlite test shim).
  * Feeds the pure S2a/S2b core. See cross_repo_stats.h and
  * docs/proposals/pending/cross-repo-dependency-graph.md §3.3/§4.1. */
 
 #include "cross_repo_stats.h"
 
 #include "aimee.h"
-#include "db2.h"
+#include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -19,7 +19,7 @@
 
 static void *cr_conn(void)
 {
-   return db2_conn();
+   return kb_store_conn();
 }
 
 /* ---- FNV-1a 64-bit ------------------------------------------------------- */
@@ -73,8 +73,8 @@ static int cr_scalar(void *conn, const char *sql, const char *b1, const char *b2
 
 /* ---- distinctiveness stats (§3.3) ---------------------------------------- */
 
-int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
-                                  xrepo_distinct_stats_t *out)
+int kb_store_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
+                                       xrepo_distinct_stats_t *out)
 {
    void *conn = cr_conn();
    if (!conn || !symbol || !caller_repo || !out)
@@ -93,7 +93,7 @@ int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
    out->callee_repo_count = (int)v;
 
    /* defined in >= ? trusted repos. Positive match on kind='definition' (the
-    * convention db2_code_index_term_find uses) rather than a negative kind<>'route'
+    * convention kb_store_code_index_term_find uses) rather than a negative kind<>'route'
     * exclusion, so a future terms.kind value can't silently inflate the count. */
    if (cr_scalar(conn,
                  "SELECT COUNT(DISTINCT p.id) FROM terms t "
@@ -125,7 +125,7 @@ int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
 
 /* ---- blocked_symbols (§3.3) ---------------------------------------------- */
 
-int db2_cross_repo_symbol_blocked(const char *symbol, const char *lang)
+int kb_store_cross_repo_symbol_blocked(const char *symbol, const char *lang)
 {
    void *conn = cr_conn();
    if (!conn || !symbol)
@@ -143,7 +143,7 @@ int db2_cross_repo_symbol_blocked(const char *symbol, const char *lang)
    return blocked;
 }
 
-int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
+int kb_store_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
 {
    void *conn = cr_conn();
    if (!conn || k <= 0 || m <= 0 || len_min <= 0)
@@ -227,8 +227,8 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
 
 /* ---- meta / hashes (§4.1) ------------------------------------------------ */
 
-int db2_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
-                             char *repo_set_hash, size_t cap)
+int kb_store_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
+                                  char *repo_set_hash, size_t cap)
 {
    void *conn = cr_conn();
    if (!conn)
@@ -272,7 +272,7 @@ static int cr_hash_query(void *conn, const char *sql, const char *bind, uint64_t
    return step < 0 ? -1 : 0;
 }
 
-int db2_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap)
+int kb_store_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap)
 {
    void *conn = cr_conn();
    if (!conn || !project || !out || cap < 17)
@@ -304,7 +304,7 @@ int db2_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap)
    return 0;
 }
 
-int db2_cross_repo_repo_set_hash(char *out, size_t cap)
+int kb_store_cross_repo_repo_set_hash(char *out, size_t cap)
 {
    void *conn = cr_conn();
    if (!conn || !out || cap < 17)
@@ -324,7 +324,7 @@ int db2_cross_repo_repo_set_hash(char *out, size_t cap)
       const char *name = aimee_pg_column_text(st, 0);
       const char *trust = aimee_pg_column_text(st, 1);
       char sym[17] = "";
-      if (db2_cross_repo_repo_symbol_hash(name, sym, sizeof(sym)) != 0)
+      if (kb_store_cross_repo_repo_symbol_hash(name, sym, sizeof(sym)) != 0)
       {
          rc = -1;
          break;
@@ -352,9 +352,9 @@ int db2_cross_repo_repo_set_hash(char *out, size_t cap)
 
 /* ---- S7: per-repo trust write + audit ------------------------------------ */
 
-int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
-                             const char *request_id, char *prior_out, size_t prior_cap,
-                             int *changed_out)
+int kb_store_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                                  const char *request_id, char *prior_out, size_t prior_cap,
+                                  int *changed_out)
 {
    if (prior_out && prior_cap)
       prior_out[0] = '\0';

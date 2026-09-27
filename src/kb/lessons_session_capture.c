@@ -89,9 +89,9 @@ int lessons_session_observe(const char *project, long long generation_id, const 
    int recorded = 0;
    for (int i = 0; i < n_fired; i++)
    {
-      int64_t oid = db2_lessons_record_outcome(session_id, "", project, generation_id, "useful", "",
-                                               "", "", "agent", 0);
-      if (oid > 0 && db2_lessons_record_citation(oid, fired[i], "useful") == 0)
+      int64_t oid = kb_store_lessons_record_outcome(session_id, "", project, generation_id,
+                                                    "useful", "", "", "", "agent", 0);
+      if (oid > 0 && kb_store_lessons_record_citation(oid, fired[i], "useful") == 0)
          recorded++;
    }
    return recorded;

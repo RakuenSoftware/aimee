@@ -261,8 +261,8 @@ int tool_validate(const char *tool_name, const char *args_json, char *err_out, s
 
 const char *tool_side_effect(const char *tool_name)
 {
-   /* Fall through aimee-kb so the lookup works in the daemon (DB2-less)
-    * process.  Thread-local buffer mirrors db2_tool_registry_side_effect's
+   /* Fall through aimee-kb so the lookup works in the daemon (KB_STORE-less)
+    * process.  Thread-local buffer mirrors kb_store_tool_registry_side_effect's
     * legacy contract — caller can treat the pointer as valid until the
     * next tool_side_effect() call on this thread. */
    static __thread char buf[32];
@@ -316,7 +316,7 @@ char *agent_collect_tool_prompts(void)
    struct tool_prompts_ctx ctx = {0};
    dstr_init(&ctx.out);
 
-   /* Pull all enabled tool prompts via aimee-kb (DB2 owner). */
+   /* Pull all enabled tool prompts via aimee-kb (KB_STORE owner). */
    char *envelope = kb_client_tool_registry_snapshot_json();
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
@@ -502,7 +502,7 @@ void agent_write_metrics(void)
               rows[i].tool_calls);
    }
 
-   /* DB2 metrics (incl. pgvector) are owned by aimee-kb, not aimee-server. */
+   /* KB_STORE metrics (incl. pgvector) are owned by aimee-kb, not aimee-server. */
 
    fclose(f);
 }

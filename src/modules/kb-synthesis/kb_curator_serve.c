@@ -9,7 +9,7 @@
 #include "json_fluent.h"
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <stdio.h>
@@ -20,7 +20,7 @@ int kb_curator_implements_json(const char *topic, char *out, size_t out_cap)
 {
    if (!out || out_cap < 64 || !topic || !topic[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -92,7 +92,7 @@ int kb_curator_synthesize_serve_json(const char *topic, char *out, size_t out_ca
 {
    if (!out || out_cap < 64 || !topic || !topic[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -168,7 +168,7 @@ int kb_curator_contradictions_json(int limit, char *out, size_t out_cap)
       limit = 20;
    if (limit > 100)
       limit = 100;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

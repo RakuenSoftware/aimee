@@ -1,6 +1,6 @@
 /* kb_service_css.c: KB-side handler for the CSS migration assistant signals
  * (css.signals). The style graph + component join + migration tables live in the
- * KB's DB2 (the KB runs the indexer), so the queries run here; aimee-server
+ * KB's KB_STORE (the KB runs the indexer), so the queries run here; aimee-server
  * forwards the op via kb_client. Mirrors the other kb_service_* handlers. */
 #include "aimee.h"
 #include "cJSON.h"
@@ -22,7 +22,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    if (strcmp(op, "dead-rules") == 0)
    {
       css_dead_rule_hit_t h[512];
-      int n = db2_css_dead_rules(project, h, 512);
+      int n = kb_store_css_dead_rules(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -35,7 +35,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "conflicts") == 0)
    {
       css_spec_conflict_t h[512];
-      int n = db2_css_graph_specificity_conflicts(project, h, 512);
+      int n = kb_store_css_graph_specificity_conflicts(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -51,7 +51,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "duplicate-declarations") == 0)
    {
       css_dup_decl_t h[512];
-      int n = db2_css_graph_duplicate_declarations(project, h, 512);
+      int n = kb_store_css_graph_duplicate_declarations(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -65,7 +65,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "duplicate-selectors") == 0)
    {
       css_dup_selector_t h[512];
-      int n = db2_css_graph_duplicate_selectors(project, h, 512);
+      int n = kb_store_css_graph_duplicate_selectors(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -78,7 +78,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "unresolved") == 0)
    {
       css_unresolved_hit_t h[512];
-      int n = db2_css_component_unresolved(project, h, 512);
+      int n = kb_store_css_component_unresolved(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -90,7 +90,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "migrate-list") == 0)
    {
       css_migration_unit_t u[1024];
-      int n = db2_css_migration_list(project, NULL, u, 1024);
+      int n = kb_store_css_migration_list(project, NULL, u, 1024);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -105,7 +105,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "important-audit") == 0)
    {
       css_important_t h[512];
-      int n = db2_css_important_audit(project, h, 512);
+      int n = kb_store_css_important_audit(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -118,7 +118,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "high-specificity") == 0)
    {
       css_high_spec_t h[512];
-      int n = db2_css_high_specificity(project, h, 512);
+      int n = kb_store_css_high_specificity(project, h, 512);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -134,7 +134,7 @@ static cJSON *css_signal_array(const char *op, const char *project)
    else if (strcmp(op, "unused-vars") == 0)
    {
       css_unused_var_t h[1024];
-      int n = db2_css_unused_custom_properties(project, h, 1024);
+      int n = kb_store_css_unused_custom_properties(project, h, 1024);
       for (int i = 0; i < n; i++)
       {
          cJSON *o = cJSON_CreateObject();
@@ -165,7 +165,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
 
    if (strcmp(op, "migrate-enumerate") == 0)
    {
-      int n = db2_css_migration_enumerate(project);
+      int n = kb_store_css_migration_enumerate(project);
       if (n < 0)
       {
          cJSON_Delete(resp);
@@ -177,7 +177,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
    if (strcmp(op, "rules-doc") == 0)
    {
       char doc[16384];
-      int n = db2_css_migration_rules_doc(project, doc, sizeof(doc));
+      int n = kb_store_css_migration_rules_doc(project, doc, sizeof(doc));
       if (n < 0)
       {
          cJSON_Delete(resp);
@@ -190,7 +190,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
    {
       cJSON_Delete(resp);
       cJSON *result =
-          db2_kb_service_css_conventions_json(project, !strcmp(op, "assert-conventions"));
+          kb_store_kb_service_css_conventions_json(project, !strcmp(op, "assert-conventions"));
       return result ? kb_send_response(fd, result)
                     : kb_send_error(fd, "css conventions unavailable");
    }
@@ -200,7 +200,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON *mc = cJSON_GetObjectItemCaseSensitive(req, "min_count");
       int min_count = (cJSON_IsNumber(mc) && mc->valueint > 0) ? mc->valueint : 3;
       css_token_cand_t h[512];
-      int n = db2_css_token_candidates(project, min_count, h, 512);
+      int n = kb_store_css_token_candidates(project, min_count, h, 512);
       cJSON *arr = cJSON_CreateArray();
       for (int i = 0; i < n; i++)
       {
@@ -230,20 +230,21 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON_AddNumberToObject(summary, key, _n < 0 ? 0 : _n);                                      \
       free(_h);                                                                                    \
    } while (0)
-      CSS_REPORT_COUNT("dead_rules", css_dead_rule_hit_t, db2_css_dead_rules);
+      CSS_REPORT_COUNT("dead_rules", css_dead_rule_hit_t, kb_store_css_dead_rules);
       CSS_REPORT_COUNT("specificity_conflicts", css_spec_conflict_t,
-                       db2_css_graph_specificity_conflicts);
+                       kb_store_css_graph_specificity_conflicts);
       CSS_REPORT_COUNT("duplicate_declarations", css_dup_decl_t,
-                       db2_css_graph_duplicate_declarations);
+                       kb_store_css_graph_duplicate_declarations);
       CSS_REPORT_COUNT("duplicate_selectors", css_dup_selector_t,
-                       db2_css_graph_duplicate_selectors);
-      CSS_REPORT_COUNT("unresolved_classes", css_unresolved_hit_t, db2_css_component_unresolved);
-      CSS_REPORT_COUNT("high_specificity_rules", css_high_spec_t, db2_css_high_specificity);
+                       kb_store_css_graph_duplicate_selectors);
+      CSS_REPORT_COUNT("unresolved_classes", css_unresolved_hit_t,
+                       kb_store_css_component_unresolved);
+      CSS_REPORT_COUNT("high_specificity_rules", css_high_spec_t, kb_store_css_high_specificity);
 #undef CSS_REPORT_COUNT
       /* !important: total declarations + top properties. */
       {
          css_important_t *h = (css_important_t *)malloc((size_t)RCAP * sizeof(*h));
-         int n = h ? db2_css_important_audit(project, h, RCAP) : 0;
+         int n = h ? kb_store_css_important_audit(project, h, RCAP) : 0;
          int total = 0;
          cJSON *arr = cJSON_CreateArray();
          for (int i = 0; i < n; i++)
@@ -264,7 +265,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
       /* unused custom properties: count + top names. */
       {
          css_unused_var_t *h = (css_unused_var_t *)malloc((size_t)RCAP * sizeof(*h));
-         int n = h ? db2_css_unused_custom_properties(project, h, RCAP) : 0;
+         int n = h ? kb_store_css_unused_custom_properties(project, h, RCAP) : 0;
          cJSON *arr = cJSON_CreateArray();
          for (int i = 0; i < n && i < 5; i++)
             cJSON_AddItemToArray(arr, cJSON_CreateString(h[i].name));
@@ -275,7 +276,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
       /* token candidates (>= 3 repeats): count + top values. */
       {
          css_token_cand_t *h = (css_token_cand_t *)malloc((size_t)RCAP * sizeof(*h));
-         int n = h ? db2_css_token_candidates(project, 3, h, RCAP) : 0;
+         int n = h ? kb_store_css_token_candidates(project, 3, h, RCAP) : 0;
          cJSON *arr = cJSON_CreateArray();
          for (int i = 0; i < n && i < 5; i++)
          {
@@ -307,8 +308,8 @@ int kb_handle_css_signals(int fd, cJSON *req)
       }
       char now_iso[40];
       now_utc(now_iso, sizeof(now_iso));
-      int n = db2_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
-                                            snap_j->valuestring, now_iso);
+      int n = kb_store_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
+                                                 snap_j->valuestring, now_iso);
       if (n < 0)
       {
          cJSON_Delete(resp);
@@ -356,8 +357,8 @@ int kb_handle_css_signals(int fd, cJSON *req)
       free(rerr);
       char now_iso[40];
       now_utc(now_iso, sizeof(now_iso));
-      int n = db2_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
-                                            snap, now_iso);
+      int n = kb_store_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
+                                                 snap, now_iso);
       free(snap);
       if (n < 0)
       {
@@ -380,7 +381,7 @@ int kb_handle_css_signals(int fd, cJSON *req)
       char now_iso[40];
       now_utc(now_iso, sizeof(now_iso));
       css_render_verdict_t v;
-      if (db2_css_render_oracle_evaluate(project, unit_j->valuestring, now_iso, &v) != 0)
+      if (kb_store_css_render_oracle_evaluate(project, unit_j->valuestring, now_iso, &v) != 0)
       {
          cJSON_Delete(resp);
          return kb_send_error(fd, "css render-verify failed");

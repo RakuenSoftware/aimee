@@ -10,7 +10,7 @@
 // applies on the next turn. Keep in sync if a field's reload_class changes.
 export const RESTART_KEYS = new Set<string>([
   "kb_connection_string",
-  "db2_url", "kb_api_http_port", "kb_api_bearer_token",
+  "kb_api_http_port", "kb_api_bearer_token",
   // Deploy-topology (page-2) record: the deploy layer reads these and the
   // topology (which containers run) only changes on a restart — RELOAD_RESTART
   // in src/config_fields.c. (embedding_endpoint/model/dim apply on the next turn.)
@@ -181,7 +181,6 @@ export const FIELD_HELP: Record<string, string> = {
   // Providers & delegates
   guardrail_mode:
     "How aimee handles a risky tool call: 'approve' asks you first (default), 'prompt' warns but proceeds, 'deny' refuses it outright.",
-  db2_url: "Postgres connection URL for the shared knowledge store (DB2). Leave blank to use the bundled Postgres the deploy stack spawns automatically; set it only to point at an existing database. Changing it needs a server restart.",
   provider: "Which primary agent aimee drives — e.g. claude, codex, or an openai-compatible endpoint.",
   default_persona:
     "The persona a fresh primary session starts as, and the persona draft roundtable panelists author with when none is set. Defaults to 'engineer' (e.g. qa, security, reviewer, architect, or a custom persona).",

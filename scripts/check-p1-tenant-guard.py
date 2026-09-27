@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""check-p1-tenant-guard.py (N1): every exported function in the tenant-scoped db2
-modules must call db2_tenant_require_pg() before touching the DB. This makes the
+"""check-p1-tenant-guard.py (N1): every exported function in the tenant-scoped kb_store
+modules must call kb_store_tenant_require_pg() before touching the DB. This makes the
 "every tenant entry is guarded" property falsifiable at build time — a new
 entrypoint added without the guard fails CI, so it can never silently run
 unprotected on the RLS-less SQLite shim.
@@ -21,13 +21,13 @@ MODULES = [
 ]
 
 # A top-level function definition: return-type + name(...) { at column 0, where the
-# name starts with db2_ (the exported tenant CRUD entrypoints).
-FUNC_RE = re.compile(r"^(?:[A-Za-z_][\w \*]*?)\b(db2_[A-Za-z0-9_]+)\s*\([^;]*\)\s*$", re.M)
-GUARD = "db2_tenant_require_pg("
+# name starts with kb_store_ (the exported tenant CRUD entrypoints).
+FUNC_RE = re.compile(r"^(?:[A-Za-z_][\w \*]*?)\b(kb_store_[A-Za-z0-9_]+)\s*\([^;]*\)\s*$", re.M)
+GUARD = "kb_store_tenant_require_pg("
 
 
 def function_bodies(src: str):
-    """Yield (name, body) for each top-level db2_* function definition. The body is
+    """Yield (name, body) for each top-level kb_store_* function definition. The body is
     the text from this signature up to the next top-level signature (or EOF) — a
     slice that robustly contains only this function's statements without relying on
     brace matching."""
@@ -52,7 +52,7 @@ def main() -> int:
             if GUARD not in body:
                 offenders.append(f"{rel}: {name}() missing {GUARD})")
         if not found_any:
-            offenders.append(f"{rel}: no db2_* functions found (module renamed?)")
+            offenders.append(f"{rel}: no kb_store_* functions found (module renamed?)")
     if offenders:
         print("P1 tenant-guard check FAILED:")
         for o in offenders:

@@ -12,7 +12,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_index_code_unit.h"
 
 /* Stub the heavy embed + vector deps the handler references but this test never
@@ -49,8 +49,8 @@ static void test_seeded_commits(void)
 {
    /* Regression: the proposed-code_unit SELECT must use the real `payload` column
     * (not `payload_json`); a seeded proposed code_unit must be found + committed. */
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    assert(sqlite3_exec(
               db,
@@ -67,19 +67,19 @@ static void test_seeded_commits(void)
    const char *state = (const char *)sqlite3_column_text(st, 0);
    assert(state && strcmp(state, "committed") == 0);
    sqlite3_finalize(st);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  index_code_unit commits a seeded proposed code_unit OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_index_code_unit"))
+   if (kb_store_test_shim_skip_on_postgres("curator_index_code_unit"))
       return 0;
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    int rc = kb_curator_index_code_unit_one(NULL);
    assert(rc == 0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  index_code_unit graceful on empty/shim OK\n");
    test_seeded_commits();
    printf("curator_index_code_unit: all tests passed\n");

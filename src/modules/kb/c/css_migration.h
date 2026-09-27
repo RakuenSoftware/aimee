@@ -1,4 +1,4 @@
-/* db2/css_migration.h: CSS migration pipeline driver (WP-F).
+/* kb_store/css_migration.h: CSS migration pipeline driver (WP-F).
  *
  * The "enumerate-and-track driver" the plan calls the only new code for #5: it
  * enumerates conversion units (components) from the WP-D component join, tracks
@@ -13,8 +13,8 @@
  * that derives a MIGRATION.md-style spec from an exemplar project's style graph
  * (no typed-fact dependency).
  */
-#ifndef DEC_DB2_CSS_MIGRATION_H
-#define DEC_DB2_CSS_MIGRATION_H 1
+#ifndef DEC_KB_STORE_CSS_MIGRATION_H
+#define DEC_KB_STORE_CSS_MIGRATION_H 1
 
 #include "../headers/aimee.h" /* MAX_PATH_LEN */
 
@@ -55,24 +55,25 @@ extern "C"
    /* Populate css_migration_units for `project` from the component join (one
     * unit per component file, with token coverage). Existing units keep their
     * state; new units start 'pending'. Returns the unit count, -1 on error. */
-   int db2_css_migration_enumerate(const char *project);
+   int kb_store_css_migration_enumerate(const char *project);
 
    /* Update a unit's state (+ optional oracle verdict and note). updated_at is
     * stamped by the caller-supplied timestamp (now_utc-style). */
-   int db2_css_migration_set_state(const char *project, const char *unit_path, const char *state,
-                                   int oracle_equivalent, const char *note, const char *now_iso);
+   int kb_store_css_migration_set_state(const char *project, const char *unit_path,
+                                        const char *state, int oracle_equivalent, const char *note,
+                                        const char *now_iso);
 
    /* List units for a project (optionally filtered by state). */
-   int db2_css_migration_list(const char *project, const char *state_filter,
-                              css_migration_unit_t *out, int max);
+   int kb_store_css_migration_list(const char *project, const char *state_filter,
+                                   css_migration_unit_t *out, int max);
 
    /* Emit a degraded-#2 convention rules document for the exemplar project,
     * derived from its indexed style graph (rule/selector/token stats + detected
     * naming convention). Returns bytes written (excl. NUL), -1 on error. */
-   int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap);
+   int kb_store_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CSS_MIGRATION_H */
+#endif /* DEC_KB_STORE_CSS_MIGRATION_H */

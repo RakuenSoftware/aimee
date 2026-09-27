@@ -21,17 +21,17 @@
 #include <stdio.h>
 #include <string.h>
 
-/* db2_intent_canonical_actor validates a canonical STORED record: NUL-terminated
+/* kb_store_intent_canonical_actor validates a canonical STORED record: NUL-terminated
  * in a fixed buffer with an all-zero tail. Build that shape so the comparison is
  * against the same input the server predicate sees. */
-static int db2_says(const char *subject)
+static int kb_store_says(const char *subject)
 {
    char rec[577];
    if (strlen(subject) >= sizeof(rec))
       return 0;
    memset(rec, 0, sizeof(rec));
    memcpy(rec, subject, strlen(subject));
-   return db2_intent_canonical_actor(rec, sizeof(rec)) ? 1 : 0;
+   return kb_store_intent_canonical_actor(rec, sizeof(rec)) ? 1 : 0;
 }
 
 static int server_says(const char *subject)
@@ -60,22 +60,22 @@ int main(void)
    for (size_t i = 0; i < SUBJECT_CORPUS_N; ++i)
    {
       const subject_case_t *c = &SUBJECT_CORPUS[i];
-      int db2 = db2_says(c->subject);
+      int kb_store = kb_store_says(c->subject);
       int srv = server_says(c->subject);
       int aut = authority_says(c->subject);
 
       /* Disagreement first: it is the defect the four-copy design risks, and it is
        * invisible in production because the stricter copy just wins. */
-      if (db2 != srv || db2 != aut)
+      if (kb_store != srv || kb_store != aut)
       {
-         printf("  DISAGREE [%s] (%s): db2=%d server=%d authority=%d\n", c->subject, c->why, db2,
-                srv, aut);
+         printf("  DISAGREE [%s] (%s): kb_store=%d server=%d authority=%d\n", c->subject, c->why,
+                kb_store, srv, aut);
          failures++;
          continue;
       }
-      if (db2 != c->accept)
+      if (kb_store != c->accept)
       {
-         printf("  WRONG    [%s] (%s): both say %d, corpus says %d\n", c->subject, c->why, db2,
+         printf("  WRONG    [%s] (%s): both say %d, corpus says %d\n", c->subject, c->why, kb_store,
                 c->accept);
          failures++;
       }

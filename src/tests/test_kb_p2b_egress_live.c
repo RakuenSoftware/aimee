@@ -15,10 +15,10 @@
 #include "modules/vault/vault_kek_check.h"
 #include "modules/vault/vault_server_key.h"
 #include "modules/vault/vault_service.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/enrollments.h"
 #include "modules/kb/c/org_vault_key_use.h"
 #include "modules/kb/c/vault_pg.h"
@@ -32,7 +32,7 @@
 
 static void register_crypto_provider(void)
 {
-   const db2_vault_crypto_provider_t provider = {
+   const kb_store_vault_crypto_provider_t provider = {
        .aad_build_v2 = vault_aad_build_v2,
        .aad_build_v1_safe = vault_aad_build_v1_safe,
        .random = vault_crypto_random,
@@ -43,7 +43,7 @@ static void register_crypto_provider(void)
        .kek_check_wrap = vault_kek_check_wrap,
        .kek_check_verify = vault_kek_check_verify,
    };
-   aimee_db2_register_vault_crypto_provider(&provider);
+   aimee_kb_store_register_vault_crypto_provider(&provider);
 }
 
 /* This live fixture links the full KB route closure so it can exercise the
@@ -124,7 +124,7 @@ char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
 static int64_t scalar(const char *sql)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st || aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
    {
       fprintf(stderr, "p2b live SQL failed: %s\n", err);
@@ -141,8 +141,9 @@ static int add_member(const char *identity, int64_t team)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "INSERT INTO kb_team_membership(identity_key,team,is_default) VALUES (?1,?2,1)",
-       err, sizeof(err));
+       kb_store_conn(),
+       "INSERT INTO kb_team_membership(identity_key,team,is_default) VALUES (?1,?2,1)", err,
+       sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", identity);
@@ -156,7 +157,7 @@ static int revoke_enrollment(const char *fingerprint)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "UPDATE kb_enrollments SET state='revoked',revoked_at=pg_now_text() "
                         "WHERE fingerprint=?1",
                         err, sizeof(err));
@@ -230,12 +231,12 @@ int main(void)
        "{\"access_key_id\":\"AKIDEXAMPLE\",\"secret_access_key\":\"secret\"}";
 
    register_crypto_provider();
-   assert(db2_init(url) == 0);
+   assert(kb_store_init(url) == 0);
    vault_store_set_backend(&vault_pg_backend);
    int64_t epoch = 0;
    int sealed = -1;
-   assert(db2_vault_control_startup_begin(&epoch, &sealed) == 0 && epoch > 0);
-   assert(db2_vault_control_startup_end(1) == 0);
+   assert(kb_store_vault_control_startup_begin(&epoch, &sealed) == 0 && epoch > 0);
+   assert(kb_store_vault_control_startup_end(1) == 0);
    char policy_err[256] = "";
    assert(kb_vault_policy_select("kms", policy_err, sizeof(policy_err)) == 0);
    assert(vault_primary_epoch_initialize((uint64_t)epoch) == VAULT_MAINTENANCE_OK);
@@ -262,10 +263,10 @@ int main(void)
    assert(kb_vault_rotation_activate_or_resume(&admin, team, rotation) ==
           KB_VAULT_ROTATION_COMPLETE);
 
-   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(kb_store_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_egress_binding_set(982260,'p2b-live-model','p2b-live-billable',1,"
                  "'p2b-live-key','team:982260:bedrock','bedrock','iam',1000,100,true)::int") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    const char *aimee_home = getenv("AIMEE_HOME");
    assert(aimee_home && *aimee_home);
@@ -291,15 +292,15 @@ int main(void)
    assert(add_member(identity, team) == 0);
    char authority[33];
    int authority_rc =
-       db2_enrollment_authority_resolve(cert_fp, cert_issuer, probe.subject, authority);
+       kb_store_enrollment_authority_resolve(cert_fp, cert_issuer, probe.subject, authority);
    if (authority_rc != 0)
       fprintf(stderr, "P2b enrolled identity unresolved fp=%s issuer=%s serial=%s rc=%d\n", cert_fp,
               cert_issuer, cert_serial, authority_rc);
    assert(authority_rc == 0);
-   int scope_rc = db2_tenant_scope_begin(&probe, team);
+   int scope_rc = kb_store_tenant_scope_begin(&probe, team);
    if (scope_rc != 0)
       fprintf(stderr, "P2b enrolled membership unresolved identity=%s rc=%d\n", identity, scope_rc);
-   assert(scope_rc == 0 && db2_tenant_scope_commit() == 0);
+   assert(scope_rc == 0 && kb_store_tenant_scope_commit() == 0);
    char response[262144];
    int status =
        egress_request(mtls_port, ca, cert, client_key, "11111111-1111-4111-8111-111111111111", team,
@@ -327,24 +328,24 @@ int main(void)
    assert(status == 409 && strstr(response, "request already recorded"));
 
    /* Both private refusal classes collapse to 429 and stop before P7/network. */
-   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(kb_store_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_rate_policy_set('team','982260',3600,0)") > 0);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
    status = egress_request(mtls_port, ca, cert, client_key, "22222222-2222-4222-8222-222222222222",
                            team, response, sizeof(response));
    assert(status == 429);
-   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(kb_store_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_rate_policy_set('team','982260',3600,100)") > 0);
    assert(scalar("SELECT org_budget_set(982260,NULL,'day',(SELECT spend_usd+reserved_usd "
                  "FROM org_budget_counter WHERE team_id=982260 AND project_id IS NULL "
                  "AND period='day'),NULL)") > 0);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
    status = egress_request(mtls_port, ca, cert, client_key, "33333333-3333-4333-8333-333333333333",
                            team, response, sizeof(response));
    assert(status == 429);
-   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(kb_store_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_budget_set(982260,NULL,'day',1000,NULL)") > 0);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    status = egress_request(mtls_port, ca, cert, client_key, "44444444-4444-4444-8444-444444444444",
                            team + 1, response, sizeof(response));
@@ -376,11 +377,11 @@ int main(void)
 
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 3);
 
-   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(kb_store_tenant_scope_begin(&admin, team) == 0);
    assert(scalar("SELECT org_egress_binding_set(982260,'p2b-live-model',"
                  "'p2b-live-billable',1,'p2b-live-key','team:982260:bedrock',"
                  "'bedrock','iam',1000,100,false)::int") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
    status = egress_request(mtls_port, ca, cert, client_key, "77777777-7777-4777-8777-777777777777",
                            team, response, sizeof(response));
    assert(status == 403);
@@ -398,7 +399,7 @@ int main(void)
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    kb_mtls_stop();
    kb_tls_set_pam_check_for_test(NULL);
-   db2_shutdown();
+   kb_store_shutdown();
    puts("PASS: enrolled mTLS -> admission -> vault-sign -> TLS dispatch -> IR settlement");
    return 0;
 }

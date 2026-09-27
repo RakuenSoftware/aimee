@@ -1,25 +1,26 @@
-/* db2/features.c: feature_rows for ranking and detection.
+/* kb_store/features.c: feature_rows for ranking and detection.
  * See
  * docs/proposals/accepted/statistical-decision-systems-for-ranking-calibration-and-experiments.md
  */
 
 #include "feature_rows.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
 
 #include <stdio.h>
 #include <string.h>
 
-int db2_feature_row_upsert(const char *subject_id, const char *subject_kind, const char *scope_kind,
-                           const char *scope_id, const char *feature_set_version,
-                           const char *features_json, const char *computed_at)
+int kb_store_feature_row_upsert(const char *subject_id, const char *subject_kind,
+                                const char *scope_kind, const char *scope_id,
+                                const char *feature_set_version, const char *features_json,
+                                const char *computed_at)
 {
    if (!subject_id || !subject_kind || !feature_set_version || !features_json)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -55,13 +56,13 @@ int db2_feature_row_upsert(const char *subject_id, const char *subject_kind, con
    return 0;
 }
 
-int db2_feature_row_read(const char *subject_id, const char *subject_kind,
-                         const char *feature_set_version, char *buf, size_t len)
+int kb_store_feature_row_read(const char *subject_id, const char *subject_kind,
+                              const char *feature_set_version, char *buf, size_t len)
 {
    if (!subject_id || !subject_kind || !feature_set_version || !buf || len == 0)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

@@ -30,6 +30,24 @@ class ProviderBoundaryTests(unittest.TestCase):
     def test_retired_tree_fails(self):
         self.write("src/modules/db2/renamed.c", "")
         self.assertTrue(BOUNDARY.check(self.root))
+    def test_legacy_api_and_new_legacy_files_fail(self):
+        self.write("src/kb/new.c", "int db2_open(void);\n")
+        self.assertTrue(BOUNDARY.check(self.root))
+        self.write("src/kb/new.c", "int kb_store_open(void);\n")
+        self.write("src/kb/db2_new.h", "")
+        self.assertTrue(BOUNDARY.check(self.root))
+    def test_legacy_literals_are_narrowly_allowed(self):
+        self.write("src/config_client.c", 'reject("AIMEE_DB2_URL");')
+        self.assertEqual([], BOUNDARY.check(self.root))
+        self.write("src/config_client.c", 'reject("AIMEE_DB2_URL"); int db2_open(void);')
+        self.assertTrue(BOUNDARY.check(self.root))
+    def test_new_credential_fallback_fails(self):
+        self.write("server-go/modules/postgres/fallback.go", 'getenv("AIMEE_DB2_URL")')
+        self.assertTrue(BOUNDARY.check(self.root))
+    def test_published_migration_cannot_be_reworded(self):
+        path = next(iter(BOUNDARY.IMMUTABLE_MIGRATIONS))
+        self.write(path, "-- same SQL with a rewritten comment\n")
+        self.assertTrue(any("published migration changed" in e for e in BOUNDARY.check(self.root)))
     def test_native_driver_fails_even_outside_modules(self):
         self.write("src/hidden.c", "PQconnectdb(dsn);")
         self.assertTrue(BOUNDARY.check(self.root))

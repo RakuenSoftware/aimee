@@ -1,11 +1,11 @@
-/* db2/corpus_structural.h: corpus structural analysis helpers.
+/* kb_store/corpus_structural.h: corpus structural analysis helpers.
  *
  * Implements deterministic pieces of the corpus structural-analysis proposal:
  * doc classification, Markdown section trees, document references, and
  * reference staleness marking.
  */
-#ifndef DEC_DB2_CORPUS_STRUCTURAL_H
-#define DEC_DB2_CORPUS_STRUCTURAL_H 1
+#ifndef DEC_KB_STORE_CORPUS_STRUCTURAL_H
+#define DEC_KB_STORE_CORPUS_STRUCTURAL_H 1
 
 #include <stdint.h>
 
@@ -33,7 +33,7 @@ extern "C"
       int64_t span_start;
       int64_t span_end;
       char content_hash[65];
-   } db2_corpus_section_t;
+   } kb_store_corpus_section_t;
 
    typedef struct
    {
@@ -45,19 +45,20 @@ extern "C"
       int64_t to_doc_id;
       char resolution[CORPUS_REF_RESOLUTION_LEN];
       double confidence;
-   } db2_corpus_reference_t;
+   } kb_store_corpus_reference_t;
 
-   const char *db2_corpus_classify_type(const char *filename, const char *normalized_text,
-                                        double *confidence_out);
-   int db2_corpus_classify_doc(int64_t doc_id, const char *operator_id);
-   int db2_corpus_sections_rebuild(int64_t doc_id);
-   int db2_corpus_sections_list(int64_t doc_id, db2_corpus_section_t *out, int max_out);
-   int db2_corpus_extract_references(int64_t doc_id);
-   int db2_corpus_references_list(int64_t from_doc_id, db2_corpus_reference_t *out, int max_out);
-   int db2_corpus_mark_references_stale_for_doc(int64_t to_doc_id);
+   const char *kb_store_corpus_classify_type(const char *filename, const char *normalized_text,
+                                             double *confidence_out);
+   int kb_store_corpus_classify_doc(int64_t doc_id, const char *operator_id);
+   int kb_store_corpus_sections_rebuild(int64_t doc_id);
+   int kb_store_corpus_sections_list(int64_t doc_id, kb_store_corpus_section_t *out, int max_out);
+   int kb_store_corpus_extract_references(int64_t doc_id);
+   int kb_store_corpus_references_list(int64_t from_doc_id, kb_store_corpus_reference_t *out,
+                                       int max_out);
+   int kb_store_corpus_mark_references_stale_for_doc(int64_t to_doc_id);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CORPUS_STRUCTURAL_H */
+#endif /* DEC_KB_STORE_CORPUS_STRUCTURAL_H */

@@ -4,10 +4,10 @@
  * encoded in THREE independent places, because the layers cannot share code:
  *
  *   1. the `subject` CHECK on kb_write_tier_grant and kb_management_identity_intent
- *      (db2/schema.sql) — a Postgres regex
- *   2. db2_intent_canonical_actor (db2/management_intent_fields.h) — kb's C side
+ *      (kb_store/schema.sql) — a Postgres regex
+ *   2. kb_store_intent_canonical_actor (kb_store/management_intent_fields.h) — kb's C side
  *   3. server_identity_subject_valid (shared/auth_token_verify.c) — the server's,
- *      which links neither DB2_OBJS nor libpq (see scripts/check_tier_deps.sh),
+ *      which links neither KB_STORE_OBJS nor libpq (see scripts/check_tier_deps.sh),
  *      so it cannot include (2)
  *
  * Three copies of one rule drift, and the drift is SILENT AND ASYMMETRIC:

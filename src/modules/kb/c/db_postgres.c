@@ -88,16 +88,16 @@ void aimee_pg_free_names(char **names, int count)
    free(names);
 }
 
-/* --- DB2 text-search rewriter ------------------------------------
+/* --- KB_STORE text-search rewriter ------------------------------------
  *
- * DB2 exposes `<X>_fts` views backed by generated tsvector columns + GIN
+ * KB_STORE exposes `<X>_fts` views backed by generated tsvector columns + GIN
  * indexes. This rewriter translates the MATCH / bm25 query shape callers emit
- * into DB2 text-search predicates:
+ * into KB_STORE text-search predicates:
  *
  *   X_fts MATCH <expr>               → X_fts.fts_tsv @@ plainto_tsquery('simple', <expr>)
  *   X_fts.<col> MATCH <expr>         → X_fts.fts_tsv @@ plainto_tsquery('simple', <expr>)
  *   bm25(X_fts[, w1, w2, ...])       → (-ts_rank_cd(X_fts.fts_tsv, plainto_tsquery('simple',
- * <match_expr_for_X_fts>))) INSERT INTO X_fts (...)          → SELECT 1 WHERE false (DB2
+ * <match_expr_for_X_fts>))) INSERT INTO X_fts (...)          → SELECT 1 WHERE false (KB_STORE
  * tsvector cols are generated, so mirror maintenance inserts are no-ops; the view isn't
  * writable without INSTEAD OF triggers we don't ship.)
  *
@@ -109,7 +109,7 @@ void aimee_pg_free_names(char **names, int count)
  *   - Advanced expression syntax (NEAR, column filters, ^) is
  *     passed through plainto_tsquery which interprets it as plain text.
  *
- * These deltas are covered by the DB2 retrieval parity budget.
+ * These deltas are covered by the KB_STORE retrieval parity budget.
  */
 
 static int is_fts_ident(const char *start, const char *end)
@@ -122,7 +122,7 @@ static int is_fts_ident(const char *start, const char *end)
 /* Text-search views that use trigram matching expose a generated
  * `<name>_text` column as `match_text`. The rewriter emits ILIKE and pg_trgm
  * `similarity()` against this column rather than @@ / ts_rank_cd. See the
- * DB2 text-search block in src/modules/kb/c/schema.sql. */
+ * KB_STORE text-search block in src/modules/kb/c/schema.sql. */
 static const char *const fts_trigram_tables[] = {
     "memories_code_fts",
 };
@@ -203,7 +203,7 @@ static int find_any_match_arg(const char *haystack, const char **match_start,
    return 0;
 }
 
-static char *rewrite_db2_text_search(const char *sql)
+static char *rewrite_kb_store_text_search(const char *sql)
 {
    if (!sql)
       return NULL;
@@ -672,9 +672,9 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
       sql_in = xlated;
 
    /* Step 1b: translate text-search operators (MATCH, bm25, INSERT INTO
-    * *_fts) into DB2 tsvector equivalents. */
+    * *_fts) into KB_STORE tsvector equivalents. */
    errno = 0;
-   char *fts_xlated = rewrite_db2_text_search(sql_in);
+   char *fts_xlated = rewrite_kb_store_text_search(sql_in);
    if (!fts_xlated && errno == ENOMEM)
       goto resource_failure;
    if (fts_xlated)
@@ -814,7 +814,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
          continue;
       }
 
-      /* DB2 positional placeholder: either a bare `?` numbered by appearance
+      /* KB_STORE positional placeholder: either a bare `?` numbered by appearance
        * or a `?N` form emitted by the pre-pass so repeated references point at
        * the same $N. */
       if (*p == '?')

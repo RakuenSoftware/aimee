@@ -1,7 +1,7 @@
-/* db2/collab_rules.c: collaborative agent rules — Postgres via libpq. */
+/* kb_store/collab_rules.c: collaborative agent rules — Postgres via libpq. */
 
 #include "collab_rules.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include "cJSON.h"
@@ -46,12 +46,12 @@ static void row_to_collab_rule(aimee_pg_stmt_t *st, collab_rule_t *rule)
 {
    memset(rule, 0, sizeof(*rule));
    rule->id = aimee_pg_column_int(st, 0);
-   db2_copy_col_text(rule->text, sizeof(rule->text), st, 1);
-   db2_copy_col_text(rule->reason, sizeof(rule->reason), st, 2);
-   db2_copy_col_text(rule->proposed_by, sizeof(rule->proposed_by), st, 3);
+   kb_store_copy_col_text(rule->text, sizeof(rule->text), st, 1);
+   kb_store_copy_col_text(rule->reason, sizeof(rule->reason), st, 2);
+   kb_store_copy_col_text(rule->proposed_by, sizeof(rule->proposed_by), st, 3);
    rule->status = status_from_str(aimee_pg_column_text(st, 4));
-   db2_copy_col_text(rule->created_at, sizeof(rule->created_at), st, 5);
-   db2_copy_col_text(rule->decided_at, sizeof(rule->decided_at), st, 6);
+   kb_store_copy_col_text(rule->created_at, sizeof(rule->created_at), st, 5);
+   kb_store_copy_col_text(rule->decided_at, sizeof(rule->decided_at), st, 6);
 }
 
 static int count_total(void *conn)
@@ -98,7 +98,7 @@ static int increment_epoch(void *conn)
    aimee_pg_finalize(st);
    if (rc != AIMEE_PG_DONE)
       return -1;
-   return db2_collab_rules_epoch();
+   return kb_store_collab_rules_epoch();
 }
 
 static cJSON *collab_rule_to_json(const collab_rule_t *rule)
@@ -114,9 +114,9 @@ static cJSON *collab_rule_to_json(const collab_rule_t *rule)
    return obj;
 }
 
-int db2_collab_rules_epoch(void)
+int kb_store_collab_rules_epoch(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char err[CR_ERRBUF] = "";
@@ -131,9 +131,9 @@ int db2_collab_rules_epoch(void)
    return epoch;
 }
 
-int db2_collab_rules_list(collab_rule_t *out, int max)
+int kb_store_collab_rules_list(collab_rule_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
    char err[CR_ERRBUF] = "";
@@ -154,9 +154,9 @@ int db2_collab_rules_list(collab_rule_t *out, int max)
    return count;
 }
 
-int db2_collab_rules_list_active(collab_rule_t *out, int max)
+int kb_store_collab_rules_list_active(collab_rule_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
    char err[CR_ERRBUF] = "";
@@ -177,9 +177,9 @@ int db2_collab_rules_list_active(collab_rule_t *out, int max)
    return count;
 }
 
-int db2_collab_rules_propose(const char *text, const char *reason, const char *proposed_by)
+int kb_store_collab_rules_propose(const char *text, const char *reason, const char *proposed_by)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !text || !text[0])
       return -1;
    if (count_total(conn) >= COLLAB_MAX_TOTAL_RULES)
@@ -209,9 +209,9 @@ int db2_collab_rules_propose(const char *text, const char *reason, const char *p
    return id;
 }
 
-int db2_collab_rules_approve(int rule_id)
+int kb_store_collab_rules_approve(int rule_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || rule_id <= 0)
       return -1;
    if (count_by_status(conn, "active") >= COLLAB_MAX_ACTIVE_RULES)
@@ -234,9 +234,9 @@ int db2_collab_rules_approve(int rule_id)
    return increment_epoch(conn) >= 0 ? 0 : -1;
 }
 
-int db2_collab_rules_reject(int rule_id)
+int kb_store_collab_rules_reject(int rule_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || rule_id <= 0)
       return -1;
    char err[CR_ERRBUF] = "";
@@ -254,9 +254,9 @@ int db2_collab_rules_reject(int rule_id)
    return changed > 0 ? 0 : -1;
 }
 
-int db2_collab_rules_retire(int rule_id)
+int kb_store_collab_rules_retire(int rule_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || rule_id <= 0)
       return -1;
    char err[CR_ERRBUF] = "";
@@ -276,19 +276,19 @@ int db2_collab_rules_retire(int rule_id)
    return increment_epoch(conn) >= 0 ? 0 : -1;
 }
 
-char *db2_collab_rules_inject(int agent_last_epoch)
+char *kb_store_collab_rules_inject(int agent_last_epoch)
 {
    collab_rule_t rules[COLLAB_MAX_ACTIVE_RULES];
-   int epoch = db2_collab_rules_epoch();
+   int epoch = kb_store_collab_rules_epoch();
    int count;
    dstr_t out;
 
-   if (!db2_conn())
+   if (!kb_store_conn())
       return NULL;
    if (agent_last_epoch >= 0 && agent_last_epoch == epoch)
       return NULL;
 
-   count = db2_collab_rules_list_active(rules, COLLAB_MAX_ACTIVE_RULES);
+   count = kb_store_collab_rules_list_active(rules, COLLAB_MAX_ACTIVE_RULES);
    if (count <= 0)
       return NULL;
 
@@ -299,12 +299,12 @@ char *db2_collab_rules_inject(int agent_last_epoch)
    return dstr_steal(&out);
 }
 
-char *db2_collab_rules_json_all(void)
+char *kb_store_collab_rules_json_all(void)
 {
-   if (!db2_conn())
+   if (!kb_store_conn())
       return NULL;
    collab_rule_t rules[COLLAB_MAX_TOTAL_RULES];
-   int count = db2_collab_rules_list(rules, COLLAB_MAX_TOTAL_RULES);
+   int count = kb_store_collab_rules_list(rules, COLLAB_MAX_TOTAL_RULES);
    cJSON *arr = cJSON_CreateArray();
 
    for (int i = 0; i < count; i++)
@@ -315,13 +315,13 @@ char *db2_collab_rules_json_all(void)
    return json;
 }
 
-char *db2_collab_rules_json_active(void)
+char *kb_store_collab_rules_json_active(void)
 {
-   if (!db2_conn())
+   if (!kb_store_conn())
       return NULL;
    collab_rule_t rules[COLLAB_MAX_ACTIVE_RULES];
-   int count = db2_collab_rules_list_active(rules, COLLAB_MAX_ACTIVE_RULES);
-   int epoch = db2_collab_rules_epoch();
+   int count = kb_store_collab_rules_list_active(rules, COLLAB_MAX_ACTIVE_RULES);
+   int epoch = kb_store_collab_rules_epoch();
    cJSON *obj = cJSON_CreateObject();
    cJSON *arr;
 

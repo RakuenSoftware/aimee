@@ -14,7 +14,7 @@
  *                 frame is sunk but before its snapshot.
  *   Boundary 11 — record emission dies MID-BATCH.
  *
- * A restart is simulated by db2_shutdown() + db2_init(): the connection pool is torn
+ * A restart is simulated by kb_store_shutdown() + kb_store_init(): the connection pool is torn
  * down and a fresh one re-reads the durable tables and the emission cursor. Nothing
  * in-process survives, which is exactly the post-kill starting state the plan
  * specifies ("restart using only PostgreSQL ... and the artifact directory").
@@ -35,10 +35,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
-#include "modules/kb/c/db2_witness_checkpoint.h"
-#include "modules/kb/c/db2_witness_emit.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
+#include "modules/kb/c/kb_store_witness_emit.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
@@ -81,14 +81,14 @@ static int capture_sink(void *ctx, vault_witness_export_kind_t kind, const uint8
 
 static char g_url[512];
 
-/* Tear down and re-open the db2 layer: the process-restart stand-in. Returns the
+/* Tear down and re-open the kb_store layer: the process-restart stand-in. Returns the
  * fresh connection or NULL. */
 static void *simulate_restart(void)
 {
-   db2_shutdown();
-   if (db2_init(g_url) != 0)
+   kb_store_shutdown();
+   if (kb_store_init(g_url) != 0)
       return NULL;
-   return db2_conn();
+   return kb_store_conn();
 }
 
 static int append_record(void *conn, const char *sid)
@@ -124,8 +124,8 @@ int main(void)
    snprintf(home, sizeof home, "%s/aimee-witness-recovery-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
-   MUST(db2_init(url) == 0, "db2_init failed for %s", url);
-   void *conn = db2_conn();
+   MUST(kb_store_init(url) == 0, "kb_store_init failed for %s", url);
+   void *conn = kb_store_conn();
    MUST(conn != NULL, "no connection");
 
    /* Derive the anchor once; it is stable across restarts (KEK-derived). */
@@ -147,13 +147,14 @@ int main(void)
       MUST(append_record(conn, sid) == 0, "append %s failed", sid);
    }
    int64_t cp1 = -1;
-   MUST(db2_witness_checkpoint_produce(&cp1) == DB2_WITNESS_CP_OK, "checkpoint produce failed");
+   MUST(kb_store_witness_checkpoint_produce(&cp1) == KB_STORE_WITNESS_CP_OK,
+        "checkpoint produce failed");
 
    conn = simulate_restart();
    MUST(conn != NULL, "restart after checkpoint-commit failed");
 
-   db2_witness_emit_stats_t s9;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &s9) == DB2_WITNESS_EMIT_OK,
+   kb_store_witness_emit_stats_t s9;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &s9) == KB_STORE_WITNESS_EMIT_OK,
         "post-restart emit failed");
    MUST(s9.records_emitted == 5, "committed-but-unemitted: expected 5 records, got %llu",
         (unsigned long long)s9.records_emitted);
@@ -180,17 +181,17 @@ int main(void)
     * the cursor never runs ahead of durable emission. */
    {
       g_sink_budget = 0; /* the process dies before the first frame lands */
-      db2_witness_emit_stats_t sz;
-      db2_witness_emit_result_t rz = db2_witness_emit_run(capture_sink, NULL, 8192, &sz);
-      MUST(rz == DB2_WITNESS_EMIT_SINK_FAILED, "expected an immediate sink failure, got %d",
+      kb_store_witness_emit_stats_t sz;
+      kb_store_witness_emit_result_t rz = kb_store_witness_emit_run(capture_sink, NULL, 8192, &sz);
+      MUST(rz == KB_STORE_WITNESS_EMIT_SINK_FAILED, "expected an immediate sink failure, got %d",
            (int)rz);
       MUST(sz.records_emitted == 0, "the cursor advanced with nothing durably sunk (%llu records)",
            (unsigned long long)sz.records_emitted);
       g_sink_budget = -1;
       conn = simulate_restart();
       MUST(conn != NULL, "restart after zero-sink kill failed");
-      db2_witness_emit_stats_t szr;
-      MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &szr) == DB2_WITNESS_EMIT_OK,
+      kb_store_witness_emit_stats_t szr;
+      MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &szr) == KB_STORE_WITNESS_EMIT_OK,
            "resume after zero-sink kill failed");
       MUST(szr.records_emitted == 10,
            "zero-sink kill lost records: resume emitted %llu, expected all 10",
@@ -209,9 +210,9 @@ int main(void)
    }
    size_t before_partial = g_len;
    g_sink_budget = 4; /* accept 4 frames, then the "process dies" */
-   db2_witness_emit_stats_t s10;
-   db2_witness_emit_result_t r10 = db2_witness_emit_run(capture_sink, NULL, 8192, &s10);
-   MUST(r10 == DB2_WITNESS_EMIT_SINK_FAILED,
+   kb_store_witness_emit_stats_t s10;
+   kb_store_witness_emit_result_t r10 = kb_store_witness_emit_run(capture_sink, NULL, 8192, &s10);
+   MUST(r10 == KB_STORE_WITNESS_EMIT_SINK_FAILED,
         "expected the mid-batch sink failure to surface, got %d", (int)r10);
    MUST(g_len > before_partial, "no frames were captured before the simulated kill");
    printf("witness_recovery_pg: mid-batch kill after %llu records (%zu bytes captured)\n",
@@ -221,8 +222,8 @@ int main(void)
    conn = simulate_restart();
    MUST(conn != NULL, "restart after mid-batch kill failed");
 
-   db2_witness_emit_stats_t s11;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &s11) == DB2_WITNESS_EMIT_OK,
+   kb_store_witness_emit_stats_t s11;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &s11) == KB_STORE_WITNESS_EMIT_OK,
         "post-kill resume emit failed");
    printf("witness_recovery_pg: resumed, emitted %llu more records\n",
           (unsigned long long)s11.records_emitted);
@@ -264,15 +265,17 @@ int main(void)
    }
    /* Drain the new records first so the next emit run's first frames are the
     * checkpoint and its snapshot, letting us kill precisely between them. */
-   db2_witness_emit_stats_t sdrain;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &sdrain) == DB2_WITNESS_EMIT_OK,
+   kb_store_witness_emit_stats_t sdrain;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &sdrain) == KB_STORE_WITNESS_EMIT_OK,
         "pre-checkpoint drain failed");
    int64_t cp2 = -1;
-   MUST(db2_witness_checkpoint_produce(&cp2) == DB2_WITNESS_CP_OK, "second checkpoint failed");
+   MUST(kb_store_witness_checkpoint_produce(&cp2) == KB_STORE_WITNESS_CP_OK,
+        "second checkpoint failed");
    g_sink_budget = 1; /* accept the checkpoint frame, die before its snapshot */
-   db2_witness_emit_stats_t s10b;
-   db2_witness_emit_result_t r10b = db2_witness_emit_run(capture_sink, NULL, 8192, &s10b);
-   MUST(r10b == DB2_WITNESS_EMIT_SINK_FAILED, "expected snapshot-sink failure, got %d", (int)r10b);
+   kb_store_witness_emit_stats_t s10b;
+   kb_store_witness_emit_result_t r10b = kb_store_witness_emit_run(capture_sink, NULL, 8192, &s10b);
+   MUST(r10b == KB_STORE_WITNESS_EMIT_SINK_FAILED, "expected snapshot-sink failure, got %d",
+        (int)r10b);
    MUST(s10b.checkpoints_emitted == 1 && s10b.snapshots_emitted == 0,
         "expected checkpoint sunk but snapshot not (cp=%llu snap=%llu)",
         (unsigned long long)s10b.checkpoints_emitted, (unsigned long long)s10b.snapshots_emitted);
@@ -280,8 +283,8 @@ int main(void)
    g_sink_budget = -1;
    conn = simulate_restart();
    MUST(conn != NULL, "restart after snapshot-kill failed");
-   db2_witness_emit_stats_t s10c;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &s10c) == DB2_WITNESS_EMIT_OK,
+   kb_store_witness_emit_stats_t s10c;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &s10c) == KB_STORE_WITNESS_EMIT_OK,
         "post-snapshot-kill resume failed");
    MUST(s10c.checkpoints_emitted == 1 && s10c.snapshots_emitted == 1,
         "resume did not re-emit the checkpoint and deliver its snapshot (cp=%llu snap=%llu)",
@@ -312,8 +315,8 @@ int main(void)
     * Restart after a full drain is a no-op: no re-emission storm. */
    conn = simulate_restart();
    MUST(conn != NULL, "restart after full drain failed");
-   db2_witness_emit_stats_t s12;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &s12) == DB2_WITNESS_EMIT_OK,
+   kb_store_witness_emit_stats_t s12;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &s12) == KB_STORE_WITNESS_EMIT_OK,
         "post-drain emit failed");
    MUST(s12.records_emitted == 0 && s12.checkpoints_emitted == 0,
         "restart after a full drain re-emitted (records=%llu checkpoints=%llu) — a cursor that "
@@ -321,7 +324,7 @@ int main(void)
         (unsigned long long)s12.records_emitted, (unsigned long long)s12.checkpoints_emitted);
    printf("witness_recovery_pg: restart after full drain is a no-op (cursor survived)\n");
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_recovery_pg: PASSED\n");
    return 0;
 }

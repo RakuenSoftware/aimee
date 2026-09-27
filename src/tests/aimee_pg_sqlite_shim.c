@@ -4,12 +4,12 @@
  *
  * Production: src/db_postgres.c uses libpq.
  * Tests: this file gets linked instead. The "conn" returned from
- * aimee_pg_open is the sqlite3* registered via db2_register_shared_sqlite,
+ * aimee_pg_open is the sqlite3* registered via kb_store_register_shared_sqlite,
  * so the same in-memory sqlite handle backs both the still-on-sqlite
- * db2 modules (db2_shared_sqlite()) and the migrated ones
- * (db2_conn() → which is now also a sqlite3*).
+ * kb_store modules (kb_store_shared_sqlite()) and the migrated ones
+ * (kb_store_conn() → which is now also a sqlite3*).
  *
- * SQL translation: the migrated db2 modules emit Postgres-flavored SQL
+ * SQL translation: the migrated kb_store modules emit Postgres-flavored SQL
  * (?N placeholders, ON CONFLICT DO UPDATE, RETURNING, GREATEST,
  * to_tsvector, ::timestamp, datetime() shim usage). Most of that is
  * sqlite-compatible already (?N positional params work, ON CONFLICT,
@@ -20,21 +20,21 @@
  * can't faithfully emulate (full FTS via tsquery, interval arithmetic
  * with sub-second precision) get coarse stand-ins that keep the test
  * compiling and running. Tests that need the real semantics belong in
- * db2-specific contract tests run against actual Postgres.
+ * kb_store-specific contract tests run against actual Postgres.
  */
 
 /* TEST-ONLY enforcement: this shim makes aimee_pg_is_shim() return 1, which the
  * ephemeral/vector-sync-suppression path keys off. It must NEVER be compiled
  * into a production build. Production server/kb objects are built with
- * AIMEE_DISABLE_DB2_SQLITE_SHIM; test objects are not. Fail the build loudly if
+ * AIMEE_DISABLE_KB_STORE_SQLITE_SHIM; test objects are not. Fail the build loudly if
  * this file is ever pulled into a production (shim-disabled) compilation. */
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
 #error "aimee_pg_sqlite_shim.c is test-only and must not be compiled into a production build"
 #endif
 
 #include "db_postgres.h"
-#include "../modules/kb/c/db2.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/kb_store.h"
+#include "../modules/kb/c/kb_store_internal.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -227,7 +227,7 @@ int aimee_pg_rewrite_params(const char *sql_in, char **out_sql, char ***out_name
 /* --- SQL translation: postgres syntax → sqlite-compatible ---
  *
  * Pure text replacement — not a real parser. Targets only the patterns
- * the migrated db2 modules emit: GREATEST, ::timestamp casts,
+ * the migrated kb_store modules emit: GREATEST, ::timestamp casts,
  * (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), interval '<n> seconds',
  * to_tsvector / to_tsquery, EXTRACT(EPOCH...). */
 
@@ -614,7 +614,7 @@ static char *translate_sql(const char *sql_in)
        * shim doesn't faithfully emulate full-text search. Replace the
        * whole '<col_or_expr> @@ to_tsquery(...)' predicate with '0'
        * (no FTS hits). Tests that rely on real FTS routing must be
-       * covered by db2 contract tests against real Postgres. */
+       * covered by kb_store contract tests against real Postgres. */
       if (starts_with(p, "to_tsvector("))
       {
          /* Skip until matching ')'. */
@@ -666,15 +666,15 @@ static char *translate_sql(const char *sql_in)
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
 {
    (void)conninfo;
-   /* Tests register a sqlite handle as the shared one before db2_init
+   /* Tests register a sqlite handle as the shared one before kb_store_init
     * runs. Reuse it as the "postgres" connection. */
-   sqlite3 *db = db2_shared_sqlite();
+   sqlite3 *db = kb_store_shared_sqlite();
    if (!db)
    {
       if (errbuf && errlen)
          snprintf(errbuf, errlen,
                   "no shared sqlite handle registered (call "
-                  "db2_register_shared_sqlite first in test setup)");
+                  "kb_store_register_shared_sqlite first in test setup)");
       return NULL;
    }
    pgvec_register_functions(db);
@@ -733,7 +733,7 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    if (!db)
       return -1;
    /* The schema-apply path runs the full postgres schema text through
-    * here. Tests are expected to apply db2_apply_schema_sqlite_shim to
+    * here. Tests are expected to apply kb_store_apply_schema_sqlite_shim to
     * their handle BEFORE registering it; ignore the postgres schema text. */
    if (sql &&
        (strstr(sql, "CREATE OR REPLACE FUNCTION") != NULL ||
@@ -899,7 +899,7 @@ int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt)
 
 /* --- Bind helpers ---
  *
- * The migrated db2 modules call aimee_pg_bind_int(stmt, "?N", value).
+ * The migrated kb_store modules call aimee_pg_bind_int(stmt, "?N", value).
  * sqlite supports numbered parameters natively (?1, ?2, ...), so we
  * pass the name through to sqlite3_bind_parameter_index. */
 

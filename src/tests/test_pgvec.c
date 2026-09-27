@@ -14,9 +14,9 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
-#include "../modules/kb/c/db2_internal.h"
-#include "../modules/kb/c/lifecycle.h" /* db2_set_embedding_dim */
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/lifecycle.h" /* kb_store_set_embedding_dim */
 #include "../modules/kb/c/pgvec_transport.h"
 #include "../modules/kb/c/memory_vectors.h"
 #include "../modules/kb/c/kb_vectors.h"
@@ -220,7 +220,7 @@ static void test_latency_snapshot(void)
 
 static void test_public_api_symbols(void)
 {
-   /* Verify the DB2-owned KB vector API resolves at link time. Memory-vector
+   /* Verify the KB_STORE-owned KB vector API resolves at link time. Memory-vector
     * ownership and its ABI contract are covered by server-go/modules/memory. */
    (void)pgvec_kb_vector_collection_name;
    (void)pgvec_kb_vector_upsert_document;
@@ -293,10 +293,10 @@ static void test_corpus_ensure_index_graceful(void)
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    /* These tests upsert tiny 4-dim vectors; declare that dim so the upsert
-    * dim guard (pgvec_*_upsert vs db2_embedding_dim) accepts them. */
-   db2_set_embedding_dim(4);
+    * dim guard (pgvec_*_upsert vs kb_store_embedding_dim) accepts them. */
+   kb_store_set_embedding_dim(4);
 
    test_collection_names();
    test_collection_readiness_accepts_supported_ann_indexes();
@@ -309,7 +309,7 @@ int main(void)
    test_corpus_index_type_falls_back_without_the_extension();
    test_corpus_ensure_index_graceful();
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("pgvec: all tests passed\n");
    return 0;
 }

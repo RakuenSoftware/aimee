@@ -3,7 +3,7 @@
 
 #include "kb_identity.h"
 
-#include "modules/kb/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+#include "modules/kb/c/management_intent_fields.h" /* kb_store_intent_bare_username (header-only) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -183,7 +183,7 @@ int kb_principal_from_host_account(const char *username, kb_principal_t *out)
     * reserved name. Checked HERE and not only at the route: this constructor is
     * what stamps authenticated = 1, and a principal that could not be a legal
     * subject must not carry that stamp anywhere. */
-   if (!db2_intent_bare_username(username) || strcmp(username, "owner") == 0)
+   if (!kb_store_intent_bare_username(username) || strcmp(username, "owner") == 0)
       return -1;
    out->kind = KB_PRIN_HOST;
    snprintf(out->subject, sizeof(out->subject), "%s", username);
@@ -266,12 +266,12 @@ int kb_principal_from_identity_key(const char *identity_key, kb_principal_t *out
    if (!identity_key || !out)
       return -1;
 
-   char canonical[DB2_INTENT_ACTOR_MAX + 1] = {0};
+   char canonical[KB_STORE_INTENT_ACTOR_MAX + 1] = {0};
    size_t n = strnlen(identity_key, sizeof(canonical));
    if (!n || n >= sizeof(canonical))
       return -1;
    memcpy(canonical, identity_key, n);
-   if (!db2_intent_canonical_actor(canonical, sizeof(canonical)))
+   if (!kb_store_intent_canonical_actor(canonical, sizeof(canonical)))
       return -1;
    if (strcmp(canonical, "owner") == 0)
    {

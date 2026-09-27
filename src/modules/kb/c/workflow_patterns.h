@@ -1,8 +1,8 @@
-/* db2/workflow_patterns.h: durable store for promoted `workflow` learning
+/* kb_store/workflow_patterns.h: durable store for promoted `workflow` learning
  * candidates (the cross-source-learning-pipeline promotion target surface).
- * DB2 subsystem — written by learning_promote. */
-#ifndef DEC_DB2_WORKFLOW_PATTERNS_H
-#define DEC_DB2_WORKFLOW_PATTERNS_H 1
+ * KB_STORE subsystem — written by learning_promote. */
+#ifndef DEC_KB_STORE_WORKFLOW_PATTERNS_H
+#define DEC_KB_STORE_WORKFLOW_PATTERNS_H 1
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C"
@@ -20,9 +20,9 @@ extern "C"
 
    /* Insert a workflow pattern. out may be NULL. Returns 0 on success, -1 on
     * failure. */
-   int db2_workflow_pattern_insert(const char *pattern, const char *description, const char *source,
-                                   const char *source_ref, double confidence,
-                                   workflow_pattern_t *out);
+   int kb_store_workflow_pattern_insert(const char *pattern, const char *description,
+                                        const char *source, const char *source_ref,
+                                        double confidence, workflow_pattern_t *out);
 #ifdef __cplusplus
 }
 #endif

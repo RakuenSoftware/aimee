@@ -1,5 +1,5 @@
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/org_model_catalog.h"
 #include "kb/kb_bedrock_egress.h"
 #include "kb_identity.h"
@@ -47,7 +47,7 @@ int main(int argc, char **argv)
    if (argc == 3 && !streaming && strcmp(argv[2], "buffered") != 0)
       return 2;
    int64_t team = team_text && *team_text ? strtoll(team_text, NULL, 10) : 960001;
-   if (team <= 0 || db2_init(url) != 0)
+   if (team <= 0 || kb_store_init(url) != 0)
       return 2;
 
    kb_verify_result_t verified;
@@ -55,18 +55,18 @@ int main(int argc, char **argv)
    snprintf(verified.subject, sizeof(verified.subject), "p6c_member_a");
    kb_principal_t actor;
    if (kb_principal_from_verify(&verified, "test", &actor) != 0 ||
-       db2_tenant_scope_begin(&actor, team) != 0)
+       kb_store_tenant_scope_begin(&actor, team) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 2;
    }
    kb_bedrock_authorized_target_t *target = NULL;
    kb_bedrock_result_t resolved = kb_bedrock_authorized_target_resolve(team, argv[1], &target);
-   if (db2_tenant_scope_commit() != 0 || resolved != KB_BEDROCK_OK)
+   if (kb_store_tenant_scope_commit() != 0 || resolved != KB_BEDROCK_OK)
    {
       fprintf(stderr, "kb_bedrock_live: target unavailable (%d)\n", resolved);
       kb_bedrock_authorized_target_clear(&target);
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -97,11 +97,11 @@ int main(int argc, char **argv)
                     "terminal=%zu\n",
                     result, status, probe.callbacks, probe.terminal);
             kb_bedrock_authorized_target_clear(&target);
-            db2_shutdown();
+            kb_store_shutdown();
             return 1;
          }
          kb_bedrock_authorized_target_clear(&target);
-         db2_shutdown();
+         kb_store_shutdown();
          puts("kb_bedrock_live: ok (callback abort)");
          return 0;
       }
@@ -119,11 +119,11 @@ int main(int argc, char **argv)
    {
       fprintf(stderr, "kb_bedrock_live: dispatch failed rc=%d status=%d\n", result, status);
       kb_bedrock_authorized_target_clear(&target);
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
    kb_bedrock_authorized_target_clear(&target);
-   db2_shutdown();
+   kb_store_shutdown();
    puts("kb_bedrock_live: ok");
    return 0;
 }

@@ -1,4 +1,4 @@
-#include "db2_code_audit_graph.h"
+#include "kb_store_code_audit_graph.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +37,7 @@ int code_audit_dead_exports(const char *const *exports, int n_exports, const cha
    return count;
 }
 
-#define DB2_CODE_AUDIT_MAX_NODES 4096
+#define KB_STORE_CODE_AUDIT_MAX_NODES 4096
 
 typedef struct
 {
@@ -60,7 +60,7 @@ static int node_intern(node_set_t *set, const char *name)
    for (int i = 0; i < set->n; i++)
       if (strcmp(set->names[i], name) == 0)
          return i;
-   if (set->n >= DB2_CODE_AUDIT_MAX_NODES)
+   if (set->n >= KB_STORE_CODE_AUDIT_MAX_NODES)
       return -1;
    if (set->n >= set->cap)
    {

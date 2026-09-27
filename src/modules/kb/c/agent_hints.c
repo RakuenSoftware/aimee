@@ -1,8 +1,8 @@
-/* db2/agent_hints.c: one-shot agent hint lookup + consume — Postgres
+/* kb_store/agent_hints.c: one-shot agent hint lookup + consume — Postgres
  * via libpq. */
 
 #include "agent_hints.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
@@ -10,11 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *db2_agent_hint_find_and_consume(const char *role, const char *prompt)
+char *kb_store_agent_hint_find_and_consume(const char *role, const char *prompt)
 {
    if (!role || !prompt)
       return NULL;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 

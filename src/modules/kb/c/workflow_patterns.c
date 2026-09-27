@@ -1,5 +1,5 @@
 #include "workflow_patterns.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdint.h>
@@ -8,10 +8,11 @@
 
 #define WFP_ERRBUF 256
 
-int db2_workflow_pattern_insert(const char *pattern, const char *description, const char *source,
-                                const char *source_ref, double confidence, workflow_pattern_t *out)
+int kb_store_workflow_pattern_insert(const char *pattern, const char *description,
+                                     const char *source, const char *source_ref, double confidence,
+                                     workflow_pattern_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !pattern)
       return -1;
 

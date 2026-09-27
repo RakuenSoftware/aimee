@@ -2,8 +2,8 @@
 #include "managed_server_identity_install.h"
 
 #include "managed_server_identity.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/membership.h"
 #include "modules/kb/c/server_registry.h"
 #include "modules/kb/c/team.h"
@@ -28,13 +28,13 @@ static int owner_principal(kb_principal_t *owner)
 
 static int select_team(const kb_principal_t *owner, int64_t *team_id)
 {
-   if (!owner || !team_id || db2_tenant_scope_begin(owner, 0) != 0)
+   if (!owner || !team_id || kb_store_tenant_scope_begin(owner, 0) != 0)
       return -1;
-   db2_team_row_t teams[256];
-   int count = db2_team_list(teams, (int)(sizeof(teams) / sizeof(teams[0])));
+   kb_store_team_row_t teams[256];
+   int count = kb_store_team_list(teams, (int)(sizeof(teams) / sizeof(teams[0])));
    int rc = -1;
    if (count == 0)
-      rc = db2_team_create("default", "managed-install", team_id);
+      rc = kb_store_team_create("default", "managed-install", team_id);
    else if (count == 1)
    {
       *team_id = teams[0].id;
@@ -58,17 +58,18 @@ static int select_team(const kb_principal_t *owner, int64_t *team_id)
     * with more than one team. */
    char owner_key[576];
    int64_t existing_default = 0;
-   if (rc == 0 && (kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
-                   db2_membership_add(
-                       owner_key, *team_id,
-                       db2_membership_default_team(owner_key, &existing_default) != 0, NULL) != 0))
+   if (rc == 0 &&
+       (kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
+        kb_store_membership_add(owner_key, *team_id,
+                                kb_store_membership_default_team(owner_key, &existing_default) != 0,
+                                NULL) != 0))
       rc = -1;
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
 static int ensure_owner_membership(const kb_principal_t *owner, int64_t team_id)
@@ -76,16 +77,17 @@ static int ensure_owner_membership(const kb_principal_t *owner, int64_t team_id)
    char owner_key[576];
    int64_t existing_default = 0;
    if (!owner || team_id < 1 || kb_identity_key(owner, owner_key, sizeof(owner_key)) != 0 ||
-       db2_tenant_scope_begin(owner, 0) != 0)
+       kb_store_tenant_scope_begin(owner, 0) != 0)
       return -1;
-   int rc = db2_membership_add(
-       owner_key, team_id, db2_membership_default_team(owner_key, &existing_default) != 0, NULL);
+   int rc = kb_store_membership_add(
+       owner_key, team_id, kb_store_membership_default_team(owner_key, &existing_default) != 0,
+       NULL);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
 static int ensure_principal_membership(const kb_principal_t *owner, const kb_principal_t *member,
@@ -94,24 +96,24 @@ static int ensure_principal_membership(const kb_principal_t *owner, const kb_pri
    char member_key[576];
    if (!owner || !member || team_id < 1 ||
        kb_identity_key(member, member_key, sizeof(member_key)) != 0 ||
-       db2_tenant_scope_begin(owner, 0) != 0)
+       kb_store_tenant_scope_begin(owner, 0) != 0)
       return -1;
    /* Every managed request names the registry-bound team explicitly, so these
     * service/operator rows need no default-team side effect. The insert is
     * idempotent, which makes deploy a membership repair operation too. */
-   int rc = db2_membership_add(member_key, team_id, 0, NULL);
+   int rc = kb_store_membership_add(member_key, team_id, 0, NULL);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
 static int pending_registry(const kb_principal_t *owner,
                             const kb_managed_server_identity_t *identity, char status[32])
 {
-   db2_server_pending_t pending = {
+   kb_store_server_pending_t pending = {
        .operation = identity->operation,
        .server_id = identity->server_id,
        .endpoint = identity->endpoint,
@@ -122,18 +124,18 @@ static int pending_registry(const kb_principal_t *owner,
        .team_id = identity->team_id,
        .ttl_seconds = 3600,
    };
-   if (db2_tenant_scope_begin(owner, identity->team_id) != 0)
+   if (kb_store_tenant_scope_begin(owner, identity->team_id) != 0)
       return -1;
-   int rc = db2_server_registry_pending(&pending, status, 32);
+   int rc = kb_store_server_registry_pending(&pending, status, 32);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
-static int cert_identity(const char *cert, db2_server_cert_identity_t *out, char issuer[601],
+static int cert_identity(const char *cert, kb_store_server_cert_identity_t *out, char issuer[601],
                          char serial[129], char fingerprint[65])
 {
    char raw_serial[129];
@@ -151,42 +153,43 @@ static int cert_identity(const char *cert, db2_server_cert_identity_t *out, char
 static int finalize_registry(const kb_principal_t *owner,
                              const kb_managed_server_identity_t *identity)
 {
-   db2_server_cert_identity_t client, management;
+   kb_store_server_cert_identity_t client, management;
    char client_issuer[601], client_serial[129], client_fp[65];
    char management_issuer[601], management_serial[129], management_fp[65];
    char status[32];
    if (cert_identity(identity->client_cert, &client, client_issuer, client_serial, client_fp) ||
        cert_identity(identity->management_cert, &management, management_issuer, management_serial,
                      management_fp) ||
-       db2_tenant_scope_begin(owner, identity->team_id) != 0)
+       kb_store_tenant_scope_begin(owner, identity->team_id) != 0)
       return -1;
-   int rc = db2_server_registry_finalize(identity->operation, identity->client_csr_digest,
-                                         identity->management_csr_digest, &client, &management,
-                                         status, sizeof(status));
+   int rc = kb_store_server_registry_finalize(identity->operation, identity->client_csr_digest,
+                                              identity->management_csr_digest, &client, &management,
+                                              status, sizeof(status));
    if (rc != 0 || strcmp(status, "active") != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
 static int heartbeat_registry(const kb_principal_t *owner,
                               const kb_managed_server_identity_t *identity)
 {
-   db2_server_cert_identity_t client;
+   kb_store_server_cert_identity_t client;
    char issuer[601], serial[129], fingerprint[65];
    if (cert_identity(identity->client_cert, &client, issuer, serial, fingerprint) ||
-       db2_tenant_scope_begin(owner, identity->team_id) != 0)
+       kb_store_tenant_scope_begin(owner, identity->team_id) != 0)
       return -1;
-   int rc = db2_server_registry_heartbeat(identity->server_id, client.issuer, client.serial_norm,
+   int rc =
+       kb_store_server_registry_heartbeat(identity->server_id, client.issuer, client.serial_norm,
                                           client.fingerprint, "identity-ready", "installer-v2");
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit();
+   return kb_store_tenant_scope_commit();
 }
 
 static int paths_and_lock(const kb_managed_server_identity_install_options_t *options,

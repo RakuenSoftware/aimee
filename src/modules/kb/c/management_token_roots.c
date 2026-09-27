@@ -5,13 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 
-static int idle(const db2_management_token_roots_ctx_t *ctx)
+static int idle(const kb_store_management_token_roots_ctx_t *ctx)
 {
    return ctx && ctx->connection && ctx->session_lock_held &&
           !aimee_pg_in_transaction(ctx->connection);
 }
 
-static int session_lock_acquire(db2_management_token_roots_ctx_t *ctx, char *errbuf, size_t errlen)
+static int session_lock_acquire(kb_store_management_token_roots_ctx_t *ctx, char *errbuf,
+                                size_t errlen)
 {
    static const char sql[] = "SELECT pg_catalog.pg_advisory_lock("
                              "pg_catalog.hashtextextended('kb-management-token-roots-v1',0))";
@@ -25,7 +26,7 @@ static int session_lock_acquire(db2_management_token_roots_ctx_t *ctx, char *err
    return ok ? 0 : -1;
 }
 
-static void session_lock_release(db2_management_token_roots_ctx_t *ctx)
+static void session_lock_release(kb_store_management_token_roots_ctx_t *ctx)
 {
    if (!ctx || !ctx->connection || !ctx->session_lock_held)
       return;
@@ -92,8 +93,8 @@ static int role_assert(void *connection)
    return ok ? 0 : -1;
 }
 
-int db2_management_token_roots_open(db2_management_token_roots_ctx_t *ctx, const char *conninfo,
-                                    char *errbuf, size_t errlen)
+int kb_store_management_token_roots_open(kb_store_management_token_roots_ctx_t *ctx,
+                                         const char *conninfo, char *errbuf, size_t errlen)
 {
    if (!ctx || !conninfo || !*conninfo)
       return -1;
@@ -115,7 +116,7 @@ int db2_management_token_roots_open(db2_management_token_roots_ctx_t *ctx, const
    return 0;
 }
 
-void db2_management_token_roots_close(db2_management_token_roots_ctx_t *ctx)
+void kb_store_management_token_roots_close(kb_store_management_token_roots_ctx_t *ctx)
 {
    if (!ctx)
       return;
@@ -161,7 +162,7 @@ static int copy_blob(aimee_pg_stmt_t *s, int col, uint8_t *out, size_t cap, size
 static kb_mgmt_root_db_result_t inspect_root(void *opaque, kb_mgmt_root_kind_t kind,
                                              const char *custody_id, kb_mgmt_root_record_t *out)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    const char *kind_s = kind_name(kind);
    if (!idle(ctx) || !kind_s || !custody_id || !*custody_id ||
        strlen(custody_id) > KB_MGMT_ROOT_CUSTODY_ID_MAX || !out)
@@ -238,7 +239,7 @@ static kb_mgmt_root_db_result_t inspect_root(void *opaque, kb_mgmt_root_kind_t k
 
 static kb_mgmt_root_db_result_t stage_root(void *opaque, const kb_mgmt_root_record_t *r)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    const char *kind = r ? kind_name(r->kind) : NULL;
    if (!idle(ctx) || !kind || !r || r->phase != KB_MGMT_ROOT_STAGED || r->seal_epoch < 1 ||
        r->v1.version != 1 || r->v2.version != 2 || !r->v1.ciphertext_len ||
@@ -285,7 +286,7 @@ static kb_mgmt_root_db_result_t stage_root(void *opaque, const kb_mgmt_root_reco
 static kb_mgmt_root_db_result_t record_cas(void *opaque, const kb_mgmt_root_record_t *r,
                                            const uint8_t *att, size_t att_len)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    const char *kind = r ? kind_name(r->kind) : NULL;
    if (!idle(ctx) || !kind || !r || !att || !att_len || att_len > KB_MGMT_ROOT_ATTEST_MAX)
       return KB_MGMT_ROOT_DB_INTEGRITY;
@@ -305,7 +306,7 @@ static kb_mgmt_root_db_result_t record_cas(void *opaque, const kb_mgmt_root_reco
 
 static kb_mgmt_root_db_result_t finalize_root(void *opaque, const kb_mgmt_root_record_t *r)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    const char *kind = r ? kind_name(r->kind) : NULL;
    if (!idle(ctx) || !kind || !r)
       return KB_MGMT_ROOT_DB_INTEGRITY;
@@ -324,7 +325,7 @@ static kb_mgmt_root_db_result_t finalize_root(void *opaque, const kb_mgmt_root_r
 
 static kb_mgmt_root_db_result_t inspect_publication(void *opaque, kb_mgmt_publication_root_t *out)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    if (!idle(ctx) || !out)
       return KB_MGMT_ROOT_DB_INTEGRITY;
    memset(out, 0, sizeof(*out));
@@ -357,7 +358,7 @@ static kb_mgmt_root_db_result_t inspect_publication(void *opaque, kb_mgmt_public
 
 static kb_mgmt_root_db_result_t bind_publication(void *opaque, const kb_mgmt_publication_root_t *r)
 {
-   db2_management_token_roots_ctx_t *ctx = opaque;
+   kb_store_management_token_roots_ctx_t *ctx = opaque;
    if (!idle(ctx) || !r || !r->custody_key_id[0] || !r->helper[0] || !r->verifier_domain[0] ||
        !r->hwm1_attestation_len || r->hwm1_attestation_len > sizeof(r->hwm1_attestation))
       return KB_MGMT_ROOT_DB_INTEGRITY;
@@ -377,7 +378,8 @@ static kb_mgmt_root_db_result_t bind_publication(void *opaque, const kb_mgmt_pub
    return ok ? KB_MGMT_ROOT_DB_OK : classify(e);
 }
 
-int db2_management_token_roots_bind(db2_management_token_roots_ctx_t *ctx, kb_mgmt_roots_db_t *out)
+int kb_store_management_token_roots_bind(kb_store_management_token_roots_ctx_t *ctx,
+                                         kb_mgmt_roots_db_t *out)
 {
    if (!idle(ctx) || !out)
       return -1;

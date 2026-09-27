@@ -1,9 +1,9 @@
-/* db2/corpus_jobs.c: deterministic corpus stage conductor. */
+/* kb_store/corpus_jobs.c: deterministic corpus stage conductor. */
 #include "corpus_jobs.h"
 #include "corpus_structural.h"
 #include "curator_gaps.h"
 #include "curator_terms.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -30,7 +30,7 @@ static const char *const k_stages[] = {
     NULL,
 };
 
-const char *db2_corpus_pipeline_next_stage(const char *stage)
+const char *kb_store_corpus_pipeline_next_stage(const char *stage)
 {
    const char *cur = (stage && stage[0]) ? stage : "ingested";
    for (int i = 0; k_stages[i]; i++)
@@ -39,9 +39,9 @@ const char *db2_corpus_pipeline_next_stage(const char *stage)
    return NULL;
 }
 
-int db2_corpus_job_seed_doc(int64_t doc_id, const char *content_hash)
+int kb_store_corpus_job_seed_doc(int64_t doc_id, const char *content_hash)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0 || !content_hash || !content_hash[0])
       return -1;
 
@@ -78,10 +78,10 @@ int db2_corpus_job_seed_doc(int64_t doc_id, const char *content_hash)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_corpus_job_record_version(int64_t doc_id, const char *scope, const char *filename,
-                                  const char *content_hash)
+int kb_store_corpus_job_record_version(int64_t doc_id, const char *scope, const char *filename,
+                                       const char *content_hash)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0 || !content_hash || !content_hash[0])
       return -1;
 
@@ -106,7 +106,7 @@ int db2_corpus_job_record_version(int64_t doc_id, const char *scope, const char 
    {
       previous_doc_id = aimee_pg_column_int64(st, 0);
       previous_version = aimee_pg_column_int(st, 1);
-      db2_copy_text(previous_hash, sizeof(previous_hash), aimee_pg_column_text(st, 2));
+      kb_store_copy_text(previous_hash, sizeof(previous_hash), aimee_pg_column_text(st, 2));
    }
    aimee_pg_finalize(st);
    if (previous_hash[0] && strcmp(previous_hash, content_hash) == 0)
@@ -171,9 +171,9 @@ int db2_corpus_job_record_version(int64_t doc_id, const char *scope, const char 
    return 0;
 }
 
-int db2_corpus_job_get(int64_t doc_id, db2_corpus_job_t *out)
+int kb_store_corpus_job_get(int64_t doc_id, kb_store_corpus_job_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0 || !out)
       return -1;
 
@@ -194,12 +194,12 @@ int db2_corpus_job_get(int64_t doc_id, db2_corpus_job_t *out)
 
    memset(out, 0, sizeof(*out));
    out->doc_id = aimee_pg_column_int64(st, 0);
-   db2_copy_text(out->content_hash, sizeof(out->content_hash), aimee_pg_column_text(st, 1));
-   db2_copy_text(out->stage, sizeof(out->stage), aimee_pg_column_text(st, 2));
-   db2_copy_text(out->stage_status, sizeof(out->stage_status), aimee_pg_column_text(st, 3));
+   kb_store_copy_text(out->content_hash, sizeof(out->content_hash), aimee_pg_column_text(st, 1));
+   kb_store_copy_text(out->stage, sizeof(out->stage), aimee_pg_column_text(st, 2));
+   kb_store_copy_text(out->stage_status, sizeof(out->stage_status), aimee_pg_column_text(st, 3));
    out->attempts = aimee_pg_column_int(st, 4);
-   db2_copy_text(out->last_error, sizeof(out->last_error), aimee_pg_column_text(st, 5));
-   db2_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(st, 6));
+   kb_store_copy_text(out->last_error, sizeof(out->last_error), aimee_pg_column_text(st, 5));
+   kb_store_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(st, 6));
    aimee_pg_finalize(st);
    return 0;
 }
@@ -207,7 +207,7 @@ int db2_corpus_job_get(int64_t doc_id, db2_corpus_job_t *out)
 static int corpus_event_insert(int64_t doc_id, const char *from_stage, const char *to_stage,
                                const char *outcome, const char *detail)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CJ_ERRBUF] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
@@ -230,19 +230,19 @@ static int corpus_event_insert(int64_t doc_id, const char *from_stage, const cha
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_corpus_job_advance(int64_t doc_id, const char *outcome, const char *detail)
+int kb_store_corpus_job_advance(int64_t doc_id, const char *outcome, const char *detail)
 {
-   db2_corpus_job_t job;
-   if (db2_corpus_job_get(doc_id, &job) != 0)
+   kb_store_corpus_job_t job;
+   if (kb_store_corpus_job_get(doc_id, &job) != 0)
       return -1;
-   const char *next = db2_corpus_pipeline_next_stage(job.stage);
+   const char *next = kb_store_corpus_pipeline_next_stage(job.stage);
    if (!next)
       return 0;
 
    if (corpus_event_insert(doc_id, job.stage, next, outcome, detail) != 0)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CJ_ERRBUF] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
@@ -263,16 +263,16 @@ int db2_corpus_job_advance(int64_t doc_id, const char *outcome, const char *deta
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_corpus_job_mark_restoration_candidate(int64_t doc_id, const char *content_hash,
-                                              const char *signals_json)
+int kb_store_corpus_job_mark_restoration_candidate(int64_t doc_id, const char *content_hash,
+                                                   const char *signals_json)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0)
       return -1;
 
-   db2_corpus_job_t existing;
+   kb_store_corpus_job_t existing;
    const char *from_stage = "";
-   if (db2_corpus_job_get(doc_id, &existing) == 0)
+   if (kb_store_corpus_job_get(doc_id, &existing) == 0)
       from_stage = existing.stage;
 
    char detail[512];
@@ -307,9 +307,9 @@ int db2_corpus_job_mark_restoration_candidate(int64_t doc_id, const char *conten
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_corpus_job_fail(int64_t doc_id, const char *error)
+int kb_store_corpus_job_fail(int64_t doc_id, const char *error)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0)
       return -1;
    char err[CJ_ERRBUF] = "";
@@ -332,9 +332,9 @@ int db2_corpus_job_fail(int64_t doc_id, const char *error)
    return (rc == AIMEE_PG_DONE && changed > 0) ? 0 : -1;
 }
 
-int db2_corpus_job_recover_running(int stale_seconds)
+int kb_store_corpus_job_recover_running(int stale_seconds)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CJ_ERRBUF] = "";
@@ -353,9 +353,9 @@ int db2_corpus_job_recover_running(int stale_seconds)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? changed : -1;
 }
 
-int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
+int kb_store_corpus_pipeline_status(kb_store_corpus_pipeline_stats_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -386,7 +386,7 @@ int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
 
    /* Cumulative skipped transitions, from the event log rather than the job row:
     * the job row only knows where a document got to, not how much of the journey
-    * was a no-op. See db2_corpus_pipeline_stats_t.skipped. */
+    * was a no-op. See kb_store_corpus_pipeline_stats_t.skipped. */
    st = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM corpus_stage_events WHERE outcome = 'skipped'",
                          err, sizeof(err));
    if (st)
@@ -398,9 +398,9 @@ int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
    return 0;
 }
 
-int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int max_out)
+int kb_store_corpus_pipeline_stage_counts(kb_store_corpus_pipeline_stage_count_t *out, int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
    memset(out, 0, (size_t)max_out * sizeof(out[0]));
@@ -417,8 +417,9 @@ int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int
    int n = 0;
    while (n < max_out && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_copy_text(out[n].stage, sizeof(out[n].stage), aimee_pg_column_text(st, 0));
-      db2_copy_text(out[n].stage_status, sizeof(out[n].stage_status), aimee_pg_column_text(st, 1));
+      kb_store_copy_text(out[n].stage, sizeof(out[n].stage), aimee_pg_column_text(st, 0));
+      kb_store_copy_text(out[n].stage_status, sizeof(out[n].stage_status),
+                         aimee_pg_column_text(st, 1));
       out[n].count = aimee_pg_column_int(st, 2);
       n++;
    }
@@ -438,31 +439,31 @@ static int corpus_run_stage_handler(int64_t doc_id, const char *next_stage, char
 
    if (strcmp(next_stage, "classified") == 0)
    {
-      int rc = db2_corpus_classify_doc(doc_id, "pipeline");
+      int rc = kb_store_corpus_classify_doc(doc_id, "pipeline");
       snprintf(detail, detail_len, "classified");
       return rc;
    }
    if (strcmp(next_stage, "sectioned") == 0)
    {
-      int n = db2_corpus_sections_rebuild(doc_id);
+      int n = kb_store_corpus_sections_rebuild(doc_id);
       snprintf(detail, detail_len, "sections=%d", n < 0 ? 0 : n);
       return n < 0 ? -1 : 0;
    }
    if (strcmp(next_stage, "references_extracted") == 0)
    {
-      int n = db2_corpus_extract_references(doc_id);
+      int n = kb_store_corpus_extract_references(doc_id);
       snprintf(detail, detail_len, "references=%d", n < 0 ? 0 : n);
       return n < 0 ? -1 : 0;
    }
    if (strcmp(next_stage, "terms_normalized") == 0)
    {
-      int n = db2_corpus_normalize_terms(doc_id);
+      int n = kb_store_corpus_normalize_terms(doc_id);
       snprintf(detail, detail_len, "terms=%d", n < 0 ? 0 : n);
       return n < 0 ? -1 : 0;
    }
    if (strcmp(next_stage, "gaps_detected") == 0)
    {
-      int n = db2_corpus_detect_gaps(doc_id);
+      int n = kb_store_corpus_detect_gaps(doc_id);
       snprintf(detail, detail_len, "gaps=%d", n < 0 ? 0 : n);
       return n < 0 ? -1 : 0;
    }
@@ -471,7 +472,7 @@ static int corpus_run_stage_handler(int64_t doc_id, const char *next_stage, char
    return 1;
 }
 
-int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
+int kb_store_corpus_pipeline_drain(int limit, kb_store_corpus_pipeline_stats_t *out)
 {
    int processed = 0;
    int skipped = 0;
@@ -479,7 +480,7 @@ int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
 
    while (processed < max_steps)
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       if (!conn)
          return -1;
       char err[CJ_ERRBUF] = "";
@@ -498,10 +499,10 @@ int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
       }
       int64_t doc_id = aimee_pg_column_int64(st, 0);
       char stage[CORPUS_PIPELINE_STAGE_LEN];
-      db2_copy_text(stage, sizeof(stage), aimee_pg_column_text(st, 1));
+      kb_store_copy_text(stage, sizeof(stage), aimee_pg_column_text(st, 1));
       aimee_pg_finalize(st);
 
-      const char *next = db2_corpus_pipeline_next_stage(stage);
+      const char *next = kb_store_corpus_pipeline_next_stage(stage);
       if (!next)
          break;
 
@@ -509,23 +510,23 @@ int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
       int hrc = corpus_run_stage_handler(doc_id, next, detail, sizeof(detail));
       if (hrc < 0)
       {
-         db2_corpus_job_fail(doc_id, detail[0] ? detail : "stage handler failed");
+         kb_store_corpus_job_fail(doc_id, detail[0] ? detail : "stage handler failed");
          return -1;
       }
-      if (db2_corpus_job_advance(doc_id, hrc > 0 ? "skipped" : "advanced", detail) != 0)
+      if (kb_store_corpus_job_advance(doc_id, hrc > 0 ? "skipped" : "advanced", detail) != 0)
          return -1;
       processed++;
       if (hrc > 0)
          skipped++;
    }
 
-   if (out && db2_corpus_pipeline_status(out) != 0)
+   if (out && kb_store_corpus_pipeline_status(out) != 0)
       return -1;
    if (out)
    {
       out->processed = processed;
       /* This drain's own skips, which is what the caller asked about. The cumulative
-       * figure from db2_corpus_pipeline_status would answer a different question and
+       * figure from kb_store_corpus_pipeline_status would answer a different question and
        * would make a fresh drain of an already-skipped corpus look busy. */
       out->skipped = skipped;
    }

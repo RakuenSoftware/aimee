@@ -50,9 +50,9 @@ scripts/compose-local.sh -p upgraded-kb -f compose.kb.yaml -f upgrade.override.y
 ```
 
 Use the same project, environment file, and overrides for both commands. The first command
-seals the new runtime, migration, and KB DSNs from Compose into the copied Vault; it does
+seals the new PostgreSQL runtime and migration DSNs from Compose into the copied Vault; it does
 not start the services. Its one-shot `AIMEE_VAULT_STORE_MIGRATION=1` control replaces only
-`AIMEE_STORE_URL`, `AIMEE_STORE_MIGRATION_URL`, and `AIMEE_DB2_URL`. Enrollment, provider
+`AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL`. Enrollment, provider
 credentials, and the encryption key retain their existing values. Ordinary startup continues
 to preserve existing credentials. Do not persist either this migration control or the broader
 `AIMEE_VAULT_ENV_OVERWRITE` control in the application environment.

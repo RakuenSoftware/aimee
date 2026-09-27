@@ -24,9 +24,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
-#include "modules/kb/c/db2_witness_checkpoint.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
 #include "modules/kb/c/db_postgres.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_cadence.h"
@@ -96,7 +96,8 @@ int main(int argc, char **argv)
    CHECK(kb_witness_boot_check(err, sizeof err) == 0,
          "boot check refused while sealed (should be a no-op): %s", err);
    /* The release gate is closed while sealed — no live keys (term 1). */
-   CHECK(kb_egress_release_allowed() == 0, "release gate OPEN while sealed (term 1 not fail-closed)");
+   CHECK(kb_egress_release_allowed() == 0,
+         "release gate OPEN while sealed (term 1 not fail-closed)");
    printf("witness_boot_tpm: sealed regime OK (no live keys, boot check no-op, gate closed)\n");
 
    /* Unseal the real anchor. On a stub (non-WITH_TPM2) build this stays sealed. */
@@ -109,8 +110,8 @@ int main(int argc, char **argv)
    CHECK(kb_vault_live_keys_allowed() == 1, "live keys not allowed after unsealing a real anchor");
    printf("witness_boot_tpm: unsealed real anchor OK (live keys now allowed)\n");
 
-   CHECK(db2_init(url) == 0, "db2_init failed for %s", url);
-   void *conn = db2_conn();
+   CHECK(kb_store_init(url) == 0, "kb_store_init failed for %s", url);
+   void *conn = kb_store_conn();
    CHECK(conn != NULL, "no db connection");
 
    /* POSITIVE: real evidence signed by the current (TPM-derived) key must NOT be
@@ -122,7 +123,8 @@ int main(int argc, char **argv)
       CHECK(append_record(conn, sid) == 0, "seed append %s failed", sid);
    }
    int64_t seq = -1;
-   CHECK(db2_witness_checkpoint_produce(&seq) == DB2_WITNESS_CP_OK, "checkpoint produce failed");
+   CHECK(kb_store_witness_checkpoint_produce(&seq) == KB_STORE_WITNESS_CP_OK,
+         "checkpoint produce failed");
    CHECK(kb_witness_boot_check(err, sizeof err) == 0,
          "boot check REFUSED valid evidence under live keys (false positive): %s", err);
    printf("witness_boot_tpm: positive OK (live keys + verifiable evidence -> boot check passes)\n");
@@ -174,15 +176,17 @@ int main(int argc, char **argv)
     * operator would see when the chain has stalled. */
    CHECK(exec_sql(conn, "ALTER TABLE kb_vault_witness_checkpoint DISABLE TRIGGER USER") == 0,
          "could not disable checkpoint WORM");
-   CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
-                        "SET created_at = (CURRENT_TIMESTAMP - interval '4000 seconds')::text") == 0,
+   CHECK(exec_sql(conn,
+                  "UPDATE kb_vault_witness_checkpoint "
+                  "SET created_at = (CURRENT_TIMESTAMP - interval '4000 seconds')::text") == 0,
          "aging created_at failed");
    CHECK(kb_egress_release_allowed() == 0, "gate OPEN with a stale checkpoint chain (term 4)");
    /* Restore freshness and confirm the gate re-opens — proving term 4 was the cause,
     * not a one-way latch. */
    CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint SET created_at = pg_now_text()") == 0,
          "restoring created_at failed");
-   CHECK(kb_egress_release_allowed() == 1, "gate did not re-open after freshness restored (term 4)");
+   CHECK(kb_egress_release_allowed() == 1,
+         "gate did not re-open after freshness restored (term 4)");
    printf("witness_boot_tpm: gate closes on a stale chain and re-opens when fresh (term 4) OK\n");
 
    /* Term 3 — anchor coverage. A retained checkpoint signed by a key this kb cannot
@@ -206,7 +210,7 @@ int main(int argc, char **argv)
           "%s\n",
           err);
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_boot_tpm: PASSED (boot-refusal + release-gate conjunction proven under a real "
           "TPM anchor)\n");
    return 0;

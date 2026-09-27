@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 support for deterministic in-place UTF-8 repair. */
-#include "db2_text.h"
+/* Descriptor-owned KB_STORE support for deterministic in-place UTF-8 repair. */
+#include "kb_store_text.h"
 
 size_t text_sanitize_utf8(char *s)
 {

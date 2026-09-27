@@ -1,5 +1,5 @@
 #include "evidence_vectors.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -7,12 +7,12 @@
 
 #define EV_ERRBUF 256
 
-int db2_evidence_enqueue(const char *artifact_id, const char *collection)
+int kb_store_evidence_enqueue(const char *artifact_id, const char *collection)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -30,13 +30,13 @@ int db2_evidence_enqueue(const char *artifact_id, const char *collection)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_evidence_store_vector(const char *artifact_id, const char *collection,
-                              const char *embedding_text)
+int kb_store_evidence_store_vector(const char *artifact_id, const char *collection,
+                                   const char *embedding_text)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -82,12 +82,12 @@ int db2_evidence_store_vector(const char *artifact_id, const char *collection,
    return (rc_upd == AIMEE_PG_DONE || rc_upd == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_evidence_mark_failed(const char *artifact_id, const char *error)
+int kb_store_evidence_mark_failed(const char *artifact_id, const char *error)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -108,12 +108,12 @@ int db2_evidence_mark_failed(const char *artifact_id, const char *error)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_evidence_list_pending(db2_evidence_pending_t *out, int max)
+int kb_store_evidence_list_pending(kb_store_evidence_pending_t *out, int max)
 {
    if (!out || max <= 0)
       return 0;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -141,12 +141,12 @@ int db2_evidence_list_pending(db2_evidence_pending_t *out, int max)
    return count;
 }
 
-int db2_evidence_reset_stuck(int max_attempts)
+int kb_store_evidence_reset_stuck(int max_attempts)
 {
    if (max_attempts <= 0)
       return 0;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -164,9 +164,9 @@ int db2_evidence_reset_stuck(int max_attempts)
    return changes;
 }
 
-int db2_evidence_reembed_all(void)
+int kb_store_evidence_reembed_all(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -182,20 +182,20 @@ int db2_evidence_reembed_all(void)
    return changes;
 }
 
-int db2_evidence_ops_count(const char *status)
+int kb_store_evidence_ops_count(const char *status)
 {
    if (status)
-      return db2_scalar_int_text("SELECT COUNT(*) FROM evidence_index_ops WHERE status = ?1",
-                                 status, -1);
-   return db2_scalar_int("SELECT COUNT(*) FROM evidence_index_ops", -1);
+      return kb_store_scalar_int_text("SELECT COUNT(*) FROM evidence_index_ops WHERE status = ?1",
+                                      status, -1);
+   return kb_store_scalar_int("SELECT COUNT(*) FROM evidence_index_ops", -1);
 }
 
-int db2_evidence_vectors_list(db2_evidence_vector_row_t *out, int max)
+int kb_store_evidence_vectors_list(kb_store_evidence_vector_row_t *out, int max)
 {
    if (!out || max <= 0)
       return 0;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

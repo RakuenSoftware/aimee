@@ -1,4 +1,4 @@
-/* db2/fact_identity.c: normalized identity for typed-fact assertions.
+/* kb_store/fact_identity.c: normalized identity for typed-fact assertions.
  * See fact_identity.h for what this guarantees and what it deliberately does
  * not. */
 

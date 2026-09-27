@@ -8,7 +8,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb_curator_serve.h"
 
 static void seed(sqlite3 *db, const char *sql)
@@ -18,8 +18,8 @@ static void seed(sqlite3 *db, const char *sql)
 
 static void test_implements(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO projects (id,name,root,scanned_at,current_generation)"
             " VALUES (1,'p','/p','t',2)");
@@ -43,14 +43,14 @@ static void test_implements(void)
    assert(strstr(buf, "cu-old") == NULL && strstr(buf, "src/old.c") == NULL);
    /* unknown topic → empty list, count 0 */
    assert(kb_curator_implements_json("nope", buf, sizeof(buf)) == 0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  /v1/implements traverses mentions -> code_units OK\n");
 }
 
 static void test_synthesize(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload) VALUES"
             " ('e1','entity','committed','{\"name\":\"pgvector\"}'),"
@@ -62,14 +62,14 @@ static void test_synthesize(void)
    int n = kb_curator_synthesize_serve_json("pgvector", buf, sizeof(buf));
    assert(n == 2);
    assert(strstr(buf, "pgvector backs search") && strstr(buf, "100") && strstr(buf, "200"));
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  /v1/synthesize returns the cited narrative OK\n");
 }
 
 static void test_contradictions(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload) VALUES"
             " ('c1','claim','committed','{\"text\":\"auth uses JWT\"}'),"
@@ -80,13 +80,13 @@ static void test_contradictions(void)
    int n = kb_curator_contradictions_json(10, buf, sizeof(buf));
    assert(n == 1);
    assert(strstr(buf, "auth uses JWT") && strstr(buf, "auth uses opaque tokens"));
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  /v1/contradictions lists claim pairs OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_serve"))
+   if (kb_store_test_shim_skip_on_postgres("curator_serve"))
       return 0;
 
    test_implements();

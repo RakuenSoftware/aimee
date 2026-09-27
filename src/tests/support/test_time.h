@@ -1,6 +1,6 @@
-/* test_time.h: back-dated / post-dated timestamps for DB2 test fixtures.
+/* test_time.h: back-dated / post-dated timestamps for KB_STORE test fixtures.
  *
- * DB2's timestamp columns are TEXT in the canonical 'YYYY-MM-DD HH:MM:SS' UTC
+ * KB_STORE's timestamp columns are TEXT in the canonical 'YYYY-MM-DD HH:MM:SS' UTC
  * spelling (schema.sql defaults them to to_char(CURRENT_TIMESTAMP, ...), and the
  * sqlite shim's pg_now_text() emits the same shape). A fixture that needs "nine
  * days ago" therefore used to reach for datetime('now', '-9 days') -- a sqlite

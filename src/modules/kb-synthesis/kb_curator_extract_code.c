@@ -1,5 +1,5 @@
 /* kb_curator_extract_code.c: curator drain handler — claim one extract_code_unit job,
- * read source body from filesystem, invoke sidecar, write code_unit artifacts to DB2,
+ * read source body from filesystem, invoke sidecar, write code_unit artifacts to KB_STORE,
  * mark job done/failed.
  * No DB1 access from this file. */
 
@@ -15,7 +15,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <errno.h>
@@ -60,7 +60,7 @@ typedef struct
 
 static int ccu_claim_job(ccu_job_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -120,7 +120,7 @@ static int ccu_claim_job(ccu_job_t *out)
 
 static void ccu_mark_done(int64_t job_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[CCU_ERRBUF] = "";
@@ -138,7 +138,7 @@ void kb_curator_mark_retry_provider_unavailable_code(int64_t job_id, int attempt
                                                      const char *error_msg)
 {
    kb_curator_provider_backoff_note();
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -172,7 +172,7 @@ static int ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
       kb_curator_mark_retry_provider_unavailable_code(job_id, attempts, error_msg);
       return 1;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -229,7 +229,7 @@ static void ccu_reclaim_stale_running(int max_attempts)
       return;
    }
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       /* Deliberately do NOT arm the throttle here, nor on the failures below: a
@@ -295,7 +295,7 @@ static void ccu_resolve_path(const char *project, const char *file_path, char *o
       return;
    }
    char root[1024] = "";
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (conn && project && project[0])
    {
       char err[CCU_ERRBUF] = "";
@@ -350,16 +350,16 @@ static char *ccu_slice_lines(const char *content, int line)
    return body;
 }
 
-/* Read the code-unit body from the file's content stored in DB2 (file_contents),
+/* Read the code-unit body from the file's content stored in KB_STORE (file_contents),
  * keyed by project + project-relative path. This is the primary source: the
  * curator drain runs server-side, where thin-client-ingested files do not exist
  * on disk (projects.root points at the client's path) — but ingest pushes the
  * whole file content into file_contents. Returns malloc'd string (caller frees),
  * or NULL when no stored content exists (caller falls back to an on-disk read for
  * local deployments). */
-static char *ccu_read_body_db2(const char *project, const char *file_path, int line)
+static char *ccu_read_body_kb_store(const char *project, const char *file_path, int line)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0] || !file_path || !file_path[0])
       return NULL;
    char err[CCU_ERRBUF] = "";
@@ -571,7 +571,7 @@ static int ccu_payload_contradicts_structure(const ccu_job_t *job, const cJSON *
    if (reason_out && reason_len > 0)
       reason_out[0] = '\0';
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -660,7 +660,7 @@ static int ccu_payload_contradicts_structure(const ccu_job_t *job, const cJSON *
 
 static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -710,24 +710,25 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
       char *payload_str = payload_j ? cJSON_PrintUnformatted(payload_j) : NULL;
 
       char id_buf[64];
-      db2_artifact_gen_id(id_buf, sizeof(id_buf));
+      kb_store_artifact_gen_id(id_buf, sizeof(id_buf));
 
-      int wrc = db2_artifact_write(id_buf, kind_j->valuestring, "proposed", "project", job->project,
-                                   "kb.curator.extract_code", confidence,
-                                   payload_str ? payload_str : "{}");
+      int wrc = kb_store_artifact_write(id_buf, kind_j->valuestring, "proposed", "project",
+                                        job->project, "kb.curator.extract_code", confidence,
+                                        payload_str ? payload_str : "{}");
       free(payload_str);
 
       if (wrc != 0)
       {
-         /* db2_artifact_write swallows the backend's message, so the only record
+         /* kb_store_artifact_write swallows the backend's message, so the only record
           * of WHY was postgres' own log — which is how ~5,300 jobs died as a bare
           * "artifact write failed" while the server had been saying "invalid byte
           * sequence for encoding UTF8" all along. Name the artifact so the next
           * one is findable without cross-referencing container logs by timestamp. */
-         aimee_log(LOG_WARN, "kb.curator.extract_code",
-                   "artifact write rejected for symbol '%s' (job %lld, kind=%s); see the db2 log "
-                   "for the backend reason",
-                   job->symbol, (long long)job->job_id, kind_j->valuestring);
+         aimee_log(
+             LOG_WARN, "kb.curator.extract_code",
+             "artifact write rejected for symbol '%s' (job %lld, kind=%s); see the kb_store log "
+             "for the backend reason",
+             job->symbol, (long long)job->job_id, kind_j->valuestring);
          aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }
@@ -753,8 +754,8 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
                   "{\"gate\":\"structural_grounding\",\"symbol\":\"%s\",\"callee\":\"%s\","
                   "\"detail\":\"claimed no side effects but calls side-effecting %s\"}",
                   job->symbol, ground_reason, ground_reason);
-         db2_artifact_reject(id_buf, "structural_grounding", "side_effects", ground_reason,
-                             before_json);
+         kb_store_artifact_reject(id_buf, "structural_grounding", "side_effects", ground_reason,
+                                  before_json);
          aimee_log(LOG_WARN, "kb.curator.extract_code",
                    "rejected code_unit for symbol '%s' (job %lld): claims no side effects but "
                    "calls side-effecting '%s'",
@@ -762,7 +763,7 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
          continue;
       }
 
-      db2_artifact_cite(id_buf, "kb_file", job->file_path);
+      kb_store_artifact_cite(id_buf, "kb_file", job->file_path);
       committed++;
    }
 
@@ -797,10 +798,10 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
              job.symbol, job.file_path);
 
    char body_err[CCU_ERRBUF] = "";
-   /* Primary: the file content stored in DB2 at ingest (works server-side for
+   /* Primary: the file content stored in KB_STORE at ingest (works server-side for
     * thin-client-ingested files). Fallback: an on-disk read for local
     * deployments whose file_contents may be empty. */
-   char *body = ccu_read_body_db2(job.project, job.file_path, job.line);
+   char *body = ccu_read_body_kb_store(job.project, job.file_path, job.line);
    if (!body)
    {
       char abs_path[2048];
@@ -871,10 +872,10 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
     * a CPU model runs seconds to minutes, and holding a lease across it trips the
     * pool's stuck-lease ceiling (300s) and permanently shrinks the pool. All
     * remaining DB work (grounding, artifact write, mark_done) re-acquires lazily
-    * via db2_conn() after the call returns. Safe: we are at lease depth 0 (the
-    * drain uses db2_lease_release_idle, not an explicit begin/end scope), and the
-    * body was already read from DB2 above. */
-   db2_lease_release_idle();
+    * via kb_store_conn() after the call returns. Safe: we are at lease depth 0 (the
+    * drain uses kb_store_lease_release_idle, not an explicit begin/end scope), and the
+    * body was already read from KB_STORE above. */
+   kb_store_lease_release_idle();
 
    char sidecar_err[512] = "";
    char *resp_str = ccu_invoke_sidecar(cmd, req_str, sidecar_err, sizeof(sidecar_err));

@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "roadmap_decompose.h"
 
 /* The well-formed decomposition from test_roadmap.c — validated by
@@ -160,7 +160,7 @@ static int stub_fail(const char *prompt, char **out, void *ud)
 /* ---- 5. decompose_run succeeds on first attempt ---- */
 static void test_run_succeeds_first(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    char *out = NULL;
    char err[256] = "";
    int rc = roadmap_decompose_run("Add OAuth login", NULL, NULL, stub_good, NULL, 3, &out, err,
@@ -168,14 +168,14 @@ static void test_run_succeeds_first(void)
    assert(rc == 0 && out != NULL);
    assert(strstr(out, "goal") != NULL);
    free(out);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  run_succeeds_first: ok\n");
 }
 
 /* ---- 6. decompose_run retries, succeeds on 2nd attempt ---- */
 static void test_run_retries_and_succeeds(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    int call = 0;
    char *out = NULL;
    char err[256] = "";
@@ -184,20 +184,20 @@ static void test_run_retries_and_succeeds(void)
    assert(rc == 0 && out != NULL);
    assert(call == 2); /* first call invalid, second call valid */
    free(out);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  run_retries_and_succeeds: ok\n");
 }
 
 /* ---- 7. decompose_run fails after all attempts ---- */
 static void test_run_exhausts_attempts(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    char *out = NULL;
    char err[256] = "";
    int rc = roadmap_decompose_run("goal", NULL, NULL, stub_fail, NULL, 2, &out, err, sizeof(err));
    assert(rc == -1 && out == NULL);
    assert(err[0] != '\0'); /* failure reason populated */
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  run_exhausts_attempts: ok\n");
 }
 

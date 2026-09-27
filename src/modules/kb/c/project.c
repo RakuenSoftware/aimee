@@ -1,17 +1,17 @@
-/* db2/project.c: P1 tenancy projects (kb_project) — Postgres via libpq.
- * See project.h. Mirrors the db2/enrollments.c access pattern. Tenant-scoped:
+/* kb_store/project.c: P1 tenancy projects (kb_project) — Postgres via libpq.
+ * See project.h. Mirrors the kb_store/enrollments.c access pattern. Tenant-scoped:
  * every entry requires the RLS-enforcing Postgres backend. */
 
 #include "project.h"
-#include "db2_tenant.h"
-#include "db2_internal.h"
+#include "kb_store_tenant.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_project_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_project_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -29,15 +29,15 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_project_row_t *row)
 
 #define PROJECT_COLS "id, parent, name, access_mode, created_at, operator_id"
 
-int db2_project_create(int64_t parent, const char *name, const char *access_mode,
-                       const char *operator_id, int64_t *out_id)
+int kb_store_project_create(int64_t parent, const char *name, const char *access_mode,
+                            const char *operator_id, int64_t *out_id)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (parent <= 0 || !name || !name[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    const char *sql = "INSERT INTO kb_project (parent, name, access_mode, operator_id) "
@@ -60,14 +60,14 @@ int db2_project_create(int64_t parent, const char *name, const char *access_mode
    return 0;
 }
 
-int db2_project_list(int64_t parent, db2_project_row_t *out, int max)
+int kb_store_project_list(int64_t parent, kb_store_project_row_t *out, int max)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int scoped = parent > 0;
@@ -88,14 +88,14 @@ int db2_project_list(int64_t parent, db2_project_row_t *out, int max)
    return n;
 }
 
-int db2_project_get(int64_t id, db2_project_row_t *out)
+int kb_store_project_get(int64_t id, kb_store_project_row_t *out)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -114,14 +114,14 @@ int db2_project_get(int64_t id, db2_project_row_t *out)
    return rc;
 }
 
-int db2_project_attribute_code(const char *code_project, int64_t kb_project)
+int kb_store_project_attribute_code(const char *code_project, int64_t kb_project)
 {
-   int guard = db2_tenant_require_pg();
+   int guard = kb_store_tenant_require_pg();
    if (guard)
       return guard;
    if (!code_project || !code_project[0] || strlen(code_project) > 255 || kb_project <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

@@ -28,6 +28,6 @@ int xrepo_extract_identities(const char *basename, const char *content, xrepo_id
 /* Rebuild cross_repo_identity for all registered repos from their indexed manifest
  * file_contents (broadens the load_descs manifest query to CMakeLists.txt + *.pc).
  * Transactional: replaces each project's rows. Returns rows written, -1 on error. */
-int db2_cross_repo_rebuild_identities(void);
+int kb_store_cross_repo_rebuild_identities(void);
 
 #endif /* AIMEE_CROSS_REPO_IDENTITY_H */

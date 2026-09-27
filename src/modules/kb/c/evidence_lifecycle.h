@@ -1,6 +1,6 @@
 /* evidence_lifecycle.h: typed C boundary over the P1-P9 PostgreSQL contract. */
-#ifndef DEC_DB2_EVIDENCE_LIFECYCLE_H
-#define DEC_DB2_EVIDENCE_LIFECYCLE_H 1
+#ifndef DEC_KB_STORE_EVIDENCE_LIFECYCLE_H
+#define DEC_KB_STORE_EVIDENCE_LIFECYCLE_H 1
 
 #include "fact_mutation.h"
 
@@ -35,14 +35,14 @@ extern "C"
 
    /* Invoke one fixed operation. Arguments are data-only bound parameters; SQL
     * and actor/authority are selected internally. The result is one JSON value. */
-   int db2_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
-                                   const char *const *args, int nargs, char *out, int out_cap);
+   int kb_store_evidence_lifecycle_json(const fact_actor_t *actor, evidence_lifecycle_op_t op,
+                                        const char *const *args, int nargs, char *out, int out_cap);
 
    /* P5 read projection used by the existing audit provenance API/CLI.  The
     * evaluator and task/correction fields are exported verbatim; prose memory
     * content is never copied into the outcome overlay. */
-   int db2_work_outcomes_for_retrieval_json(const char *retrieval_event_id, char *out,
-                                            int out_cap);
+   int kb_store_work_outcomes_for_retrieval_json(const char *retrieval_event_id, char *out,
+                                                 int out_cap);
 
 #ifdef __cplusplus
 }

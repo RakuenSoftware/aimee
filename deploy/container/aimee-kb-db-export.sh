@@ -1,5 +1,5 @@
 #!/bin/sh
-# Move the aimee-kb internal DB2 to an external PostgreSQL server.
+# Move the aimee-kb internal KB_STORE to an external PostgreSQL server.
 #
 # The internal cluster (see aimee-kb-entrypoint.sh) is an ordinary PostgreSQL data
 # directory, so this is a plain dump/restore. It exists so outgrowing the embedded
@@ -44,7 +44,7 @@ safe_target=$(printf '%s' "$target" | sed -E \
     's#^(postgres(ql)?://[^:/@]+):[^@]*@#\1:<redacted>@#')
 
 : "${AIMEE_HOME:=/var/lib/aimee}"
-PGMAJOR="${AIMEE_DB2_PG_MAJOR:-18}"
+PGMAJOR="${AIMEE_KB_STORE_PG_MAJOR:-18}"
 PGBIN="/usr/lib/postgresql/$PGMAJOR/bin"
 PGDATA="$AIMEE_HOME/postgres"
 PGSOCK="$AIMEE_HOME/run"
@@ -67,7 +67,7 @@ if ! "$PGBIN/pg_isready" --host="$PGSOCK" --dbname=postgres --quiet 2>/dev/null;
     # stopped uncleanly, and pg_ctl's 60s default is shorter than the resulting
     # crash recovery. Timing out here aborts the export with the data intact but
     # unread; wait for recovery instead. See aimee-kb-entrypoint.sh.
-    export PGCTLTIMEOUT="${AIMEE_DB2_PGCTLTIMEOUT:-1800}"
+    export PGCTLTIMEOUT="${AIMEE_KB_STORE_PGCTLTIMEOUT:-1800}"
     "$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent \
         --options="-c listen_addresses='' -c unix_socket_directories=$PGSOCK" start
     started_here=1
@@ -94,9 +94,9 @@ if ! "$PGBIN/psql" "$target" --no-psqlrc --quiet --tuples-only \
 fi
 
 "$PGBIN/pg_dump" --host="$PGSOCK" --dbname="$DB" --format=custom --no-owner --no-acl \
-    --file=/tmp/aimee-db2-export.dump
+    --file=/tmp/aimee-kb_store-export.dump
 "$PGBIN/pg_restore" --dbname="$target" --no-owner --no-acl --exit-on-error \
-    /tmp/aimee-db2-export.dump
+    /tmp/aimee-kb_store-export.dump
 
 # Verify before destroying anything: compare exact row counts for every user
 # table. pg_stat_user_tables.n_live_tup is an estimate and can legitimately
@@ -113,7 +113,7 @@ if [ "$src_counts" != "$dst_counts" ]; then
     echo "--- target ---";   echo "$dst_counts"
     exit 1
 fi
-rm -f /tmp/aimee-db2-export.dump
+rm -f /tmp/aimee-kb_store-export.dump
 echo "verified: $(echo "$src_counts" | wc -l) tables match"
 
 if [ "$wipe" = 1 ]; then

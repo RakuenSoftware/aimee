@@ -10,17 +10,17 @@
 #include "canonical_index_internal.h"
 #include "code_index.h"
 #include "cross_repo_resolver.h" /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
-#include "db2.h"
-#include "db2_bounded_text.h"
-#include "db2_internal.h"
+#include "kb_store.h"
+#include "kb_store_bounded_text.h"
+#include "kb_store_internal.h"
 #include "entity_edges.h"     /* co_edited backfill: edge upsert / co_targets read */
 #include "index.h"            /* cochange_pairs_for_commit / cochange_is_hex_sha */
-#include "kb_runtime_state.h" /* db2_kb_purge_fence_active: commit-point fence check */
+#include "kb_runtime_state.h" /* kb_store_kb_purge_fence_active: commit-point fence check */
 #include "aimee.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 #include <ctype.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -234,7 +234,7 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
       return -1;
    memset(out, 0, sizeof(*out));
    snprintf(out->file, sizeof(out->file), "%s", file_path);
-   if (db2_code_index_blast_radius(project, file_path, out) != 0)
+   if (kb_store_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
    /* Expand with co_edited graph edges (weight > 3): files that historically
@@ -245,15 +245,15 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
       const char *match_name = slash ? slash + 1 : file_path;
 
       char co_buf[16][128];
-      int n = db2_entity_edge_co_targets(match_name, "co_edited", 3, co_buf, 16);
+      int n = kb_store_entity_edge_co_targets(match_name, "co_edited", 3, co_buf, 16);
       for (int b = 0; b < n && out->dependent_count < CI_MAX_DEPS; b++)
       {
          const char *related = co_buf[b];
          if (!related[0] || strcmp(related, match_name) == 0)
             continue;
          char resolved[MAX_PATH_LEN];
-         if (db2_code_index_unique_file_basename(project, related, resolved, sizeof(resolved)) !=
-                 1 ||
+         if (kb_store_code_index_unique_file_basename(project, related, resolved,
+                                                      sizeof(resolved)) != 1 ||
              strcmp(resolved, file_path) == 0)
             continue;
          int found = -1;
@@ -289,7 +289,7 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
       }
    }
 
-   db2_code_index_blast_radius_local_first(project, out);
+   kb_store_code_index_blast_radius_local_first(project, out);
 
    return 0;
 }
@@ -447,7 +447,7 @@ int canonical_index_project_stats(const char *project, int *files_out, int *defs
       *defs_out = 0;
    if (!project || !project[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -495,7 +495,7 @@ int canonical_index_project_lang_breakdown(const char *project, char *buf, size_
    buf[2] = '\0';
    if (!project || !project[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -554,12 +554,13 @@ int canonical_index_project_lang_breakdown(const char *project, char *buf, size_
 int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max, int enrich)
 {
-   /* Forward to db2_code_index — same SQL, same connection. */
-   return db2_code_index_code_search(query, project, out, max, enrich);
+   /* Forward to kb_store_code_index — same SQL, same connection. */
+   return kb_store_code_index_code_search(query, project, out, max, enrich);
 }
 
 int canonical_index_code_search_excluding_project(const char *query, const char *excluded_project,
                                                   code_search_hit_t *out, int max, int enrich)
 {
-   return db2_code_index_code_search_excluding_project(query, excluded_project, out, max, enrich);
+   return kb_store_code_index_code_search_excluding_project(query, excluded_project, out, max,
+                                                            enrich);
 }

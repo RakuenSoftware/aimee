@@ -14,7 +14,7 @@
  *     the caller's identifiers rather than filing a second intent
  */
 #include "modules/kb/c/management_identity_journal.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
@@ -57,33 +57,33 @@ static int parameter_index(const char *name)
    return n;
 }
 
-int db2_tenant_scope_begin(const kb_principal_t *principal, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *principal, int64_t team)
 {
    assert(principal && team == 7);
    return mock_begin_result;
 }
 
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    return mock_commit_failure ? -1 : 0;
 }
 
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    mock_rollback_count++;
 }
 
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return &mock_stmt;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
 
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *conn, const char *sql, aimee_pg_prepare_error_t *kind,
@@ -236,13 +236,13 @@ static void reset_mocks(void)
    mock_sqlstate = NULL;
 }
 
-static db2_identity_intent_operation_t make_operation(void)
+static kb_store_identity_intent_operation_t make_operation(void)
 {
-   db2_identity_intent_operation_t op;
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC,
-                                             "https://kb.example.test", "identity-key-1", 300,
-                                             "0123456789abcdef0123456789abcdef",
-                                             &op) == DB2_MANAGEMENT_ACTION_OK);
+   kb_store_identity_intent_operation_t op;
+   assert(kb_store_identity_intent_operation_init(7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC,
+                                                  "https://kb.example.test", "identity-key-1", 300,
+                                                  "0123456789abcdef0123456789abcdef",
+                                                  &op) == KB_STORE_MANAGEMENT_ACTION_OK);
    return op;
 }
 
@@ -259,16 +259,16 @@ static kb_principal_t make_principal(void)
 
 static void test_auth_mode_strings(void)
 {
-   assert(!strcmp(db2_identity_auth_mode_str(DB2_IDENTITY_AUTH_MODE_OIDC), "oidc"));
-   assert(!strcmp(db2_identity_auth_mode_str(DB2_IDENTITY_AUTH_MODE_PAM), "pam"));
-   assert(db2_identity_auth_mode_str((db2_identity_auth_mode_t)0) == NULL);
-   assert(db2_identity_auth_mode_str((db2_identity_auth_mode_t)99) == NULL);
+   assert(!strcmp(kb_store_identity_auth_mode_str(KB_STORE_IDENTITY_AUTH_MODE_OIDC), "oidc"));
+   assert(!strcmp(kb_store_identity_auth_mode_str(KB_STORE_IDENTITY_AUTH_MODE_PAM), "pam"));
+   assert(kb_store_identity_auth_mode_str((kb_store_identity_auth_mode_t)0) == NULL);
+   assert(kb_store_identity_auth_mode_str((kb_store_identity_auth_mode_t)99) == NULL);
 }
 
 static void test_operation_init(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    assert(strlen(op.correlation_id) == 64 && strlen(op.jti) == 64);
    assert(strlen(op.token_jti) == 64);
    /* Three independent draws: no identifier may be derivable from another, or a
@@ -276,47 +276,47 @@ static void test_operation_init(void)
    assert(strcmp(op.correlation_id, op.jti) && strcmp(op.correlation_id, op.token_jti) &&
           strcmp(op.jti, op.token_jti));
    assert(op.team_id == 7 && op.ttl_seconds == 300);
-   assert(op.auth_mode == DB2_IDENTITY_AUTH_MODE_OIDC);
+   assert(op.auth_mode == KB_STORE_IDENTITY_AUTH_MODE_OIDC);
    assert(!strcmp(op.target_server_id, "server-a"));
    assert(!strcmp(op.installation_id, "0123456789abcdef0123456789abcdef"));
 
    /* Rejected inputs. Each one is a schema CHECK the C side refuses first. */
-   db2_identity_intent_operation_t bad;
-   assert(db2_identity_intent_operation_init(0, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             300, "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_operation_init(7, "server-a", (db2_identity_auth_mode_t)0, "kb", "k",
-                                             300, "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
+   kb_store_identity_intent_operation_t bad;
+   assert(kb_store_identity_intent_operation_init(
+              0, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb", "k", 300,
+              "0123456789abcdef0123456789abcdef", &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(
+              7, "server-a", (kb_store_identity_auth_mode_t)0, "kb", "k", 300,
+              "0123456789abcdef0123456789abcdef", &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
    /* A TTL the server's verifier would throw away. */
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             DB2_IDENTITY_TTL_MAX_SECONDS + 1,
-                                             "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             0, "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC,
+                                                  "kb", "k", KB_STORE_IDENTITY_TTL_MAX_SECONDS + 1,
+                                                  "0123456789abcdef0123456789abcdef",
+                                                  &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC,
+                                                  "kb", "k", 0, "0123456789abcdef0123456789abcdef",
+                                                  &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
    /* A kid outside the token charset, and a non-hex installation id. */
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb",
-                                             "bad/kid", 300, "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             300, "not-hex",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_operation_init(7, NULL, DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k", 300,
-                                             "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             300, "0123456789abcdef0123456789abcdef",
-                                             NULL) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(
+              7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb", "bad/kid", 300,
+              "0123456789abcdef0123456789abcdef", &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC,
+                                                  "kb", "k", 300, "not-hex",
+                                                  &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(7, NULL, KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb",
+                                                  "k", 300, "0123456789abcdef0123456789abcdef",
+                                                  &bad) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_operation_init(
+              7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb", "k", 300,
+              "0123456789abcdef0123456789abcdef", NULL) == KB_STORE_MANAGEMENT_ACTION_INVALID);
 
    /* A CSPRNG failure must produce no operation at all. */
    mock_random_failure = 1;
    memset(&bad, 0xff, sizeof(bad));
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_OIDC, "kb", "k",
-                                             300, "0123456789abcdef0123456789abcdef",
-                                             &bad) == DB2_MANAGEMENT_ACTION_UNAVAILABLE);
-   db2_identity_intent_operation_t zero;
+   assert(kb_store_identity_intent_operation_init(
+              7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_OIDC, "kb", "k", 300,
+              "0123456789abcdef0123456789abcdef", &bad) == KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE);
+   kb_store_identity_intent_operation_t zero;
    memset(&zero, 0, sizeof(zero));
    assert(!memcmp(&bad, &zero, sizeof(bad)));
    mock_random_failure = 0;
@@ -325,10 +325,10 @@ static void test_operation_init(void)
 static void test_start_happy_path(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   kb_store_identity_intent_t out;
+   assert(kb_store_identity_intent_start(&principal, &op, &out) == KB_STORE_MANAGEMENT_ACTION_OK);
 
    /* Binding order is the SQL signature's, and the auth mode goes out as its
     * wire string in slot 6 — not as an integer, and not in the subject's place
@@ -347,7 +347,7 @@ static void test_start_happy_path(void)
    assert(out.replayed == 0);
    assert(!strcmp(out.correlation_id, op.correlation_id));
    assert(!strcmp(out.token_jti, op.token_jti));
-   assert(out.auth_mode == DB2_IDENTITY_AUTH_MODE_OIDC);
+   assert(out.auth_mode == KB_STORE_IDENTITY_AUTH_MODE_OIDC);
    /* The subject is whatever the database resolved from the scope. */
    assert(!strcmp(out.subject, "oidc:https%3A//issuer:alice"));
    assert(!strcmp(out.audience, out.target_server_id));
@@ -355,40 +355,45 @@ static void test_start_happy_path(void)
    assert(mock_rollback_count == 0);
 
    /* PAM rides the identical path; only the recorded mode differs. */
-   assert(db2_identity_intent_operation_init(7, "server-a", DB2_IDENTITY_AUTH_MODE_PAM,
-                                             "https://kb.example.test", "identity-key-1", 300,
-                                             "0123456789abcdef0123456789abcdef",
-                                             &op) == DB2_MANAGEMENT_ACTION_OK);
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   assert(kb_store_identity_intent_operation_init(7, "server-a", KB_STORE_IDENTITY_AUTH_MODE_PAM,
+                                                  "https://kb.example.test", "identity-key-1", 300,
+                                                  "0123456789abcdef0123456789abcdef",
+                                                  &op) == KB_STORE_MANAGEMENT_ACTION_OK);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) == KB_STORE_MANAGEMENT_ACTION_OK);
    assert(!strcmp(bound_text[6], "pam"));
-   assert(out.auth_mode == DB2_IDENTITY_AUTH_MODE_PAM);
+   assert(out.auth_mode == KB_STORE_IDENTITY_AUTH_MODE_PAM);
 }
 
 static void test_start_rejects_bad_arguments(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
-   assert(db2_identity_intent_start(NULL, &op, &out) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_start(&principal, NULL, &out) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_identity_intent_start(&principal, &op, NULL) == DB2_MANAGEMENT_ACTION_INVALID);
+   kb_store_identity_intent_t out;
+   assert(kb_store_identity_intent_start(NULL, &op, &out) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_start(&principal, NULL, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_start(&principal, &op, NULL) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
 
    /* A tampered operation record — a token_jti below the schema's minimum, and a
     * correlation id that is not canonical 64-hex. */
-   db2_identity_intent_operation_t tampered = op;
+   kb_store_identity_intent_operation_t tampered = op;
    memset(tampered.token_jti, 0, sizeof(tampered.token_jti));
    strcpy(tampered.token_jti, "short");
-   assert(db2_identity_intent_start(&principal, &tampered, &out) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_start(&principal, &tampered, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
 
    tampered = op;
    tampered.correlation_id[10] = 'z';
-   assert(db2_identity_intent_start(&principal, &tampered, &out) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_start(&principal, &tampered, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
 
    /* A non-zero tail past the terminator must not slip through. */
    tampered = op;
    tampered.kid[strlen(tampered.kid) + 2] = 'x';
-   assert(db2_identity_intent_start(&principal, &tampered, &out) == DB2_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_identity_intent_start(&principal, &tampered, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
 
    /* Nothing above should have opened a transaction. */
    assert(mock_rollback_count == 0);
@@ -397,47 +402,50 @@ static void test_start_rejects_bad_arguments(void)
 static void test_start_denies_unauthenticated_scope(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
-   mock_begin_result = DB2_ERR_TENANT_UNAUTHENTICATED;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_DENIED);
-   mock_begin_result = DB2_ERR_TENANT_DENIED;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_DENIED);
+   kb_store_identity_intent_t out;
+   mock_begin_result = KB_STORE_ERR_TENANT_UNAUTHENTICATED;
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_DENIED);
+   mock_begin_result = KB_STORE_ERR_TENANT_DENIED;
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_DENIED);
    mock_begin_result = -99;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_UNAVAILABLE);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE);
 }
 
 static void test_start_maps_sqlstates(void)
 {
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
+   kb_store_identity_intent_t out;
    struct
    {
       const char *state;
-      db2_management_action_result_t expected;
+      kb_store_management_action_result_t expected;
    } cases[] = {
-       {"22023", DB2_MANAGEMENT_ACTION_INVALID},
+       {"22023", KB_STORE_MANAGEMENT_ACTION_INVALID},
        /* An ungranted subject and a non-member both arrive as 42501. */
-       {"42501", DB2_MANAGEMENT_ACTION_DENIED},
-       {"28000", DB2_MANAGEMENT_ACTION_DENIED},
-       {"23505", DB2_MANAGEMENT_ACTION_CONFLICT},
-       {"40001", DB2_MANAGEMENT_ACTION_RETRY},
-       {"25006", DB2_MANAGEMENT_ACTION_RETRY},
-       {"55000", DB2_MANAGEMENT_ACTION_INTEGRITY},
-       {"P0002", DB2_MANAGEMENT_ACTION_INTEGRITY},
-       {"XX000", DB2_MANAGEMENT_ACTION_UNAVAILABLE},
+       {"42501", KB_STORE_MANAGEMENT_ACTION_DENIED},
+       {"28000", KB_STORE_MANAGEMENT_ACTION_DENIED},
+       {"23505", KB_STORE_MANAGEMENT_ACTION_CONFLICT},
+       {"40001", KB_STORE_MANAGEMENT_ACTION_RETRY},
+       {"25006", KB_STORE_MANAGEMENT_ACTION_RETRY},
+       {"55000", KB_STORE_MANAGEMENT_ACTION_INTEGRITY},
+       {"P0002", KB_STORE_MANAGEMENT_ACTION_INTEGRITY},
+       {"XX000", KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE},
    };
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
    {
       reset_mocks();
       mock_sqlstate = cases[i].state;
       memset(&out, 0xff, sizeof(out));
-      assert(db2_identity_intent_start(&principal, &op, &out) == cases[i].expected);
+      assert(kb_store_identity_intent_start(&principal, &op, &out) == cases[i].expected);
       /* Every refusal rolls back and clears the output. */
       assert(mock_rollback_count == 1);
-      db2_identity_intent_t zero;
+      kb_store_identity_intent_t zero;
       memset(&zero, 0, sizeof(zero));
       assert(!memcmp(&out, &zero, sizeof(out)));
    }
@@ -445,9 +453,9 @@ static void test_start_maps_sqlstates(void)
 
 static void test_start_rejects_mismatched_row(void)
 {
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
+   kb_store_identity_intent_t out;
 
    /* A BARE username is a valid subject — the PAM login's form, and what
     * kb_identity_token.h documents the `sub` as. It must round-trip, or the C
@@ -456,14 +464,15 @@ static void test_start_rejects_mismatched_row(void)
     * are mutually exclusive, so there is no namespace to collide with. */
    reset_mocks();
    mock_bad_field = 6;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) == KB_STORE_MANAGEMENT_ACTION_OK);
    assert(!strcmp(out.subject, "alice"));
 
    /* But not anything unprefixed: a leading '-' is not a username, and admitting
     * it would widen the subject column to arbitrary text. */
    reset_mocks();
    mock_bad_field = 7;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_INTEGRITY);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
 
    /* Each perturbation is a way the returned row could disagree with what was
     * asked for; every one must be INTEGRITY rather than a usable intent. */
@@ -471,34 +480,37 @@ static void test_start_rejects_mismatched_row(void)
    {
       reset_mocks();
       mock_bad_field = field;
-      assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_INTEGRITY);
+      assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+             KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
       assert(mock_rollback_count == 1);
    }
 
    /* A column count that is not the function's RETURNS TABLE width. */
    reset_mocks();
    mock_bad_shape = 1;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_INTEGRITY);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
 
    /* More than one row from a single-row function. */
    reset_mocks();
    mock_duplicate_row = 1;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_INTEGRITY);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
 }
 
 static void test_start_commit_ambiguous(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
+   kb_store_identity_intent_t out;
    mock_commit_failure = 1;
    memset(&out, 0xff, sizeof(out));
-   assert(db2_identity_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
    /* Outputs are unusable, but the caller's operation is untouched so the retry
     * reuses the same identifiers instead of filing a second intent. */
-   db2_identity_intent_operation_t again = make_operation();
+   kb_store_identity_intent_operation_t again = make_operation();
    assert(strcmp(again.correlation_id, op.correlation_id));
    assert(strlen(op.correlation_id) == 64);
 }
@@ -506,11 +518,12 @@ static void test_start_commit_ambiguous(void)
 static void test_start_prepare_failure(void)
 {
    reset_mocks();
-   db2_identity_intent_operation_t op = make_operation();
+   kb_store_identity_intent_operation_t op = make_operation();
    kb_principal_t principal = make_principal();
-   db2_identity_intent_t out;
+   kb_store_identity_intent_t out;
    mock_prepare_failure = 1;
-   assert(db2_identity_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_UNAVAILABLE);
+   assert(kb_store_identity_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE);
    assert(mock_rollback_count == 1);
 }
 

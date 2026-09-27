@@ -10,13 +10,13 @@
  *
  * Two ontology sources exist (mirroring the config-table registry-cache idiom):
  *   - the in-code SEED_ONTOLOGY here, always available (DB-outage fallback), and
- *   - the live `rel_types` DB2 table (db2/rel_types.c) which overlays/extends the
+ *   - the live `rel_types` KB_STORE table (kb_store/rel_types.c) which overlays/extends the
  *     seed and can carry operator/promoted (§2) types.
  * This header is the pure, DB-free core: the seed table, name normalization, kind
  * validation, and ontology self-validation. It links without libpq so it is unit-
  * testable in isolation.
  *
- * Entity kinds reuse memory_node_kind_t (DB2 graph_kinds.h); NODE_OTHER is the
+ * Entity kinds reuse memory_node_kind_t (KB_STORE graph_kinds.h); NODE_OTHER is the
  * ANY wildcard (matching the existing schema-rule convention) and NODE_SCALAR is
  * a value-typed object (age=30). */
 #ifndef DEC_REL_TYPES_H
@@ -117,7 +117,7 @@ extern "C"
    int rel_types_alias_count(void);
    const char *rel_types_alias_at(int i, const char **canonical_out);
 
-   /* Seed iteration (used to upsert the seed into the DB2 table). */
+   /* Seed iteration (used to upsert the seed into the KB_STORE table). */
    int rel_types_seed_count(void);
    const rel_type_def_t *rel_types_seed_at(int i);
 
@@ -140,7 +140,7 @@ extern "C"
     * Exercised by a unit test so a malformed seed fails the build's tests. */
    int rel_types_self_validate(char *err, size_t errlen);
 
-   /* enum <-> text (for the DB2 table columns + CLI). from_text is tolerant:
+   /* enum <-> text (for the KB_STORE table columns + CLI). from_text is tolerant:
     * unknown correction -> CORR_SUPERSEDE; unknown sensitivity -> SENS_PII
     * (fail closed, §1/§7). */
    const char *correction_behavior_to_text(correction_behavior_t b);

@@ -131,7 +131,7 @@ SQL NULL remains distinct from an empty value.
 ## Native knowledge sessions and upgrades
 
 KB owns its knowledge schema and SQL algorithms under `src/modules/kb/c`. The
-retired Db2 module, wire contract, standalone process and native connection pool
+retired KbStore module, wire contract, standalone process and native connection pool
 have been removed. Its former principal 29 remains reserved; KB startup archives
 persisted grants for that identity without transferring their permissions.
 

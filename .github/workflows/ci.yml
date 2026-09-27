@@ -821,7 +821,7 @@ jobs:
       # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
       # needs CREATEDB and a connection to `postgres` -- both true for the image's
       # bootstrap superuser.
-      AIMEE_TEST_DB2_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
+      AIMEE_TEST_KB_STORE_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
       # Make the content-scope proof exercise PostgreSQL provider session connections as the
       # production NOBYPASSRLS role, with a hermetic 768-dimensional embedder.
       # Each test process receives its own disposable database clone.
@@ -919,7 +919,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      AIMEE_DB2_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+      AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
       # Temp-table tests must not fall through to packaged owner relations when
       # they deliberately drop a relation to exercise unavailable storage.
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
@@ -967,10 +967,12 @@ jobs:
           exit 1
       - name: Initialize the isolated knowledge replay schema
         run: |
-          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
-          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
-          sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f -
-          psql -X -v ON_ERROR_STOP=1 "$AIMEE_DB2_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
+          sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f -
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
+      - name: Verify persisted erasure state upgrade and idempotence
+        run: python3 tests/e2e/knowledge-schema-upgrade.py
       - name: Replay memory ownership and PostgreSQL sessions
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
       - name: Replay Go memory ownership and isolated evaluator contracts
@@ -2094,7 +2096,7 @@ jobs:
         env:
           PGPASSWORD: aimee
           AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_DB2_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
+          AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
           AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
           AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
           AIMEE_DB_TEST_REQUIRED: '1'

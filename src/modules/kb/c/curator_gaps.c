@@ -1,7 +1,7 @@
-/* db2/curator_gaps.c: corpus gap detection.
+/* kb_store/curator_gaps.c: corpus gap detection.
  *
  * Stage 12: detect undefined_entity and dangling_reference gaps in the corpus,
- * promote them to curiosity_items via db2_curiosity_promote_corpus_gap().
+ * promote them to curiosity_items via kb_store_curiosity_promote_corpus_gap().
  */
 
 #ifndef _GNU_SOURCE
@@ -11,7 +11,7 @@
 #include "curator_gaps.h"
 #include "artifacts.h"
 #include "curiosity.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -23,7 +23,7 @@
 
 static int gap_exists(const char *subject, const char *gap_kind)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !subject || !gap_kind)
       return 0;
    char err[CG_ERRBUF] = "";
@@ -51,7 +51,7 @@ static int write_gap_artifact(const char *subject, const char *gap_kind, const c
       return 0;
 
    char artifact_id[37];
-   db2_artifact_gen_id(artifact_id, sizeof(artifact_id));
+   kb_store_artifact_gen_id(artifact_id, sizeof(artifact_id));
 
    char payload[512];
    snprintf(payload, sizeof(payload),
@@ -59,17 +59,17 @@ static int write_gap_artifact(const char *subject, const char *gap_kind, const c
             "\"evidence_refs\":[\"%s\"]}",
             subject, gap_kind, evidence_ref);
 
-   if (db2_artifact_write(artifact_id, "gap", "proposed", "global", "global", "corpus.gaps", 0.6,
-                          payload) != 0)
+   if (kb_store_artifact_write(artifact_id, "gap", "proposed", "global", "global", "corpus.gaps",
+                               0.6, payload) != 0)
       return -1;
 
-   db2_curiosity_promote_corpus_gap(artifact_id, gap_kind, subject, evidence_ref);
+   kb_store_curiosity_promote_corpus_gap(artifact_id, gap_kind, subject, evidence_ref);
    return 1;
 }
 
 static int detect_undefined_entity_gaps(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CG_ERRBUF] = "";
@@ -107,7 +107,7 @@ static int detect_undefined_entity_gaps(void)
 
 static int detect_dangling_ref_gaps(int64_t doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0)
       return -1;
    char err[CG_ERRBUF] = "";
@@ -144,7 +144,7 @@ static int detect_dangling_ref_gaps(int64_t doc_id)
    return count;
 }
 
-int db2_corpus_detect_gaps(int64_t doc_id)
+int kb_store_corpus_detect_gaps(int64_t doc_id)
 {
    if (doc_id <= 0)
       return -1;

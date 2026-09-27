@@ -11,7 +11,7 @@
 #define REPLAY_MAX_HITS 256
 
 /* Process-wide backend seam (see header). NULL => no code index here => degrade.
- * The engine references NO index/db2/kb symbol directly, so it links into every
+ * The engine references NO index/kb_store/kb symbol directly, so it links into every
  * binary; the server installs a kb_client-backed backend at startup. */
 static const replay_backend_t *g_backend = NULL;
 

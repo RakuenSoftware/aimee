@@ -1,5 +1,5 @@
 /* test_kb_graph.c: unit tests for the code-graph P1 build orchestrator and the
- * derived edge-provenance tag. DB2 is stubbed so the idempotency control flow
+ * derived edge-provenance tag. KB_STORE is stubbed so the idempotency control flow
  * (skip-when-unchanged vs publish-a-new-generation) is driven deterministically
  * without a live Postgres. */
 #include "kb_service_graph.h"
@@ -11,55 +11,55 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- controllable DB2 stubs ---- */
+/* ---- controllable KB_STORE stubs ---- */
 static char g_fp[64] = "";      /* fingerprint the project "currently" hashes to */
 static char g_visible[64] = ""; /* fingerprint stored on the visible generation  */
-static int g_synced = 0;        /* db2_code_projection_sync_project call count    */
-static int g_published = 0;     /* db2_code_projection_generation_publish count   */
+static int g_synced = 0;        /* kb_store_code_projection_sync_project call count    */
+static int g_published = 0;     /* kb_store_code_projection_generation_publish count   */
 static int g_aborted = 0;
 
-int db2_is_initialized(void)
+int kb_store_is_initialized(void)
 {
    return 1;
 }
-int db2_code_projection_project_fingerprint(const char *project, char *out, size_t out_len)
+int kb_store_code_projection_project_fingerprint(const char *project, char *out, size_t out_len)
 {
    (void)project;
    snprintf(out, out_len, "%s", g_fp);
    return g_fp[0] ? 0 : -1; /* empty g_fp simulates a fingerprint error */
 }
-int db2_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
+int kb_store_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
 {
    (void)project;
    snprintf(out, out_len, "%s", g_visible);
    return 0;
 }
-int64_t db2_code_projection_generation_create(const char *project)
+int64_t kb_store_code_projection_generation_create(const char *project)
 {
    (void)project;
    return 42;
 }
-int db2_code_projection_generation_set_source_hash(int64_t gen, const char *h)
+int kb_store_code_projection_generation_set_source_hash(int64_t gen, const char *h)
 {
    (void)gen;
    (void)h;
    return 0;
 }
-int64_t db2_code_projection_sync_project(const char *project, int64_t gen)
+int64_t kb_store_code_projection_sync_project(const char *project, int64_t gen)
 {
    (void)project;
    (void)gen;
    g_synced++;
    return 7; /* pretend 7 edges */
 }
-int db2_code_projection_generation_publish(int64_t gen, const char *project)
+int kb_store_code_projection_generation_publish(int64_t gen, const char *project)
 {
    (void)gen;
    (void)project;
    g_published++;
    return 0;
 }
-int db2_code_projection_generation_abort(int64_t gen, const char *err)
+int kb_store_code_projection_generation_abort(int64_t gen, const char *err)
 {
    (void)gen;
    (void)err;
@@ -75,7 +75,7 @@ static int64_t g_persist_gen = 0;
 static int g_persist_n = -1;
 static code_projection_community_t g_persist_rows[64];
 
-int db2_code_projection_list_edges_for_gen(int64_t gen, code_projection_edge_t *out, int max)
+int kb_store_code_projection_list_edges_for_gen(int64_t gen, code_projection_edge_t *out, int max)
 {
    (void)gen;
    int n = g_n_edges < max ? g_n_edges : max;
@@ -83,8 +83,8 @@ int db2_code_projection_list_edges_for_gen(int64_t gen, code_projection_edge_t *
       out[i] = g_edges[i];
    return n;
 }
-int db2_code_projection_communities_replace(int64_t gen, const char *project,
-                                            const code_projection_community_t *rows, int n)
+int kb_store_code_projection_communities_replace(int64_t gen, const char *project,
+                                                 const code_projection_community_t *rows, int n)
 {
    (void)project;
    g_persist_gen = gen;
@@ -107,20 +107,20 @@ struct cJSON *jo_ok(void)
 {
    return 0;
 }
-int db2_entity_edge_explain_by_entity(const char *e, void *out, int n)
+int kb_store_entity_edge_explain_by_entity(const char *e, void *out, int n)
 {
    (void)e;
    (void)out;
    (void)n;
    return 0;
 }
-int db2_entity_node_get(const char *e, void *out)
+int kb_store_entity_node_get(const char *e, void *out)
 {
    (void)e;
    (void)out;
    return -1;
 }
-struct cJSON *db2_kb_service_code_audit_json(const char *p, int n)
+struct cJSON *kb_store_kb_service_code_audit_json(const char *p, int n)
 {
    (void)p;
    (void)n;
@@ -188,7 +188,7 @@ static void test_idempotent_build(void)
 
 /* After a publish, the derived community membership is computed from the
  * generation's edges and persisted (keyed by generation id). Drives the real
- * build path with a two-triangle fixture through the DB2 stubs. */
+ * build path with a two-triangle fixture through the KB_STORE stubs. */
 static void test_community_persist(void)
 {
    code_projection_edge_t edges[] = {

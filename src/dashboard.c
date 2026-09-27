@@ -29,7 +29,7 @@
 /* api_metrics / api_delegations / api_vector_status moved to
  * src/server/dashboard_server.c so they can link into aimee-server (the only
  * caller of those three from the daemon side). The rest of dashboard.c
- * stays here because it reads DB2 directly. */
+ * stays here because it reads KB_STORE directly. */
 
 char *api_token_audit(void)
 {

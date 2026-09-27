@@ -1,7 +1,7 @@
 #include "kb_vault_rotation.h"
 
 #include "org_vault_rotation.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "vault_server_key.h"
 
 #include <limits.h>
@@ -22,7 +22,7 @@ int kb_vault_rotation_classify(uint64_t anchor_version, uint64_t from_version, u
 static int rotation_scope_begin(const kb_principal_t *caller, int64_t team_id, char actor[576])
 {
    if (!caller || kb_identity_key(caller, actor, 576) != 0 ||
-       db2_tenant_scope_begin(caller, team_id) != 0)
+       kb_store_tenant_scope_begin(caller, team_id) != 0)
       return -1;
    return 0;
 }
@@ -31,10 +31,10 @@ static int rotation_scope_finish(int rc)
 {
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit() == 0 ? 0 : -1;
+   return kb_store_tenant_scope_commit() == 0 ? 0 : -1;
 }
 
 int kb_vault_rotation_start(const kb_principal_t *caller, int64_t team_id, const char *key_id,
@@ -43,7 +43,7 @@ int kb_vault_rotation_start(const kb_principal_t *caller, int64_t team_id, const
 {
    if (from_version < 1 || from_version == INT64_MAX)
       return -1;
-   uint8_t att[DB2_VAULT_ROTATION_ATTEST_MAX];
+   uint8_t att[KB_STORE_VAULT_ROTATION_ATTEST_MAX];
    size_t att_len = 0;
    uint64_t anchor = 0;
    int rc = vault_hwm_read(key_id, &anchor, att, sizeof(att), &att_len);
@@ -53,8 +53,8 @@ int kb_vault_rotation_start(const kb_principal_t *caller, int64_t team_id, const
    char actor[576];
    if (rotation_scope_begin(caller, team_id, actor) != 0)
       return -1;
-   rc = db2_vault_rotation_start(actor, key_id, principal, team_id > 0, team_id, agent, cred,
-                                 from_version, compromise, out_rotation_id);
+   rc = kb_store_vault_rotation_start(actor, key_id, principal, team_id > 0, team_id, agent, cred,
+                                      from_version, compromise, out_rotation_id);
    return rotation_scope_finish(rc);
 }
 
@@ -67,7 +67,8 @@ int kb_vault_rotation_stage(const kb_principal_t *caller, int64_t team_id, int64
    if (rotation_scope_begin(caller, team_id, actor) != 0)
       return -1;
    int64_t version = 0;
-   int rc = db2_vault_rotation_stage(actor, rotation_id, wrapped_dek, wrapped_dek_len, nonce,
+   int rc =
+       kb_store_vault_rotation_stage(actor, rotation_id, wrapped_dek, wrapped_dek_len, nonce,
                                      nonce_len, ciphertext, ciphertext_len, tag, tag_len, &version);
    return rotation_scope_finish(rc);
 }
@@ -79,17 +80,17 @@ int kb_vault_rotation_mark_probed(const kb_principal_t *caller, int64_t team_id,
    if (rotation_scope_begin(caller, team_id, actor) != 0)
       return -1;
    return rotation_scope_finish(
-       db2_vault_rotation_transition(actor, rotation_id, "staged", "probed", ""));
+       kb_store_vault_rotation_transition(actor, rotation_id, "staged", "probed", ""));
 }
 
 int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t team_id,
                                          int64_t rotation_id)
 {
-   db2_vault_rotation_row_t row;
+   kb_store_vault_rotation_row_t row;
    char actor[576];
    if (rotation_scope_begin(caller, team_id, actor) != 0)
       return -1;
-   int rc = db2_vault_rotation_get(rotation_id, &row);
+   int rc = kb_store_vault_rotation_get(rotation_id, &row);
    if (rotation_scope_finish(rc) != 0)
       return -1;
    if (strcmp(row.state, "activated") == 0)
@@ -98,7 +99,7 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
    {
       if (rotation_scope_begin(caller, team_id, actor) != 0)
          return -1;
-      rc = db2_vault_rotation_transition(actor, rotation_id, "probed", "activating", "");
+      rc = kb_store_vault_rotation_transition(actor, rotation_id, "probed", "activating", "");
       if (rotation_scope_finish(rc) != 0)
          return -1;
       memcpy(row.state, "activating", sizeof("activating"));
@@ -106,7 +107,7 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
    if (strcmp(row.state, "activating") != 0 || row.from_version < 1 || row.to_version < 1)
       return -1;
 
-   uint8_t att[DB2_VAULT_ROTATION_ATTEST_MAX];
+   uint8_t att[KB_STORE_VAULT_ROTATION_ATTEST_MAX];
    size_t att_len = 0;
    uint64_t anchor = 0;
    if (vault_hwm_read(row.key_id, &anchor, att, sizeof(att), &att_len) != 0)
@@ -137,7 +138,7 @@ int kb_vault_rotation_activate_or_resume(const kb_principal_t *caller, int64_t t
       OPENSSL_cleanse(att, sizeof(att));
       return -1;
    }
-   rc = db2_vault_rotation_finalize(actor, rotation_id, att, att_len);
+   rc = kb_store_vault_rotation_finalize(actor, rotation_id, att, att_len);
    OPENSSL_cleanse(att, sizeof(att));
    return rotation_scope_finish(rc) == 0 ? KB_VAULT_ROTATION_COMPLETE : -1;
 }

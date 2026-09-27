@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 /* DB-backed stats / data-gathering for the cross-repo resolver (S3). These run
- * over db2 (Postgres in production; the sqlite test shim where the SQL is kept
+ * over kb_store (Postgres in production; the sqlite test shim where the SQL is kept
  * portable -- plain SELECT/GROUP BY/ON CONFLICT, no JSONB/to_char) and feed the
  * pure S2a/S2b core. S4 composes candidate generation + classification.
  *
@@ -34,35 +34,35 @@
  * TRUSTED repos only: callee_repo_count (# trusted repos where S is a callee),
  * definer_repo_count (# trusted repos defining S), caller_file_pct (% of A's
  * files where S is a callee). Fills *out. Returns 0 on success, -1 on error. */
-int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
-                                  xrepo_distinct_stats_t *out);
+int kb_store_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
+                                       xrepo_distinct_stats_t *out);
 
 /* §3.3 recompute the blocked_symbols set over TRUSTED repos: a symbol is blocked
  * when it is a callee in >= k repos OR defined in >= m repos (length >= len_min
  * is required to be considered distinctive, so shorter names are implicitly
  * blocked at query time, not stored). Replaces the table contents and bumps
  * cross_repo_meta.blocked_symbols_version. Returns rows written, -1 on error. */
-int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min);
+int kb_store_cross_repo_recompute_blocked_symbols(int k, int m, int len_min);
 
 /* §3.3 membership test against the materialized blocked_symbols set for `lang`
  * (and the lang='' all-languages rows). Returns 1 = blocked, 0 = not, -1 error. */
-int db2_cross_repo_symbol_blocked(const char *symbol, const char *lang);
+int kb_store_cross_repo_symbol_blocked(const char *symbol, const char *lang);
 
 /* §4.1 per-repo symbol-table hash: FNV-1a over the repo's canonicalized
  * (terms,file_exports,file_imports) rows. out buffer must be >= 17 bytes
  * (16 hex + NUL). Returns 0 on success, -1 on error. */
-int db2_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap);
+int kb_store_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap);
 
 /* §4.1 repo_set_hash: FNV-1a over the sorted (name,trust,symbol-table-hash) of
  * all registered repos; also written into cross_repo_meta.repo_set_hash. out
  * buffer must be >= 17 bytes. Returns 0 on success, -1 on error. */
-int db2_cross_repo_repo_set_hash(char *out, size_t cap);
+int kb_store_cross_repo_repo_set_hash(char *out, size_t cap);
 
 /* Read the current global version stamp components (§4.1) from cross_repo_meta:
  * trust_epoch, blocked_symbols_version, and the stored repo_set_hash. Any out
  * pointer may be NULL. Returns 0 on success, -1 on error. */
-int db2_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
-                             char *repo_set_hash, size_t cap);
+int kb_store_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
+                                  char *repo_set_hash, size_t cap);
 
 /* §0/S7: apply a per-repo trust change transactionally and audit it. Reads the
  * prior trust (the project must already exist), UPDATEs projects.trust, and --
@@ -74,9 +74,9 @@ int db2_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_vers
  * prior_cap bytes) receives the prior trust value; *changed_out (optional) is
  * set to 1 iff the trust value actually changed. Returns 0 = applied,
  * 1 = no such project, -1 = DB error / bad argument. */
-int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
-                             const char *request_id, char *prior_out, size_t prior_cap,
-                             int *changed_out);
+int kb_store_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                                  const char *request_id, char *prior_out, size_t prior_cap,
+                                  int *changed_out);
 
 /* NOTE: repo descriptors (manifest module_id parsing for the §3.7 resolver) and
  * the §4.2 candidate-generation query are orchestration-coupled and validated

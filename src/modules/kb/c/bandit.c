@@ -1,25 +1,25 @@
-/* db2/bandit.c: DB2 accessors for contextual bandit decision logs and arm stats.
+/* kb_store/bandit.c: KB_STORE accessors for contextual bandit decision logs and arm stats.
  * See
  * docs/proposals/accepted/contextual-bandits-and-counterfactual-replay.md
  */
 
 #include "bandit.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
-#include "../support/db2_log.h" /* aimee_log */
+#include "../support/kb_store_log.h" /* aimee_log */
 
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-int db2_bandit_decision_insert(const char *id, const char *decision_point, const char *arm_id,
-                               const char *context_hash, double propensity, int is_exploration)
+int kb_store_bandit_decision_insert(const char *id, const char *decision_point, const char *arm_id,
+                                    const char *context_hash, double propensity, int is_exploration)
 {
    if (!id || !decision_point || !arm_id)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -50,8 +50,8 @@ int db2_bandit_decision_insert(const char *id, const char *decision_point, const
    return 0;
 }
 
-int db2_bandit_explore_stats(const char *decision_point, int window_seconds,
-                             long long *n_explore_out, long long *n_total_out)
+int kb_store_bandit_explore_stats(const char *decision_point, int window_seconds,
+                                  long long *n_explore_out, long long *n_total_out)
 {
    if (n_explore_out)
       *n_explore_out = 0;
@@ -60,7 +60,7 @@ int db2_bandit_explore_stats(const char *decision_point, int window_seconds,
    if (!decision_point)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -102,12 +102,12 @@ int db2_bandit_explore_stats(const char *decision_point, int window_seconds,
    return 0;
 }
 
-int db2_bandit_decision_close(const char *id, double reward)
+int kb_store_bandit_decision_close(const char *id, double reward)
 {
    if (!id)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -131,13 +131,13 @@ int db2_bandit_decision_close(const char *id, double reward)
    return 0;
 }
 
-int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
-                              db2_bandit_arm_stats_t *out)
+int kb_store_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
+                                   kb_store_bandit_arm_stats_t *out)
 {
    if (!decision_point || !arm_id || !out)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -178,13 +178,14 @@ int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
    return found ? 0 : -1;
 }
 
-int db2_bandit_arm_stats_update(const char *decision_point, const char *arm_id, double reward_delta,
-                                double posterior_alpha, double posterior_beta)
+int kb_store_bandit_arm_stats_update(const char *decision_point, const char *arm_id,
+                                     double reward_delta, double posterior_alpha,
+                                     double posterior_beta)
 {
    if (!decision_point || !arm_id)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -268,7 +269,7 @@ static int bandit_emit_string_array(aimee_pg_stmt_t *st, char *buf, size_t len)
    return 0;
 }
 
-int db2_bandit_decision_points_list(char *buf, size_t len)
+int kb_store_bandit_decision_points_list(char *buf, size_t len)
 {
    if (!buf || len < 3)
       return -1;
@@ -276,7 +277,7 @@ int db2_bandit_decision_points_list(char *buf, size_t len)
    buf[1] = ']';
    buf[2] = '\0';
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -295,7 +296,7 @@ int db2_bandit_decision_points_list(char *buf, size_t len)
    return 0;
 }
 
-int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
+int kb_store_bandit_arms_list(const char *decision_point, char *buf, size_t len)
 {
    if (!decision_point || !buf || len < 3)
       return -1;
@@ -303,7 +304,7 @@ int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
    buf[1] = ']';
    buf[2] = '\0';
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -322,14 +323,14 @@ int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
    return 0;
 }
 
-int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+int kb_store_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
 {
    if (arm_out && arm_out_len)
       arm_out[0] = '\0';
    if (!decision_point || !arm_out || arm_out_len == 0)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -355,13 +356,13 @@ int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t a
    return found;
 }
 
-int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
-                             const char *rollback_arm)
+int kb_store_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                                  const char *rollback_arm)
 {
    if (!decision_point || !arm_id || !arm_id[0])
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -388,12 +389,12 @@ int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
    return 0;
 }
 
-int db2_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
+int kb_store_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
 {
    if (!decision_point || !buf || len == 0)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

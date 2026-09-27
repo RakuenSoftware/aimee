@@ -1,7 +1,7 @@
 /* kb_http_telemetry.c: /v1/metrics + /v1/telemetry routes (P9a telemetry export).
  *
  * See kb_http_telemetry.h. Mirrors kb_http_rate.c: the authenticated actor comes
- * from kb_reqctx; every op runs inside a tenant scope (db2_tenant_scope_begin sets
+ * from kb_reqctx; every op runs inside a tenant scope (kb_store_tenant_scope_begin sets
  * aimee.principal), so the admin gate is enforced at the DB layer inside the
  * SECURITY DEFINER functions (a non-authorized caller surfaces here as 403). The
  * scrape/ingest TOKEN path (kb_http_telemetry_token_route) sits BEFORE the bearer
@@ -13,7 +13,7 @@
 #include "kb_http_telemetry.h"
 
 #include "cJSON.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_verifier.h"
@@ -63,14 +63,14 @@ static int emit(cJSON *root, char *out, int cap, int status)
    return status;
 }
 
-/* Map a tenant-scope/db2 return into an HTTP status. */
+/* Map a tenant-scope/kb_store return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return 503;
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return 401;
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return 403;
    return 500;
 }
@@ -85,7 +85,7 @@ static int begin_actor_scope(char *out, int cap, int *http_out)
       *http_out = err(out, cap, 401, "authentication required");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(actor, 0);
+   int rc = kb_store_tenant_scope_begin(actor, 0);
    if (rc != 0)
    {
       *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
@@ -107,7 +107,7 @@ static int begin_owner_scope(char *out, int cap, int *http_out)
       *http_out = err(out, cap, 500, "owner scope init failed");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(&owner, 0);
+   int rc = kb_store_tenant_scope_begin(&owner, 0);
    if (rc != 0)
    {
       *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
@@ -120,16 +120,16 @@ static int begin_owner_scope(char *out, int cap, int *http_out)
  * scope. Returns an HTTP status and writes the body; does NOT commit. */
 static int do_metrics(char *out, int cap)
 {
-   org_metric_row_t *rows = calloc(DB2_TELEMETRY_MAX_ROWS, sizeof(*rows));
+   org_metric_row_t *rows = calloc(KB_STORE_TELEMETRY_MAX_ROWS, sizeof(*rows));
    if (!rows)
       return err(out, cap, 500, "out of memory");
-   int n = db2_metrics_snapshot(rows, DB2_TELEMETRY_MAX_ROWS);
+   int n = kb_store_metrics_snapshot(rows, KB_STORE_TELEMETRY_MAX_ROWS);
    if (n < 0)
    {
       free(rows);
-      if (n == DB2_TELEMETRY_ERR_DENIED)
+      if (n == KB_STORE_TELEMETRY_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin required)");
-      if (n == DB2_TELEMETRY_ERR_TOOBIG)
+      if (n == KB_STORE_TELEMETRY_ERR_TOOBIG)
          return err(out, cap, 500, "metrics snapshot exceeds buffer (too many series)");
       return err(out, cap, 500, "metrics snapshot failed");
    }
@@ -167,11 +167,11 @@ int kb_http_telemetry_scrape(const char *presented, int trusted_transport, int r
    int status = do_metrics(out_buf, out_cap);
    if (status >= 200 && status < 300)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out_buf, out_cap, 500, "commit failed");
    }
    else
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
    return status;
 }
 
@@ -224,8 +224,9 @@ static int do_ingest(const char *body, const char *origin_cn, char *out, int cap
    int64_t ts = (int64_t)jts->valuedouble;
    cJSON_Delete(b);
 
-   char result[DB2_TELEMETRY_RESULT_MAX] = "";
-   int rc = db2_telemetry_ingest(source_event_id, origin_cn, 0 /*has_team*/, 0, event_schema,
+   char result[KB_STORE_TELEMETRY_RESULT_MAX] = "";
+   int rc =
+       kb_store_telemetry_ingest(source_event_id, origin_cn, 0 /*has_team*/, 0, event_schema,
                                  metric_name, metric_kind, value_text, ts, result, sizeof(result));
    if (rc != 0)
       return err(out, cap, 500, "telemetry ingest failed");
@@ -275,11 +276,11 @@ int kb_http_telemetry_token_route(const char *method, const char *path, const ch
       status = do_ingest(body, "telemetry-token", out_buf, out_cap);
    if (status >= 200 && status < 300)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out_buf, out_cap, 500, "commit failed");
    }
    else
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
    return status;
 }
 
@@ -289,22 +290,22 @@ static int handle_allow_show(char *out, int cap)
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
-   db2_telemetry_allow_row_t *rows = calloc(DB2_TELEMETRY_ALLOW_MAX_ROWS, sizeof(*rows));
+   kb_store_telemetry_allow_row_t *rows = calloc(KB_STORE_TELEMETRY_ALLOW_MAX_ROWS, sizeof(*rows));
    if (!rows)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return err(out, cap, 500, "out of memory");
    }
-   int n = db2_telemetry_allow_show(rows, DB2_TELEMETRY_ALLOW_MAX_ROWS);
+   int n = kb_store_telemetry_allow_show(rows, KB_STORE_TELEMETRY_ALLOW_MAX_ROWS);
    if (n < 0)
    {
       free(rows);
-      db2_tenant_scope_rollback();
-      if (n == DB2_TELEMETRY_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (n == KB_STORE_TELEMETRY_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin required)");
       return err(out, cap, 500, "telemetry allow show failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
    {
       free(rows);
       return err(out, cap, 500, "commit failed");
@@ -382,15 +383,15 @@ static int handle_allow_set(const char *body, char *out, int cap)
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
-   int rc = db2_telemetry_allow(event_schema, arr_lit, enabled);
+   int rc = kb_store_telemetry_allow(event_schema, arr_lit, enabled);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
-      if (rc == DB2_TELEMETRY_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (rc == KB_STORE_TELEMETRY_ERR_DENIED)
          return err(out, cap, 403, "not authorized to set allowlist (org-admin required)");
       return err(out, cap, 500, "telemetry allow set failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o2 = cJSON_CreateObject();
    cJSON_AddStringToObject(o2, "event_schema", event_schema);
@@ -411,11 +412,11 @@ static int handle_admin_metrics(const char *method, char *out, int cap)
    int status = do_metrics(out, cap);
    if (status >= 200 && status < 300)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
    }
    else
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
    return status;
 }
 
@@ -433,11 +434,11 @@ static int handle_admin_ingest(const char *method, const char *body, char *out, 
    int status = do_ingest(body, origin, out, cap);
    if (status >= 200 && status < 300)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
    }
    else
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
    return status;
 }
 

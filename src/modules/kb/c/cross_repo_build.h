@@ -36,6 +36,6 @@ int xrepo_build_ref_repo(const char *ref, char *out, size_t cap);
  * projects.name (normalized), insert (caller, definer, build_kind, parse_confidence,
  * evidence). Self-edges + external (unmapped) refs are skipped. Returns row count or
  * -1 on failure (fail-to-last-known-good, like the route rebuild). */
-int db2_cross_repo_rebuild_build_deps(void);
+int kb_store_cross_repo_rebuild_build_deps(void);
 
 #endif /* AIMEE_CROSS_REPO_BUILD_H */

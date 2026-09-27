@@ -38,7 +38,7 @@
 -- says so on apply and the answer is an external vector provider module; the
 -- relational store keeps the canonical vectors either way.
 --
--- Back up DB2 first. Idempotent: re-running is a no-op once every embedding
+-- Back up KB_STORE first. Idempotent: re-running is a no-op once every embedding
 -- column is already `vector`.
 
 BEGIN;

@@ -21,9 +21,9 @@
 #include "kb_http_egress.h"
 #include "../../modules/kb/c/server_registry.h"
 #include "../../modules/kb/c/management_jwks_runtime.h"
-#include "../../modules/kb/c/db2_tenant.h"
-#include "modules/kb/c/db2.h" /* request-scoped DB2 lease */
-#include "kb_ingress.h"       /* B5 identity-header ingress guard */
+#include "../../modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/kb_store.h" /* request-scoped KB_STORE lease */
+#include "kb_ingress.h"            /* B5 identity-header ingress guard */
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
 #include "kb_caller_token.h"
@@ -261,7 +261,7 @@ static const cJSON *json_member_once(const cJSON *object, const char *name)
 /* The cert-bound runtime fetch returns only a FINAL, integrity-checked
  * publication envelope. Reconstruct its JWKS and bind it to the stored digest
  * before using it to verify a caller token. */
-static int caller_jwks(const db2_management_jwks_runtime_record_t *record, long now, char *out,
+static int caller_jwks(const kb_store_management_jwks_runtime_record_t *record, long now, char *out,
                        size_t cap)
 {
    if (!record || !out || cap == 0 || now < record->valid_from || now >= record->valid_until)
@@ -301,12 +301,12 @@ static int caller_token_identity(const char *authorization, const char *server_i
       return 0;
    if (server_binding <= 0)
       return server_binding;
-   db2_management_jwks_runtime_record_t record;
-   db2_management_jwks_runtime_result_t fetched =
-       db2_management_jwks_runtime_fetch(cert_issuer, cert_serial, cert_fingerprint, &record);
-   if (fetched == DB2_MANAGEMENT_JWKS_RUNTIME_DENIED)
+   kb_store_management_jwks_runtime_record_t record;
+   kb_store_management_jwks_runtime_result_t fetched =
+       kb_store_management_jwks_runtime_fetch(cert_issuer, cert_serial, cert_fingerprint, &record);
+   if (fetched == KB_STORE_MANAGEMENT_JWKS_RUNTIME_DENIED)
       return 0;
-   if (fetched != DB2_MANAGEMENT_JWKS_RUNTIME_OK)
+   if (fetched != KB_STORE_MANAGEMENT_JWKS_RUNTIME_OK)
       return -1;
    char *jwks = calloc(KB_TLS_CALLER_JWKS_MAX, 1);
    if (!jwks)
@@ -636,9 +636,9 @@ static int mtls_server_heartbeat(const char *issuer, const char *serial, const c
    cJSON *health = j ? cJSON_GetObjectItemCaseSensitive(j, "health") : NULL;
    cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
    int ok = cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
-            db2_server_registry_heartbeat(cJSON_GetStringValue(sid), issuer, serial, fingerprint,
-                                          cJSON_GetStringValue(health),
-                                          cJSON_GetStringValue(version)) == 0;
+            kb_store_server_registry_heartbeat(cJSON_GetStringValue(sid), issuer, serial,
+                                               fingerprint, cJSON_GetStringValue(health),
+                                               cJSON_GetStringValue(version)) == 0;
    cJSON_Delete(j);
    snprintf(resp, (size_t)cap, ok ? "{\"ok\":true}" : "{\"error\":\"heartbeat rejected\"}");
    return ok ? 200 : 403;
@@ -647,15 +647,15 @@ static int mtls_server_heartbeat(const char *issuer, const char *serial, const c
 static int mtls_management_jwks(const char *issuer, const char *serial, const char *fingerprint,
                                 char *resp, int cap)
 {
-   db2_management_jwks_runtime_record_t record;
-   db2_management_jwks_runtime_result_t result =
-       db2_management_jwks_runtime_fetch(issuer, serial, fingerprint, &record);
-   if (result == DB2_MANAGEMENT_JWKS_RUNTIME_DENIED)
+   kb_store_management_jwks_runtime_record_t record;
+   kb_store_management_jwks_runtime_result_t result =
+       kb_store_management_jwks_runtime_fetch(issuer, serial, fingerprint, &record);
+   if (result == KB_STORE_MANAGEMENT_JWKS_RUNTIME_DENIED)
    {
       snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS fetch denied\"}");
       return 403;
    }
-   if (result != DB2_MANAGEMENT_JWKS_RUNTIME_OK || record.envelope_len + 1 > (size_t)cap)
+   if (result != KB_STORE_MANAGEMENT_JWKS_RUNTIME_OK || record.envelope_len + 1 > (size_t)cap)
    {
       snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS unavailable\"}");
       return 503;
@@ -738,14 +738,14 @@ static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_
    snprintf(renew_actor.issuer, sizeof(renew_actor.issuer), "%s", old_issuer);
    snprintf(renew_actor.subject, sizeof(renew_actor.subject), "%s", old_serial_norm);
    int persisted = -1;
-   if (metadata_ok && db2_tenant_scope_begin(&renew_actor, 0) == 0)
+   if (metadata_ok && kb_store_tenant_scope_begin(&renew_actor, 0) == 0)
    {
-      persisted = db2_enrollment_renew(old_fp, old_issuer, old_serial_norm, scope_cn, new_fp,
-                                       new_issuer, new_serial, NULL);
+      persisted = kb_store_enrollment_renew(old_fp, old_issuer, old_serial_norm, scope_cn, new_fp,
+                                            new_issuer, new_serial, NULL);
       if (persisted == 0)
-         persisted = db2_tenant_scope_commit();
+         persisted = kb_store_tenant_scope_commit();
       else
-         db2_tenant_scope_rollback();
+         kb_store_tenant_scope_rollback();
    }
    if (!metadata_ok || persisted != 0)
    {
@@ -850,11 +850,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          body_len = (int)declared_body;
       }
 
-      /* Worker threads are long-lived, so a lazily acquired DB2 connection
+      /* Worker threads are long-lived, so a lazily acquired KB_STORE connection
        * would otherwise remain pinned until shutdown. Bound every routed
        * request explicitly; this also keeps persistent mTLS connections from
-       * exhausting the shared DB2 pool after one request per worker. */
-      db2_lease_begin();
+       * exhausting the shared KB_STORE pool after one request per worker. */
+      kb_store_lease_begin();
 
       /* Split query string off the path. */
       char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
@@ -891,9 +891,10 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
              kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 &&
              kb_principal_from_cert(issuer, serial, cn, &transport) == 0)
          {
-            cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
+            cert_authority =
+                kb_store_enrollment_is_active_by_key(transport.issuer, transport.subject);
             if (cert_authority == 1)
-               db2_enrollment_touch_last_seen(fp, cn); /* transport-use telemetry */
+               kb_store_enrollment_touch_last_seen(fp, cn); /* transport-use telemetry */
          }
       }
 
@@ -930,15 +931,15 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
           * Carry the independently verified service identity into this read;
           * a certificate or caller-supplied team alone grants no visibility.
           * End this scope before resolving the content caller below. */
-         int scope_rc = db2_tenant_scope_begin(&application_identity, named_team);
+         int scope_rc = kb_store_tenant_scope_begin(&application_identity, named_team);
          if (scope_rc == 0)
          {
-            server_binding = db2_server_registry_client_match(
+            server_binding = kb_store_server_registry_client_match(
                 server_id, named_team, transport.issuer, transport.subject, fp);
-            db2_tenant_scope_rollback();
+            kb_store_tenant_scope_rollback();
          }
          else
-            server_binding = scope_rc == DB2_ERR_TENANT_DENIED ? 0 : -1;
+            server_binding = scope_rc == KB_STORE_ERR_TENANT_DENIED ? 0 : -1;
       }
       kb_principal_t caller_identity = {0};
       int caller_authority = 0;
@@ -1168,11 +1169,11 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                status = 403;
                goto content_done;
             }
-            int scope_rc = db2_tenant_scope_begin(&resolved.actor, resolved.billing_team);
+            int scope_rc = kb_store_tenant_scope_begin(&resolved.actor, resolved.billing_team);
             if (scope_rc != 0)
             {
                snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"content tenant scope unavailable\"}");
-               status = scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
+               status = scope_rc == KB_STORE_ERR_TENANT_DENIED ? 403 : 503;
                goto content_done;
             }
             tenant_scope_open = 1;
@@ -1187,7 +1188,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                 caller_authority == 1 ? &caller_identity : NULL, resp, KB_TLS_RESP_MAX);
       content_done:
          if (tenant_scope_open)
-            db2_tenant_scope_rollback();
+            kb_store_tenant_scope_rollback();
          memset(&resolved, 0, sizeof(resolved));
       }
       if (status >= 400 && !is_bootstrap)
@@ -1199,7 +1200,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                   identity_matches, application_authority, application_matches, server_binding,
                   caller_authority);
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
-      db2_lease_end();
+      kb_store_lease_end();
       OPENSSL_cleanse(&service_identity, sizeof(service_identity));
       OPENSSL_cleanse(&application_identity, sizeof(application_identity));
       OPENSSL_cleanse(&caller_identity, sizeof(caller_identity));
@@ -1293,7 +1294,7 @@ static void *mtls_worker_thread(void *arg)
       int one = 1;
       (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       kb_tls_serve_conn(fd, g_mtls_ctx);
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       close(fd);
       pthread_mutex_lock(&g_mtls_queue_mu);
       if (g_mtls_connections_live > 0)

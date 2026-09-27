@@ -27,7 +27,7 @@ extern "C"
     * Returns a static string; never NULL. */
    const char *roadmap_milestone_parse_verdict(const char *review_text);
 
-   /* Check whether all plan_unit artifacts (DB2) at a given level that are
+   /* Check whether all plan_unit artifacts (KB_STORE) at a given level that are
     * scoped to parent_id have state='done' in the DB1 rdm_unit_dispatch table.
     * Returns 1 if all done, 0 if not, -1 on error.
     * level is "task" (to check a slice's tasks) or "slice" (to check a
@@ -36,7 +36,7 @@ extern "C"
 
    /* Build the review prompt for a milestone.
     * Includes the milestone title, intent, acceptance criteria, and the
-    * acceptance criteria of all its child tasks (loaded from DB2 artifacts
+    * acceptance criteria of all its child tasks (loaded from KB_STORE artifacts
     * scoped to milestone_id via their slice parents). Returns heap string
     * (caller frees), or NULL on error. */
    char *roadmap_milestone_review_prompt(const char *roadmap_id, const char *milestone_id);

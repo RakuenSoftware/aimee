@@ -1,4 +1,4 @@
-/* db2/demotion.h: retrieval attribution evidence and demotion profiles.
+/* kb_store/demotion.h: retrieval attribution evidence and demotion profiles.
  *
  * Evidence storage uses the charter artifacts table (no new tables).
  * Evidence kinds:
@@ -13,8 +13,8 @@
  *   then (memory_class, "global", "").
  *
  * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
-#ifndef DEC_DB2_DEMOTION_H
-#define DEC_DB2_DEMOTION_H 1
+#ifndef DEC_KB_STORE_DEMOTION_H
+#define DEC_KB_STORE_DEMOTION_H 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,28 +37,29 @@ extern "C"
     * surfaced_ids: array of n_surfaced memory row ids.
     * id_out: receives the new UUID (>= 37 bytes); may be NULL.
     * Returns 0 on success, -1 on error. */
-   int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
-                                          const int64_t *surfaced_ids, int n_surfaced, char *id_out,
-                                          int id_out_len);
+   int kb_store_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
+                                               const int64_t *surfaced_ids, int n_surfaced,
+                                               char *id_out, int id_out_len);
 
-   /* Like db2_demotion_retrieval_event_write but stamps the caller-visible
+   /* Like kb_store_demotion_retrieval_event_write but stamps the caller-visible
     * `turn_id` (auditable-correctness §Layer 2 / P1) so an audit trace can find
     * the event that grounded a turn. The partial unique index makes one turn map
     * to one event; a duplicate turn_id leaves the event written but un-stamped
     * (the first turn-stamped event stays authoritative — idempotent two-writer
     * merge is P1.5). turn_id NULL/"" behaves exactly like the base writer.
     * Returns 0 on success, -1 on error. */
-   int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
-                                               const char *role, const int64_t *surfaced_ids,
-                                               int n_surfaced, char *id_out, int id_out_len);
+   int kb_store_demotion_retrieval_event_write_turn(const char *turn_id,
+                                                    const char *query_fingerprint, const char *role,
+                                                    const int64_t *surfaced_ids, int n_surfaced,
+                                                    char *id_out, int id_out_len);
 
    /* Look up a turn-keyed retrieval_event by its caller-visible `turn_id` (the
     * /v1/audit/trace read). Writes the internal event id into id_out and the JSON
     * payload into payload_out (either may be NULL). Returns 1 on hit, 0 if no
     * event for that turn, -1 on error or insufficient output capacity. A failed
     * bounded read leaves both supplied outputs empty. */
-   int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
-                                            char *payload_out, int payload_out_len);
+   int kb_store_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                                 char *payload_out, int payload_out_len);
 
    /* auditable-correctness P1.5 (D14): the idempotent two-writer merge. If no event
     * exists for `turn_id` yet, behaves exactly like ..._write_turn (first writer
@@ -73,9 +74,10 @@ extern "C"
     * ignored. `query_fingerprint`/`role` are used ONLY on the first-writer create
     * path (a later writer contributes refs, not a new fingerprint). Writes the
     * canonical event id into id_out (may be NULL). Returns 0 / -1. */
-   int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
-                                               const char *role, const int64_t *surfaced_ids,
-                                               int n_surfaced, char *id_out, int id_out_len);
+   int kb_store_demotion_retrieval_event_merge_turn(const char *turn_id,
+                                                    const char *query_fingerprint, const char *role,
+                                                    const int64_t *surfaced_ids, int n_surfaced,
+                                                    char *id_out, int id_out_len);
 
    /* auditable-correctness P1.5 (D3/D14): merge TYPED refs into the turn's unified
     * surfaced_refs. The three parallel arrays give each ref's `type` (e.g. "code"),
@@ -87,12 +89,12 @@ extern "C"
     * exists yet a bare turn event is created first (reusing write_turn's dup-race
     * handling). Same CAS retry/concurrency contract as the int64 merge. `versions`
     * may be NULL; `n_refs`==0 is a valid no-op. Returns 0 / -1. */
-   int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id,
-                                                    const char *query_fingerprint, const char *role,
-                                                    const char *const *types,
-                                                    const char *const *refs,
-                                                    const char *const *versions, int n_refs,
-                                                    char *id_out, int id_out_len);
+   int kb_store_demotion_retrieval_event_merge_refs_turn(const char *turn_id,
+                                                         const char *query_fingerprint,
+                                                         const char *role, const char *const *types,
+                                                         const char *const *refs,
+                                                         const char *const *versions, int n_refs,
+                                                         char *id_out, int id_out_len);
 
    /* Write a retrieval_attribution artifact linking one surfaced row to a verdict.
     * retrieval_event_id: UUID of the originating retrieval_event.
@@ -100,12 +102,12 @@ extern "C"
     * verdict: one of the DEMOTION_VERDICT_* constants.
     * weight: contribution fraction in [0, 1].
     * Returns 0 on success, -1 on error. */
-   int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
-                                                int64_t surfaced_row_id, const char *verdict,
-                                                double weight);
+   int kb_store_demotion_retrieval_attribution_write(const char *retrieval_event_id,
+                                                     int64_t surfaced_row_id, const char *verdict,
+                                                     double weight);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_DEMOTION_H */
+#endif /* DEC_KB_STORE_DEMOTION_H */

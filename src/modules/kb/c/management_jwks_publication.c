@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static int idle(const db2_management_jwks_publication_ctx_t *ctx)
+static int idle(const kb_store_management_jwks_publication_ctx_t *ctx)
 {
    return ctx && ctx->connection && ctx->barrier_lock_held && ctx->publication_lock_held &&
           !aimee_pg_in_transaction(ctx->connection);
@@ -79,7 +79,7 @@ static int sha256_value(const void *value, size_t len, uint8_t out[32])
                                                                                               : -1;
 }
 
-static int exec_lock(db2_management_jwks_publication_ctx_t *ctx, const char *sql, char *errbuf,
+static int exec_lock(kb_store_management_jwks_publication_ctx_t *ctx, const char *sql, char *errbuf,
                      size_t errlen)
 {
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(ctx->connection, sql, errbuf, errlen);
@@ -115,8 +115,8 @@ static int role_assert(void *connection)
    return ok ? 0 : -1;
 }
 
-int db2_management_jwks_publication_open(db2_management_jwks_publication_ctx_t *ctx,
-                                         const char *conninfo, char *errbuf, size_t errlen)
+int kb_store_management_jwks_publication_open(kb_store_management_jwks_publication_ctx_t *ctx,
+                                              const char *conninfo, char *errbuf, size_t errlen)
 {
    static const char barrier[] =
        "SELECT pg_catalog.pg_advisory_lock_shared(-7046029254386353131::BIGINT)";
@@ -147,7 +147,7 @@ fail:
    return -1;
 }
 
-static void unlock(db2_management_jwks_publication_ctx_t *ctx, const char *sql)
+static void unlock(kb_store_management_jwks_publication_ctx_t *ctx, const char *sql)
 {
    char error[128] = "";
    if (ctx && ctx->connection)
@@ -162,7 +162,7 @@ static void unlock(db2_management_jwks_publication_ctx_t *ctx, const char *sql)
    OPENSSL_cleanse(error, sizeof(error));
 }
 
-void db2_management_jwks_publication_close(db2_management_jwks_publication_ctx_t *ctx)
+void kb_store_management_jwks_publication_close(kb_store_management_jwks_publication_ctx_t *ctx)
 {
    if (!ctx)
       return;
@@ -182,10 +182,9 @@ void db2_management_jwks_publication_close(db2_management_jwks_publication_ctx_t
    OPENSSL_cleanse(ctx, sizeof(*ctx));
 }
 
-int db2_management_jwks_publication_set_provider_binding(db2_management_jwks_publication_ctx_t *ctx,
-                                                         const char *helper,
-                                                         const char *verifier_domain,
-                                                         const uint8_t identity_digest[32])
+int kb_store_management_jwks_publication_set_provider_binding(
+    kb_store_management_jwks_publication_ctx_t *ctx, const char *helper,
+    const char *verifier_domain, const uint8_t identity_digest[32])
 {
    if (!idle(ctx) || ctx->snapshot_valid || !helper || !verifier_domain || !identity_digest ||
        !helper[0] || strlen(helper) > 128 || !verifier_domain[0] || strlen(verifier_domain) > 128)
@@ -198,7 +197,7 @@ int db2_management_jwks_publication_set_provider_binding(db2_management_jwks_pub
    return 0;
 }
 
-static kb_mgmt_jwks_db_result_t inspect_roots(db2_management_jwks_publication_ctx_t *ctx,
+static kb_mgmt_jwks_db_result_t inspect_roots(kb_store_management_jwks_publication_ctx_t *ctx,
                                               kb_mgmt_jwks_roots_t *roots)
 {
    char error[256] = "";
@@ -280,7 +279,7 @@ static kb_mgmt_jwks_db_result_t inspect_roots(db2_management_jwks_publication_ct
 static kb_mgmt_jwks_db_result_t inspect(void *opaque, kb_mgmt_jwks_roots_t *roots,
                                         kb_mgmt_jwks_record_t *record)
 {
-   db2_management_jwks_publication_ctx_t *ctx = opaque;
+   kb_store_management_jwks_publication_ctx_t *ctx = opaque;
    if (!idle(ctx) || !ctx->provider_binding_set || !roots || !record)
       return KB_MGMT_JWKS_DB_INTEGRITY;
    ctx->snapshot_valid = 0;
@@ -373,7 +372,7 @@ static kb_mgmt_jwks_db_result_t execute_void(aimee_pg_stmt_t *stmt, char error[2
 
 static kb_mgmt_jwks_db_result_t stage(void *opaque, const kb_mgmt_jwks_record_t *record)
 {
-   db2_management_jwks_publication_ctx_t *ctx = opaque;
+   kb_store_management_jwks_publication_ctx_t *ctx = opaque;
    if (!idle(ctx) || !ctx->snapshot_valid || !record || record->phase != KB_MGMT_JWKS_STAGED ||
        record->generation != 1 || !record->candidate_id[0] || !record->jwks_len ||
        !record->payload_len || !record->envelope_len || !record->hwm1_attestation_len)
@@ -420,7 +419,7 @@ static kb_mgmt_jwks_db_result_t stage(void *opaque, const kb_mgmt_jwks_record_t 
 static kb_mgmt_jwks_db_result_t record_cas(void *opaque, const kb_mgmt_jwks_record_t *record,
                                            const uint8_t *attestation, size_t attestation_len)
 {
-   db2_management_jwks_publication_ctx_t *ctx = opaque;
+   kb_store_management_jwks_publication_ctx_t *ctx = opaque;
    if (!idle(ctx) || !record || record->generation != 1 || !record->candidate_id[0] ||
        !attestation || !attestation_len || attestation_len > KB_MGMT_ROOT_ATTEST_MAX)
       return KB_MGMT_JWKS_DB_INTEGRITY;
@@ -438,7 +437,7 @@ static kb_mgmt_jwks_db_result_t record_cas(void *opaque, const kb_mgmt_jwks_reco
 
 static kb_mgmt_jwks_db_result_t finalize(void *opaque, const kb_mgmt_jwks_record_t *record)
 {
-   db2_management_jwks_publication_ctx_t *ctx = opaque;
+   kb_store_management_jwks_publication_ctx_t *ctx = opaque;
    if (!idle(ctx) || !record || record->generation != 1 || !record->candidate_id[0])
       return KB_MGMT_JWKS_DB_INTEGRITY;
    char error[256] = "";
@@ -452,10 +451,10 @@ static kb_mgmt_jwks_db_result_t finalize(void *opaque, const kb_mgmt_jwks_record
    return execute_void(stmt, error);
 }
 
-kb_mgmt_jwks_db_result_t db2_management_jwks_manifest_key_admit(
-    db2_management_jwks_publication_ctx_t *ctx, const char *use_id, uint64_t generation,
+kb_mgmt_jwks_db_result_t kb_store_management_jwks_manifest_key_admit(
+    kb_store_management_jwks_publication_ctx_t *ctx, const char *use_id, uint64_t generation,
     const char *candidate_id, const kb_mgmt_root_record_t *manifest,
-    const uint8_t payload_digest[32], db2_management_jwks_admission_t *out)
+    const uint8_t payload_digest[32], kb_store_management_jwks_admission_t *out)
 {
    if (!idle(ctx) || !use_id || strlen(use_id) != 64 || generation != 1 || !candidate_id ||
        strlen(candidate_id) != 64 || !manifest || manifest->kind != KB_MGMT_ROOT_MANIFEST ||
@@ -506,8 +505,8 @@ kb_mgmt_jwks_db_result_t db2_management_jwks_manifest_key_admit(
    return KB_MGMT_JWKS_DB_OK;
 }
 
-int db2_management_jwks_publication_bind(db2_management_jwks_publication_ctx_t *ctx,
-                                         kb_mgmt_jwks_callbacks_t *callbacks)
+int kb_store_management_jwks_publication_bind(kb_store_management_jwks_publication_ctx_t *ctx,
+                                              kb_mgmt_jwks_callbacks_t *callbacks)
 {
    if (!idle(ctx) || !callbacks)
       return -1;

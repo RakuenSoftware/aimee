@@ -11,9 +11,9 @@
 #include "cJSON.h"
 #include "config.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_learning.h"
+#include "modules/kb/c/kb_store_learning.h"
 #include <aimee/learning/learning.h>
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/feature_rows.h"
 #include "modules/kb/c/mining.h"
@@ -66,7 +66,7 @@ static int parse_job_timestamp(const char *value, time_t *out)
    return 1;
 }
 
-static int mining_job_due(const db2_mining_job_row_t *row)
+static int mining_job_due(const kb_store_mining_job_row_t *row)
 {
    if (!row || !row->last_run_at[0] || row->interval_s <= 0)
       return 1;
@@ -101,7 +101,7 @@ static void mining_uuid_for_key(const char *prefix, const char *key, char *out, 
 
 static int query_max_event_id(int64_t hwm, const char *where_sql, int64_t *max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !max_out)
       return -1;
    *max_out = hwm;
@@ -140,8 +140,8 @@ static int propose_pattern_cluster(const char *cluster_key, int count, int64_t m
       return -1;
 
    double confidence = count >= 20 ? 0.85 : 0.70;
-   int rc = db2_artifact_write(id, "interaction_pattern", "proposed", "workspace", "", "kb-mining",
-                               confidence, json);
+   int rc = kb_store_artifact_write(id, "interaction_pattern", "proposed", "workspace", "",
+                                    "kb-mining", confidence, json);
    if (rc == 0 && cluster_key && cluster_key[0])
    {
       kb_mdl_score_t mdl = {0};
@@ -152,7 +152,7 @@ static int propose_pattern_cluster(const char *cluster_key, int count, int64_t m
                   "{\"mdl.l_candidate\":%.2f,\"mdl.l_residual\":%.2f,"
                   "\"mdl.total\":%.2f,\"mdl.rank_in_cluster\":%d}",
                   mdl.l_candidate, mdl.l_residual, mdl.total, mdl.rank_in_cluster);
-         db2_feature_row_upsert(id, "kb_artifact", "", "", "v1", feat, NULL);
+         kb_store_feature_row_upsert(id, "kb_artifact", "", "", "v1", feat, NULL);
       }
    }
    free(json);
@@ -161,7 +161,7 @@ static int propose_pattern_cluster(const char *cluster_key, int count, int64_t m
 
 static int run_pattern_cluster(int64_t hwm, int64_t *new_hwm_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !new_hwm_out)
       return -1;
    *new_hwm_out = hwm;
@@ -226,7 +226,7 @@ static char *recurrence_evidence_refs(const char *observation_id)
       cJSON_AddItemToArray(refs, oref);
    }
    int64_t event_ids[64];
-   int event_n = db2_learning_observation_evidence_ids(observation_id, event_ids, 64);
+   int event_n = kb_store_learning_observation_evidence_ids(observation_id, event_ids, 64);
    for (int i = 0; i < event_n; i++)
    {
       cJSON *eref = cJSON_CreateObject();
@@ -261,7 +261,7 @@ static int recurrence_collect_evidence(const char *scope_kind, const char *scope
                                        const char *recovery_action, int64_t max_event_id,
                                        learning_observation_evidence_input_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return -1;
    static const char *sql =
@@ -334,7 +334,7 @@ static int propose_recurrence(const char *scope_kind, const char *scope_id, cons
    int collected =
        recurrence_collect_evidence(scope_kind, scope_id, task_family, role, failure_mode,
                                    error_signature, recovery_action, max_event_id, evidence, 64);
-   if (collected < 0 || db2_learning_observation_refresh(
+   if (collected < 0 || kb_store_learning_observation_refresh(
                             observation_id, scope_kind, scope_id, observation_type, title, summary,
                             "attempt-pattern-v2", evidence, collected, "") != 0)
    {
@@ -391,12 +391,12 @@ static int propose_recurrence(const char *scope_kind, const char *scope_id, cons
             snprintf(target_key, sizeof(target_key), "delegate_exit:%s:%s", role, failure_mode);
          else
             snprintf(target_key, sizeof(target_key), "attempt:%s", key);
-         int existing = db2_learning_proposal_find_pending("artifact", target_key, 0);
+         int existing = kb_store_learning_proposal_find_pending("artifact", target_key, 0);
          if (existing > 0)
          {
-            db2_learning_proposal_bump_corroboration(existing);
+            kb_store_learning_proposal_bump_corroboration(existing);
             if (refs_json)
-               (void)db2_learning_proposal_refresh_evidence(existing, refs_json);
+               (void)kb_store_learning_proposal_refresh_evidence(existing, refs_json);
             free(refs_json);
             free(json);
             return 0;
@@ -444,13 +444,13 @@ static int propose_recurrence(const char *scope_kind, const char *scope_id, cons
                         role && role[0] ? role : "unknown", evidence_count, session_count);
                snprintf(sig.target_key, sizeof(sig.target_key), "%s", target_key);
                sig.evidence_refs_json = refs_json;
-               int sigid = db2_learning_signal_insert(&sig, "");
+               int sigid = kb_store_learning_signal_insert(&sig, "");
                if (sigid > 0)
                {
                   char expires[32];
                   recurrence_expiry(30, expires, sizeof(expires));
-                  (void)db2_learning_proposal_insert(sigid, "artifact", target_key, 0, action_json,
-                                                     refs_json, expires);
+                  (void)kb_store_learning_proposal_insert(sigid, "artifact", target_key, 0,
+                                                          action_json, refs_json, expires);
                }
                free(action_json);
             }
@@ -467,10 +467,10 @@ static int propose_recurrence(const char *scope_kind, const char *scope_id, cons
 
 static int run_recurrence(int64_t hwm, int64_t *new_hwm_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !new_hwm_out)
       return -1;
-   if (db2_learning_observations_reconcile() != 0)
+   if (kb_store_learning_observations_reconcile() != 0)
       return -1;
    *new_hwm_out = hwm;
    if (query_max_event_id(hwm, "event_type IN ('delegate_exit','task_attempt')", new_hwm_out) != 0)
@@ -533,7 +533,7 @@ static const mining_job_t JOBS[] = {
 
 int kb_mining_run_once(void)
 {
-   if (db2_mining_seed_job_defaults() != 0)
+   if (kb_store_mining_seed_job_defaults() != 0)
    {
       LOG_WARN("kb.mining", "could not seed mining job definitions");
       return -1;
@@ -542,8 +542,8 @@ int kb_mining_run_once(void)
    int ran = 0;
    for (int i = 0; JOBS[i].id; i++)
    {
-      db2_mining_job_row_t row;
-      if (db2_mining_job_get(JOBS[i].id, &row) != 0)
+      kb_store_mining_job_row_t row;
+      if (kb_store_mining_job_get(JOBS[i].id, &row) != 0)
       {
          LOG_WARN("kb.mining", "could not load job %s", JOBS[i].id);
          continue;
@@ -552,15 +552,15 @@ int kb_mining_run_once(void)
          continue;
       if (!mining_job_due(&row))
          continue;
-      if (!db2_mining_job_try_lock(JOBS[i].id))
+      if (!kb_store_mining_job_try_lock(JOBS[i].id))
          continue;
 
       int64_t new_hwm = row.hwm;
       kb_background_set("mining", "job=%s hwm=%lld", JOBS[i].id, (long long)row.hwm);
       int rc = JOBS[i].run(row.hwm, &new_hwm);
       kb_background_clear("mining");
-      (void)db2_mining_job_complete(JOBS[i].id, new_hwm, rc == 0 ? "" : "job failed");
-      db2_mining_job_unlock(JOBS[i].id);
+      (void)kb_store_mining_job_complete(JOBS[i].id, new_hwm, rc == 0 ? "" : "job failed");
+      kb_store_mining_job_unlock(JOBS[i].id);
       if (rc != 0)
          LOG_WARN("kb.mining", "job %s failed at hwm=%lld", JOBS[i].id, (long long)row.hwm);
       ran++;
@@ -578,9 +578,9 @@ static void *mining_thread_main(void *arg)
 
    while (!g_mining_stop)
    {
-      db2_lease_begin(); /* WP-C: hold a pool lease only during the cycle */
+      kb_store_lease_begin(); /* WP-C: hold a pool lease only during the cycle */
       int ran = kb_mining_run_once();
-      db2_lease_end();
+      kb_store_lease_end();
       LOG_DEBUG("kb.mining", "scheduler tick completed (jobs=%d)", ran);
       for (int i = 0; i < min_poll_s && !g_mining_stop; i++)
          mining_sleep_one_second();

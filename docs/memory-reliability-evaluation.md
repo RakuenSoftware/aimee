@@ -1,9 +1,9 @@
 # Memory reliability evaluation and promotion
 
 Run `python3 scripts/check_memory_reliability_release.py --output RESULT.json`
-with disposable `AIMEE_MEMORY_EVAL_URL`, `AIMEE_DB2_REPLAY_URL`,
-`AIMEE_TEST_PG_URL` and `AIMEE_DB_TEST_URL` databases. Bootstrap the DB2 replay
-store from `src/modules/kb/c/schema.sql`. Use distinct DB1/DB2 stores, a role able
+with disposable `AIMEE_MEMORY_EVAL_URL`, `AIMEE_KB_STORE_REPLAY_URL`,
+`AIMEE_TEST_PG_URL` and `AIMEE_DB_TEST_URL` databases. Bootstrap the KB_STORE replay
+store from `src/modules/kb/c/schema.sql`. Use distinct DB1/KB_STORE stores, a role able
 to create disposable evaluation databases, and serialize their test runners.
 The required `memory-retrieval-eval` CI job provisions these stores.
 

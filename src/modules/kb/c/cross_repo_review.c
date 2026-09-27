@@ -1,13 +1,13 @@
 /* cross_repo_review.c: S4b — the AMBIGUOUS cross-repo review queue + adjudication
- * (§3.8). Portable SQL over db2 (Postgres + sqlite shim). See cross_repo_review.h. */
+ * (§3.8). Portable SQL over kb_store (Postgres + sqlite shim). See cross_repo_review.h. */
 
 #include "cross_repo_review.h"
 
 #include "aimee.h"
-#include "db2.h"
-#include "db2_internal.h" /* db2_now_utc */
+#include "kb_store.h"
+#include "kb_store_internal.h" /* kb_store_now_utc */
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,13 +18,13 @@
 
 static void *crr_conn(void)
 {
-   return db2_conn();
+   return kb_store_conn();
 }
 
-int db2_cross_repo_review_upsert(const char *repo_set_hash, const char *symbol,
-                                 const char *caller_repo, const char *candidate_definer,
-                                 const char *evidence_json, double evidence_score,
-                                 const char *review_class, int cross_lang, int queue_max)
+int kb_store_cross_repo_review_upsert(const char *repo_set_hash, const char *symbol,
+                                      const char *caller_repo, const char *candidate_definer,
+                                      const char *evidence_json, double evidence_score,
+                                      const char *review_class, int cross_lang, int queue_max)
 {
    void *conn = crr_conn();
    if (!conn || !symbol || !caller_repo)
@@ -33,7 +33,7 @@ int db2_cross_repo_review_upsert(const char *repo_set_hash, const char *symbol,
       evidence_score = 0.0;
    char err[CRR_ERR] = "";
    char ts[32];
-   db2_now_utc(ts, sizeof(ts));
+   kb_store_now_utc(ts, sizeof(ts));
 
    /* No separate arrival_seq counter (a MAX+1 read-then-write would race): the
     * row's DB-assigned monotonic `id` is the FIFO tie-break — atomic and preserved
@@ -113,8 +113,8 @@ int db2_cross_repo_review_upsert(const char *repo_set_hash, const char *symbol,
    return 0;
 }
 
-int db2_cross_repo_review_list(const char *caller_repo, const char *status, xrepo_review_row_t *out,
-                               int max, int64_t *overflow_dropped)
+int kb_store_cross_repo_review_list(const char *caller_repo, const char *status,
+                                    xrepo_review_row_t *out, int max, int64_t *overflow_dropped)
 {
    void *conn = crr_conn();
    if (!conn || !out || max <= 0)
@@ -179,7 +179,7 @@ int db2_cross_repo_review_list(const char *caller_repo, const char *status, xrep
    return n;
 }
 
-int db2_cross_repo_review_set_status(int64_t id, const char *status)
+int kb_store_cross_repo_review_set_status(int64_t id, const char *status)
 {
    void *conn = crr_conn();
    if (!conn || !status)
@@ -188,7 +188,7 @@ int db2_cross_repo_review_set_status(int64_t id, const char *status)
       return -1;
    char err[CRR_ERR] = "";
    char ts[32];
-   db2_now_utc(ts, sizeof(ts));
+   kb_store_now_utc(ts, sizeof(ts));
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn, "UPDATE cross_repo_review_queue SET status = ?1, updated_at = ?2 WHERE id = ?3", err,
        sizeof(err));

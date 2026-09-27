@@ -1,15 +1,16 @@
 #include "org_token_audit.h"
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 #include <string.h>
-int db2_org_token_audit_start(const char *rid, const char *cn, const char *iss, const char *sub,
-                              int64_t team, int has_proj, int64_t proj, const char *model,
-                              int64_t pv, const char *session, const char *deleg, int64_t *out)
+int kb_store_org_token_audit_start(const char *rid, const char *cn, const char *iss,
+                                   const char *sub, int64_t team, int has_proj, int64_t proj,
+                                   const char *model, int64_t pv, const char *session,
+                                   const char *deleg, int64_t *out)
 {
-   if (db2_tenant_require_pg() != 0 || !rid || !cn || !model)
+   if (kb_store_tenant_require_pg() != 0 || !rid || !cn || !model)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -36,13 +37,13 @@ int db2_org_token_audit_start(const char *rid, const char *cn, const char *iss, 
    aimee_pg_finalize(s);
    return st == AIMEE_PG_ROW ? 0 : -1;
 }
-int db2_org_token_audit_settle(const char *rid, const char *cn, const char *model,
-                               const char *served, int64_t pt, int64_t ct, int64_t cr, int64_t cw,
-                               const char *cost, const char *state)
+int kb_store_org_token_audit_settle(const char *rid, const char *cn, const char *model,
+                                    const char *served, int64_t pt, int64_t ct, int64_t cr,
+                                    int64_t cw, const char *cost, const char *state)
 {
-   if (db2_tenant_require_pg() != 0 || !rid || !cn || !model || !cost || !state)
+   if (kb_store_tenant_require_pg() != 0 || !rid || !cn || !model || !cost || !state)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];

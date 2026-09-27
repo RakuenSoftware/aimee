@@ -1,7 +1,7 @@
-/* db2/mining.c: DB2 substrate for aimee-kb continuous mining. */
+/* kb_store/mining.c: KB_STORE substrate for aimee-kb continuous mining. */
 
 #include "mining.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -21,7 +21,7 @@ static const mining_job_default_t JOB_DEFAULTS[] = {
 
 static int exec_job_default(const char *id, int interval_s)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -40,7 +40,7 @@ static int exec_job_default(const char *id, int interval_s)
    return rc == AIMEE_PG_DONE ? 0 : -1;
 }
 
-int db2_mining_seed_job_defaults(void)
+int kb_store_mining_seed_job_defaults(void)
 {
    for (int i = 0; JOB_DEFAULTS[i].id; i++)
    {
@@ -50,11 +50,11 @@ int db2_mining_seed_job_defaults(void)
    return 0;
 }
 
-int db2_mining_job_get(const char *id, db2_mining_job_row_t *out)
+int kb_store_mining_job_get(const char *id, kb_store_mining_job_row_t *out)
 {
    if (!id || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -88,11 +88,11 @@ int db2_mining_job_get(const char *id, db2_mining_job_row_t *out)
    return 0;
 }
 
-int db2_mining_job_complete(const char *id, int64_t hwm, const char *error)
+int kb_store_mining_job_complete(const char *id, int64_t hwm, const char *error)
 {
    if (!id)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -114,13 +114,13 @@ int db2_mining_job_complete(const char *id, int64_t hwm, const char *error)
    return rc == AIMEE_PG_DONE ? 0 : -1;
 }
 
-int db2_mining_job_try_lock(const char *id)
+int kb_store_mining_job_try_lock(const char *id)
 {
    if (!id || !id[0])
       return 0;
    if (aimee_pg_is_shim())
       return 1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -142,11 +142,11 @@ int db2_mining_job_try_lock(const char *id)
    return locked;
 }
 
-void db2_mining_job_unlock(const char *id)
+void kb_store_mining_job_unlock(const char *id)
 {
    if (!id || !id[0] || aimee_pg_is_shim())
       return;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[256] = "";
@@ -159,11 +159,11 @@ void db2_mining_job_unlock(const char *id)
    aimee_pg_finalize(st);
 }
 
-int db2_mining_event_upsert(const db2_mining_event_t *event)
+int kb_store_mining_event_upsert(const kb_store_mining_event_t *event)
 {
    if (!event || event->source_event_id <= 0 || !event->event_type[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

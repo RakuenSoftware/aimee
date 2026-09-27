@@ -26,9 +26,9 @@ database transport.
 DB1 contains server-local and same-user state. It includes sessions, working memory, agent jobs,
 workflow rows, checkpoints, policy and audit state, caches, and management state.
 
-`aimee-kb` owns DB2, a separate PostgreSQL and pgvector tier for shared knowledge. The server reaches
-DB2 through typed `/v1` requests. The server and KB also keep separate SQLite WORM evidence stores
-outside DB1 and DB2.
+`aimee-kb` owns KB_STORE, a separate PostgreSQL and pgvector tier for shared knowledge. The server reaches
+KB_STORE through typed `/v1` requests. The server and KB also keep separate SQLite WORM evidence stores
+outside DB1 and KB_STORE.
 
 ## Configuration and migrations
 

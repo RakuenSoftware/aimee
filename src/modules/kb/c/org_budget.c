@@ -1,5 +1,5 @@
-/* db2/org_budget.c: P4a budget reservation core — Postgres via libpq. See org_budget.h.
- * Mirrors the db2/org_model_catalog.c / db2/org_spend.c access pattern: one prepared
+/* kb_store/org_budget.c: P4a budget reservation core — Postgres via libpq. See org_budget.h.
+ * Mirrors the kb_store/org_model_catalog.c / kb_store/org_spend.c access pattern: one prepared
  * call into a SECURITY DEFINER function, the definer's RAISE mapped to a sentinel by
  * message text (libpq surfaces the RAISE message, not the SQLSTATE). All money is bound
  * and read as NUMERIC TEXT (never a double), so a hard cap is exact. Every mutation goes
@@ -8,8 +8,8 @@
 
 #include "org_budget.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -23,25 +23,25 @@ static int budget_step_err(const char *err)
    if (!err)
       return -1;
    if (strstr(err, "admin only") || strstr(err, "not authorized"))
-      return DB2_BUDGET_ERR_DENIED;
+      return KB_STORE_BUDGET_ERR_DENIED;
    if (strstr(err, "mismatched attributes"))
-      return DB2_BUDGET_ERR_CONFLICT;
+      return KB_STORE_BUDGET_ERR_CONFLICT;
    if (strstr(err, "retroactive reduction"))
-      return DB2_BUDGET_ERR_RETRO;
+      return KB_STORE_BUDGET_ERR_RETRO;
    return -1;
 }
 
-int db2_org_budget_set(int64_t team, int has_project, int64_t project, const char *period,
-                       const char *limit_usd, const char *soft_limit_usd, int64_t *out_id)
+int kb_store_org_budget_set(int64_t team, int has_project, int64_t project, const char *period,
+                            const char *limit_usd, const char *soft_limit_usd, int64_t *out_id)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!period || !period[0] || !limit_usd || !limit_usd[0])
       return -1;
    if (strcmp(period, "day") != 0 && strcmp(period, "month") != 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -71,15 +71,15 @@ int db2_org_budget_set(int64_t team, int has_project, int64_t project, const cha
    return 0;
 }
 
-int db2_org_budget_show(int64_t team, int has_project, int64_t project, db2_org_budget_row_t *out,
-                        int max)
+int kb_store_org_budget_show(int64_t team, int has_project, int64_t project,
+                             kb_store_org_budget_row_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -102,7 +102,7 @@ int db2_org_budget_show(int64_t team, int has_project, int64_t project, db2_org_
    {
       if (n >= max)
          break;
-      db2_org_budget_row_t *r = &out[n++];
+      kb_store_org_budget_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->team_id = aimee_pg_column_int64(st, 0);
       if (aimee_pg_column_is_null(st, 1))
@@ -138,17 +138,17 @@ int db2_org_budget_show(int64_t team, int has_project, int64_t project, db2_org_
    return n;
 }
 
-int db2_org_budget_reserve(const char *origin_cn, const char *request_id, int64_t team,
-                           int has_project, int64_t project, int64_t pricing_version,
-                           const char *reserved_max, int64_t lease_ttl_secs, int *out_outcome)
+int kb_store_org_budget_reserve(const char *origin_cn, const char *request_id, int64_t team,
+                                int has_project, int64_t project, int64_t pricing_version,
+                                const char *reserved_max, int64_t lease_ttl_secs, int *out_outcome)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!origin_cn || !origin_cn[0] || !request_id || !request_id[0] || !reserved_max ||
        !reserved_max[0] || lease_ttl_secs <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -179,11 +179,11 @@ int db2_org_budget_reserve(const char *origin_cn, const char *request_id, int64_
    /* Parse the typed reserve verdict string. */
    int outcome;
    if (strcmp(verdict, "granted") == 0)
-      outcome = DB2_BUDGET_GRANTED;
+      outcome = KB_STORE_BUDGET_GRANTED;
    else if (strstr(verdict, "project budget exceeded"))
-      outcome = DB2_BUDGET_REFUSED_PROJECT;
+      outcome = KB_STORE_BUDGET_REFUSED_PROJECT;
    else if (strstr(verdict, "team budget exceeded"))
-      outcome = DB2_BUDGET_REFUSED_TEAM;
+      outcome = KB_STORE_BUDGET_REFUSED_TEAM;
    else
       return -1; /* unrecognized verdict */
    if (out_outcome)
@@ -191,16 +191,16 @@ int db2_org_budget_reserve(const char *origin_cn, const char *request_id, int64_
    return 0;
 }
 
-int db2_org_budget_settle(const char *origin_cn, const char *request_id, const char *realized_usd,
-                          int *out_settled)
+int kb_store_org_budget_settle(const char *origin_cn, const char *request_id,
+                               const char *realized_usd, int *out_settled)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!origin_cn || !origin_cn[0] || !request_id || !request_id[0] || !realized_usd ||
        !realized_usd[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -222,15 +222,15 @@ int db2_org_budget_settle(const char *origin_cn, const char *request_id, const c
    return 0;
 }
 
-int db2_org_budget_heartbeat(const char *origin_cn, const char *request_id, int64_t lease_ttl_secs,
-                             int *out_ok)
+int kb_store_org_budget_heartbeat(const char *origin_cn, const char *request_id,
+                                  int64_t lease_ttl_secs, int *out_ok)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!origin_cn || !origin_cn[0] || !request_id || !request_id[0] || lease_ttl_secs <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -252,12 +252,12 @@ int db2_org_budget_heartbeat(const char *origin_cn, const char *request_id, int6
    return 0;
 }
 
-int db2_org_budget_settle_expired(int64_t *out_settled)
+int kb_store_org_budget_settle_expired(int64_t *out_settled)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

@@ -1,5 +1,5 @@
-#ifndef DEC_DB2_KB_VECTORS_H
-#define DEC_DB2_KB_VECTORS_H 1
+#ifndef DEC_KB_STORE_KB_VECTORS_H
+#define DEC_KB_STORE_KB_VECTORS_H 1
 
 #include <stdint.h>
 
@@ -17,4 +17,4 @@ int pgvec_kb_vector_search_scoped(const char *project, const char *exclude_proje
                                   const float *vec, int dim, int limit, int64_t *ids,
                                   double *scores, int max);
 
-#endif /* DEC_DB2_KB_VECTORS_H */
+#endif /* DEC_KB_STORE_KB_VECTORS_H */

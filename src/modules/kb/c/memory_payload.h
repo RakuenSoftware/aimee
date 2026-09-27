@@ -1,14 +1,14 @@
-/* memory_payload.h: DB2 domain helpers that build vector point payloads.
+/* memory_payload.h: KB_STORE domain helpers that build vector point payloads.
  *
- * The payload JSON is pure DB2 data — memories, memory_units,
+ * The payload JSON is pure KB_STORE data — memories, memory_units,
  * memory_scopes, memory_entities rows assembled for the point body.
  * The pgvector upsert path calls these builders immediately before
  * writing.
  *
  * Pure domain API.  Backend access stays private to src/modules/kb/c/.
  */
-#ifndef DEC_DB2_MEMORY_PAYLOAD_H
-#define DEC_DB2_MEMORY_PAYLOAD_H 1
+#ifndef DEC_KB_STORE_MEMORY_PAYLOAD_H
+#define DEC_KB_STORE_MEMORY_PAYLOAD_H 1
 
 #include <stdint.h>
 
@@ -19,11 +19,11 @@ extern "C"
 
    /* Legacy wire-catalog declaration only. No native implementation or
     * production caller remains; Go memory owns exact-key lookup. Retire this
-    * declaration with the older generated DB2 key_exists wire contract. */
-   int db2_memory_key_exists(const char *key);
+    * declaration with the older generated KB_STORE key_exists wire contract. */
+   int kb_store_memory_key_exists(const char *key);
 
    /* Total row count in the memories table. Returns 0 on error. */
-   int64_t db2_memory_count(void);
+   int64_t kb_store_memory_count(void);
 
    /* Auditable-correctness P2 (/v1/audit/provenance): resolve a surfaced memory
     * id to its provenance fields — kind, source (source_session), and version
@@ -35,4 +35,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_DB2_MEMORY_PAYLOAD_H */
+#endif /* DEC_KB_STORE_MEMORY_PAYLOAD_H */

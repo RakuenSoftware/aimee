@@ -7,7 +7,7 @@
  * We stub memory_embed_text (so the neighbourhood bundle is deterministic) and
  * stub the model sidecar with a `cat <canned-file>` command, so the worker's
  * orchestration — build bundle, call sidecar, write proposed candidates, cite
- * the neighbourhood — is exercised end-to-end over the db2 sqlite shim without
+ * the neighbourhood — is exercised end-to-end over the kb_store sqlite shim without
  * a live LLM.
  *
  * Tests:
@@ -24,7 +24,7 @@
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb/kb_learning_synth.h"
 
 #define RESP_PATH "/tmp/aimee_synth_test_resp.json"
@@ -45,8 +45,8 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void write_resp(const char *json)
@@ -69,15 +69,15 @@ static void make_vec384(char *buf, size_t n, float v0)
 static void seed_id(const char *kind, const char *content, float v0, char *id_out, size_t id_len)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
    char payload[256];
    snprintf(payload, sizeof(payload), "{\"content\":\"%s\"}", content);
-   assert(db2_artifact_write(id, kind, "proposed", "user", "jbailes", "jbailes", 1.0, payload) ==
-          0);
-   assert(db2_evidence_enqueue(id, "evidence") == 0);
+   assert(kb_store_artifact_write(id, kind, "proposed", "user", "jbailes", "jbailes", 1.0,
+                                  payload) == 0);
+   assert(kb_store_evidence_enqueue(id, "evidence") == 0);
    char vec[8192];
    make_vec384(vec, sizeof(vec), v0);
-   assert(db2_evidence_store_vector(id, "evidence", vec) == 0);
+   assert(kb_store_evidence_store_vector(id, "evidence", vec) == 0);
    if (id_out)
       snprintf(id_out, id_len, "%s", id);
 }
@@ -105,13 +105,13 @@ static void test_synth_success(void)
    assert(n == 1);
 
    /* The candidate is a proposed anti_pattern... */
-   db2_artifact_row_t row;
-   assert(db2_artifact_read(ids[0], &row, NULL, 0, NULL) == 0);
+   kb_store_artifact_row_t row;
+   assert(kb_store_artifact_read(ids[0], &row, NULL, 0, NULL) == 0);
    assert(strcmp(row.kind, "anti_pattern") == 0);
    assert(strcmp(row.state, "proposed") == 0);
 
    /* ...citing every neighbourhood evidence artifact (corroboration = 3). */
-   assert(db2_artifact_citation_count(ids[0]) == 3);
+   assert(kb_store_artifact_citation_count(ids[0]) == 3);
 
    printf("  test_synth_success: PASS\n");
 }
@@ -129,7 +129,7 @@ static void test_synth_sidecar_error(void)
                                       NULL, 0);
    assert(n == -1);
    /* No candidate artifacts beyond the 2 seeded evidence rows. */
-   assert(db2_artifact_count("anti_pattern", NULL) == 0);
+   assert(kb_store_artifact_count("anti_pattern", NULL) == 0);
 
    printf("  test_synth_sidecar_error: PASS\n");
 }
@@ -158,16 +158,16 @@ static void test_synth_drain(void)
    char id1[64], id2[64];
    seed_id("feedback_negative", "retry on auth failure", 1.0f, id1, sizeof(id1));
    seed_id("guardrail_event", "auth retry blocked", 0.9f, id2, sizeof(id2));
-   assert(db2_synth_enqueue(id1) == 0);
-   assert(db2_synth_enqueue(id2) == 0);
-   assert(db2_synth_ops_count("pending") == 2);
+   assert(kb_store_synth_enqueue(id1) == 0);
+   assert(kb_store_synth_enqueue(id2) == 0);
+   assert(kb_store_synth_ops_count("pending") == 2);
 
    int n = kb_learning_synth_drain(16, STUB_CMD, "stub", 8, 2048);
    assert(n == 2); /* both ops processed */
-   assert(db2_synth_ops_count("ok") == 2);
-   assert(db2_synth_ops_count("pending") == 0);
+   assert(kb_store_synth_ops_count("ok") == 2);
+   assert(kb_store_synth_ops_count("pending") == 0);
    /* One candidate per processed op. */
-   assert(db2_artifact_count("anti_pattern", "proposed") == 2);
+   assert(kb_store_artifact_count("anti_pattern", "proposed") == 2);
 
    /* Drained queue is a no-op. */
    assert(kb_learning_synth_drain(16, STUB_CMD, "stub", 8, 2048) == 0);
@@ -182,7 +182,7 @@ int main(void)
    test_synth_sidecar_error();
    test_synth_empty_corpus();
    test_synth_drain();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    remove(RESP_PATH);
    printf("test_learning_synth: ALL PASS\n");
    return 0;

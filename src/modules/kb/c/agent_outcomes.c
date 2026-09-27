@@ -1,17 +1,18 @@
-/* db2/agent_outcomes.c: per-delegation outcome audit — Postgres via libpq. */
+/* kb_store/agent_outcomes.c: per-delegation outcome audit — Postgres via libpq. */
 
 #include "agent_outcomes.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
 #include <string.h>
 
-int db2_agent_outcome_record(const char *agent_name, const char *role, const char *outcome_kind,
-                             const char *reason, int turns_used, int tools_called,
-                             int64_t tokens_used, const char *tool_error_pattern)
+int kb_store_agent_outcome_record(const char *agent_name, const char *role,
+                                  const char *outcome_kind, const char *reason, int turns_used,
+                                  int tools_called, int64_t tokens_used,
+                                  const char *tool_error_pattern)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !outcome_kind)
       return -1;
 
@@ -39,9 +40,10 @@ int db2_agent_outcome_record(const char *agent_name, const char *role, const cha
    return rc;
 }
 
-int db2_agent_outcome_recent_failures(int window_days, db2_agent_outcome_failure_t *out, int max)
+int kb_store_agent_outcome_recent_failures(int window_days, kb_store_agent_outcome_failure_t *out,
+                                           int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0 || window_days <= 0)
       return 0;
 
@@ -73,10 +75,11 @@ int db2_agent_outcome_recent_failures(int window_days, db2_agent_outcome_failure
    return count;
 }
 
-int db2_agent_outcome_repeated_error_patterns(int min_count, db2_agent_outcome_pattern_count_t *out,
-                                              int max)
+int kb_store_agent_outcome_repeated_error_patterns(int min_count,
+                                                   kb_store_agent_outcome_pattern_count_t *out,
+                                                   int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0 || min_count <= 0)
       return 0;
 

@@ -327,8 +327,8 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
    }
 
    int was_existing = 0;
-   int64_t doc_id = db2_kb_doc_write(content_hash, filename, scope, converter, converter_version,
-                                     normalized, &was_existing);
+   int64_t doc_id = kb_store_kb_doc_write(content_hash, filename, scope, converter,
+                                          converter_version, normalized, &was_existing);
    free(normalized);
 
    if (doc_id < 0)
@@ -402,7 +402,7 @@ int handle_post_docs_manifest(const char *body, int body_len, char *out_buf, int
       if (cJSON_IsString(item_scope_j) && item_scope_j->valuestring && item_scope_j->valuestring[0])
          scope = item_scope_j->valuestring;
 
-      int exists = db2_kb_doc_exists_by_hash_scope(hash_j->valuestring, scope);
+      int exists = kb_store_kb_doc_exists_by_hash_scope(hash_j->valuestring, scope);
       if (exists < 0)
       {
          db_error = 1;
@@ -455,8 +455,8 @@ int handle_post_docs_manifest(const char *body, int body_len, char *out_buf, int
 int handle_get_doc(const char *doc_id, char *out_buf, int out_cap)
 {
    int64_t id = (int64_t)atoll(doc_id);
-   db2_kb_doc_t doc;
-   if (db2_kb_doc_read(id, &doc) != 0)
+   kb_store_kb_doc_t doc;
+   if (kb_store_kb_doc_read(id, &doc) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
       return 404;
@@ -474,8 +474,8 @@ int handle_get_doc(const char *doc_id, char *out_buf, int out_cap)
 int handle_delete_doc(const char *doc_id, char *out_buf, int out_cap)
 {
    int64_t id = (int64_t)atoll(doc_id);
-   db2_kb_doc_t doc;
-   if (id <= 0 || db2_kb_doc_read(id, &doc) != 0)
+   kb_store_kb_doc_t doc;
+   if (id <= 0 || kb_store_kb_doc_read(id, &doc) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
       return 404;
@@ -504,14 +504,14 @@ int handle_get_review(const char *query_string, char *out_buf, int out_cap)
          limit = 50;
    }
 
-   db2_kb_doc_t *docs = malloc((size_t)limit * sizeof(db2_kb_doc_t));
+   kb_store_kb_doc_t *docs = malloc((size_t)limit * sizeof(kb_store_kb_doc_t));
    if (!docs)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
 
-   int count = db2_kb_doc_list_review(limit, cursor, docs, limit);
+   int count = kb_store_kb_doc_list_review(limit, cursor, docs, limit);
    if (count < 0)
    {
       free(docs);

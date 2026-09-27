@@ -1,12 +1,12 @@
-/* db2/decision_log.h: task-keyed decision log — DB2 subsystem.
+/* kb_store/decision_log.h: task-keyed decision log — KB_STORE subsystem.
  *
- * Per the DB1/DB2 storage split, decision_log lives in DB2
+ * Per the DB1/KB_STORE storage split, decision_log lives in KB_STORE
  * alongside notes and shareable task state. The per-window `decisions`
  * audit table remains in DB1 (db1/decisions.h).
  *
  * Pure domain API. No backend types or handles in any signature. */
-#ifndef DEC_DB2_DECISION_LOG_H
-#define DEC_DB2_DECISION_LOG_H 1
+#ifndef DEC_KB_STORE_DECISION_LOG_H
+#define DEC_KB_STORE_DECISION_LOG_H 1
 
 #include <stdint.h>
 
@@ -34,13 +34,13 @@ extern "C"
       char subject[256];        /* scope key: what this decision is about */
       char author[128];         /* who decided */
       int64_t linked_policy_id; /* bound policy id, or 0 */
-   } db2_decision_log_row_t;
+   } kb_store_decision_log_row_t;
 
    /* Insert a task decision_log row. `created_at` may be NULL to default
     * to datetime('now'). Optionally returns the inserted row in `out`. */
-   int db2_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
-                               const char *rationale, const char *assumptions,
-                               const char *created_at, db2_decision_log_row_t *out);
+   int kb_store_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
+                                    const char *rationale, const char *assumptions,
+                                    const char *created_at, kb_store_decision_log_row_t *out);
 
    /* Record a governance decision (P1). Writes an `active` decision for `subject`
     * (scope key) with the given rationale/author/policy/revisit, and — atomically
@@ -50,14 +50,14 @@ extern "C"
     * (subject, linked_policy_id) is rejected. Returns 0 on success (row in `out`
     * if non-NULL), -1 on any failure (including the invariant rejection), with
     * the transaction rolled back so no partial write survives. */
-   int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
-                               const char *rationale, const char *author, int64_t linked_policy_id,
-                               const char *revisit_when, int64_t supersedes_id,
-                               db2_decision_log_row_t *out);
+   int kb_store_decision_log_record(const char *subject, const char *options, const char *chosen,
+                                    const char *rationale, const char *author,
+                                    int64_t linked_policy_id, const char *revisit_when,
+                                    int64_t supersedes_id, kb_store_decision_log_row_t *out);
 
    /* Load a task decision_log row by id. Returns 0 on success, -1 if the
-    * row does not exist or DB2 is unavailable. */
-   int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out);
+    * row does not exist or KB_STORE is unavailable. */
+   int kb_store_decision_log_get(int64_t id, kb_store_decision_log_row_t *out);
 
    /* Flip active decisions whose revisit_when has elapsed to 'revisit_due' so
     * they resurface for review (P1). Idempotent: only active rows are touched, so
@@ -73,30 +73,31 @@ extern "C"
     *
     * Returns the number flipped this call, or -1 on error. Reuses the existing
     * curator drain poll — no new scheduler. */
-   int db2_decision_log_mark_revisit_due(void);
+   int kb_store_decision_log_mark_revisit_due(void);
 
    /* Update the outcome for a task decision_log row. */
-   int db2_decision_log_set_outcome(int64_t id, const char *outcome);
+   int kb_store_decision_log_set_outcome(int64_t id, const char *outcome);
 
    /* List task decision_log rows, newest first. If `outcome` is NULL/empty,
     * no outcome filter is applied. `limit <= 0` means no SQL LIMIT. */
-   int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out, int max);
+   int kb_store_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
+                                  int max);
 
    /* List decisions filtered by subject and/or status (either NULL/empty = no
     * filter), most-recent-first. Returns the count written, or -1. */
-   int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
-                                    db2_decision_log_row_t *out, int max);
+   int kb_store_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                         kb_store_decision_log_row_t *out, int max);
 
    /* The id of the active decision for (subject, linked_policy_id) — the exact
     * idx_dl_active_scope key — or 0 if none. For a precise pre-check 409. */
-   int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id);
+   int64_t kb_store_decision_log_active_id(const char *subject, int64_t linked_policy_id);
 
    /* Set a decision's status / revisit_when. Returns 0, or -1 if the id is absent. */
-   int db2_decision_log_set_status(int64_t id, const char *status);
-   int db2_decision_log_set_revisit(int64_t id, const char *revisit_when);
+   int kb_store_decision_log_set_status(int64_t id, const char *status);
+   int kb_store_decision_log_set_revisit(int64_t id, const char *revisit_when);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_DECISION_LOG_H */
+#endif /* DEC_KB_STORE_DECISION_LOG_H */

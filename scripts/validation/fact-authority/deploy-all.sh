@@ -66,7 +66,7 @@ x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-
 if [ -f /tmp/pgt.tgz ]; then
   p /tmp/pgt.tgz /tmp/pgt.tgz
   [ -f /tmp/pgsql.tgz ] && p /tmp/pgsql.tgz /tmp/pgsql.tgz
-  x 'cd /root/pgtests && tar xzf /tmp/pgt.tgz && { [ -f /tmp/pgsql.tgz ] && tar xzf /tmp/pgsql.tgz; }; chmod +x unit-test-* db2-test-template 2>/dev/null'
+  x 'cd /root/pgtests && tar xzf /tmp/pgt.tgz && { [ -f /tmp/pgsql.tgz ] && tar xzf /tmp/pgsql.tgz; }; chmod +x unit-test-* kb-store-test-template 2>/dev/null'
 fi
 
 # The trust-chain rig, when staged. test-account-tcp-authority.sh needs it to

@@ -1,17 +1,17 @@
-/* db2/oidc_jwks.c: P1 tenancy fleet-wide trusted JWKS (kb_oidc_jwks) — Postgres
- * via libpq. See oidc_jwks.h. Mirrors the db2/enrollments.c access pattern.
+/* kb_store/oidc_jwks.c: P1 tenancy fleet-wide trusted JWKS (kb_oidc_jwks) — Postgres
+ * via libpq. See oidc_jwks.h. Mirrors the kb_store/enrollments.c access pattern.
  * Requires the RLS-enforcing Postgres backend. */
 
 #include "oidc_jwks.h"
-#include "db2_tenant.h"
-#include "db2_internal.h"
+#include "kb_store_tenant.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_jwks_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_jwks_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -30,14 +30,14 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_jwks_row_t *row)
 
 #define JWKS_COLS "id, issuer, kid, jwk_json, added_at, retired_at"
 
-int db2_jwks_add(const char *issuer, const char *kid, const char *jwk_json, int64_t *out_id)
+int kb_store_jwks_add(const char *issuer, const char *kid, const char *jwk_json, int64_t *out_id)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!issuer || !issuer[0] || !kid || !kid[0] || !jwk_json)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    const char *sql = "INSERT INTO kb_oidc_jwks (issuer, kid, jwk_json) VALUES (?1, ?2, ?3) "
@@ -60,14 +60,14 @@ int db2_jwks_add(const char *issuer, const char *kid, const char *jwk_json, int6
    return 0;
 }
 
-int db2_jwks_retire(const char *issuer, const char *kid)
+int kb_store_jwks_retire(const char *issuer, const char *kid)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!issuer || !issuer[0] || !kid || !kid[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -83,14 +83,14 @@ int db2_jwks_retire(const char *issuer, const char *kid)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_jwks_list_active(const char *issuer, db2_jwks_row_t *out, int max)
+int kb_store_jwks_list_active(const char *issuer, kb_store_jwks_row_t *out, int max)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!issuer || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

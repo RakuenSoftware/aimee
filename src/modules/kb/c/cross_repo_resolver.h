@@ -9,7 +9,7 @@
  * pipeline + multiplicity (§3.5/§3.10) land in S2b. Every function here is
  * deterministic and takes precomputed corpus data as input -- it never touches
  * the database -- so it is fully unit-testable on the sqlite shim (where the
- * Postgres-only db2 ops return -1). The DB layer (S3) gathers the inputs.
+ * Postgres-only kb_store ops return -1). The DB layer (S3) gathers the inputs.
  *
  * See docs/proposals/pending/cross-repo-dependency-graph.md. */
 

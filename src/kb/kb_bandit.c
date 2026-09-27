@@ -6,7 +6,7 @@
 #include "kb_bandit_registry.h"
 #include "modules/kb/c/artifacts.h"
 #include "modules/kb/c/bandit.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "headers/platform_process.h"
 
@@ -24,7 +24,7 @@ int kb_bandit_arm_register(const char *decision_point, const char *arm_id, const
    if (!decision_point || !arm_id)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -101,9 +101,9 @@ int kb_bandit_arm_register(const char *decision_point, const char *arm_id, const
    else
    {
       char id[64];
-      db2_artifact_gen_id(id, sizeof(id));
-      rc = db2_artifact_write(id, "policy_arm", "proposed", "bandit_arm", composite_scope_id,
-                              "system", 1.0, payload_str);
+      kb_store_artifact_gen_id(id, sizeof(id));
+      rc = kb_store_artifact_write(id, "policy_arm", "proposed", "bandit_arm", composite_scope_id,
+                                   "system", 1.0, payload_str);
    }
 
    free(payload_str);
@@ -147,7 +147,7 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       window_seconds = 7 * 24 * 3600;
 
    long long n_explore = 0, n_total = 0;
-   db2_bandit_explore_stats(decision_point, window_seconds, &n_explore, &n_total);
+   kb_store_bandit_explore_stats(decision_point, window_seconds, &n_explore, &n_total);
 
    int gate_refuses = 0;
    if (n_total >= 20 && budget > 0.0)
@@ -160,13 +160,13 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
    double u = (double)rand() / ((double)RAND_MAX + 1.0);
    int allow_explore = gate_refuses ? 0 : (u < budget);
 
-   /* Read current arm posteriors from DB2. */
+   /* Read current arm posteriors from KB_STORE. */
    cJSON *arms_arr = cJSON_CreateArray();
    for (int i = 0; i < n_arms; i++)
    {
-      db2_bandit_arm_stats_t stats;
+      kb_store_bandit_arm_stats_t stats;
       memset(&stats, 0, sizeof(stats));
-      db2_bandit_arm_stats_read(decision_point, arm_ids[i], &stats);
+      kb_store_bandit_arm_stats_read(decision_point, arm_ids[i], &stats);
 
       cJSON *arm = cJSON_CreateObject();
       cJSON_AddStringToObject(arm, "arm_id", arm_ids[i]);
@@ -248,16 +248,16 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       }
    }
 
-   /* Log decision to DB2. */
+   /* Log decision to KB_STORE. */
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    char ctx_hash[16] = "";
    if (context_json)
       _context_hash(context_json, ctx_hash, sizeof(ctx_hash));
 
-   db2_bandit_decision_insert(id, decision_point, arm_ids[arm_idx], ctx_hash, propensity,
-                              allow_explore);
+   kb_store_bandit_decision_insert(id, decision_point, arm_ids[arm_idx], ctx_hash, propensity,
+                                   allow_explore);
 
    if (decision_id_out)
       strncpy(decision_id_out, id, KB_BANDIT_MAX_DECISION - 1);
@@ -274,20 +274,20 @@ int kb_bandit_reward(const char *decision_point, const char *decision_id, const 
       return -1;
 
    /* Close the decision log entry. */
-   if (db2_bandit_decision_close(decision_id, reward) != 0)
+   if (kb_store_bandit_decision_close(decision_id, reward) != 0)
       return -1;
 
    /* Read current arm stats to get the posterior. */
-   db2_bandit_arm_stats_t stats;
+   kb_store_bandit_arm_stats_t stats;
    memset(&stats, 0, sizeof(stats));
-   db2_bandit_arm_stats_read(decision_point, arm_id, &stats);
+   kb_store_bandit_arm_stats_read(decision_point, arm_id, &stats);
 
    /* Beta-Bernoulli posterior update: alpha += reward, beta += (1 - reward).
     * For bounded rewards in [0,1] this approximates a Bernoulli observation. */
    double new_alpha = stats.posterior_alpha + reward;
    double new_beta = stats.posterior_beta + (1.0 - reward);
 
-   return db2_bandit_arm_stats_update(decision_point, arm_id, reward, new_alpha, new_beta);
+   return kb_store_bandit_arm_stats_update(decision_point, arm_id, reward, new_alpha, new_beta);
 }
 
 kb_bandit_result_count_t kb_bandit_result_count_availability(int n_results, int limit)
@@ -301,7 +301,7 @@ int kb_bandit_record_result_count(const char *decision_id, int n_results, int li
 {
    if (!decision_id || !decision_id[0] || n_results < 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    kb_bandit_result_count_t result = kb_bandit_result_count_availability(n_results, limit);
@@ -362,13 +362,13 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* Replay evidence is durable, system-scoped: scope_kind="bandit_replay",
     * scope_id=<decision_point>. Confidence reflects estimator status:
     * ok → 1.0, insufficient_data → 0.5, else → 0.5. */
-   int rc = db2_artifact_write(id, "benchmark_trace", "committed", "bandit_replay", decision_point,
-                               "", confidence, payload);
+   int rc = kb_store_artifact_write(id, "benchmark_trace", "committed", "bandit_replay",
+                                    decision_point, "", confidence, payload);
    free(payload);
    if (rc != 0)
       return -1;

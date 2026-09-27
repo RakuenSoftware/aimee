@@ -1,10 +1,10 @@
-/* db2/curiosity.h: curiosity backlog, DB2 subsystem.
+/* kb_store/curiosity.h: curiosity backlog, KB_STORE subsystem.
  *
  * Pure domain API. No backend types. SQL is encapsulated in
  * src/modules/kb/c/curiosity.c, which goes through the libpq shim via
  * aimee_pg_* helpers. */
-#ifndef DEC_DB2_CURIOSITY_H
-#define DEC_DB2_CURIOSITY_H 1
+#ifndef DEC_KB_STORE_CURIOSITY_H
+#define DEC_KB_STORE_CURIOSITY_H 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -52,53 +52,53 @@ extern "C"
    } curiosity_item_t;
 
    /* Predicates: cheap, no DB. */
-   int db2_curiosity_gap_type_is_canonical(const char *gap_type);
-   int db2_curiosity_state_is_valid(const char *state);
+   int kb_store_curiosity_gap_type_is_canonical(const char *gap_type);
+   int kb_store_curiosity_state_is_valid(const char *state);
 
    /* Create a new curiosity item with state = open. source_session is
     * stored verbatim; callers usually pass session_id(). Returns 0 on
     * success and populates *out (if non-NULL). */
-   int db2_curiosity_create(const char *gap_type, const char *target_entity,
-                            const char *target_topic, const char *evidence, double importance,
-                            double novelty, const char *source_session, curiosity_item_t *out);
+   int kb_store_curiosity_create(const char *gap_type, const char *target_entity,
+                                 const char *target_topic, const char *evidence, double importance,
+                                 double novelty, const char *source_session, curiosity_item_t *out);
 
    /* List items, optionally filtered by state (NULL/empty = all).
     * Newest-first by created_at. Returns count written (<= max). */
-   int db2_curiosity_list(const char *state, curiosity_item_t *out, int max);
+   int kb_store_curiosity_list(const char *state, curiosity_item_t *out, int max);
 
    /* List the top-N open items by routing_score (DESC), tiebreaking on
     * created_at (ASC). Used by the directive-routing path so the
     * highest-priority gap goes first. Returns count written (<= max). */
-   int db2_curiosity_list_top_open_by_score(curiosity_item_t *out, int max);
+   int kb_store_curiosity_list_top_open_by_score(curiosity_item_t *out, int max);
 
    /* Fetch a single item by id. Returns 1 if found, 0 if not, -1 on error. */
-   int db2_curiosity_get(int64_t id, curiosity_item_t *out);
+   int kb_store_curiosity_get(int64_t id, curiosity_item_t *out);
 
    /* Transition state. Rejects unknown states. Returns 0 on success. */
-   int db2_curiosity_update_state(int64_t id, const char *new_state);
+   int kb_store_curiosity_update_state(int64_t id, const char *new_state);
 
    /* Sweep the local failed_queries table for retrieval-failure entries
     * that don't yet have an open `missing_fact` curiosity item, and
     * create one each. Returns the number of new items created. */
-   int db2_curiosity_sweep_failed_queries(void);
+   int kb_store_curiosity_sweep_failed_queries(void);
 
    /* Recompute importance / novelty / progress / routing_score for
     * every open or in-progress item. Returns the number of rows
     * rescored. */
-   int db2_curiosity_rescore_all(void);
+   int kb_store_curiosity_rescore_all(void);
 
    /* Remove every curiosity item. Test-only. */
-   int db2_curiosity_reset(void);
+   int kb_store_curiosity_reset(void);
 
    /* Promote a corpus gap artifact to a curiosity_items row.
     * gap_kind maps: undefined_entity→missing_fact, dangling_reference→weak_coverage.
     * Skips if an open item for the same subject already exists.
     * Returns 0 on success or skip, -1 on error. */
-   int db2_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_kind,
-                                        const char *subject, const char *evidence_ref);
+   int kb_store_curiosity_promote_corpus_gap(const char *artifact_id, const char *gap_kind,
+                                             const char *subject, const char *evidence_ref);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CURIOSITY_H */
+#endif /* DEC_KB_STORE_CURIOSITY_H */

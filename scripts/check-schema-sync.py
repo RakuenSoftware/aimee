@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Verify the DB2 shim schema and the DB2 native schema cover the same set
+"""Verify the KB_STORE shim schema and the KB_STORE native schema cover the same set
 of tables, and that the store's schema only contains DB1-owned tables.
 
 The store's schema is server-go/modules/aimee/families/schema_*.sql, one file
 per family, since DB1 became a Go module.
 
-After the 3db split, the DB2 shim schema used by tests lives in
-src/modules/kb/c/schema_sqlite.sql; production DB2 uses src/modules/kb/c/schema.sql.
-Drift between those two files breaks the DB2 shim test path.
+After the 3db split, the KB_STORE shim schema used by tests lives in
+src/modules/kb/c/schema_sqlite.sql; production KB_STORE uses src/modules/kb/c/schema.sql.
+Drift between those two files breaks the KB_STORE shim test path.
 
 Run via `make schema-sync-check` (or directly during CI). Exits non-zero on
 drift; prints the set differences so the fix is obvious.
@@ -27,8 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # The store's schema, one file per family since it became a Go module. Was a
 # single src/modules/db1/schema.sql.
 STORE_SCHEMA_DIR = ROOT / "server-go" / "modules" / "aimee" / "families"
-DB2_SCHEMA_PG = ROOT / "src" / "modules" / "kb" / "c" / "schema.sql"
-DB2_SCHEMA_SQLITE = ROOT / "src" / "modules" / "kb" / "c" / "schema_sqlite.sql"
+KB_STORE_SCHEMA_PG = ROOT / "src" / "modules" / "kb" / "c" / "schema.sql"
+KB_STORE_SCHEMA_SQLITE = ROOT / "src" / "modules" / "kb" / "c" / "schema_sqlite.sql"
 
 # CREATE TABLE [IF NOT EXISTS] <name> ( ... ). `name` may be quoted or bare.
 TABLE_RE = re.compile(
@@ -36,10 +36,10 @@ TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Lexical-index virtual tables don't have analogues as *tables* in the DB2
+# Lexical-index virtual tables don't have analogues as *tables* in the KB_STORE
 # native schema; their content is mirrored through native search projections,
 # so skip them from the parity check between the shim and the native schema.
-DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
+KB_STORE_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
     "memories_fts",
     "memory_chunks_fts",
     "memory_units_fts",
@@ -52,7 +52,7 @@ DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 }
 
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
-# the DB2 schemas (sqlite shim and postgres) must not create them.
+# the KB_STORE schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
     "user_memory_erasure_epoch",
     "user_memory_erasure_intents",
@@ -202,11 +202,11 @@ DB1_ONLY_TABLES = {
     "harness_memory",
 }
 
-# These protocols require PostgreSQL row/advisory locks. The DB2 test
+# These protocols require PostgreSQL row/advisory locks. The KB_STORE test
 # shim cannot implement their send/replay safety contract. Both independent
 # memory owners declare their own send guard; only KB owns relation consumers.
 MEMORY_OWNER_POSTGRES_TABLES = {"memory_send_barrier", "memory_send_leases"}
-DB2_POSTGRES_ONLY_TABLES = MEMORY_OWNER_POSTGRES_TABLES | {
+KB_STORE_POSTGRES_ONLY_TABLES = MEMORY_OWNER_POSTGRES_TABLES | {
     "memory_relation_consumer_positions", "memory_relation_consumer_state",
 }
 
@@ -229,17 +229,17 @@ def main() -> int:
     db1_tables = set()
     for schema in store_schemas:
         db1_tables |= extract_tables(schema)
-    db2_shim_tables = extract_tables(DB2_SCHEMA_SQLITE)
-    db2_native_tables = extract_tables(DB2_SCHEMA_PG)
+    kb_store_shim_tables = extract_tables(KB_STORE_SCHEMA_SQLITE)
+    kb_store_native_tables = extract_tables(KB_STORE_SCHEMA_PG)
 
-    shim_shareable = db2_shim_tables - DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES
-    missing_in_native = shim_shareable - db2_native_tables
-    missing_in_shim = db2_native_tables - shim_shareable - DB2_POSTGRES_ONLY_TABLES
-    missing_protocol_tables = (DB2_POSTGRES_ONLY_TABLES - db2_native_tables) | (MEMORY_OWNER_POSTGRES_TABLES - db1_tables)
-    unsupported_shim_protocols = DB2_POSTGRES_ONLY_TABLES & db2_shim_tables
+    shim_shareable = kb_store_shim_tables - KB_STORE_SHIM_ONLY_LEXICAL_INDEX_TABLES
+    missing_in_native = shim_shareable - kb_store_native_tables
+    missing_in_shim = kb_store_native_tables - shim_shareable - KB_STORE_POSTGRES_ONLY_TABLES
+    missing_protocol_tables = (KB_STORE_POSTGRES_ONLY_TABLES - kb_store_native_tables) | (MEMORY_OWNER_POSTGRES_TABLES - db1_tables)
+    unsupported_shim_protocols = KB_STORE_POSTGRES_ONLY_TABLES & kb_store_shim_tables
 
-    db1_only_in_db2_native = DB1_ONLY_TABLES & db2_native_tables
-    db1_only_in_db2_shim = DB1_ONLY_TABLES & db2_shim_tables
+    db1_only_in_kb_store_native = DB1_ONLY_TABLES & kb_store_native_tables
+    db1_only_in_kb_store_shim = DB1_ONLY_TABLES & kb_store_shim_tables
 
     db1_allowed = DB1_ONLY_TABLES | DB1_OWNED_LEXICAL_INDEX | MEMORY_OWNER_POSTGRES_TABLES
     db1_unexpected = db1_tables - db1_allowed
@@ -247,8 +247,8 @@ def main() -> int:
     issues = (
         missing_in_native
         or missing_in_shim
-        or db1_only_in_db2_native
-        or db1_only_in_db2_shim
+        or db1_only_in_kb_store_native
+        or db1_only_in_kb_store_shim
         or db1_unexpected
         or missing_protocol_tables
         or unsupported_shim_protocols
@@ -264,18 +264,18 @@ def main() -> int:
     if missing_protocol_tables:
         print("schema drift: required PostgreSQL memory protocol tables absent:", sorted(missing_protocol_tables))
     if unsupported_shim_protocols:
-        print("schema drift: PostgreSQL-only protocols cannot be advertised by the DB2 test shim:", sorted(unsupported_shim_protocols))
+        print("schema drift: PostgreSQL-only protocols cannot be advertised by the KB_STORE test shim:", sorted(unsupported_shim_protocols))
     if db1_unexpected:
         print(f"schema drift: non-DB1 tables present in {STORE_SCHEMA_DIR}/schema_*.sql:")
         for name in sorted(db1_unexpected):
             print(f"  - {name}")
-    if db1_only_in_db2_native:
+    if db1_only_in_kb_store_native:
         print("schema drift: DB1-only tables present in src/modules/kb/c/schema.sql:")
-        for name in sorted(db1_only_in_db2_native):
+        for name in sorted(db1_only_in_kb_store_native):
             print(f"  - {name}")
-    if db1_only_in_db2_shim:
+    if db1_only_in_kb_store_shim:
         print("schema drift: DB1-only tables present in src/modules/kb/c/schema_sqlite.sql:")
-        for name in sorted(db1_only_in_db2_shim):
+        for name in sorted(db1_only_in_kb_store_shim):
             print(f"  - {name}")
     if missing_in_native:
         print(

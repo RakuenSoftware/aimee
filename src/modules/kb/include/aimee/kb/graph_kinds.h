@@ -1,7 +1,7 @@
-#ifndef AIMEE_DB2_GRAPH_KINDS_H
-#define AIMEE_DB2_GRAPH_KINDS_H 1
+#ifndef AIMEE_KB_STORE_GRAPH_KINDS_H
+#define AIMEE_KB_STORE_GRAPH_KINDS_H 1
 
-/* Persisted DB2 graph schema codes shared by native code-index writers and
+/* Persisted KB_STORE graph schema codes shared by native code-index writers and
  * the Go memory owner. Values are an on-disk contract, not memory policy.
  * Historical typedef names remain for native storage consumers. No validation,
  * extraction, ranking or memory-side communication is implemented here.
@@ -54,4 +54,4 @@ typedef enum
    REL_OTHER = 99
 } memory_relation_kind_t;
 
-#endif /* AIMEE_DB2_GRAPH_KINDS_H */
+#endif /* AIMEE_KB_STORE_GRAPH_KINDS_H */

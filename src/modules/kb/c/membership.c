@@ -1,17 +1,17 @@
-/* db2/membership.c: P1 tenancy team membership (kb_team_membership) — Postgres
- * via libpq. See membership.h. Mirrors the db2/enrollments.c access pattern.
+/* kb_store/membership.c: P1 tenancy team membership (kb_team_membership) — Postgres
+ * via libpq. See membership.h. Mirrors the kb_store/enrollments.c access pattern.
  * Tenant-scoped: every entry requires the RLS-enforcing Postgres backend. */
 
 #include "membership.h"
-#include "db2_tenant.h"
-#include "db2_internal.h"
+#include "kb_store_tenant.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_membership_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_membership_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -26,14 +26,14 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_membership_row_t *row)
 
 #define MEMBERSHIP_COLS "id, identity_key, team, is_default, created_at"
 
-int db2_membership_add(const char *identity_key, int64_t team, int is_default, int64_t *out_id)
+int kb_store_membership_add(const char *identity_key, int64_t team, int is_default, int64_t *out_id)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !identity_key[0] || team <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    const char *sql = "INSERT INTO kb_team_membership (identity_key, team, is_default) "
@@ -56,14 +56,14 @@ int db2_membership_add(const char *identity_key, int64_t team, int is_default, i
    return 0;
 }
 
-int db2_membership_remove(const char *identity_key, int64_t team)
+int kb_store_membership_remove(const char *identity_key, int64_t team)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !identity_key[0] || team <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -79,14 +79,15 @@ int db2_membership_remove(const char *identity_key, int64_t team)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_membership_list_for_identity(const char *identity_key, db2_membership_row_t *out, int max)
+int kb_store_membership_list_for_identity(const char *identity_key, kb_store_membership_row_t *out,
+                                          int max)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -104,14 +105,14 @@ int db2_membership_list_for_identity(const char *identity_key, db2_membership_ro
    return n;
 }
 
-int db2_membership_teams(const char *identity_key, int64_t *out_teams, int max)
+int kb_store_membership_teams(const char *identity_key, int64_t *out_teams, int max)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !out_teams || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -128,14 +129,14 @@ int db2_membership_teams(const char *identity_key, int64_t *out_teams, int max)
    return n;
 }
 
-int db2_membership_default_team(const char *identity_key, int64_t *out_team)
+int kb_store_membership_default_team(const char *identity_key, int64_t *out_team)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !out_team)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

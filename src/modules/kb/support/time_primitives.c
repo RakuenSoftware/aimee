@@ -2,7 +2,7 @@
 #define _GNU_SOURCE
 #endif
 
-#include "db2_time.h"
+#include "kb_store_time.h"
 
 #include <stdio.h>
 #include <string.h>

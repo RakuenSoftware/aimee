@@ -1,11 +1,11 @@
-/* db2/enrollments.c: redeemed-cert enrollment records — Postgres via libpq.
- * See enrollments.h. Mirrors the db2/decision_log.c access pattern. */
+/* kb_store/enrollments.c: redeemed-cert enrollment records — Postgres via libpq.
+ * See enrollments.h. Mirrors the kb_store/decision_log.c access pattern. */
 
 #include "enrollments.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_identity.h" /* kb_cert_serial_normalize for the (issuer,serial) key */
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <openssl/rand.h>
 
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <time.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_enrollment_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_enrollment_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -61,14 +61,14 @@ static int authority_generate(char out[33])
 
 static void revcache_put(const char *fp, int revoked); /* defined below */
 
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
-                          const char *cert_serial_norm, const char *expires_at, int legacy,
-                          int64_t *out_id)
+int kb_store_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                               const char *cert_serial_norm, const char *expires_at, int legacy,
+                               int64_t *out_id)
 {
    if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
        !cert_serial_norm[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char authority_id[33];
@@ -107,17 +107,17 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
    return 0;
 }
 
-int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
-                         const char *old_serial_norm, const char *scope,
-                         const char *new_fingerprint, const char *new_issuer,
-                         const char *new_serial_norm, int64_t *out_id)
+int kb_store_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                              const char *old_serial_norm, const char *scope,
+                              const char *new_fingerprint, const char *new_issuer,
+                              const char *new_serial_norm, int64_t *out_id)
 {
    if (!old_fingerprint || !old_fingerprint[0] || !old_issuer || !old_issuer[0] ||
        !old_serial_norm || !old_serial_norm[0] || !scope || !scope[0] || !new_fingerprint ||
        !new_fingerprint[0] || !new_issuer || !new_issuer[0] || !new_serial_norm ||
        !new_serial_norm[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -142,11 +142,11 @@ int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
    return 0;
 }
 
-int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
+int kb_store_enrollment_list(int limit, kb_store_enrollment_row_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (limit <= 0 || limit > max)
@@ -165,9 +165,9 @@ int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
    return n;
 }
 
-int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
+int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* Idempotent: revoking twice keeps the first revoked_at and still returns the
@@ -181,7 +181,7 @@ int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
       return -1;
    aimee_pg_bind_int64(st, "?1", id);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   db2_enrollment_row_t row;
+   kb_store_enrollment_row_t row;
    int rc;
    if (step == AIMEE_PG_ROW)
    {
@@ -214,7 +214,7 @@ struct revcache_ent
 static struct revcache_ent g_revcache[REVCACHE_MAX];
 static pthread_mutex_t g_revcache_lock = PTHREAD_MUTEX_INITIALIZER;
 
-void db2_enrollment_cache_flush(void)
+void kb_store_enrollment_cache_flush(void)
 {
    pthread_mutex_lock(&g_revcache_lock);
    memset(g_revcache, 0, sizeof(g_revcache));
@@ -283,7 +283,7 @@ static void revcache_warn_failopen(const char *fingerprint, const char *why)
              why ? why : "?", fingerprint ? fingerprint : "");
 }
 
-int db2_enrollment_is_revoked(const char *fingerprint)
+int kb_store_enrollment_is_revoked(const char *fingerprint)
 {
    if (!fingerprint || !fingerprint[0])
       return 0;
@@ -297,7 +297,7 @@ int db2_enrollment_is_revoked(const char *fingerprint)
     * the shared kb. KNOWN revocations still hold through an outage because revoke
     * primes the cache with revoked=1 (checked above, before this DB path). The
     * fail-open is logged (throttled) so an operator can see it. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       revcache_warn_failopen(fingerprint, "db unavailable");
@@ -328,12 +328,12 @@ int db2_enrollment_is_revoked(const char *fingerprint)
  * the invariant requires each request re-read revocation from the source of truth
  * (the primary), so a revoked cert stops authorizing on the very next request even
  * over a pooled/keep-alive mTLS connection. Returns 1 revoked, 0 active/unknown.
- * Fail-open on DB outage (matching db2_enrollment_is_revoked), throttled-logged. */
-int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm)
+ * Fail-open on DB outage (matching kb_store_enrollment_is_revoked), throttled-logged. */
+int kb_store_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm)
 {
    if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       revcache_warn_failopen(cert_serial_norm, "db unavailable");
@@ -360,11 +360,11 @@ int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_s
    return revoked;
 }
 
-int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+int kb_store_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
 {
    if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -394,14 +394,14 @@ int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_se
    return status;
 }
 
-int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
-                                     const char *cert_serial_norm, char out_authority[33])
+int kb_store_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
+                                          const char *cert_serial_norm, char out_authority[33])
 {
    if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
        !cert_serial_norm[0] || !out_authority)
       return -1;
    out_authority[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -440,11 +440,11 @@ int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_i
  * window where a legacy cert has no revocation key. `ca_issuer_dn` is the
  * enrollment CA's issuer DN (the single issuer for all enrolled certs). Returns
  * the number of rows updated, or -1 on error. */
-int db2_enrollment_backfill_cert_keys(const char *ca_issuer_dn)
+int kb_store_enrollment_backfill_cert_keys(const char *ca_issuer_dn)
 {
    if (!ca_issuer_dn || !ca_issuer_dn[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -538,11 +538,11 @@ static int seen_should_write(const char *fp)
    return 1;
 }
 
-void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
+void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 {
    if (!fingerprint || !fingerprint[0] || !seen_should_write(fingerprint))
       return;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char authority_id[33];
@@ -570,12 +570,12 @@ void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 
 /* --- console OIDC login config (single row id=1) --- */
 
-int db2_console_oidc_get(db2_console_oidc_t *out)
+int kb_store_console_oidc_get(kb_store_console_oidc_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -608,11 +608,11 @@ int db2_console_oidc_get(db2_console_oidc_t *out)
    return rc;
 }
 
-int db2_console_oidc_put(const db2_console_oidc_t *in)
+int kb_store_console_oidc_put(const kb_store_console_oidc_t *in)
 {
    if (!in)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

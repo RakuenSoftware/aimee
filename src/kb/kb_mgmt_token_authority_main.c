@@ -87,14 +87,14 @@ static int parse_id(const char *value, uint64_t max, uint64_t *out)
    return 0;
 }
 
-static int reopen_database(void *opaque, db2_management_token_authority_ctx_t *db)
+static int reopen_database(void *opaque, kb_store_management_token_authority_ctx_t *db)
 {
    reopen_config_t *config = opaque;
    char error[256] = "";
    if (!config || !config->dsn || !db)
       return -1;
-   db2_management_token_authority_close(db);
-   int rc = db2_management_token_authority_open(db, config->dsn, error, sizeof(error));
+   kb_store_management_token_authority_close(db);
+   int rc = kb_store_management_token_authority_open(db, config->dsn, error, sizeof(error));
    OPENSSL_cleanse(error, sizeof(error));
    return rc;
 }
@@ -114,8 +114,8 @@ int main(int argc, char **argv)
       return 64;
    }
 
-   aimee_db2_register_token_record_validators(kb_mgmt_token_authority_record_valid,
-                                              kb_identity_token_authority_record_valid);
+   aimee_kb_store_register_token_record_validators(kb_mgmt_token_authority_record_valid,
+                                                   kb_identity_token_authority_record_valid);
 
    char *dsn = copy_env("AIMEE_KB_TOKEN_AUTHORITY_DSN", 4096);
    char *helper = copy_env("AIMEE_VAULT_KMS_HELPER", PATH_MAX - 1);
@@ -156,7 +156,7 @@ int main(int argc, char **argv)
       return 70;
    }
 
-   db2_management_token_authority_ctx_t database;
+   kb_store_management_token_authority_ctx_t database;
    memset(&database, 0, sizeof(database));
    reopen_config_t reopen = {.dsn = dsn};
    kb_mgmt_token_authority_service_t service = {
@@ -186,7 +186,7 @@ int main(int argc, char **argv)
       return 68;
 
    int daemon_rc = kb_mgmt_token_authority_daemon_run(&daemon);
-   db2_management_token_authority_close(&database);
+   kb_store_management_token_authority_close(&database);
    int seal_rc = vault_seal();
    OPENSSL_cleanse(dsn, strlen(dsn));
    free(dsn);

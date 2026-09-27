@@ -66,7 +66,7 @@ END
 $$;
 
 -- The runtime role must never bypass RLS and must never hold DDL. These are the
--- properties db2_init boot-asserts (B4/N4): a mismatch here or an operator
+-- properties kb_store_init boot-asserts (B4/N4): a mismatch here or an operator
 -- over-grant is caught at boot, not silently tolerated.
 ALTER ROLE aimee_kb_runtime NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
 -- Dedicated online audit consumer. It receives no application-table or chain-

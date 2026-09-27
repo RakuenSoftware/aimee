@@ -256,7 +256,7 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
 static int gsem_strict_arm_active(void)
 {
    char arm[64] = "";
-   if (db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
+   if (kb_store_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
       return 0;
    return strcmp(arm, "strict") == 0;
 }

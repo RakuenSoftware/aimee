@@ -7,7 +7,7 @@
  * We stub memory_embed_text to return a fixed query vector and store crafted
  * evidence vectors directly, so cosine ordering is fully deterministic and the
  * test is independent of any real embedder. The point under test is the
- * ranking + cross-kind spanning, over the db2 sqlite shim.
+ * ranking + cross-kind spanning, over the kb_store sqlite shim.
  *
  * Tests:
  *   1. ranks by cosine, spans >= 3 kinds, orders nearest-first.
@@ -22,7 +22,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "modules/learning/learning_bundle.h"
 
 /* Stub embedder: query vector is the unit basis e0 = [1,0,0,...]. Cosine with a
@@ -42,8 +42,8 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 /* Build a 384-dim pgvector text literal "[v0,v1,0,...,0]". */
@@ -60,12 +60,13 @@ static void make_vec384(char *buf, size_t n, float v0, float v1)
 static void seed(const char *kind, float v0, float v1)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
-   assert(db2_artifact_write(id, kind, "proposed", "user", "jbailes", "jbailes", 1.0, "{}") == 0);
-   assert(db2_evidence_enqueue(id, "evidence") == 0);
+   kb_store_artifact_gen_id(id, sizeof(id));
+   assert(kb_store_artifact_write(id, kind, "proposed", "user", "jbailes", "jbailes", 1.0, "{}") ==
+          0);
+   assert(kb_store_evidence_enqueue(id, "evidence") == 0);
    char vec[8192];
    make_vec384(vec, sizeof(vec), v0, v1);
-   assert(db2_evidence_store_vector(id, "evidence", vec) == 0);
+   assert(kb_store_evidence_store_vector(id, "evidence", vec) == 0);
 }
 
 /* ---- 1. cross-kind ranking ------------------------------------------- */
@@ -135,7 +136,7 @@ int main(void)
    test_bundle_ranks_across_kinds();
    test_bundle_k_limit();
    test_bundle_empty();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("test_learning_bundle: ALL PASS\n");
    return 0;
 }

@@ -947,8 +947,8 @@ int kb_doc_pdf_render_assets(const char *project, const char *file_path,
       if (kb_blob_store_put(png, (size_t)png_len, sha, sizeof(sha)) == 0)
       {
          /* Full-page crop: bbox is the whole page [0,1]. kind='page'. */
-         if (db2_kb_doc_asset_insert(project, file_path, page, 0.0, 0.0, 1.0, 1.0, "page", "",
-                                     "image/png", sha, sensitivity_class) > 0)
+         if (kb_store_kb_doc_asset_insert(project, file_path, page, 0.0, 0.0, 1.0, 1.0, "page", "",
+                                          "image/png", sha, sensitivity_class) > 0)
             created++;
       }
       free(png);
@@ -1098,9 +1098,9 @@ static int kb_pdf_tsr_chunk(const char *file_path, const kb_pdf_chunk_t *c,
                     */
       if (rid <= 0)
          continue;
-      if (db2_kb_table_cell_insert(rid, file_path, page_no, cells[k].row, cells[k].col,
-                                   cells[k].text, cells[k].subject, cells[k].relation,
-                                   cells[k].object, cells[k].confidence, sensitivity_class) < 0)
+      if (kb_store_kb_table_cell_insert(
+              rid, file_path, page_no, cells[k].row, cells[k].col, cells[k].text, cells[k].subject,
+              cells[k].relation, cells[k].object, cells[k].confidence, sensitivity_class) < 0)
          LOG_WARN("kb_tsr", "table cell insert failed (%s p%d r%d c%d)", file_path, page_no,
                   cells[k].row, cells[k].col);
    }
@@ -1196,7 +1196,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * the KB is never left with prior rows gone and only partial new rows. The borrowed
     * line pointers in `chunks` stay valid throughout: `doc` is owned by the caller and is
     * never freed here, and `chunks` is built, consumed, and freed inside this function. */
-   if (db2_kb_txn_begin() != 0)
+   if (kb_store_kb_txn_begin() != 0)
    {
       kb_pdf_free_chunks(chunks, n_chunks);
       return -1;
@@ -1208,31 +1208,32 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * file_path. The now-unreferenced blobs are reclaimed by the periodic reconciliation sweep,
     * so a shared/deduped blob survives until its last referrer is gone. New crops are rendered +
     * inserted by the upload route after this. */
-   (void)db2_kb_doc_assets_delete_for_doc(project, file_path);
-   db2_kb_documents_delete_for_file(project, file_path); /* void; covered by the txn */
+   (void)kb_store_kb_doc_assets_delete_for_doc(project, file_path);
+   kb_store_kb_documents_delete_for_file(project, file_path); /* void; covered by the txn */
 
    int n_regions = 0;
-   int64_t prev_id = 0; /* per-call local; the first chunk links with 0 (a no-op in
-                         * db2_kb_documents_link_neighbours), and nothing carries across calls */
+   int64_t prev_id =
+       0; /* per-call local; the first chunk links with 0 (a no-op in
+           * kb_store_kb_documents_link_neighbours), and nothing carries across calls */
    for (int i = 0; i < n_chunks; i++)
    {
       kb_pdf_chunk_t *c = &chunks[i];
-      int64_t id = db2_kb_documents_insert_chunk_pdf(
+      int64_t id = kb_store_kb_documents_insert_chunk_pdf(
           project, file_path, file_hash, i, "" /* heading_path: Phase-1 page chunking */,
           c->line_start, c->line_end, c->content ? c->content : "", c->token_count,
           "page" /* chunk_strategy */, c->page_start, c->page_end, sensitivity_class, quarantine);
       if (id <= 0)
          goto fail;
-      db2_kb_documents_link_neighbours(id, prev_id); /* void; covered by the txn */
+      kb_store_kb_documents_link_neighbours(id, prev_id); /* void; covered by the txn */
 
       int64_t region_ids[KB_PDF_MAX_CHUNK_LINES];
       int n_region_ids = 0;
       for (int j = 0; j < c->n_lines; j++)
       {
          const kb_pdf_line_t *ln = c->lines[j];
-         int64_t rid =
-             db2_kb_doc_regions_insert(id, file_path, ln->page_no, ln->x0, ln->y0, ln->x1, ln->y1,
-                                       ln->text ? ln->text : "", j, "text", sensitivity_class);
+         int64_t rid = kb_store_kb_doc_regions_insert(id, file_path, ln->page_no, ln->x0, ln->y0,
+                                                      ln->x1, ln->y1, ln->text ? ln->text : "", j,
+                                                      "text", sensitivity_class);
          if (rid <= 0)
             goto fail;
          if (j < KB_PDF_MAX_CHUNK_LINES)
@@ -1260,13 +1261,13 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
        * races). When the capability is off the chunk stays lexical-only, exactly
        * as Phase 2 behaved, and is invisible to the vector-only /v1/search by
        * construction (PDF vectors never enter kb_embeddings). */
-      if (embed_pdf_vec && db2_kb_async_enqueue("embed_pdf", id, project) != 0)
+      if (embed_pdf_vec && kb_store_kb_async_enqueue("embed_pdf", id, project) != 0)
          LOG_WARN("kb_pdf", "ingest: embed_pdf enqueue failed for chunk %lld (%s)", (long long)id,
                   file_path); /* best-effort; the chunk stays lexical-only + cited */
       prev_id = id;
    }
 
-   if (db2_kb_txn_commit() != 0)
+   if (kb_store_kb_txn_commit() != 0)
       goto fail;
 
    /* Phase B: TSR runs HERE — after the text/regions are durably committed — so the sidecar
@@ -1284,7 +1285,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       }
       /* Record the per-document TSR outcome so lookup_table can report tsr_status
        * (ran | no_table); left '' when the capability is off/absent → 'unavailable'. */
-      db2_kb_documents_set_tsr_state(project, file_path, tsr_found_table ? "ran" : "no_table");
+      kb_store_kb_documents_set_tsr_state(project, file_path, tsr_found_table ? "ran" : "no_table");
    }
    if (chunk_rids)
       for (int i = 0; i < n_chunks; i++)
@@ -1301,7 +1302,7 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
    return n_chunks;
 
 fail:
-   db2_kb_txn_rollback();
+   kb_store_kb_txn_rollback();
    if (chunk_rids)
       for (int i = 0; i < n_chunks; i++)
          free(chunk_rids[i]);

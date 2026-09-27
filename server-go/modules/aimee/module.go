@@ -2,7 +2,7 @@
 // to aimee-server, served as a bus process rather than linked into a caller.
 //
 // The module is a HOST FOR CAPABILITIES, not a single feature. Session peer
-// messaging is the first to land here; server-side symbols currently in db2
+// messaging is the first to land here; server-side symbols currently in kb_store
 // (src/index.c, dashboard_kb.c) arrive during the redistribution, and they are
 // index and dashboard reads with nothing to do with peers. A module whose
 // constructor, stage table and dispatch were shaped around its first capability

@@ -3,7 +3,7 @@
 # single Postgres instance, confirm both boot cleanly and the shared
 # schema is applied exactly once.
 #
-# Satisfies the two-replica acceptance criterion from the DB2 Postgres
+# Satisfies the two-replica acceptance criterion from the KB_STORE Postgres
 # design tracked in
 # docs/STORAGE_TIERS.md.
 #

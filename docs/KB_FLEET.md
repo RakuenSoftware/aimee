@@ -33,8 +33,8 @@ Every routed result needs to preserve:
 - honest role health and degradation;
 - request and audit correlation across the server-to-KB boundary.
 
-Several stateless KB replicas may share an explicitly configured DB2 when they have the same storage
-and schema authority. Separate corpora or trust boundaries use separate DB2 ownership. A deployment
+Several stateless KB replicas may share an explicitly configured KB_STORE when they have the same storage
+and schema authority. Separate corpora or trust boundaries use separate KB_STORE ownership. A deployment
 must not infer either arrangement from container names.
 
 ## Current implementation boundary
@@ -44,7 +44,7 @@ uses one `AIMEE_KB_API_URL`. They are the single-KB profile of the design. Fleet
 selection, and multi-KB operator commands are not yet an integrated path, so current guides do not
 invent commands for them.
 
-Until that path lands, scale identical KB workers only where the shared DB2, identity, and queue
+Until that path lands, scale identical KB workers only where the shared KB_STORE, identity, and queue
 contracts already support it. Do not present independent KBs as one fleet by placing a generic load
 balancer in front of them; that would erase the routing authority described above.
 

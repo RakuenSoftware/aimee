@@ -1,7 +1,7 @@
 #include "org_vault_rewrap.h"
 
-#include "db2_bounded_text.h"
-#include "db2_internal.h"
+#include "kb_store_bounded_text.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <openssl/crypto.h>
@@ -12,9 +12,9 @@
 
 #define RW_ERR 256
 
-static db2_vault_reseal_provider_t reseal_provider;
+static kb_store_vault_reseal_provider_t reseal_provider;
 
-void aimee_db2_register_vault_reseal_provider(const db2_vault_reseal_provider_t *provider)
+void aimee_kb_store_register_vault_reseal_provider(const kb_store_vault_reseal_provider_t *provider)
 {
    if (provider)
       reseal_provider = *provider;
@@ -22,19 +22,19 @@ void aimee_db2_register_vault_reseal_provider(const db2_vault_reseal_provider_t 
       memset(&reseal_provider, 0, sizeof(reseal_provider));
 }
 
-int64_t db2_vault_reseal_deadline_ms(uint32_t per_call_ms)
+int64_t kb_store_vault_reseal_deadline_ms(uint32_t per_call_ms)
 {
    return per_call_ms && reseal_provider.deadline_ms ? reseal_provider.deadline_ms(per_call_ms)
                                                      : -1;
 }
 
-int db2_vault_reseal_operation_id_to_hex(const uint8_t operation_id[16], char out[33])
+int kb_store_vault_reseal_operation_id_to_hex(const uint8_t operation_id[16], char out[33])
 {
    if (out)
       memset(out, 0, 33);
    if (!operation_id || !out || !reseal_provider.operation_id_to_hex ||
        reseal_provider.operation_id_to_hex(operation_id, out) != 0 ||
-       db2_bounded_len(out, 33) != 32)
+       kb_store_bounded_len(out, 33) != 32)
       goto invalid;
    for (size_t i = 0; i < 32; ++i)
       if (!((out[i] >= '0' && out[i] <= '9') || (out[i] >= 'a' && out[i] <= 'f')))
@@ -46,12 +46,12 @@ invalid:
    return -1;
 }
 
-int db2_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id[16])
+int kb_store_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id[16])
 {
    uint8_t expected[16] = {0};
    if (operation_id)
       OPENSSL_cleanse(operation_id, 16);
-   if (!hex || !operation_id || db2_bounded_len(hex, 33) != 32 ||
+   if (!hex || !operation_id || kb_store_bounded_len(hex, 33) != 32 ||
        !reseal_provider.operation_id_from_hex)
       return -1;
    for (size_t i = 0; i < 32; ++i)
@@ -76,8 +76,8 @@ int db2_vault_reseal_operation_id_from_hex(const char *hex, uint8_t operation_id
    return 0;
 }
 
-int db2_vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
-                                    vault_tpm2_reseal_receipt_t *receipt)
+int kb_store_vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
+                                         vault_tpm2_reseal_receipt_t *receipt)
 {
    if (receipt)
       OPENSSL_cleanse(receipt, sizeof(*receipt));
@@ -91,8 +91,8 @@ int db2_vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
    return 0;
 }
 
-int db2_vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN],
-                                    uint8_t digest[32])
+int kb_store_vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN],
+                                         uint8_t digest[32])
 {
    if (digest)
       OPENSSL_cleanse(digest, 32);
@@ -109,7 +109,7 @@ int db2_vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_L
 static int utf8_valid(const uint8_t *s, size_t n);
 static int cursor_cmp(const uint8_t *a, size_t an, const uint8_t *b, size_t bn);
 
-struct db2_vault_rewrap_tx
+struct kb_store_vault_rewrap_tx
 {
    void *conn;
    pthread_t owner;
@@ -138,47 +138,49 @@ struct db2_vault_rewrap_tx
    uint8_t operation_id[16];
    int64_t fence, expected_secrets, expected_checks, consumed_secrets, consumed_checks;
    int64_t last_secret_id;
-   db2_vault_rewrap_cursor_t check_cursor;
+   kb_store_vault_rewrap_cursor_t check_cursor;
    int secret_exhausted, check_exhausted;
    uint8_t receipt_digest[32], inventory_digest[32], stage_digest[32];
-   db2_vault_rewrap_result_t prepare_error;
+   kb_store_vault_rewrap_result_t prepare_error;
 };
 
-static int tx_owned(const db2_vault_rewrap_tx_t *tx)
+static int tx_owned(const kb_store_vault_rewrap_tx_t *tx)
 {
    return tx && tx->conn && tx->phase != RW_PHASE_FAILED &&
           pthread_equal(tx->owner, pthread_self());
 }
 
-static db2_vault_rewrap_result_t tx_fail(db2_vault_rewrap_tx_t *tx, db2_vault_rewrap_result_t rc)
+static kb_store_vault_rewrap_result_t tx_fail(kb_store_vault_rewrap_tx_t *tx,
+                                              kb_store_vault_rewrap_result_t rc)
 {
    if (tx && pthread_equal(tx->owner, pthread_self()))
       tx->phase = RW_PHASE_FAILED;
    return rc;
 }
 
-static db2_vault_rewrap_result_t claim_kind(db2_vault_rewrap_tx_t *tx, int kind)
+static kb_store_vault_rewrap_result_t claim_kind(kb_store_vault_rewrap_tx_t *tx, int kind)
 {
    if (!tx_owned(tx))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (tx->kind == RW_KIND_NONE && tx->phase == RW_PHASE_GENERAL)
    {
       tx->kind = kind;
       if (kind == RW_KIND_STAGING)
          tx->phase = RW_PHASE_STAGING;
-      return DB2_VAULT_REWRAP_OK;
+      return KB_STORE_VAULT_REWRAP_OK;
    }
    if (kind == RW_KIND_STAGING && tx->kind == RW_KIND_STAGING && tx->phase == RW_PHASE_STAGING)
-      return DB2_VAULT_REWRAP_OK;
-   return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return KB_STORE_VAULT_REWRAP_OK;
+   return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
 }
 
-static db2_vault_rewrap_result_t prepare_or_bind_failure(db2_vault_rewrap_tx_t *tx, int had_stmt)
+static kb_store_vault_rewrap_result_t prepare_or_bind_failure(kb_store_vault_rewrap_tx_t *tx,
+                                                              int had_stmt)
 {
-   return tx_fail(tx, had_stmt ? DB2_VAULT_REWRAP_INVALID : tx->prepare_error);
+   return tx_fail(tx, had_stmt ? KB_STORE_VAULT_REWRAP_INVALID : tx->prepare_error);
 }
 
-static int state_parse(const char *s, db2_vault_rewrap_state_t *out)
+static int state_parse(const char *s, kb_store_vault_rewrap_state_t *out)
 {
    static const char *const names[] = {
        "preparing", "custody_prepared", "wraps_staged", "reseal_committing", "resealed",
@@ -188,49 +190,50 @@ static int state_parse(const char *s, db2_vault_rewrap_state_t *out)
    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
       if (strcmp(s, names[i]) == 0)
       {
-         *out = (db2_vault_rewrap_state_t)i;
+         *out = (kb_store_vault_rewrap_state_t)i;
          return 0;
       }
    return -1;
 }
 
 #define RW_STATE_BIT(state) (UINT32_C(1) << (state))
-#define RW_STATES_ALL       ((UINT32_C(1) << (DB2_VAULT_REWRAP_RECOVERY_REQUIRED + 1)) - 1)
+#define RW_STATES_ALL       ((UINT32_C(1) << (KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED + 1)) - 1)
 
-db2_vault_rewrap_result_t db2_vault_rewrap_classify_sqlstate(const char *s)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_classify_sqlstate(const char *s)
 {
    if (!s || strlen(s) != 5)
-      return DB2_VAULT_REWRAP_ERROR;
+      return KB_STORE_VAULT_REWRAP_ERROR;
    if (strcmp(s, "55000") == 0)
-      return DB2_VAULT_REWRAP_BUSY;
+      return KB_STORE_VAULT_REWRAP_BUSY;
    if (strcmp(s, "P7C01") == 0 || strcmp(s, "23505") == 0)
-      return DB2_VAULT_REWRAP_CONFLICT;
+      return KB_STORE_VAULT_REWRAP_CONFLICT;
    if (strcmp(s, "P7I01") == 0 || strcmp(s, "P7B01") == 0)
-      return DB2_VAULT_REWRAP_INTEGRITY;
+      return KB_STORE_VAULT_REWRAP_INTEGRITY;
    if (strcmp(s, "40001") == 0 || strcmp(s, "40P01") == 0)
-      return DB2_VAULT_REWRAP_TRANSIENT;
+      return KB_STORE_VAULT_REWRAP_TRANSIENT;
    if (strcmp(s, "22023") == 0 || strcmp(s, "22003") == 0 || strcmp(s, "25001") == 0)
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (!strncmp(s, "08", 2) || !strncmp(s, "53", 2) || !strncmp(s, "57", 2))
-      return DB2_VAULT_REWRAP_TRANSIENT;
-   return DB2_VAULT_REWRAP_ERROR;
+      return KB_STORE_VAULT_REWRAP_TRANSIENT;
+   return KB_STORE_VAULT_REWRAP_ERROR;
 }
 
-static db2_vault_rewrap_result_t step(aimee_pg_stmt_t *st, aimee_pg_step_t *value)
+static kb_store_vault_rewrap_result_t step(aimee_pg_stmt_t *st, aimee_pg_step_t *value)
 {
    char err[RW_ERR] = "";
    *value = aimee_pg_step(st, err, sizeof(err));
-   return *value == AIMEE_PG_ERR ? db2_vault_rewrap_classify_sqlstate(aimee_pg_sqlstate(st))
-                                 : DB2_VAULT_REWRAP_OK;
+   return *value == AIMEE_PG_ERR ? kb_store_vault_rewrap_classify_sqlstate(aimee_pg_sqlstate(st))
+                                 : KB_STORE_VAULT_REWRAP_OK;
 }
 
-static db2_vault_rewrap_result_t expect_done(aimee_pg_stmt_t *st)
+static kb_store_vault_rewrap_result_t expect_done(aimee_pg_stmt_t *st)
 {
    aimee_pg_step_t value;
-   db2_vault_rewrap_result_t rc = step(st, &value);
-   return rc != DB2_VAULT_REWRAP_OK
+   kb_store_vault_rewrap_result_t rc = step(st, &value);
+   return rc != KB_STORE_VAULT_REWRAP_OK
               ? rc
-              : (value == AIMEE_PG_DONE ? DB2_VAULT_REWRAP_OK : DB2_VAULT_REWRAP_INTEGRITY);
+              : (value == AIMEE_PG_DONE ? KB_STORE_VAULT_REWRAP_OK
+                                        : KB_STORE_VAULT_REWRAP_INTEGRITY);
 }
 
 static int sqlstate_poisoned(const char *state)
@@ -271,7 +274,7 @@ static int failure_class_valid(const char *s)
    return 1;
 }
 
-static int snapshot_shape_valid(const db2_vault_rewrap_snapshot_t *o)
+static int snapshot_shape_valid(const kb_store_vault_rewrap_snapshot_t *o)
 {
    int no_failure = !o->failure_class[0] && !o->has_failure_from_state;
    int none = !o->has_receipt && !o->has_inventory && !o->has_stage && o->secret_count == 0 &&
@@ -281,66 +284,66 @@ static int snapshot_shape_valid(const db2_vault_rewrap_snapshot_t *o)
    int staged = o->has_receipt && o->has_inventory && o->has_stage;
    switch (o->state)
    {
-   case DB2_VAULT_REWRAP_PREPARING:
+   case KB_STORE_VAULT_REWRAP_PREPARING:
       return no_failure && none;
-   case DB2_VAULT_REWRAP_CUSTODY_PREPARED:
+   case KB_STORE_VAULT_REWRAP_CUSTODY_PREPARED:
       return no_failure && prepared;
-   case DB2_VAULT_REWRAP_WRAPS_STAGED:
-   case DB2_VAULT_REWRAP_RESEAL_COMMITTING:
-   case DB2_VAULT_REWRAP_RESEALED:
-   case DB2_VAULT_REWRAP_PROMOTED:
-   case DB2_VAULT_REWRAP_COMPLETED:
+   case KB_STORE_VAULT_REWRAP_WRAPS_STAGED:
+   case KB_STORE_VAULT_REWRAP_RESEAL_COMMITTING:
+   case KB_STORE_VAULT_REWRAP_RESEALED:
+   case KB_STORE_VAULT_REWRAP_PROMOTED:
+   case KB_STORE_VAULT_REWRAP_COMPLETED:
       return no_failure && staged;
-   case DB2_VAULT_REWRAP_ABORTED:
+   case KB_STORE_VAULT_REWRAP_ABORTED:
       return o->failure_class[0] && !o->has_failure_from_state && (none || prepared || staged);
-   case DB2_VAULT_REWRAP_RECOVERY_REQUIRED:
+   case KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED:
       if (!o->failure_class[0] || !o->has_failure_from_state)
          return 0;
-      if (o->failure_from_state == DB2_VAULT_REWRAP_PREPARING)
+      if (o->failure_from_state == KB_STORE_VAULT_REWRAP_PREPARING)
          return none;
-      if (o->failure_from_state == DB2_VAULT_REWRAP_CUSTODY_PREPARED)
+      if (o->failure_from_state == KB_STORE_VAULT_REWRAP_CUSTODY_PREPARED)
          return prepared;
-      return o->failure_from_state >= DB2_VAULT_REWRAP_WRAPS_STAGED &&
-             o->failure_from_state <= DB2_VAULT_REWRAP_PROMOTED && staged;
+      return o->failure_from_state >= KB_STORE_VAULT_REWRAP_WRAPS_STAGED &&
+             o->failure_from_state <= KB_STORE_VAULT_REWRAP_PROMOTED && staged;
    }
    return 0;
 }
 
-void db2_vault_rewrap_snapshot_clear(db2_vault_rewrap_snapshot_t *s)
+void kb_store_vault_rewrap_snapshot_clear(kb_store_vault_rewrap_snapshot_t *s)
 {
    if (s)
       OPENSSL_cleanse(s, sizeof(*s));
 }
 
-void db2_vault_rewrap_secret_clear(db2_vault_rewrap_secret_t *rows, size_t count)
+void kb_store_vault_rewrap_secret_clear(kb_store_vault_rewrap_secret_t *rows, size_t count)
 {
-   if (rows && count <= DB2_VAULT_REWRAP_PAGE_MAX)
+   if (rows && count <= KB_STORE_VAULT_REWRAP_PAGE_MAX)
       OPENSSL_cleanse(rows, count * sizeof(*rows));
 }
 
-void db2_vault_rewrap_check_clear(db2_vault_rewrap_check_t *rows, size_t count)
+void kb_store_vault_rewrap_check_clear(kb_store_vault_rewrap_check_t *rows, size_t count)
 {
-   if (rows && count <= DB2_VAULT_REWRAP_PAGE_MAX)
+   if (rows && count <= KB_STORE_VAULT_REWRAP_PAGE_MAX)
       OPENSSL_cleanse(rows, count * sizeof(*rows));
 }
 
-void db2_vault_rewrap_cursor_clear(db2_vault_rewrap_cursor_t *cursor)
+void kb_store_vault_rewrap_cursor_clear(kb_store_vault_rewrap_cursor_t *cursor)
 {
    if (cursor)
       OPENSSL_cleanse(cursor, sizeof(*cursor));
 }
 
-void db2_vault_rewrap_verify_summary_clear(db2_vault_rewrap_verify_summary_t *summary)
+void kb_store_vault_rewrap_verify_summary_clear(kb_store_vault_rewrap_verify_summary_t *summary)
 {
    if (summary)
       OPENSSL_cleanse(summary, sizeof(*summary));
 }
 
-static int snapshot_decode(aimee_pg_stmt_t *st, db2_vault_rewrap_snapshot_t *o)
+static int snapshot_decode(aimee_pg_stmt_t *st, kb_store_vault_rewrap_snapshot_t *o)
 {
    char ophex[33];
    if (text_copy(st, 0, ophex, sizeof(ophex)) != 0 ||
-       db2_vault_reseal_operation_id_from_hex(ophex, o->operation_id) != 0 ||
+       kb_store_vault_reseal_operation_id_from_hex(ophex, o->operation_id) != 0 ||
        state_parse(aimee_pg_column_text(st, 1), &o->state) != 0)
       return -1;
    if (aimee_pg_column_is_null(st, 2) || aimee_pg_column_is_null(st, 3) ||
@@ -360,10 +363,10 @@ static int snapshot_decode(aimee_pg_stmt_t *st, db2_vault_rewrap_snapshot_t *o)
       uint8_t digest[32], op[16];
       if (blob_exact(st, 6, o->receipt, sizeof(o->receipt)) != 0 ||
           blob_exact(st, 7, o->receipt_digest, 32) != 0 ||
-          db2_vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &receipt) != 0 ||
-          db2_vault_reseal_receipt_digest(o->receipt, digest) != 0 ||
+          kb_store_vault_reseal_receipt_decode(o->receipt, sizeof(o->receipt), &receipt) != 0 ||
+          kb_store_vault_reseal_receipt_digest(o->receipt, digest) != 0 ||
           CRYPTO_memcmp(digest, o->receipt_digest, 32) != 0 ||
-          db2_vault_reseal_operation_id_from_hex(ophex, op) != 0 ||
+          kb_store_vault_reseal_operation_id_from_hex(ophex, op) != 0 ||
           CRYPTO_memcmp(op, receipt.operation_id, 16) != 0 ||
           receipt.old_generation != (uint64_t)o->old_generation ||
           receipt.new_generation != (uint64_t)o->new_generation)
@@ -410,17 +413,17 @@ static int snapshot_decode(aimee_pg_stmt_t *st, db2_vault_rewrap_snapshot_t *o)
    return failure_class_valid(o->failure_class) && snapshot_shape_valid(o) ? 0 : -1;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_snapshot(const uint8_t operation_id[16],
-                                                    db2_vault_rewrap_snapshot_t *out)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_snapshot(const uint8_t operation_id[16],
+                                                              kb_store_vault_rewrap_snapshot_t *out)
 {
    if (out)
-      db2_vault_rewrap_snapshot_clear(out);
+      kb_store_vault_rewrap_snapshot_clear(out);
    if (!operation_id || !out)
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
-      return DB2_VAULT_REWRAP_INVALID;
-   void *conn = db2_scope_connection_open(err, sizeof(err));
+   if (kb_store_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+      return KB_STORE_VAULT_REWRAP_INVALID;
+   void *conn = kb_store_scope_connection_open(err, sizeof(err));
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare_ex(conn, "SELECT * FROM org_vault_rewrap_snapshot(?1)",
@@ -431,18 +434,19 @@ db2_vault_rewrap_result_t db2_vault_rewrap_snapshot(const uint8_t operation_id[1
       aimee_pg_finalize(st);
       if (conn)
          aimee_pg_close(conn);
-      return conn ? (prepare_error == AIMEE_PG_PREPARE_RESOURCE ? DB2_VAULT_REWRAP_ERROR
-                                                                : DB2_VAULT_REWRAP_INVALID)
-                  : DB2_VAULT_REWRAP_TRANSIENT;
+      return conn ? (prepare_error == AIMEE_PG_PREPARE_RESOURCE ? KB_STORE_VAULT_REWRAP_ERROR
+                                                                : KB_STORE_VAULT_REWRAP_INVALID)
+                  : KB_STORE_VAULT_REWRAP_TRANSIENT;
    }
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
-   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_DONE)
-      rc = DB2_VAULT_REWRAP_NOT_FOUND;
-   else if (rc == DB2_VAULT_REWRAP_OK && (sr != AIMEE_PG_ROW || snapshot_decode(st, out) != 0 ||
-                                          CRYPTO_memcmp(out->operation_id, operation_id, 16) != 0))
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
-   else if (rc == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_DONE)
+      rc = KB_STORE_VAULT_REWRAP_NOT_FOUND;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK &&
+            (sr != AIMEE_PG_ROW || snapshot_decode(st, out) != 0 ||
+             CRYPTO_memcmp(out->operation_id, operation_id, 16) != 0))
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
       rc = expect_done(st);
    int discard = sqlstate_poisoned(aimee_pg_sqlstate(st));
    aimee_pg_finalize(st);
@@ -450,54 +454,55 @@ db2_vault_rewrap_result_t db2_vault_rewrap_snapshot(const uint8_t operation_id[1
       aimee_pg_discard(conn);
    else
       aimee_pg_close(conn);
-   if (rc != DB2_VAULT_REWRAP_OK)
-      db2_vault_rewrap_snapshot_clear(out);
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
+      kb_store_vault_rewrap_snapshot_clear(out);
    return rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_tx_begin(db2_vault_rewrap_tx_t **out)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_tx_begin(kb_store_vault_rewrap_tx_t **out)
 {
    if (!out || *out)
-      return DB2_VAULT_REWRAP_INVALID;
-   db2_vault_rewrap_tx_t *tx = calloc(1, sizeof(*tx));
+      return KB_STORE_VAULT_REWRAP_INVALID;
+   kb_store_vault_rewrap_tx_t *tx = calloc(1, sizeof(*tx));
    if (!tx)
-      return DB2_VAULT_REWRAP_ERROR;
-   if (!(tx->conn = db2_scope_connection_open(NULL, 0)))
+      return KB_STORE_VAULT_REWRAP_ERROR;
+   if (!(tx->conn = kb_store_scope_connection_open(NULL, 0)))
    {
       free(tx);
-      return DB2_VAULT_REWRAP_TRANSIENT;
+      return KB_STORE_VAULT_REWRAP_TRANSIENT;
    }
    char state[6] = "", err[RW_ERR] = "";
    if (aimee_pg_exec_sqlstate(tx->conn, "BEGIN ISOLATION LEVEL SERIALIZABLE", state, err,
                               sizeof(err)) != 0)
    {
-      db2_vault_rewrap_result_t rc = db2_vault_rewrap_classify_sqlstate(state);
+      kb_store_vault_rewrap_result_t rc = kb_store_vault_rewrap_classify_sqlstate(state);
       aimee_pg_discard(tx->conn);
       OPENSSL_cleanse(tx, sizeof(*tx));
       free(tx);
-      return rc == DB2_VAULT_REWRAP_ERROR ? DB2_VAULT_REWRAP_TRANSIENT : rc;
+      return rc == KB_STORE_VAULT_REWRAP_ERROR ? KB_STORE_VAULT_REWRAP_TRANSIENT : rc;
    }
    tx->owner = pthread_self();
    tx->phase = RW_PHASE_GENERAL;
    *out = tx;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static db2_vault_rewrap_result_t tx_end(db2_vault_rewrap_tx_t **p, int commit)
+static kb_store_vault_rewrap_result_t tx_end(kb_store_vault_rewrap_tx_t **p, int commit)
 {
    if (!p || !*p || !(*p)->conn || !pthread_equal((*p)->owner, pthread_self()))
-      return DB2_VAULT_REWRAP_INVALID;
-   db2_vault_rewrap_tx_t *tx = *p;
+      return KB_STORE_VAULT_REWRAP_INVALID;
+   kb_store_vault_rewrap_tx_t *tx = *p;
    if (commit && tx->phase != RW_PHASE_SINGLE_DONE && tx->phase != RW_PHASE_STAGING_DONE &&
        tx->phase != RW_PHASE_PROMOTION_DONE && tx->phase != RW_PHASE_COMPLETED)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    char state[6] = "", err[RW_ERR] = "";
    int erc =
        aimee_pg_exec_sqlstate(tx->conn, commit ? "COMMIT" : "ROLLBACK", state, err, sizeof(err));
    void *conn = tx->conn;
-   db2_vault_rewrap_result_t rc =
-       erc == 0 ? DB2_VAULT_REWRAP_OK
-                : (commit ? DB2_VAULT_REWRAP_TRANSIENT : db2_vault_rewrap_classify_sqlstate(state));
+   kb_store_vault_rewrap_result_t rc =
+       erc == 0 ? KB_STORE_VAULT_REWRAP_OK
+                : (commit ? KB_STORE_VAULT_REWRAP_TRANSIENT
+                          : kb_store_vault_rewrap_classify_sqlstate(state));
    OPENSSL_cleanse(tx, sizeof(*tx));
    free(tx);
    *p = NULL;
@@ -505,25 +510,25 @@ static db2_vault_rewrap_result_t tx_end(db2_vault_rewrap_tx_t **p, int commit)
       aimee_pg_close(conn);
    else
       aimee_pg_discard(conn);
-   return rc == DB2_VAULT_REWRAP_ERROR ? DB2_VAULT_REWRAP_TRANSIENT : rc;
+   return rc == KB_STORE_VAULT_REWRAP_ERROR ? KB_STORE_VAULT_REWRAP_TRANSIENT : rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_tx_commit(db2_vault_rewrap_tx_t **tx)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_tx_commit(kb_store_vault_rewrap_tx_t **tx)
 {
    return tx_end(tx, 1);
 }
-void db2_vault_rewrap_tx_rollback(db2_vault_rewrap_tx_t **tx)
+void kb_store_vault_rewrap_tx_rollback(kb_store_vault_rewrap_tx_t **tx)
 {
    if (tx && *tx)
       (void)tx_end(tx, 0);
 }
 
-static aimee_pg_stmt_t *prepare_op(db2_vault_rewrap_tx_t *tx, const char *sql,
+static aimee_pg_stmt_t *prepare_op(kb_store_vault_rewrap_tx_t *tx, const char *sql,
                                    const uint8_t operation_id[16], int64_t fence)
 {
    if (!tx_owned(tx))
       return NULL;
-   tx->prepare_error = DB2_VAULT_REWRAP_INVALID;
+   tx->prepare_error = KB_STORE_VAULT_REWRAP_INVALID;
    if ((tx->phase != RW_PHASE_GENERAL && tx->phase != RW_PHASE_STAGING) || !operation_id ||
        fence < 1)
    {
@@ -531,12 +536,12 @@ static aimee_pg_stmt_t *prepare_op(db2_vault_rewrap_tx_t *tx, const char *sql,
       return NULL;
    }
    char op[33], err[RW_ERR] = "";
-   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (kb_store_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return NULL;
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st = aimee_pg_prepare_ex(tx->conn, sql, &prepare_error, err, sizeof(err));
    if (!st && prepare_error == AIMEE_PG_PREPARE_RESOURCE)
-      tx->prepare_error = DB2_VAULT_REWRAP_ERROR;
+      tx->prepare_error = KB_STORE_VAULT_REWRAP_ERROR;
    if (!st || aimee_pg_bind_text(st, "?1", op) != 0 || aimee_pg_bind_int64(st, "?2", fence) != 0)
    {
       aimee_pg_finalize(st);
@@ -545,19 +550,19 @@ static aimee_pg_stmt_t *prepare_op(db2_vault_rewrap_tx_t *tx, const char *sql,
    return st;
 }
 
-static aimee_pg_stmt_t *prepare_verify(db2_vault_rewrap_tx_t *tx, const char *sql,
+static aimee_pg_stmt_t *prepare_verify(kb_store_vault_rewrap_tx_t *tx, const char *sql,
                                        const uint8_t operation_id[16], int64_t fence)
 {
    if (!tx_owned(tx) || !operation_id || fence < 1)
       return NULL;
-   tx->prepare_error = DB2_VAULT_REWRAP_INVALID;
+   tx->prepare_error = KB_STORE_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+   if (kb_store_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
       return NULL;
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st = aimee_pg_prepare_ex(tx->conn, sql, &prepare_error, err, sizeof(err));
    if (!st && prepare_error == AIMEE_PG_PREPARE_RESOURCE)
-      tx->prepare_error = DB2_VAULT_REWRAP_ERROR;
+      tx->prepare_error = KB_STORE_VAULT_REWRAP_ERROR;
    if (!st || aimee_pg_bind_text(st, "?1", op) != 0 || aimee_pg_bind_int64(st, "?2", fence) != 0)
    {
       aimee_pg_finalize(st);
@@ -566,37 +571,36 @@ static aimee_pg_stmt_t *prepare_verify(db2_vault_rewrap_tx_t *tx, const char *sq
    return st;
 }
 
-static db2_vault_rewrap_result_t state_scalar(aimee_pg_stmt_t *st, uint32_t allowed_states,
-                                              db2_vault_rewrap_state_t *state_out)
+static kb_store_vault_rewrap_result_t state_scalar(aimee_pg_stmt_t *st, uint32_t allowed_states,
+                                                   kb_store_vault_rewrap_state_t *state_out)
 {
    if (!st)
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
-   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
    {
-      db2_vault_rewrap_state_t state;
+      kb_store_vault_rewrap_state_t state;
       if (state_parse(aimee_pg_column_text(st, 0), &state) != 0 ||
           !(allowed_states & RW_STATE_BIT(state)))
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
       else
       {
          rc = expect_done(st);
-         if (rc == DB2_VAULT_REWRAP_OK && state_out)
+         if (rc == KB_STORE_VAULT_REWRAP_OK && state_out)
             *state_out = state;
       }
    }
-   else if (rc == DB2_VAULT_REWRAP_OK)
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
    aimee_pg_finalize(st);
    return rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, const char *actor,
-                                                 const char *request,
-                                                 const uint8_t operation_id[16], int64_t oldg,
-                                                 int64_t newg, int64_t *epoch, int64_t *fence,
-                                                 db2_vault_rewrap_state_t *state)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_begin(kb_store_vault_rewrap_tx_t *tx, const char *actor, const char *request,
+                            const uint8_t operation_id[16], int64_t oldg, int64_t newg,
+                            int64_t *epoch, int64_t *fence, kb_store_vault_rewrap_state_t *state)
 {
    if (epoch)
       *epoch = 0;
@@ -607,12 +611,12 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
    if (!tx_owned(tx) || tx->phase != RW_PHASE_GENERAL || !actor || !actor[0] || !request ||
        !request[0] || !operation_id || oldg < 0 || oldg == INT64_MAX || newg != oldg + 1 ||
        !epoch || !fence || !state)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (claim_kind(tx, RW_KIND_SINGLE) != DB2_VAULT_REWRAP_OK)
-      return DB2_VAULT_REWRAP_INVALID;
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (claim_kind(tx, RW_KIND_SINGLE) != KB_STORE_VAULT_REWRAP_OK)
+      return KB_STORE_VAULT_REWRAP_INVALID;
    char op[33], err[RW_ERR] = "";
-   if (db2_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+   if (kb_store_vault_reseal_operation_id_to_hex(operation_id, op) != 0)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_prepare_error_t prepare_error = AIMEE_PG_PREPARE_OK;
    aimee_pg_stmt_t *st =
        aimee_pg_prepare_ex(tx->conn, "SELECT * FROM org_vault_rewrap_begin(?1,?2,?3,?4,?5)",
@@ -622,15 +626,16 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
        aimee_pg_bind_int64(st, "?4", oldg) != 0 || aimee_pg_bind_int64(st, "?5", newg) != 0)
    {
       aimee_pg_finalize(st);
-      return tx_fail(tx, prepare_error == AIMEE_PG_PREPARE_RESOURCE ? DB2_VAULT_REWRAP_ERROR
-                                                                    : DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, prepare_error == AIMEE_PG_PREPARE_RESOURCE
+                             ? KB_STORE_VAULT_REWRAP_ERROR
+                             : KB_STORE_VAULT_REWRAP_INVALID);
    }
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
    uint8_t returned_operation_id[16] = {0};
-   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW &&
-       db2_vault_reseal_operation_id_from_hex(aimee_pg_column_text(st, 0), returned_operation_id) ==
-           0 &&
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW &&
+       kb_store_vault_reseal_operation_id_from_hex(aimee_pg_column_text(st, 0),
+                                                   returned_operation_id) == 0 &&
        CRYPTO_memcmp(returned_operation_id, operation_id, 16) == 0 &&
        state_parse(aimee_pg_column_text(st, 1), state) == 0 &&
        (RW_STATES_ALL & RW_STATE_BIT(*state)))
@@ -638,48 +643,48 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
       *epoch = aimee_pg_column_int64(st, 2);
       *fence = aimee_pg_column_int64(st, 3);
       if (*epoch < 1 || *fence < 1)
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
       else
          rc = expect_done(st);
    }
-   else if (rc == DB2_VAULT_REWRAP_OK)
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
    OPENSSL_cleanse(returned_operation_id, sizeof(returned_operation_id));
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
       *epoch = *fence = 0;
       OPENSSL_cleanse(state, sizeof(*state));
    }
    else
       tx->phase = RW_PHASE_SINGLE_DONE;
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
 
-db2_vault_rewrap_result_t
-db2_vault_rewrap_record_prepared(db2_vault_rewrap_tx_t *tx, const uint8_t opid[16], int64_t fence,
-                                 int64_t old_generation, int64_t new_generation,
-                                 const uint8_t receipt[VAULT_RESEAL_RECEIPT_V1_LEN])
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_record_prepared(kb_store_vault_rewrap_tx_t *tx, const uint8_t opid[16],
+                                      int64_t fence, int64_t old_generation, int64_t new_generation,
+                                      const uint8_t receipt[VAULT_RESEAL_RECEIPT_V1_LEN])
 {
    uint8_t digest[32];
    vault_tpm2_reseal_receipt_t decoded;
    memset(&decoded, 0, sizeof(decoded));
    if (!opid || !receipt || old_generation < 0 || old_generation == INT64_MAX ||
        new_generation != old_generation + 1 ||
-       db2_vault_reseal_receipt_decode(receipt, VAULT_RESEAL_RECEIPT_V1_LEN, &decoded) != 0 ||
+       kb_store_vault_reseal_receipt_decode(receipt, VAULT_RESEAL_RECEIPT_V1_LEN, &decoded) != 0 ||
        CRYPTO_memcmp(decoded.operation_id, opid, 16) != 0 ||
        decoded.old_generation != (uint64_t)old_generation ||
        decoded.new_generation != (uint64_t)new_generation ||
-       db2_vault_reseal_receipt_digest(receipt, digest) != 0)
+       kb_store_vault_reseal_receipt_digest(receipt, digest) != 0)
    {
       OPENSSL_cleanse(&decoded, sizeof(decoded));
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    }
    OPENSSL_cleanse(&decoded, sizeof(decoded));
-   if (claim_kind(tx, RW_KIND_SINGLE) != DB2_VAULT_REWRAP_OK)
+   if (claim_kind(tx, RW_KIND_SINGLE) != KB_STORE_VAULT_REWRAP_OK)
    {
       OPENSSL_cleanse(digest, sizeof(digest));
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    }
    aimee_pg_stmt_t *st =
        prepare_op(tx, "SELECT org_vault_rewrap_record_prepared(?1,?2,?3,?4)", opid, fence);
@@ -691,32 +696,30 @@ db2_vault_rewrap_record_prepared(db2_vault_rewrap_tx_t *tx, const uint8_t opid[1
       OPENSSL_cleanse(digest, 32);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   uint32_t allowed = RW_STATES_ALL & ~RW_STATE_BIT(DB2_VAULT_REWRAP_PREPARING);
-   db2_vault_rewrap_result_t rc = state_scalar(st, allowed, NULL);
+   uint32_t allowed = RW_STATES_ALL & ~RW_STATE_BIT(KB_STORE_VAULT_REWRAP_PREPARING);
+   kb_store_vault_rewrap_result_t rc = state_scalar(st, allowed, NULL);
    OPENSSL_cleanse(digest, 32);
-   if (rc == DB2_VAULT_REWRAP_OK)
+   if (rc == KB_STORE_VAULT_REWRAP_OK)
       tx->phase = RW_PHASE_SINGLE_DONE;
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page(db2_vault_rewrap_tx_t *tx,
-                                                              const uint8_t opid[16], int64_t fence,
-                                                              int64_t after, int limit,
-                                                              db2_vault_rewrap_secret_t *rows,
-                                                              size_t cap, size_t *count)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_source_secret_page(
+    kb_store_vault_rewrap_tx_t *tx, const uint8_t opid[16], int64_t fence, int64_t after, int limit,
+    kb_store_vault_rewrap_secret_t *rows, size_t cap, size_t *count)
 {
    if (rows)
-      db2_vault_rewrap_secret_clear(
-          rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX : cap);
+      kb_store_vault_rewrap_secret_clear(
+          rows, cap > KB_STORE_VAULT_REWRAP_PAGE_MAX ? KB_STORE_VAULT_REWRAP_PAGE_MAX : cap);
    if (count)
       *count = 0;
-   if (!rows || !count || after < 0 || limit < 1 || limit > DB2_VAULT_REWRAP_PAGE_MAX ||
-       cap < (size_t)limit || cap > DB2_VAULT_REWRAP_PAGE_MAX)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+   if (!rows || !count || after < 0 || limit < 1 || limit > KB_STORE_VAULT_REWRAP_PAGE_MAX ||
+       cap < (size_t)limit || cap > KB_STORE_VAULT_REWRAP_PAGE_MAX)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    if (tx_owned(tx) && tx->secret_exhausted)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INTEGRITY);
-   if (claim_kind(tx, RW_KIND_STAGING) != DB2_VAULT_REWRAP_OK || after != tx->last_secret_id)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INTEGRITY);
+   if (claim_kind(tx, RW_KIND_STAGING) != KB_STORE_VAULT_REWRAP_OK || after != tx->last_secret_id)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_stmt_t *st =
        prepare_op(tx, "SELECT * FROM org_vault_rewrap_secret_page(?1,?2,?3,?4)", opid, fence);
    if (!st || aimee_pg_bind_int64(st, "?3", after) != 0 || aimee_pg_bind_int(st, "?4", limit) != 0)
@@ -725,16 +728,16 @@ db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page(db2_vault_rewrap_t
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = DB2_VAULT_REWRAP_OK;
+   kb_store_vault_rewrap_result_t rc = KB_STORE_VAULT_REWRAP_OK;
    aimee_pg_step_t sr;
-   while ((rc = step(st, &sr)) == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
+   while ((rc = step(st, &sr)) == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
    {
       if (*count >= (size_t)limit)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
-      db2_vault_rewrap_secret_t *r = &rows[(*count)++];
+      kb_store_vault_rewrap_secret_t *r = &rows[(*count)++];
       r->source_id = aimee_pg_column_int64(st, 0);
       r->version = aimee_pg_column_int64(st, 4);
       if (r->source_id <= after || r->version < 1 ||
@@ -744,15 +747,15 @@ db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page(db2_vault_rewrap_t
           blob_exact(st, 5, r->source_digest, 32) != 0 ||
           blob_exact(st, 6, r->wrapped_dek, VAULT_WRAPPED_DEK_LEN) != 0)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       after = r->source_id;
    }
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
-      db2_vault_rewrap_secret_clear(rows, cap);
+      kb_store_vault_rewrap_secret_clear(rows, cap);
       *count = 0;
       return tx_fail(tx, rc);
    }
@@ -763,34 +766,35 @@ db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page(db2_vault_rewrap_t
    return rc;
 }
 
-db2_vault_rewrap_result_t
-db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid[16], int64_t fence,
-                                   const db2_vault_rewrap_cursor_t *after, int limit,
-                                   db2_vault_rewrap_check_t *rows, size_t cap, size_t *count,
-                                   db2_vault_rewrap_cursor_t *next)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_source_check_page(kb_store_vault_rewrap_tx_t *tx, const uint8_t opid[16],
+                                        int64_t fence, const kb_store_vault_rewrap_cursor_t *after,
+                                        int limit, kb_store_vault_rewrap_check_t *rows, size_t cap,
+                                        size_t *count, kb_store_vault_rewrap_cursor_t *next)
 {
    static const uint8_t empty = 0;
    if (rows)
-      db2_vault_rewrap_check_clear(rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX
-                                                                         : cap);
+      kb_store_vault_rewrap_check_clear(
+          rows, cap > KB_STORE_VAULT_REWRAP_PAGE_MAX ? KB_STORE_VAULT_REWRAP_PAGE_MAX : cap);
    if (count)
       *count = 0;
-   db2_vault_rewrap_cursor_t after_copy;
+   kb_store_vault_rewrap_cursor_t after_copy;
    int after_valid = after && after->len <= sizeof(after->bytes);
    if (after_valid)
       after_copy = *after;
    if (next)
-      db2_vault_rewrap_cursor_clear(next);
-   if (!rows || !count || !after_valid || !next || limit < 1 || limit > DB2_VAULT_REWRAP_PAGE_MAX ||
-       cap < (size_t)limit || cap > DB2_VAULT_REWRAP_PAGE_MAX)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      kb_store_vault_rewrap_cursor_clear(next);
+   if (!rows || !count || !after_valid || !next || limit < 1 ||
+       limit > KB_STORE_VAULT_REWRAP_PAGE_MAX || cap < (size_t)limit ||
+       cap > KB_STORE_VAULT_REWRAP_PAGE_MAX)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    after = &after_copy;
    if (tx_owned(tx) && tx->check_exhausted)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INTEGRITY);
-   if (claim_kind(tx, RW_KIND_STAGING) != DB2_VAULT_REWRAP_OK ||
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INTEGRITY);
+   if (claim_kind(tx, RW_KIND_STAGING) != KB_STORE_VAULT_REWRAP_OK ||
        after->len != tx->check_cursor.len ||
        CRYPTO_memcmp(after->bytes, tx->check_cursor.bytes, after->len) != 0)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    *next = *after;
    aimee_pg_stmt_t *st =
        prepare_op(tx, "SELECT * FROM org_vault_rewrap_check_page(?1,?2,?3,?4)", opid, fence);
@@ -800,30 +804,30 @@ db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid
    {
       int had_stmt = st != NULL;
       aimee_pg_finalize(st);
-      db2_vault_rewrap_cursor_clear(next);
+      kb_store_vault_rewrap_cursor_clear(next);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = DB2_VAULT_REWRAP_OK;
+   kb_store_vault_rewrap_result_t rc = KB_STORE_VAULT_REWRAP_OK;
    aimee_pg_step_t sr;
-   while ((rc = step(st, &sr)) == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
+   while ((rc = step(st, &sr)) == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
    {
       if (*count >= (size_t)limit)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
-      db2_vault_rewrap_check_t *r = &rows[(*count)++];
+      kb_store_vault_rewrap_check_t *r = &rows[(*count)++];
       if (text_copy(st, 0, r->principal, sizeof(r->principal)) != 0 ||
           blob_exact(st, 1, r->source_digest, 32) != 0 || aimee_pg_column_is_null(st, 2) ||
           aimee_pg_column_is_null(st, 3))
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       int n = aimee_pg_column_bytes(st, 2);
       if (n != 0 && n != VAULT_WRAPPED_DEK_LEN)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       if (n)
@@ -831,7 +835,7 @@ db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid
          const void *p = aimee_pg_column_blob(st, 2);
          if (!p)
          {
-            rc = DB2_VAULT_REWRAP_INTEGRITY;
+            rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
             break;
          }
          memcpy(r->kek_check, p, (size_t)n);
@@ -844,18 +848,18 @@ db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid
           memcmp(r->principal, cursor, pn) != 0 || !utf8_valid(cursor, (size_t)cn) ||
           cursor_cmp(cursor, (size_t)cn, next->bytes, next->len) <= 0)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       memcpy(next->bytes, cursor, (size_t)cn);
       next->len = (size_t)cn;
    }
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
-      db2_vault_rewrap_check_clear(rows, cap);
+      kb_store_vault_rewrap_check_clear(rows, cap);
       *count = 0;
-      db2_vault_rewrap_cursor_clear(next);
+      kb_store_vault_rewrap_cursor_clear(next);
       return tx_fail(tx, rc);
    }
    tx->check_cursor = *next;
@@ -864,29 +868,29 @@ db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t opid
    return rc;
 }
 
-static db2_vault_rewrap_result_t void_scalar(aimee_pg_stmt_t *st)
+static kb_store_vault_rewrap_result_t void_scalar(aimee_pg_stmt_t *st)
 {
    if (!st)
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
-   if (rc == DB2_VAULT_REWRAP_OK && sr != AIMEE_PG_ROW)
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
-   else if (rc == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr != AIMEE_PG_ROW)
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
       rc = expect_done(st);
    aimee_pg_finalize(st);
    return rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_stage_dek(db2_vault_rewrap_tx_t *tx,
-                                                     const uint8_t opid[16], int64_t fence,
-                                                     const db2_vault_rewrap_secret_t *s,
-                                                     const uint8_t nw[VAULT_WRAPPED_DEK_LEN])
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_stage_dek(kb_store_vault_rewrap_tx_t *tx, const uint8_t opid[16],
+                                int64_t fence, const kb_store_vault_rewrap_secret_t *s,
+                                const uint8_t nw[VAULT_WRAPPED_DEK_LEN])
 {
    if (!s || !nw || s->source_id < 1 || s->version < 1)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (claim_kind(tx, RW_KIND_STAGING) != DB2_VAULT_REWRAP_OK)
-      return DB2_VAULT_REWRAP_INVALID;
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (claim_kind(tx, RW_KIND_STAGING) != KB_STORE_VAULT_REWRAP_OK)
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_stmt_t *st =
        prepare_op(tx, "SELECT org_vault_rewrap_stage_dek(?1,?2,?3,?4,?5,?6,?7,?8,?9)", opid, fence);
    if (!st || aimee_pg_bind_int64(st, "?3", s->source_id) != 0 ||
@@ -900,20 +904,20 @@ db2_vault_rewrap_result_t db2_vault_rewrap_stage_dek(db2_vault_rewrap_tx_t *tx,
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = void_scalar(st);
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
+   kb_store_vault_rewrap_result_t rc = void_scalar(st);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_stage_check(db2_vault_rewrap_tx_t *tx,
-                                                       const uint8_t opid[16], int64_t fence,
-                                                       const db2_vault_rewrap_check_t *s,
-                                                       const uint8_t *nw, size_t n)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_stage_check(kb_store_vault_rewrap_tx_t *tx, const uint8_t opid[16],
+                                  int64_t fence, const kb_store_vault_rewrap_check_t *s,
+                                  const uint8_t *nw, size_t n)
 {
    static const uint8_t empty = 0;
    if (!s || (!nw && n) || (n != 0 && n != VAULT_WRAPPED_DEK_LEN))
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (claim_kind(tx, RW_KIND_STAGING) != DB2_VAULT_REWRAP_OK)
-      return DB2_VAULT_REWRAP_INVALID;
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (claim_kind(tx, RW_KIND_STAGING) != KB_STORE_VAULT_REWRAP_OK)
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_stmt_t *st =
        prepare_op(tx, "SELECT org_vault_rewrap_stage_check(?1,?2,?3,?4,?5)", opid, fence);
    if (!st || aimee_pg_bind_text(st, "?3", s->principal) != 0 ||
@@ -924,17 +928,18 @@ db2_vault_rewrap_result_t db2_vault_rewrap_stage_check(db2_vault_rewrap_tx_t *tx
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = void_scalar(st);
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
+   kb_store_vault_rewrap_result_t rc = void_scalar(st);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
 
-static db2_vault_rewrap_result_t simple_state(db2_vault_rewrap_tx_t *tx, const char *sql,
-                                              const uint8_t opid[16], int64_t fence,
-                                              const uint8_t *digest, const char *failure, int kind,
-                                              int done_phase, uint32_t allowed_states)
+static kb_store_vault_rewrap_result_t simple_state(kb_store_vault_rewrap_tx_t *tx, const char *sql,
+                                                   const uint8_t opid[16], int64_t fence,
+                                                   const uint8_t *digest, const char *failure,
+                                                   int kind, int done_phase,
+                                                   uint32_t allowed_states)
 {
-   if (claim_kind(tx, kind) != DB2_VAULT_REWRAP_OK)
-      return DB2_VAULT_REWRAP_INVALID;
+   if (claim_kind(tx, kind) != KB_STORE_VAULT_REWRAP_OK)
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_stmt_t *st = prepare_op(tx, sql, opid, fence);
    if (!st)
       return tx_fail(tx, tx->prepare_error);
@@ -942,39 +947,39 @@ static db2_vault_rewrap_result_t simple_state(db2_vault_rewrap_tx_t *tx, const c
        (failure && aimee_pg_bind_text(st, "?3", failure) != 0))
    {
       aimee_pg_finalize(st);
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    }
-   db2_vault_rewrap_result_t rc = state_scalar(st, allowed_states, NULL);
-   if (rc == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_result_t rc = state_scalar(st, allowed_states, NULL);
+   if (rc == KB_STORE_VAULT_REWRAP_OK)
       tx->phase = done_phase;
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
-db2_vault_rewrap_result_t
-db2_vault_rewrap_inventory_summary(db2_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
-                                   db2_vault_rewrap_inventory_summary_t *out)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_inventory_summary(kb_store_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                        int64_t f, kb_store_vault_rewrap_inventory_summary_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    if (!tx_owned(t) || t->kind != RW_KIND_STAGING || t->phase != RW_PHASE_STAGING || !out)
-      return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_stmt_t *st =
        prepare_op(t, "SELECT * FROM org_vault_rewrap_inventory_summary(?1,?2)", o, f);
    if (!st)
       return tx_fail(t, t->prepare_error);
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
-   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
        !aimee_pg_column_is_null(st, 1) && blob_exact(st, 2, out->inventory_digest, 32) == 0)
    {
       out->secret_count = aimee_pg_column_int64(st, 0);
       out->check_count = aimee_pg_column_int64(st, 1);
-      rc = out->secret_count < 0 || out->check_count < 0 ? DB2_VAULT_REWRAP_INTEGRITY
+      rc = out->secret_count < 0 || out->check_count < 0 ? KB_STORE_VAULT_REWRAP_INTEGRITY
                                                          : expect_done(st);
    }
-   else if (rc == DB2_VAULT_REWRAP_OK)
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
       memset(out, 0, sizeof(*out));
       return tx_fail(t, rc);
@@ -982,14 +987,14 @@ db2_vault_rewrap_inventory_summary(db2_vault_rewrap_tx_t *t, const uint8_t o[16]
    return rc;
 }
 
-db2_vault_rewrap_result_t
-db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
-                              const db2_vault_rewrap_inventory_summary_t *expected)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_stage_finish(kb_store_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
+                                   const kb_store_vault_rewrap_inventory_summary_t *expected)
 {
    if (!tx_owned(t) || t->kind != RW_KIND_STAGING || t->phase != RW_PHASE_STAGING ||
        !t->secret_exhausted || !t->check_exhausted || !expected || expected->secret_count < 0 ||
        expected->check_count < 0)
-      return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_stmt_t *st =
        prepare_op(t, "SELECT org_vault_rewrap_stage_finish(?1,?2,?3,?4,?5)", o, f);
    if (!st || aimee_pg_bind_int64(st, "?3", expected->secret_count) != 0 ||
@@ -1000,74 +1005,76 @@ db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16], int
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(t, had_stmt);
    }
-   db2_vault_rewrap_result_t rc =
+   kb_store_vault_rewrap_result_t rc =
        state_scalar(st,
-                    RW_STATES_ALL & ~RW_STATE_BIT(DB2_VAULT_REWRAP_PREPARING) &
-                        ~RW_STATE_BIT(DB2_VAULT_REWRAP_CUSTODY_PREPARED),
+                    RW_STATES_ALL & ~RW_STATE_BIT(KB_STORE_VAULT_REWRAP_PREPARING) &
+                        ~RW_STATE_BIT(KB_STORE_VAULT_REWRAP_CUSTODY_PREPARED),
                     NULL);
-   if (rc == DB2_VAULT_REWRAP_OK)
+   if (rc == KB_STORE_VAULT_REWRAP_OK)
       t->phase = RW_PHASE_STAGING_DONE;
-   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(t, rc);
+   return rc == KB_STORE_VAULT_REWRAP_OK ? rc : tx_fail(t, rc);
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_mark_committing(db2_vault_rewrap_tx_t *t,
-                                                           const uint8_t o[16], int64_t f)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_mark_committing(kb_store_vault_rewrap_tx_t *t,
+                                                                     const uint8_t o[16], int64_t f)
 {
-   return simple_state(
-       t, "SELECT org_vault_rewrap_mark_committing(?1,?2)", o, f, NULL, NULL, RW_KIND_SINGLE,
-       RW_PHASE_SINGLE_DONE,
-       RW_STATE_BIT(DB2_VAULT_REWRAP_RESEAL_COMMITTING) | RW_STATE_BIT(DB2_VAULT_REWRAP_RESEALED) |
-           RW_STATE_BIT(DB2_VAULT_REWRAP_PROMOTED) | RW_STATE_BIT(DB2_VAULT_REWRAP_COMPLETED) |
-           RW_STATE_BIT(DB2_VAULT_REWRAP_RECOVERY_REQUIRED));
+   return simple_state(t, "SELECT org_vault_rewrap_mark_committing(?1,?2)", o, f, NULL, NULL,
+                       RW_KIND_SINGLE, RW_PHASE_SINGLE_DONE,
+                       RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RESEAL_COMMITTING) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RESEALED) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_PROMOTED) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_COMPLETED) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED));
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_mark_resealed(db2_vault_rewrap_tx_t *t,
-                                                         const uint8_t o[16], int64_t f,
-                                                         const uint8_t d[32])
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_mark_resealed(kb_store_vault_rewrap_tx_t *t,
+                                                                   const uint8_t o[16], int64_t f,
+                                                                   const uint8_t d[32])
 {
    return d ? simple_state(t, "SELECT org_vault_rewrap_mark_resealed(?1,?2,?3)", o, f, d, NULL,
                            RW_KIND_SINGLE, RW_PHASE_SINGLE_DONE,
-                           RW_STATE_BIT(DB2_VAULT_REWRAP_RESEALED) |
-                               RW_STATE_BIT(DB2_VAULT_REWRAP_PROMOTED) |
-                               RW_STATE_BIT(DB2_VAULT_REWRAP_COMPLETED) |
-                               RW_STATE_BIT(DB2_VAULT_REWRAP_RECOVERY_REQUIRED))
-            : tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RESEALED) |
+                               RW_STATE_BIT(KB_STORE_VAULT_REWRAP_PROMOTED) |
+                               RW_STATE_BIT(KB_STORE_VAULT_REWRAP_COMPLETED) |
+                               RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED))
+            : tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_promote(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
-                                                   int64_t f)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_promote(kb_store_vault_rewrap_tx_t *t,
+                                                             const uint8_t o[16], int64_t f)
 {
    return simple_state(t, "SELECT org_vault_rewrap_promote(?1,?2)", o, f, NULL, NULL,
                        RW_KIND_PROMOTION, RW_PHASE_PROMOTION_DONE,
-                       RW_STATE_BIT(DB2_VAULT_REWRAP_PROMOTED) |
-                           RW_STATE_BIT(DB2_VAULT_REWRAP_COMPLETED) |
-                           RW_STATE_BIT(DB2_VAULT_REWRAP_RECOVERY_REQUIRED));
+                       RW_STATE_BIT(KB_STORE_VAULT_REWRAP_PROMOTED) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_COMPLETED) |
+                           RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED));
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_abort(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
-                                                 int64_t f, const char *x)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_abort(kb_store_vault_rewrap_tx_t *t,
+                                                           const uint8_t o[16], int64_t f,
+                                                           const char *x)
 {
    return x && x[0] ? simple_state(t, "SELECT org_vault_rewrap_abort(?1,?2,?3)", o, f, NULL, x,
                                    RW_KIND_SINGLE, RW_PHASE_SINGLE_DONE,
-                                   RW_STATE_BIT(DB2_VAULT_REWRAP_ABORTED))
-                    : tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+                                   RW_STATE_BIT(KB_STORE_VAULT_REWRAP_ABORTED))
+                    : tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_recovery_required(db2_vault_rewrap_tx_t *t,
-                                                             const uint8_t o[16], int64_t f,
-                                                             const char *x)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_recovery_required(kb_store_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                        int64_t f, const char *x)
 {
    return x && x[0] ? simple_state(t, "SELECT org_vault_rewrap_recovery_required(?1,?2,?3)", o, f,
                                    NULL, x, RW_KIND_SINGLE, RW_PHASE_SINGLE_DONE,
-                                   RW_STATE_BIT(DB2_VAULT_REWRAP_RECOVERY_REQUIRED))
-                    : tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+                                   RW_STATE_BIT(KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED))
+                    : tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_complete(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
-                                                    int64_t f, const uint8_t r[32],
-                                                    const uint8_t i[32], const uint8_t s[32])
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_complete(kb_store_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
+                               const uint8_t r[32], const uint8_t i[32], const uint8_t s[32])
 {
    if (!tx_owned(t))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (t->phase != RW_PHASE_CRYPTO_ACKED || !o || !r || !i || !s || f != t->fence ||
        CRYPTO_memcmp(o, t->operation_id, 16) != 0 || CRYPTO_memcmp(r, t->receipt_digest, 32) != 0 ||
        CRYPTO_memcmp(i, t->inventory_digest, 32) != 0 || CRYPTO_memcmp(s, t->stage_digest, 32) != 0)
-      return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(t, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_stmt_t *st =
        prepare_verify(t, "SELECT org_vault_rewrap_complete(?1,?2,?3,?4,?5)", o, f);
    if (!st || aimee_pg_bind_blob(st, "?3", r, 32) != 0 ||
@@ -1077,34 +1084,34 @@ db2_vault_rewrap_result_t db2_vault_rewrap_complete(db2_vault_rewrap_tx_t *t, co
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(t, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = state_scalar(st, RW_STATE_BIT(DB2_VAULT_REWRAP_COMPLETED), NULL);
-   if (rc == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_result_t rc =
+       state_scalar(st, RW_STATE_BIT(KB_STORE_VAULT_REWRAP_COMPLETED), NULL);
+   if (rc == KB_STORE_VAULT_REWRAP_OK)
       t->phase = RW_PHASE_COMPLETED;
    else
       tx_fail(t, rc);
    return rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_verify_summary(db2_vault_rewrap_tx_t *tx,
-                                                          const uint8_t operation_id[16],
-                                                          int64_t fence,
-                                                          db2_vault_rewrap_verify_summary_t *out)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_verify_summary(kb_store_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
+                                     int64_t fence, kb_store_vault_rewrap_verify_summary_t *out)
 {
    if (out)
-      db2_vault_rewrap_verify_summary_clear(out);
+      kb_store_vault_rewrap_verify_summary_clear(out);
    if (!tx_owned(tx))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (tx->phase != RW_PHASE_GENERAL || !operation_id || fence < 1 || !out)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (claim_kind(tx, RW_KIND_VERIFY) != DB2_VAULT_REWRAP_OK)
-      return DB2_VAULT_REWRAP_INVALID;
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (claim_kind(tx, RW_KIND_VERIFY) != KB_STORE_VAULT_REWRAP_OK)
+      return KB_STORE_VAULT_REWRAP_INVALID;
    aimee_pg_stmt_t *st = prepare_verify(tx, "SELECT * FROM org_vault_rewrap_verify_summary(?1,?2)",
                                         operation_id, fence);
    if (!st)
       return tx_fail(tx, tx->prepare_error);
    aimee_pg_step_t sr;
-   db2_vault_rewrap_result_t rc = step(st, &sr);
-   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
+   kb_store_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
        !aimee_pg_column_is_null(st, 1) && blob_exact(st, 2, out->receipt_digest, 32) == 0 &&
        blob_exact(st, 3, out->inventory_digest, 32) == 0 &&
        blob_exact(st, 4, out->stage_digest, 32) == 0)
@@ -1112,16 +1119,16 @@ db2_vault_rewrap_result_t db2_vault_rewrap_verify_summary(db2_vault_rewrap_tx_t 
       out->secret_count = aimee_pg_column_int64(st, 0);
       out->check_count = aimee_pg_column_int64(st, 1);
       if (out->secret_count < 0 || out->check_count < 0)
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
       else
          rc = expect_done(st);
    }
-   else if (rc == DB2_VAULT_REWRAP_OK)
-      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   else if (rc == KB_STORE_VAULT_REWRAP_OK)
+      rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
-      db2_vault_rewrap_verify_summary_clear(out);
+      kb_store_vault_rewrap_verify_summary_clear(out);
       return tx_fail(tx, rc);
    }
    memcpy(tx->operation_id, operation_id, 16);
@@ -1135,31 +1142,30 @@ db2_vault_rewrap_result_t db2_vault_rewrap_verify_summary(db2_vault_rewrap_tx_t 
    return rc;
 }
 
-static int verify_identity(const db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
+static int verify_identity(const kb_store_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
                            int64_t fence)
 {
    return operation_id && fence == tx->fence &&
           CRYPTO_memcmp(operation_id, tx->operation_id, 16) == 0;
 }
 
-db2_vault_rewrap_result_t
-db2_vault_rewrap_verify_secret_page(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
-                                    int64_t fence, int64_t after, int limit,
-                                    db2_vault_rewrap_secret_t *rows, size_t cap, size_t *count)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_verify_secret_page(
+    kb_store_vault_rewrap_tx_t *tx, const uint8_t operation_id[16], int64_t fence, int64_t after,
+    int limit, kb_store_vault_rewrap_secret_t *rows, size_t cap, size_t *count)
 {
    if (rows)
-      db2_vault_rewrap_secret_clear(
-          rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX : cap);
+      kb_store_vault_rewrap_secret_clear(
+          rows, cap > KB_STORE_VAULT_REWRAP_PAGE_MAX ? KB_STORE_VAULT_REWRAP_PAGE_MAX : cap);
    if (count)
       *count = 0;
    if (!tx_owned(tx))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (tx->phase != RW_PHASE_VERIFY_SECRETS || !verify_identity(tx, operation_id, fence) || !rows ||
        !count || after < 0 || after != tx->last_secret_id || limit < 1 ||
-       limit > DB2_VAULT_REWRAP_PAGE_MAX || cap < (size_t)limit)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (cap > DB2_VAULT_REWRAP_PAGE_MAX)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+       limit > KB_STORE_VAULT_REWRAP_PAGE_MAX || cap < (size_t)limit)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (cap > KB_STORE_VAULT_REWRAP_PAGE_MAX)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    aimee_pg_stmt_t *st = prepare_verify(
        tx, "SELECT * FROM org_vault_rewrap_verify_secret_page(?1,?2,?3,?4)", operation_id, fence);
    if (!st || aimee_pg_bind_int64(st, "?3", after) != 0 || aimee_pg_bind_int(st, "?4", limit) != 0)
@@ -1168,16 +1174,16 @@ db2_vault_rewrap_verify_secret_page(db2_vault_rewrap_tx_t *tx, const uint8_t ope
       aimee_pg_finalize(st);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = DB2_VAULT_REWRAP_OK;
+   kb_store_vault_rewrap_result_t rc = KB_STORE_VAULT_REWRAP_OK;
    aimee_pg_step_t sr;
-   while ((rc = step(st, &sr)) == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
+   while ((rc = step(st, &sr)) == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
    {
       if (*count >= (size_t)limit)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
-      db2_vault_rewrap_secret_t *r = &rows[(*count)++];
+      kb_store_vault_rewrap_secret_t *r = &rows[(*count)++];
       r->source_id = aimee_pg_column_int64(st, 0);
       r->version = aimee_pg_column_int64(st, 4);
       if (r->source_id <= after || r->version < 1 ||
@@ -1186,15 +1192,15 @@ db2_vault_rewrap_verify_secret_page(db2_vault_rewrap_tx_t *tx, const uint8_t ope
           text_copy(st, 3, r->cred, sizeof(r->cred)) != 0 ||
           blob_exact(st, 5, r->wrapped_dek, VAULT_WRAPPED_DEK_LEN) != 0)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       after = r->source_id;
    }
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
-      db2_vault_rewrap_secret_clear(rows, cap);
+      kb_store_vault_rewrap_secret_clear(rows, cap);
       *count = 0;
       return tx_fail(tx, rc);
    }
@@ -1203,9 +1209,9 @@ db2_vault_rewrap_verify_secret_page(db2_vault_rewrap_tx_t *tx, const uint8_t ope
         tx->consumed_secrets + (int64_t)*count != tx->expected_secrets) ||
        (*count == 0 && tx->consumed_secrets != tx->expected_secrets))
    {
-      db2_vault_rewrap_secret_clear(rows, cap);
+      kb_store_vault_rewrap_secret_clear(rows, cap);
       *count = 0;
-      return tx_fail(tx, DB2_VAULT_REWRAP_INTEGRITY);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INTEGRITY);
    }
    tx->consumed_secrets += (int64_t)*count;
    if (*count)
@@ -1258,33 +1264,33 @@ static int cursor_cmp(const uint8_t *a, size_t an, const uint8_t *b, size_t bn)
    return rc ? rc : (an > bn) - (an < bn);
 }
 
-db2_vault_rewrap_result_t
-db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
-                                   int64_t fence, const db2_vault_rewrap_cursor_t *after, int limit,
-                                   db2_vault_rewrap_check_t *rows, size_t cap, size_t *count,
-                                   db2_vault_rewrap_cursor_t *next)
+kb_store_vault_rewrap_result_t kb_store_vault_rewrap_verify_check_page(
+    kb_store_vault_rewrap_tx_t *tx, const uint8_t operation_id[16], int64_t fence,
+    const kb_store_vault_rewrap_cursor_t *after, int limit, kb_store_vault_rewrap_check_t *rows,
+    size_t cap, size_t *count, kb_store_vault_rewrap_cursor_t *next)
 {
    static const uint8_t empty = 0;
    if (rows)
-      db2_vault_rewrap_check_clear(rows, cap > DB2_VAULT_REWRAP_PAGE_MAX ? DB2_VAULT_REWRAP_PAGE_MAX
-                                                                         : cap);
+      kb_store_vault_rewrap_check_clear(
+          rows, cap > KB_STORE_VAULT_REWRAP_PAGE_MAX ? KB_STORE_VAULT_REWRAP_PAGE_MAX : cap);
    if (count)
       *count = 0;
-   db2_vault_rewrap_cursor_t after_copy;
+   kb_store_vault_rewrap_cursor_t after_copy;
    int after_valid = after && after->len <= sizeof(after->bytes);
    if (after_valid)
       after_copy = *after;
    if (next)
-      db2_vault_rewrap_cursor_clear(next);
+      kb_store_vault_rewrap_cursor_clear(next);
    if (!tx_owned(tx))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (tx->phase != RW_PHASE_VERIFY_CHECKS || !verify_identity(tx, operation_id, fence) ||
        !after_valid || after_copy.len != tx->check_cursor.len ||
        CRYPTO_memcmp(after_copy.bytes, tx->check_cursor.bytes, after_copy.len) != 0 || !rows ||
-       !count || !next || limit < 1 || limit > DB2_VAULT_REWRAP_PAGE_MAX || cap < (size_t)limit)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
-   if (cap > DB2_VAULT_REWRAP_PAGE_MAX)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+       !count || !next || limit < 1 || limit > KB_STORE_VAULT_REWRAP_PAGE_MAX ||
+       cap < (size_t)limit)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
+   if (cap > KB_STORE_VAULT_REWRAP_PAGE_MAX)
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    after = &after_copy;
    *next = *after;
    aimee_pg_stmt_t *st = prepare_verify(
@@ -1295,29 +1301,29 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
    {
       int had_stmt = st != NULL;
       aimee_pg_finalize(st);
-      db2_vault_rewrap_cursor_clear(next);
+      kb_store_vault_rewrap_cursor_clear(next);
       return prepare_or_bind_failure(tx, had_stmt);
    }
-   db2_vault_rewrap_result_t rc = DB2_VAULT_REWRAP_OK;
+   kb_store_vault_rewrap_result_t rc = KB_STORE_VAULT_REWRAP_OK;
    aimee_pg_step_t sr;
-   while ((rc = step(st, &sr)) == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
+   while ((rc = step(st, &sr)) == KB_STORE_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW)
    {
       if (*count >= (size_t)limit)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
-      db2_vault_rewrap_check_t *r = &rows[(*count)++];
+      kb_store_vault_rewrap_check_t *r = &rows[(*count)++];
       if (text_copy(st, 0, r->principal, sizeof(r->principal)) != 0 ||
           aimee_pg_column_is_null(st, 1) || aimee_pg_column_is_null(st, 2))
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       int n = aimee_pg_column_bytes(st, 1);
       if (n != 0 && n != VAULT_WRAPPED_DEK_LEN)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       if (n)
@@ -1325,7 +1331,7 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
          const void *p = aimee_pg_column_blob(st, 1);
          if (!p)
          {
-            rc = DB2_VAULT_REWRAP_INTEGRITY;
+            rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
             break;
          }
          memcpy(r->kek_check, p, (size_t)n);
@@ -1334,21 +1340,21 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
       int cn = aimee_pg_column_bytes(st, 2);
       const uint8_t *cursor = aimee_pg_column_blob(st, 2);
       size_t pn = strlen(r->principal);
-      const db2_vault_rewrap_cursor_t *previous = *count == 1 ? after : next;
+      const kb_store_vault_rewrap_cursor_t *previous = *count == 1 ? after : next;
       if (cn < 1 || cn > (int)sizeof(next->bytes) || !cursor || pn != (size_t)cn ||
           memcmp(r->principal, cursor, pn) != 0 || !utf8_valid(cursor, (size_t)cn) ||
           cursor_cmp(cursor, (size_t)cn, previous->bytes, previous->len) <= 0)
       {
-         rc = DB2_VAULT_REWRAP_INTEGRITY;
+         rc = KB_STORE_VAULT_REWRAP_INTEGRITY;
          break;
       }
       memcpy(next->bytes, cursor, (size_t)cn);
       next->len = (size_t)cn;
    }
    aimee_pg_finalize(st);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
    {
-      db2_vault_rewrap_check_clear(rows, cap);
+      kb_store_vault_rewrap_check_clear(rows, cap);
       *count = 0;
       memset(next, 0, sizeof(*next));
       return tx_fail(tx, rc);
@@ -1358,10 +1364,10 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
         tx->consumed_checks + (int64_t)*count != tx->expected_checks) ||
        (*count == 0 && tx->consumed_checks != tx->expected_checks))
    {
-      db2_vault_rewrap_check_clear(rows, cap);
+      kb_store_vault_rewrap_check_clear(rows, cap);
       *count = 0;
       memset(next, 0, sizeof(*next));
-      return tx_fail(tx, DB2_VAULT_REWRAP_INTEGRITY);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INTEGRITY);
    }
    tx->consumed_checks += (int64_t)*count;
    tx->check_cursor = *next;
@@ -1370,40 +1376,40 @@ db2_vault_rewrap_verify_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t oper
    return rc;
 }
 
-db2_vault_rewrap_result_t db2_vault_rewrap_verify_crypto_ack(db2_vault_rewrap_tx_t *tx,
-                                                             const uint8_t operation_id[16],
-                                                             int64_t fence)
+kb_store_vault_rewrap_result_t
+kb_store_vault_rewrap_verify_crypto_ack(kb_store_vault_rewrap_tx_t *tx,
+                                        const uint8_t operation_id[16], int64_t fence)
 {
    if (!tx_owned(tx))
-      return DB2_VAULT_REWRAP_INVALID;
+      return KB_STORE_VAULT_REWRAP_INVALID;
    if (tx->phase != RW_PHASE_VERIFY_CONSUMED || !verify_identity(tx, operation_id, fence) ||
        tx->consumed_secrets != tx->expected_secrets || tx->consumed_checks != tx->expected_checks)
-      return tx_fail(tx, DB2_VAULT_REWRAP_INVALID);
+      return tx_fail(tx, KB_STORE_VAULT_REWRAP_INVALID);
    tx->phase = RW_PHASE_CRYPTO_ACKED;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-const db2_vault_rewrap_ops_t db2_vault_rewrap_default_ops = {
-    .tx_begin = db2_vault_rewrap_tx_begin,
-    .tx_commit = db2_vault_rewrap_tx_commit,
-    .tx_rollback = db2_vault_rewrap_tx_rollback,
-    .snapshot = db2_vault_rewrap_snapshot,
-    .begin = db2_vault_rewrap_begin,
-    .record_prepared = db2_vault_rewrap_record_prepared,
-    .source_secret_page = db2_vault_rewrap_source_secret_page,
-    .source_check_page = db2_vault_rewrap_source_check_page,
-    .stage_dek = db2_vault_rewrap_stage_dek,
-    .stage_check = db2_vault_rewrap_stage_check,
-    .inventory_summary = db2_vault_rewrap_inventory_summary,
-    .stage_finish = db2_vault_rewrap_stage_finish,
-    .mark_committing = db2_vault_rewrap_mark_committing,
-    .mark_resealed = db2_vault_rewrap_mark_resealed,
-    .promote = db2_vault_rewrap_promote,
-    .abort = db2_vault_rewrap_abort,
-    .recovery_required = db2_vault_rewrap_recovery_required,
-    .verify_summary = db2_vault_rewrap_verify_summary,
-    .verify_secret_page = db2_vault_rewrap_verify_secret_page,
-    .verify_check_page = db2_vault_rewrap_verify_check_page,
-    .verify_crypto_ack = db2_vault_rewrap_verify_crypto_ack,
-    .complete = db2_vault_rewrap_complete,
+const kb_store_vault_rewrap_ops_t kb_store_vault_rewrap_default_ops = {
+    .tx_begin = kb_store_vault_rewrap_tx_begin,
+    .tx_commit = kb_store_vault_rewrap_tx_commit,
+    .tx_rollback = kb_store_vault_rewrap_tx_rollback,
+    .snapshot = kb_store_vault_rewrap_snapshot,
+    .begin = kb_store_vault_rewrap_begin,
+    .record_prepared = kb_store_vault_rewrap_record_prepared,
+    .source_secret_page = kb_store_vault_rewrap_source_secret_page,
+    .source_check_page = kb_store_vault_rewrap_source_check_page,
+    .stage_dek = kb_store_vault_rewrap_stage_dek,
+    .stage_check = kb_store_vault_rewrap_stage_check,
+    .inventory_summary = kb_store_vault_rewrap_inventory_summary,
+    .stage_finish = kb_store_vault_rewrap_stage_finish,
+    .mark_committing = kb_store_vault_rewrap_mark_committing,
+    .mark_resealed = kb_store_vault_rewrap_mark_resealed,
+    .promote = kb_store_vault_rewrap_promote,
+    .abort = kb_store_vault_rewrap_abort,
+    .recovery_required = kb_store_vault_rewrap_recovery_required,
+    .verify_summary = kb_store_vault_rewrap_verify_summary,
+    .verify_secret_page = kb_store_vault_rewrap_verify_secret_page,
+    .verify_check_page = kb_store_vault_rewrap_verify_check_page,
+    .verify_crypto_ack = kb_store_vault_rewrap_verify_crypto_ack,
+    .complete = kb_store_vault_rewrap_complete,
 };

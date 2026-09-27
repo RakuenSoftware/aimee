@@ -1,5 +1,5 @@
-/* db2/model_catalog.c: P2a org model catalog + entitlement — Postgres via libpq.
- * See org_model_catalog.h. Mirrors the db2/team.c access pattern. Every mutation goes
+/* kb_store/model_catalog.c: P2a org model catalog + entitlement — Postgres via libpq.
+ * See org_model_catalog.h. Mirrors the kb_store/team.c access pattern. Every mutation goes
  * through the audited SECURITY DEFINER functions (org_catalog_upsert/_remove,
  * org_model_entitle/_unentitle) rather than a raw INSERT, so the WORM audit append is
  * atomic with the mutation in one transaction. Reads go through org_catalog_entitled(),
@@ -8,8 +8,8 @@
 
 #include "org_model_catalog.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 #include "kb_models_validate.h"
 #include "cJSON.h"
@@ -53,8 +53,10 @@ static int raw_nul_escape(const char *json)
  * but the decoder is also an explicit hostile-adapter boundary.  Bound the raw
  * JSON before cJSON allocates a tree so a corrupt/injected row cannot turn into
  * an unbounded allocation. */
-#define BEDROCK_REGIONS_JSON_CAP    (DB2_BEDROCK_ARRAY_MAX * (DB2_BEDROCK_REGION_CAP + 3) + 2)
-#define BEDROCK_UNDERLYING_JSON_CAP (DB2_BEDROCK_ARRAY_MAX * (DB2_BEDROCK_ARN_CAP + 3) + 2)
+#define BEDROCK_REGIONS_JSON_CAP                                                                   \
+   (KB_STORE_BEDROCK_ARRAY_MAX * (KB_STORE_BEDROCK_REGION_CAP + 3) + 2)
+#define BEDROCK_UNDERLYING_JSON_CAP                                                                \
+   (KB_STORE_BEDROCK_ARRAY_MAX * (KB_STORE_BEDROCK_ARN_CAP + 3) + 2)
 
 static int bedrock_json_array(const char *json, size_t json_cap, char *out, size_t stride,
                               size_t elem_cap, size_t *out_n)
@@ -70,7 +72,7 @@ static int bedrock_json_array(const char *json, size_t json_cap, char *out, size
       return -1;
    }
    int n = cJSON_GetArraySize(root);
-   if (n < 0 || n > DB2_BEDROCK_ARRAY_MAX)
+   if (n < 0 || n > KB_STORE_BEDROCK_ARRAY_MAX)
    {
       cJSON_Delete(root);
       return -1;
@@ -90,7 +92,7 @@ static int bedrock_json_array(const char *json, size_t json_cap, char *out, size
    return 0;
 }
 
-static int region_present(const db2_bedrock_target_t *t, const char *region)
+static int region_present(const kb_store_bedrock_target_t *t, const char *region)
 {
    for (size_t i = 0; i < t->n_regions; i++)
       if (strcmp(t->regions[i], region) == 0)
@@ -98,7 +100,7 @@ static int region_present(const db2_bedrock_target_t *t, const char *region)
    return 0;
 }
 
-static int regions_unique(const db2_bedrock_target_t *t)
+static int regions_unique(const kb_store_bedrock_target_t *t)
 {
    for (size_t i = 0; i < t->n_regions; i++)
       for (size_t j = i + 1; j < t->n_regions; j++)
@@ -149,18 +151,19 @@ static int underlying_region(const char *arn, const char *partition, char region
    if (!suffix || suffix == start || strchr(start, ':') != suffix || !resource[0])
       return -1;
    size_t rn = (size_t)(suffix - start);
-   if (rn >= DB2_BEDROCK_REGION_CAP)
+   if (rn >= KB_STORE_BEDROCK_REGION_CAP)
       return -1;
    memcpy(region, start, rn);
    region[rn] = 0;
    return region_valid(region) ? 0 : -1;
 }
 
-db2_bedrock_target_result_t db2_model_bedrock_target_decode_row(const db2_bedrock_target_row_t *row,
-                                                                db2_bedrock_target_t *out)
+kb_store_bedrock_target_result_t
+kb_store_model_bedrock_target_decode_row(const kb_store_bedrock_target_row_t *row,
+                                         kb_store_bedrock_target_t *out)
 {
    if (!out)
-      return DB2_BEDROCK_TARGET_INVALID;
+      return KB_STORE_BEDROCK_TARGET_INVALID;
    memset(out, 0, sizeof(*out));
    if (!row || bedrock_copy(out->model_id, 201, row->model_id, 0) != 0 ||
        bedrock_copy(out->bedrock_api, sizeof(out->bedrock_api), row->bedrock_api, 0) != 0 ||
@@ -208,10 +211,10 @@ db2_bedrock_target_result_t db2_model_bedrock_target_decode_row(const db2_bedroc
    {
       if (out->n_underlying == 0)
          goto invalid;
-      int covered[DB2_BEDROCK_ARRAY_MAX] = {0};
+      int covered[KB_STORE_BEDROCK_ARRAY_MAX] = {0};
       for (size_t i = 0; i < out->n_underlying; i++)
       {
-         char region[DB2_BEDROCK_REGION_CAP];
+         char region[KB_STORE_BEDROCK_REGION_CAP];
          if (underlying_region(out->underlying_fm_arns[i], out->partition, region) != 0 ||
              !region_present(out, region))
             goto invalid;
@@ -223,25 +226,26 @@ db2_bedrock_target_result_t db2_model_bedrock_target_decode_row(const db2_bedroc
          if (!covered[i])
             goto invalid;
    }
-   return DB2_BEDROCK_TARGET_OK;
+   return KB_STORE_BEDROCK_TARGET_OK;
 invalid:
    memset(out, 0, sizeof(*out));
-   return DB2_BEDROCK_TARGET_INVALID;
+   return KB_STORE_BEDROCK_TARGET_INVALID;
 }
 
-db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
-                                                             db2_bedrock_target_t *out)
+kb_store_bedrock_target_result_t
+kb_store_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
+                                      kb_store_bedrock_target_t *out)
 {
    if (!out)
-      return DB2_BEDROCK_TARGET_INVALID;
+      return KB_STORE_BEDROCK_TARGET_INVALID;
    memset(out, 0, sizeof(*out));
    if (team_id <= 0 || !bedrock_token(model_id, sizeof(out->model_id), 0))
-      return DB2_BEDROCK_TARGET_INVALID;
-   if (db2_tenant_require_pg() != 0)
-      return DB2_BEDROCK_TARGET_ERROR;
-   void *conn = db2_conn();
+      return KB_STORE_BEDROCK_TARGET_INVALID;
+   if (kb_store_tenant_require_pg() != 0)
+      return KB_STORE_BEDROCK_TARGET_ERROR;
+   void *conn = kb_store_conn();
    if (!conn)
-      return DB2_BEDROCK_TARGET_ERROR;
+      return KB_STORE_BEDROCK_TARGET_ERROR;
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
@@ -249,61 +253,61 @@ db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, co
        "region_set_json,underlying_json,endpoint FROM org_catalog_bedrock_target(?1,?2)",
        err, sizeof(err));
    if (!st)
-      return DB2_BEDROCK_TARGET_ERROR;
+      return KB_STORE_BEDROCK_TARGET_ERROR;
    if (aimee_pg_bind_int64(st, "?1", team_id) != 0 || aimee_pg_bind_text(st, "?2", model_id) != 0)
    {
       aimee_pg_finalize(st);
-      return DB2_BEDROCK_TARGET_ERROR;
+      return KB_STORE_BEDROCK_TARGET_ERROR;
    }
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    if (step == AIMEE_PG_DONE)
    {
       aimee_pg_finalize(st);
-      return DB2_BEDROCK_TARGET_UNAVAILABLE;
+      return KB_STORE_BEDROCK_TARGET_UNAVAILABLE;
    }
    if (step != AIMEE_PG_ROW)
    {
       aimee_pg_finalize(st);
-      return DB2_BEDROCK_TARGET_ERROR;
+      return KB_STORE_BEDROCK_TARGET_ERROR;
    }
-   db2_bedrock_target_row_t row = {0};
+   kb_store_bedrock_target_row_t row = {0};
    const char **cols[] = {
        &row.model_id, &row.bedrock_api,   &row.model_family, &row.target_type,     &row.partition,
        &row.account,  &row.invoke_region, &row.regions_json, &row.underlying_json, &row.endpoint};
    for (int i = 0; i < 10; i++)
       if (!aimee_pg_column_is_null(st, i))
          *cols[i] = aimee_pg_column_text(st, i);
-   db2_bedrock_target_result_t result = db2_model_bedrock_target_decode_row(&row, out);
-   if (result == DB2_BEDROCK_TARGET_OK && strcmp(out->model_id, model_id) != 0)
-      result = DB2_BEDROCK_TARGET_INVALID;
+   kb_store_bedrock_target_result_t result = kb_store_model_bedrock_target_decode_row(&row, out);
+   if (result == KB_STORE_BEDROCK_TARGET_OK && strcmp(out->model_id, model_id) != 0)
+      result = KB_STORE_BEDROCK_TARGET_INVALID;
    step = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    if (step == AIMEE_PG_ERR)
-      result = DB2_BEDROCK_TARGET_ERROR;
+      result = KB_STORE_BEDROCK_TARGET_ERROR;
    else if (step != AIMEE_PG_DONE)
-      result = DB2_BEDROCK_TARGET_INVALID;
-   if (result != DB2_BEDROCK_TARGET_OK)
+      result = KB_STORE_BEDROCK_TARGET_INVALID;
+   if (result != KB_STORE_BEDROCK_TARGET_OK)
       memset(out, 0, sizeof(*out));
    return result;
 }
 
 /* An admin-gated definer RAISEs "<fn>: admin only" (SQLSTATE 42501) when the caller is
  * not an org-admin; libpq surfaces that message text in the step error. Map it to the
- * distinct DB2_MODEL_ERR_DENIED so a mutation handler can return 403 vs 500 (every other
+ * distinct KB_STORE_MODEL_ERR_DENIED so a mutation handler can return 403 vs 500 (every other
  * failure — constraint/unknown model/team/audit — stays a generic -1). */
 static int model_step_err(const char *err)
 {
-   return (err && strstr(err, "admin only")) ? DB2_MODEL_ERR_DENIED : -1;
+   return (err && strstr(err, "admin only")) ? KB_STORE_MODEL_ERR_DENIED : -1;
 }
 
-int db2_model_catalog_list(db2_model_catalog_row_t *out, int max)
+int kb_store_model_catalog_list(kb_store_model_catalog_row_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -320,7 +324,7 @@ int db2_model_catalog_list(db2_model_catalog_row_t *out, int max)
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_model_catalog_row_t *r = &out[n++];
+      kb_store_model_catalog_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       const char *c;
       c = aimee_pg_column_text(st, 0);
@@ -339,14 +343,14 @@ int db2_model_catalog_list(db2_model_catalog_row_t *out, int max)
    return n;
 }
 
-int db2_model_entitled_list(db2_model_entitled_row_t *out, int max)
+int kb_store_model_entitled_list(kb_store_model_entitled_row_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -360,7 +364,7 @@ int db2_model_entitled_list(db2_model_entitled_row_t *out, int max)
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_model_entitled_row_t *r = &out[n++];
+      kb_store_model_entitled_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       const char *c;
       c = aimee_pg_column_text(st, 0);
@@ -378,10 +382,11 @@ int db2_model_entitled_list(db2_model_entitled_row_t *out, int max)
    return n;
 }
 
-int db2_model_catalog_upsert(const char *model_id, const char *display_name, const char *provider,
-                             const char *wire, const char *endpoint, int enabled, int64_t *out_id)
+int kb_store_model_catalog_upsert(const char *model_id, const char *display_name,
+                                  const char *provider, const char *wire, const char *endpoint,
+                                  int enabled, int64_t *out_id)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!model_id || !model_id[0] || !provider || !provider[0] || !wire || !wire[0])
@@ -397,7 +402,7 @@ int db2_model_catalog_upsert(const char *model_id, const char *display_name, con
       return -1;
    if (!kb_models_endpoint_valid(endpoint ? endpoint : "", 500))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -424,16 +429,16 @@ int db2_model_catalog_upsert(const char *model_id, const char *display_name, con
    return 0;
 }
 
-int db2_model_catalog_remove(const char *model_id, int64_t *out_removed)
+int kb_store_model_catalog_remove(const char *model_id, int64_t *out_removed)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!model_id || !model_id[0])
       return -1;
    if (!kb_models_name_clean(model_id, 200))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -453,14 +458,14 @@ int db2_model_catalog_remove(const char *model_id, int64_t *out_removed)
 
 static int model_ent_op(const char *sql, const char *model_id, int64_t team_id, int64_t *out)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!model_id || !model_id[0] || team_id <= 0)
       return -1;
    if (!kb_models_name_clean(model_id, 200))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -479,12 +484,12 @@ static int model_ent_op(const char *sql, const char *model_id, int64_t team_id, 
    return 0;
 }
 
-int db2_model_entitle(const char *model_id, int64_t team_id, int64_t *out_id)
+int kb_store_model_entitle(const char *model_id, int64_t team_id, int64_t *out_id)
 {
    return model_ent_op("SELECT org_model_entitle(?1, ?2)", model_id, team_id, out_id);
 }
 
-int db2_model_unentitle(const char *model_id, int64_t team_id, int64_t *out_removed)
+int kb_store_model_unentitle(const char *model_id, int64_t team_id, int64_t *out_removed)
 {
    return model_ent_op("SELECT org_model_unentitle(?1, ?2)", model_id, team_id, out_removed);
 }

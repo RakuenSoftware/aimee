@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static int idle(const db2_management_status_provision_ctx_t *ctx)
+static int idle(const kb_store_management_status_provision_ctx_t *ctx)
 {
    return ctx && ctx->connection && !aimee_pg_in_transaction(ctx->connection);
 }
@@ -69,8 +69,8 @@ static int copy_blob(aimee_pg_stmt_t *s, int col, uint8_t *out, size_t exact, in
    return 0;
 }
 
-int db2_management_status_provision_open(db2_management_status_provision_ctx_t *ctx,
-                                         const char *conninfo, char *errbuf, size_t errlen)
+int kb_store_management_status_provision_open(kb_store_management_status_provision_ctx_t *ctx,
+                                              const char *conninfo, char *errbuf, size_t errlen)
 {
    if (!ctx || !conninfo || !*conninfo)
       return -1;
@@ -91,7 +91,7 @@ int db2_management_status_provision_open(db2_management_status_provision_ctx_t *
    return 0;
 }
 
-void db2_management_status_provision_close(db2_management_status_provision_ctx_t *ctx)
+void kb_store_management_status_provision_close(kb_store_management_status_provision_ctx_t *ctx)
 {
    if (!ctx)
       return;
@@ -105,7 +105,7 @@ void db2_management_status_provision_close(db2_management_status_provision_ctx_t
    memset(ctx, 0, sizeof(*ctx));
 }
 
-int db2_management_status_provision_bootstrap_id(const char *custody_key_id, char out[65])
+int kb_store_management_status_provision_bootstrap_id(const char *custody_key_id, char out[65])
 {
    static const char domain[] = "aimee-p5-status-bootstrap-v1|";
    if (!custody_key_id || !*custody_key_id || strlen(custody_key_id) > 600 || !out)
@@ -129,16 +129,17 @@ int db2_management_status_provision_bootstrap_id(const char *custody_key_id, cha
    return 0;
 }
 
-static int valid_record(const db2_management_status_provision_record_t *r)
+static int valid_record(const kb_store_management_status_provision_record_t *r)
 {
    return r && hex64(r->bootstrap_id) && r->custody_key_id[0] && strlen(r->custody_key_id) <= 600 &&
           r->wire_key_id[0] && strlen(r->wire_key_id) <= 64 && r->v1.hwm_attestation_len == 64 &&
           r->v1.ciphertext_len == 32 && r->v2.ciphertext_len == 32;
 }
 
-int db2_management_status_provision_stage(db2_management_status_provision_ctx_t *ctx,
-                                          const db2_management_status_provision_record_t *r,
-                                          int64_t *rotation_id, int64_t *seal_epoch)
+int kb_store_management_status_provision_stage(
+    kb_store_management_status_provision_ctx_t *ctx,
+    const kb_store_management_status_provision_record_t *r, int64_t *rotation_id,
+    int64_t *seal_epoch)
 {
    if (!idle(ctx) || !valid_record(r) || !rotation_id || !seal_epoch)
       return -1;
@@ -181,9 +182,10 @@ int db2_management_status_provision_stage(db2_management_status_provision_ctx_t 
    return ok ? 0 : -1;
 }
 
-int db2_management_status_provision_resume(db2_management_status_provision_ctx_t *ctx,
-                                           const char *bootstrap_id, const char *custody_key_id,
-                                           db2_management_status_provision_record_t *out)
+int kb_store_management_status_provision_resume(kb_store_management_status_provision_ctx_t *ctx,
+                                                const char *bootstrap_id,
+                                                const char *custody_key_id,
+                                                kb_store_management_status_provision_record_t *out)
 {
    if (!idle(ctx) || !hex64(bootstrap_id) || !custody_key_id || !*custody_key_id ||
        strlen(custody_key_id) > 600 || !out)
@@ -254,21 +256,19 @@ int db2_management_status_provision_resume(db2_management_status_provision_ctx_t
    return ok ? 0 : -1;
 }
 
-int db2_management_status_provision_inspect(db2_management_status_provision_ctx_t *ctx,
-                                            const char *custody_key_id,
-                                            db2_management_status_provision_record_t *out)
+int kb_store_management_status_provision_inspect(kb_store_management_status_provision_ctx_t *ctx,
+                                                 const char *custody_key_id,
+                                                 kb_store_management_status_provision_record_t *out)
 {
    char bootstrap_id[65];
-   if (db2_management_status_provision_bootstrap_id(custody_key_id, bootstrap_id) != 0)
+   if (kb_store_management_status_provision_bootstrap_id(custody_key_id, bootstrap_id) != 0)
       return -1;
-   return db2_management_status_provision_resume(ctx, bootstrap_id, custody_key_id, out);
+   return kb_store_management_status_provision_resume(ctx, bootstrap_id, custody_key_id, out);
 }
 
-int db2_management_status_provision_prepare_activation(db2_management_status_provision_ctx_t *ctx,
-                                                       const char *bootstrap_id,
-                                                       int64_t *rotation_id,
-                                                       int64_t *expected_version,
-                                                       int64_t *next_version)
+int kb_store_management_status_provision_prepare_activation(
+    kb_store_management_status_provision_ctx_t *ctx, const char *bootstrap_id, int64_t *rotation_id,
+    int64_t *expected_version, int64_t *next_version)
 {
    if (!idle(ctx) || !hex64(bootstrap_id) || !rotation_id || !expected_version || !next_version)
       return -1;
@@ -292,10 +292,9 @@ int db2_management_status_provision_prepare_activation(db2_management_status_pro
    return ok ? 0 : -1;
 }
 
-int db2_management_status_provision_finalize(db2_management_status_provision_ctx_t *ctx,
-                                             const char *bootstrap_id,
-                                             const uint8_t hwm2_attestation[64],
-                                             db2_management_status_provision_record_t *out)
+int kb_store_management_status_provision_finalize(
+    kb_store_management_status_provision_ctx_t *ctx, const char *bootstrap_id,
+    const uint8_t hwm2_attestation[64], kb_store_management_status_provision_record_t *out)
 {
    if (!idle(ctx) || !hex64(bootstrap_id) || !hwm2_attestation || !out)
       return -1;
@@ -314,5 +313,5 @@ int db2_management_status_provision_finalize(db2_management_status_provision_ctx
    aimee_pg_finalize(s);
    if (!ok)
       return -1;
-   return db2_management_status_provision_resume(ctx, bootstrap_id, custody_key_id, out);
+   return kb_store_management_status_provision_resume(ctx, bootstrap_id, custody_key_id, out);
 }

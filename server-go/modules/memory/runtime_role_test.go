@@ -68,12 +68,12 @@ func (db runtimeRoleDB) Begin(ctx context.Context) (store.Tx, error) {
 }
 
 func TestMemoryRuntimeRoleReplay(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
 		if os.Getenv("AIMEE_MEMORY_REPLAY_REQUIRED") == "1" {
-			t.Fatal("AIMEE_DB2_REPLAY_URL required")
+			t.Fatal("AIMEE_KB_STORE_REPLAY_URL required")
 		}
-		t.Skip("set AIMEE_DB2_REPLAY_URL to the packaged DB2 replay database")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL to the packaged KB_STORE replay database")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, url)

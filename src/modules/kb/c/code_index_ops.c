@@ -1,20 +1,20 @@
-/* code_index_ops.c: DB2-side replay bookkeeping for code-chunk pgvector writes.
+/* code_index_ops.c: KB_STORE-side replay bookkeeping for code-chunk pgvector writes.
  * Mirrors vector_index_ops; Postgres via libpq (sqlite under the test shim). */
 
 #include "code_index_ops.h"
 
 #include "aimee.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-void db2_code_index_op_record(int64_t point_id, const char *project, const char *node_key,
-                              const char *file_path, int ok, const char *error_msg)
+void kb_store_code_index_op_record(int64_t point_id, const char *project, const char *node_key,
+                                   const char *file_path, int ok, const char *error_msg)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -53,11 +53,11 @@ void db2_code_index_op_record(int64_t point_id, const char *project, const char 
    aimee_pg_finalize(st);
 }
 
-int db2_code_index_ops_reset_stuck(int max_attempts)
+int kb_store_code_index_ops_reset_stuck(int max_attempts)
 {
    if (max_attempts <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -75,12 +75,12 @@ int db2_code_index_ops_reset_stuck(int max_attempts)
    return changes;
 }
 
-int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *out)
+int kb_store_code_index_ops_summary(int max_attempts, kb_store_code_index_ops_summary_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -140,9 +140,9 @@ int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *o
    "        OR (ce.source_hash = ''"                                                               \
    "            AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at))"
 
-int64_t db2_code_index_drift_candidates(void)
+int64_t kb_store_code_index_drift_candidates(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Read-only count of drift candidates (see D7_DRIFT_FROM_WHERE). Ranks/sizes
@@ -159,9 +159,9 @@ int64_t db2_code_index_drift_candidates(void)
    return n;
 }
 
-int db2_code_index_requeue_drifted(void)
+int kb_store_code_index_requeue_drifted(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* auditable-correctness D7 requeue: enqueue each distinct drifted project (see
@@ -191,13 +191,13 @@ int db2_code_index_requeue_drifted(void)
 
 #undef D7_DRIFT_FROM_WHERE
 
-int db2_code_file_hash(const char *project, const char *file_path, char *out, int out_len)
+int kb_store_code_file_hash(const char *project, const char *file_path, char *out, int out_len)
 {
    if (out && out_len > 0)
       out[0] = '\0';
    if (!project || !project[0] || !file_path || !file_path[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT f.hash FROM files f"

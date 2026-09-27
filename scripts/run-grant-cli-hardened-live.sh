@@ -17,11 +17,11 @@
 #
 #   2. kb CONNECTS AS aimee_kb_runtime, which is NOBYPASSRLS, owns nothing, and has no CREATE
 #      on public. Whether that role can EXECUTE every function the grant routes need, and
-#      whether RLS still admits the rows once aimee.principal is set by db2_tenant_scope_begin,
+#      whether RLS still admits the rows once aimee.principal is set by kb_store_tenant_scope_begin,
 #      is not implied by the owner-role run.
 #
 #   3. sslmode=verify-full — real TLS to Postgres with a verified chain and a matching
-#      hostname. db2_init treats this tier differently.
+#      hostname. kb_store_init treats this tier differently.
 #
 # So: same assertions as the dev rig, plus the hardened-specific ones, on the shape an actual
 # hardened deployment runs. Nothing is stubbed and nothing is weakened to make it pass.
@@ -291,7 +291,7 @@ export AIMEE_KB_API_BEARER_TOKEN="hardened-grant-token"
 KB_PORT=18743
 # Boot recipe, all of it learned the hard way on the dev rig — see run-grant-cli-live.sh for the
 # full account. In short: TCP DSN not socket (kb runs as root, peer auth would say root);
-# embedding_dim PINNED (db2_init otherwise reads the recorded dim and a read failure is fatal);
+# embedding_dim PINNED (kb_store_init otherwise reads the recorded dim and a read failure is fatal);
 # the port ONLY via --http-port (AIMEE_KB_PORT and a flat kb_api_http_port are both ignored, and
 # kb then binds nothing); and the bearer token as the NESTED kb.api.bearer_token, which is what
 # kb VALIDATES against — with no token kb runs auth-off and manufactures no owner actor on
@@ -316,11 +316,11 @@ aimee:
 YAML
 # sslmode=verify-full is the hardened tier's requirement, and sslrootcert is what makes it
 # verifiable rather than a claim.
-export AIMEE_DB2_URL="postgres://aimee_kb_runtime:$kbpw@127.0.0.1:5432/$db?sslmode=verify-full&sslrootcert=$certs/ca.crt"
+export AIMEE_STORE_URL="postgres://aimee_kb_runtime:$kbpw@127.0.0.1:5432/$db?sslmode=verify-full&sslrootcert=$certs/ca.crt"
 # THE FLAG THAT MAKES THIS THE HARDENED TIER. Without it kb takes the dev path and applies the
 # schema itself at boot -- which as the runtime role fails with "permission denied for schema
-# public" and kb never becomes healthy, retrying until it is killed. With it, db2_init calls
-# db2_verify_pre_provisioned instead and NEVER runs DDL: it checks that the owner-migrated
+# public" and kb never becomes healthy, retrying until it is killed. With it, kb_store_init calls
+# kb_store_verify_pre_provisioned instead and NEVER runs DDL: it checks that the owner-migrated
 # schema is present and dimension-compatible, and fails closed if it is not. This flag is also
 # what makes kb require an sslmode=verify-full DSN, asserted separately below.
 export AIMEE_KB_HARDENED=1
@@ -341,14 +341,14 @@ step "Hardened mode REFUSES a DSN that is not verify-full"
 # rig's DSN. A hardened kb that quietly accepted sslmode=require would be the whole point
 # missed, so this boots one with a weakened DSN and requires it to fail.
 (
-  export AIMEE_DB2_URL="postgres://aimee_kb_runtime:$kbpw@127.0.0.1:5432/$db?sslmode=require"
+  export AIMEE_STORE_URL="postgres://aimee_kb_runtime:$kbpw@127.0.0.1:5432/$db?sslmode=require"
   export AIMEE_KB_HARDENED=1
   timeout 25 ./aimee-kb --http-port=18744 >"$work/kb_weak.log" 2>&1
 )
 weak_rc=$?
-# The EXACT message from db2_init.c, not a keyword search: the DSN is echoed in every retry
+# The EXACT message from kb_store_init.c, not a keyword search: the DSN is echoed in every retry
 # line and contains the string "sslmode", so a grep for that can never fail and would assert
-# nothing. kb also RETRIES db2_init rather than exiting on the first refusal, so the exit code
+# nothing. kb also RETRIES kb_store_init rather than exiting on the first refusal, so the exit code
 # here is timeout's 124 rather than kb's own -- which is why the message, not the code, is the
 # evidence.
 grep -q 'hardened tier requires sslmode=verify-full' "$work/kb_weak.log" \

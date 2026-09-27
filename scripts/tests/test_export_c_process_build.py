@@ -146,14 +146,14 @@ class CProcessBuildTests(unittest.TestCase):
     def descriptor(self) -> dict[str, object]:
         return {
             "sources": [
-                "src/modules/kb/c/db2_init.c",
                 "src/modules/kb/c/db_postgres.c",
+                "src/modules/kb/c/kb_store_init.c",
                 "src/modules/kb/module_adapter.c",
             ],
             "c_build": {
                 "compile_definitions": [
                     "AIMEE_DB1_DISABLED",
-                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                    "AIMEE_DISABLE_KB_STORE_SQLITE_SHIM",
                 ],
                 "include_roots": [
                     "src",
@@ -200,9 +200,9 @@ class CProcessBuildTests(unittest.TestCase):
         descriptor["c_build"]["generated_headers"] = [{
             "entries": [
                 {"source": "src/modules/kb/c/schema.sql",
-                 "symbol": "AIMEE_DB2_SCHEMA_SQL"},
+                 "symbol": "AIMEE_KB_STORE_SCHEMA_SQL"},
                 {"source": "src/modules/kb/c/schema_sqlite.sql",
-                 "symbol": "AIMEE_DB2_SCHEMA_SQLITE_SQL"},
+                 "symbol": "AIMEE_KB_STORE_SCHEMA_SQLITE_SQL"},
             ],
             "output": "schema_data.h",
         }]
@@ -213,7 +213,7 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("find_package(Python3 REQUIRED COMPONENTS Interpreter)", cmake)
         self.assertIn("scripts/generate_c_embedded_header.py", cmake)
         self.assertIn("${MODULE_GENERATED_DIR}/schema_data.h", cmake)
-        self.assertIn("--entry AIMEE_DB2_SCHEMA_SQL", cmake)
+        self.assertIn("--entry AIMEE_KB_STORE_SCHEMA_SQL", cmake)
         self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/kb/c/schema.sql", cmake)
         self.assertIn("${MODULE_GENERATED_DIR}", cmake)
 
@@ -236,7 +236,7 @@ class CProcessBuildTests(unittest.TestCase):
 
         for dependencies, message in (
             (["../outside.h"], "unsafe header dependency"),
-            (["src/modules/kb/c/db2.h"], "must be owned"),
+            (["src/modules/kb/c/kb_store.h"], "must be owned"),
             (["src/headers/z.h", "src/headers/a.h"], "sorted and unique"),
         ):
             mutated = self.descriptor()
@@ -256,7 +256,7 @@ class CProcessBuildTests(unittest.TestCase):
             "generated_headers": [{
                 "entries": [{
                     "source": "src/modules/kb/schema.sql",
-                    "symbol": "AIMEE_DB2_SCHEMA_SQL",
+                    "symbol": "AIMEE_KB_STORE_SCHEMA_SQL",
                 }],
                 "output": "schema_data.h",
             }],
@@ -282,7 +282,7 @@ class CProcessBuildTests(unittest.TestCase):
             )
             (module / "src/modules/kb/store.c").write_text(
                 '#include "schema_data.h"\n'
-                "int embedded_value(void) { return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n"
+                "int embedded_value(void) { return AIMEE_KB_STORE_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n"
                 "extern int retired_other_module(void);\n"
                 "int unused_legacy_surface(void) { return retired_other_module(); }\n",
                 encoding="utf-8",
@@ -332,7 +332,7 @@ class CProcessBuildTests(unittest.TestCase):
             source = next(path for path in (module / "src").rglob("*.c")
                           if "int embedded_value(void) {" in path.read_text())
             source.write_text(source.read_text().replace(
-                "return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1;",
+                "return AIMEE_KB_STORE_SCHEMA_SQL[0] == 's' ? 0 : 1;",
                 "return unused_legacy_surface();").replace(
                     '#include "schema_data.h"',
                     '#include "schema_data.h"\nint unused_legacy_surface(void);'))
@@ -515,7 +515,7 @@ class CProcessBuildTests(unittest.TestCase):
             }])
             main = (bundle / "src/aimee-module-kb.c").read_text(encoding="utf-8")
             self.assertIn("extern aimee_module_status_t aimee_module_handler", main)
-            self.assertNotIn("db2_init", main)
+            self.assertNotIn("kb_store_init", main)
             self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))
 

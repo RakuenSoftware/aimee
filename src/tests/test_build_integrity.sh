@@ -379,10 +379,10 @@ for src in $(grep -rl --include='*.c' '\bmemmem[[:space:]]*(' tests 2>/dev/null)
 done
 pass "memmem tests declare GNU extensions before system headers"
 
-# Debian Bookworm's supported SQLite predates the string_agg alias. DB2 reads
+# Debian Bookworm's supported SQLite predates the string_agg alias. KB_STORE reads
 # that run in both PostgreSQL and the SQLite test shim must not hide backend-
 # specific aggregate syntax in this shared artifact listing path.
-if ! grep -q '\bstring_agg[[:space:]]*(' db2/artifacts.c; then
+if ! grep -q '\bstring_agg[[:space:]]*(' kb_store/artifacts.c; then
     pass "artifact proposal listing is portable across PostgreSQL and Bookworm SQLite"
 else
     fail "artifact proposal listing depends on SQLite-unsupported string_agg"
@@ -685,8 +685,8 @@ else
     fail "CMake shipped target boundary regressions:$cmake_boundary_failures"
 fi
 
-# 7f. Makefile shipped targets must not keep DB2/libpq implementation objects
-# in core, and KB's DB2 objects must compile with the shipped KB profile.
+# 7f. Makefile shipped targets must not keep KB_STORE/libpq implementation objects
+# in core, and KB's KB_STORE objects must compile with the shipped KB profile.
 makefile_file="Makefile"
 make_var_block() {
     awk -v var="$1" '
@@ -706,26 +706,26 @@ make_server_data_objs=$(make_var_block SERVER_DATA_OBJS)
 make_kb_target=$(grep -F '$(KB):' "$makefile_file" || true)
 make_kb_compile_rule=$(grep -A2 -F '$(OBJDIR)/kb/%.o:' "$makefile_file" || true)
 make_boundary_failures=""
-if echo "$make_core_srcs" | grep -Fq 'db2/db_postgres.c'; then
-    make_boundary_failures="$make_boundary_failures core-has-db2-postgres"
+if echo "$make_core_srcs" | grep -Fq 'kb_store/db_postgres.c'; then
+    make_boundary_failures="$make_boundary_failures core-has-kb_store-postgres"
 fi
 if echo "$make_server_data_objs" | grep -Fq '$(DATA_OBJS)'; then
     make_boundary_failures="$make_boundary_failures server-links-generic-data-objs"
 fi
 if ! echo "$make_server_data_objs" | grep -Fq '$(OBJDIR)/server/'; then
-    make_boundary_failures="$make_boundary_failures server-data-not-db2-disabled"
+    make_boundary_failures="$make_boundary_failures server-data-not-kb_store-disabled"
 fi
-if echo "$make_kb_target" | grep -Fq '$(DB2_OBJS)'; then
-    make_boundary_failures="$make_boundary_failures kb-links-generic-db2-objs"
+if echo "$make_kb_target" | grep -Fq '$(KB_STORE_OBJS)'; then
+    make_boundary_failures="$make_boundary_failures kb-links-generic-kb_store-objs"
 fi
-if ! echo "$make_kb_target" | grep -Fq '$(KB_DB2_PG_OBJS)'; then
-    make_boundary_failures="$make_boundary_failures kb-missing-kb-db2-postgres-objs"
+if ! echo "$make_kb_target" | grep -Fq '$(KB_KB_STORE_PG_OBJS)'; then
+    make_boundary_failures="$make_boundary_failures kb-missing-kb-kb_store-postgres-objs"
 fi
-if ! echo "$make_kb_target" | grep -Fq '$(KB_DB2_OBJS)'; then
-    make_boundary_failures="$make_boundary_failures kb-missing-kb-db2-objs"
+if ! echo "$make_kb_target" | grep -Fq '$(KB_KB_STORE_OBJS)'; then
+    make_boundary_failures="$make_boundary_failures kb-missing-kb-kb_store-objs"
 fi
-if ! echo "$make_kb_compile_rule" | grep -Fq 'AIMEE_DISABLE_DB2_SQLITE_SHIM'; then
-    make_boundary_failures="$make_boundary_failures kb-db2-sqlite-shim-enabled"
+if ! echo "$make_kb_compile_rule" | grep -Fq 'AIMEE_DISABLE_KB_STORE_SQLITE_SHIM'; then
+    make_boundary_failures="$make_boundary_failures kb-kb_store-sqlite-shim-enabled"
 fi
 if [ -z "$make_boundary_failures" ]; then
     pass "Makefile DB objects are target-owned and shim-disabled"
@@ -1197,7 +1197,7 @@ _group_integ() {
     # The CLI client (aimee) is a DB-free thin wrapper — no DB libraries allowed.
     # aimee-runtime-web is now a full HTTP server process with its own SQLite session
     # store (PAM auth sessions, rate-limit state); it may link sqlite but must not
-    # contain aimee DB1/DB2 API strings (aimee_db_, kb_client, etc.).
+    # contain aimee DB1/KB_STORE API strings (aimee_db_, kb_client, etc.).
     storage_string_leaks=""
     for bin in "$INTEG_BINARY"; do
         leaks=$(strings "$bin" 2>/dev/null | \
@@ -1336,21 +1336,21 @@ _group_dynlink() {
             fail "aimee-server: libpq linked into DB1-only server"
             dl_fail=1
         fi
-        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLSRV" | grep -Eq 'db2_|PQ[A-Z]'; then
-            fail "aimee-server: DB2 symbols present in DB1-only server"
+        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLSRV" | grep -Eq 'kb_store_|PQ[A-Z]'; then
+            fail "aimee-server: KB_STORE symbols present in DB1-only server"
             dl_fail=1
         fi
         if command -v nm >/dev/null 2>&1; then
             for server_db_free_obj in memory_maintenance.o memory_prospective.o memory_lifecycle.o memory_directives.o memory_health.o memory_context.o memory_graph.o memory_scan.o memory_episodes.o memory_improve.o index.o learning_router.o memory_conflict.o memory_logic.o memory_assemble.o kb.o memory_advanced.o memory_core.o; do
-                if nm --undefined-only "$DLOBJ/server/$server_db_free_obj" 2>/dev/null | grep -Eq ' db2_'; then
-                    fail "aimee-server: $server_db_free_obj references DB2"
+                if nm --undefined-only "$DLOBJ/server/$server_db_free_obj" 2>/dev/null | grep -Eq ' kb_store_'; then
+                    fail "aimee-server: $server_db_free_obj references KB_STORE"
                     dl_fail=1
                 fi
             done
         fi
         # KB reaches its PostgreSQL provider over the bus; no database driver is linked.
         if ldd "$DLKB" | grep -q 'libsqlite3'; then
-            fail "aimee-kb: libsqlite3 linked into DB2-only kb"
+            fail "aimee-kb: libsqlite3 linked into KB_STORE-only kb"
             dl_fail=1
         fi
         if ldd "$DLKB" | grep -q 'libpq'; then
@@ -1358,10 +1358,10 @@ _group_dynlink() {
             dl_fail=1
         fi
         if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'db1_|sqlite3_'; then
-            fail "aimee-kb: DB1/sqlite symbols present in DB2-only kb"
+            fail "aimee-kb: DB1/sqlite symbols present in KB_STORE-only kb"
             dl_fail=1
         fi
-        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'kb_mgmt_status_provision|db2_management_status_provision'; then
+        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'kb_mgmt_status_provision|kb_store_management_status_provision'; then
             fail "aimee-kb: offline status-provisioner symbols present in runtime kb"
             dl_fail=1
         fi
@@ -1375,7 +1375,7 @@ _group_dynlink() {
             dl_fail=1
         fi
         if [ "$dl_fail" = "0" ]; then
-            pass "dynamic linking policy: client/webchat DB-free, server DB1-only, kb DB2-only"
+            pass "dynamic linking policy: client/webchat DB-free, server DB1-only, kb KB_STORE-only"
         fi
     else
         fail "dynamic linking check: build failed"

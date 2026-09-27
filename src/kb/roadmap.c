@@ -2,7 +2,7 @@
  *
  * Implements src/headers/roadmap.h: a goal decomposed into a dependency-aware
  * tree of milestone/slice/task `plan_unit` artifacts under one `roadmap`
- * artifact. Durable artifacts live in DB2 (kind='roadmap' / 'plan_unit' over the
+ * artifact. Durable artifacts live in KB_STORE (kind='roadmap' / 'plan_unit' over the
  * shared `artifacts` table). Decomposition is produced by a reason/draft delegate
  * via an injectable hook; the validate -> write -> commit -> project path here is
  * fully deterministic so no LLM writes state directly.
@@ -325,7 +325,7 @@ int roadmap_create_from_decomposition(const char *decomposition_json, char *out_
    int n = cJSON_GetArraySize(units);
 
    char roadmap_id[37];
-   db2_artifact_gen_id(roadmap_id, sizeof(roadmap_id));
+   kb_store_artifact_gen_id(roadmap_id, sizeof(roadmap_id));
 
    char(*art_ids)[37] = calloc((size_t)n, sizeof(*art_ids));
    cJSON **arr = calloc((size_t)n, sizeof(*arr));
@@ -339,7 +339,7 @@ int roadmap_create_from_decomposition(const char *decomposition_json, char *out_
    for (int i = 0; i < n; i++)
    {
       arr[i] = cJSON_GetArrayItem(units, i);
-      db2_artifact_gen_id(art_ids[i], sizeof(art_ids[i]));
+      kb_store_artifact_gen_id(art_ids[i], sizeof(art_ids[i]));
    }
 
    int rc = 0;
@@ -394,8 +394,8 @@ int roadmap_create_from_decomposition(const char *decomposition_json, char *out_
 
       char *payload = cJSON_PrintUnformatted(p);
       cJSON_Delete(p);
-      if (!payload || db2_artifact_write(art_ids[i], "plan_unit", "proposed", "roadmap", roadmap_id,
-                                         "", 1.0, payload) != 0)
+      if (!payload || kb_store_artifact_write(art_ids[i], "plan_unit", "proposed", "roadmap",
+                                              roadmap_id, "", 1.0, payload) != 0)
          rc = -1;
       free(payload);
    }
@@ -422,17 +422,17 @@ int roadmap_create_from_decomposition(const char *decomposition_json, char *out_
 
       char *payload = cJSON_PrintUnformatted(rp);
       cJSON_Delete(rp);
-      if (!payload || db2_artifact_write(roadmap_id, "roadmap", "proposed", "roadmap", roadmap_id,
-                                         "", 1.0, payload) != 0)
+      if (!payload || kb_store_artifact_write(roadmap_id, "roadmap", "proposed", "roadmap",
+                                              roadmap_id, "", 1.0, payload) != 0)
          rc = -1;
       free(payload);
    }
 
    /* Commit: proposed -> committed for the roadmap and every unit. */
-   if (rc == 0 && db2_artifact_set_state(roadmap_id, "committed") != 0)
+   if (rc == 0 && kb_store_artifact_set_state(roadmap_id, "committed") != 0)
       rc = -1;
    for (int i = 0; i < n && rc == 0; i++)
-      if (db2_artifact_set_state(art_ids[i], "committed") != 0)
+      if (kb_store_artifact_set_state(art_ids[i], "committed") != 0)
          rc = -1;
 
    if (rc == 0 && out_id && out_len)
@@ -486,7 +486,7 @@ typedef struct
 static int load_units(const char *roadmap_id, loaded_unit_t *out, int max, int *count)
 {
    *count = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -641,9 +641,9 @@ int roadmap_show_json(const char *roadmap_id, char **out)
       *out = NULL;
    if (!roadmap_id || !roadmap_id[0] || !out)
       return -1;
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
       return -1;
    cJSON *rp = cJSON_Parse(row.payload_json);
    if (!rp)
@@ -677,7 +677,7 @@ int roadmap_list_json(char **out)
    if (!out)
       return -1;
    *out = NULL;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -731,9 +731,9 @@ int roadmap_show(const char *roadmap_id, int json_output)
       return 0;
    }
 
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
       return -1;
    cJSON *rp = cJSON_Parse(row.payload_json);
    if (!rp)
@@ -777,9 +777,9 @@ int roadmap_projections_write(const char *roadmap_id)
 {
    if (!roadmap_id || !roadmap_id[0])
       return -1;
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
       return -1;
    cJSON *rp = cJSON_Parse(row.payload_json);
    if (!rp)
@@ -924,9 +924,9 @@ int roadmap_report_html(const char *roadmap_id, const char *output_path)
       return -1;
 
    /* Load the roadmap artifact. */
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    int cc = 0;
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, &cc) != 0)
       return -1;
    cJSON *rp = cJSON_Parse(row.payload_json);
    if (!rp)

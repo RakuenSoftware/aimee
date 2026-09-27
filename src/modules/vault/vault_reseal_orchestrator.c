@@ -30,7 +30,7 @@ typedef struct
 typedef struct
 {
    const vault_reseal_orchestrator_deps_t *deps;
-   const db2_vault_rewrap_snapshot_t *snapshot;
+   const kb_store_vault_rewrap_snapshot_t *snapshot;
    secret_workspace_t *workspace;
    vault_mutation_budget_t *budget;
    uint64_t *progress;
@@ -106,7 +106,7 @@ static int request_valid(const vault_reseal_orchestrator_request_t *r)
 
 static int deps_valid(const vault_reseal_orchestrator_deps_t *d)
 {
-   const db2_vault_rewrap_ops_t *b = d ? d->db : NULL;
+   const kb_store_vault_rewrap_ops_t *b = d ? d->db : NULL;
    const vault_reseal_custody_ops_t *c = d ? d->custody : NULL;
    return b && c && b->tx_begin && b->tx_commit && b->tx_rollback && b->snapshot && b->begin &&
           b->record_prepared && b->source_secret_page && b->source_check_page && b->stage_dek &&
@@ -119,20 +119,20 @@ static int deps_valid(const vault_reseal_orchestrator_deps_t *d)
           c->random && c->dek_wrap && c->dek_unwrap && c->check_wrap && c->check_verify;
 }
 
-static vault_reseal_orchestrator_result_t db_result(db2_vault_rewrap_result_t r)
+static vault_reseal_orchestrator_result_t db_result(kb_store_vault_rewrap_result_t r)
 {
    switch (r)
    {
-   case DB2_VAULT_REWRAP_OK:
+   case KB_STORE_VAULT_REWRAP_OK:
       return VAULT_RESEAL_ORCHESTRATOR_COMPLETED;
-   case DB2_VAULT_REWRAP_BUSY:
+   case KB_STORE_VAULT_REWRAP_BUSY:
       return VAULT_RESEAL_ORCHESTRATOR_BUSY;
-   case DB2_VAULT_REWRAP_CONFLICT:
-   case DB2_VAULT_REWRAP_TRANSIENT:
+   case KB_STORE_VAULT_REWRAP_CONFLICT:
+   case KB_STORE_VAULT_REWRAP_TRANSIENT:
       return VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
-   case DB2_VAULT_REWRAP_INTEGRITY:
+   case KB_STORE_VAULT_REWRAP_INTEGRITY:
       return VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
-   case DB2_VAULT_REWRAP_INVALID:
+   case KB_STORE_VAULT_REWRAP_INVALID:
       return VAULT_RESEAL_ORCHESTRATOR_INVALID;
    default:
       return VAULT_RESEAL_ORCHESTRATOR_ERROR;
@@ -178,16 +178,16 @@ static vault_reseal_orchestrator_result_t guard_operation_result(int guard_resul
    return VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
 }
 
-static vault_reseal_orchestrator_result_t tx_finish(const db2_vault_rewrap_ops_t *db,
-                                                    db2_vault_rewrap_tx_t **tx,
-                                                    db2_vault_rewrap_result_t edge)
+static vault_reseal_orchestrator_result_t tx_finish(const kb_store_vault_rewrap_ops_t *db,
+                                                    kb_store_vault_rewrap_tx_t **tx,
+                                                    kb_store_vault_rewrap_result_t edge)
 {
-   if (edge != DB2_VAULT_REWRAP_OK)
+   if (edge != KB_STORE_VAULT_REWRAP_OK)
    {
       db->tx_rollback(tx);
       return db_result(edge);
    }
-   db2_vault_rewrap_result_t committed = db->tx_commit(tx);
+   kb_store_vault_rewrap_result_t committed = db->tx_commit(tx);
    /* D2a consumes the handle after an actual COMMIT attempt, including an
     * uncertain one, but deliberately retains it for pre-COMMIT phase misuse. */
    if (*tx)
@@ -196,7 +196,7 @@ static vault_reseal_orchestrator_result_t tx_finish(const db2_vault_rewrap_ops_t
 }
 
 static void output_snapshot(vault_reseal_orchestrator_output_t *o,
-                            const db2_vault_rewrap_snapshot_t *s)
+                            const kb_store_vault_rewrap_snapshot_t *s)
 {
    o->has_state = 1;
    o->state = s->state;
@@ -215,12 +215,12 @@ static void output_snapshot(vault_reseal_orchestrator_output_t *o,
 }
 
 static vault_reseal_orchestrator_result_t terminal_edge(const vault_reseal_orchestrator_deps_t *d,
-                                                        const db2_vault_rewrap_snapshot_t *s,
+                                                        const kb_store_vault_rewrap_snapshot_t *s,
                                                         const char *failure, int aborting)
 {
-   db2_vault_rewrap_tx_t *tx = NULL;
-   db2_vault_rewrap_result_t r = d->db->tx_begin(&tx);
-   if (r == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_result_t r = d->db->tx_begin(&tx);
+   if (r == KB_STORE_VAULT_REWRAP_OK)
       r = aborting ? d->db->abort(tx, s->operation_id, s->fencing_token, failure)
                    : d->db->recovery_required(tx, s->operation_id, s->fencing_token, failure);
    /* A known commit is progress, not yet a terminal report. The driver must
@@ -228,14 +228,14 @@ static vault_reseal_orchestrator_result_t terminal_edge(const vault_reseal_orche
    return tx_finish(d->db, &tx, r);
 }
 
-static int receipt_from_snapshot(const db2_vault_rewrap_snapshot_t *s,
+static int receipt_from_snapshot(const kb_store_vault_rewrap_snapshot_t *s,
                                  vault_tpm2_reseal_receipt_t *r)
 {
    return s->has_receipt && vault_reseal_receipt_decode(s->receipt, sizeof(s->receipt), r) == 0;
 }
 
-static int cursor_advances(const db2_vault_rewrap_cursor_t *before,
-                           const db2_vault_rewrap_cursor_t *after)
+static int cursor_advances(const kb_store_vault_rewrap_cursor_t *before,
+                           const kb_store_vault_rewrap_cursor_t *after)
 {
    if (!before || !after || before->len > sizeof(before->bytes) ||
        after->len > sizeof(after->bytes))
@@ -248,47 +248,49 @@ static int cursor_advances(const db2_vault_rewrap_cursor_t *before,
 static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
 {
    crypto_context_t *c = opaque;
-   const db2_vault_rewrap_ops_t *db = c->deps->db;
+   const kb_store_vault_rewrap_ops_t *db = c->deps->db;
    const vault_reseal_custody_ops_t *v = c->deps->custody;
-   const db2_vault_rewrap_snapshot_t *s = c->snapshot;
-   db2_vault_rewrap_tx_t *tx = NULL;
-   db2_vault_rewrap_secret_t *secrets = calloc(DB2_VAULT_REWRAP_PAGE_MAX, sizeof(*secrets));
-   db2_vault_rewrap_check_t *checks = calloc(DB2_VAULT_REWRAP_PAGE_MAX, sizeof(*checks));
+   const kb_store_vault_rewrap_snapshot_t *s = c->snapshot;
+   kb_store_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_secret_t *secrets =
+       calloc(KB_STORE_VAULT_REWRAP_PAGE_MAX, sizeof(*secrets));
+   kb_store_vault_rewrap_check_t *checks = calloc(KB_STORE_VAULT_REWRAP_PAGE_MAX, sizeof(*checks));
    int64_t after = 0;
-   db2_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
-   db2_vault_rewrap_inventory_summary_t inventory;
-   db2_vault_rewrap_result_t r = DB2_VAULT_REWRAP_ERROR;
+   kb_store_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
+   kb_store_vault_rewrap_inventory_summary_t inventory;
+   kb_store_vault_rewrap_result_t r = KB_STORE_VAULT_REWRAP_ERROR;
    int64_t seen_secrets = 0, seen_checks = 0;
    memset(&inventory, 0, sizeof(inventory));
    if (!secrets || !checks)
       goto out;
    r = db->tx_begin(&tx);
-   if (r != DB2_VAULT_REWRAP_OK)
+   if (r != KB_STORE_VAULT_REWRAP_OK)
    {
       c->result = db_result(r);
       goto out;
    }
    r = db->inventory_summary(tx, s->operation_id, s->fencing_token, &inventory);
-   if (r != DB2_VAULT_REWRAP_OK)
+   if (r != KB_STORE_VAULT_REWRAP_OK)
       goto rollback;
    if (vault_mutation_budget_bind_inventory(c->budget, (uint64_t)inventory.secret_count,
                                             (uint64_t)inventory.check_count,
                                             inventory.inventory_digest) != 0 ||
        budget_advance(c->budget, c->progress) != 0)
    {
-      r = DB2_VAULT_REWRAP_INTEGRITY;
+      r = KB_STORE_VAULT_REWRAP_INTEGRITY;
       goto rollback;
    }
    for (;;)
    {
       size_t n = 0;
       r = db->source_secret_page(tx, s->operation_id, s->fencing_token, after,
-                                 DB2_VAULT_REWRAP_PAGE_MAX, secrets, DB2_VAULT_REWRAP_PAGE_MAX, &n);
-      if (r != DB2_VAULT_REWRAP_OK)
+                                 KB_STORE_VAULT_REWRAP_PAGE_MAX, secrets,
+                                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &n);
+      if (r != KB_STORE_VAULT_REWRAP_OK)
          goto rollback;
-      if (n > DB2_VAULT_REWRAP_PAGE_MAX)
+      if (n > KB_STORE_VAULT_REWRAP_PAGE_MAX)
       {
-         r = DB2_VAULT_REWRAP_INTEGRITY;
+         r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
       if (!n)
@@ -299,7 +301,7 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
              v->dek_unwrap(old_kek, secrets[i].wrapped_dek, c->workspace->dek) != 0 ||
              v->dek_wrap(c->workspace->new_kek, c->workspace->dek, c->workspace->wrapped) != 0)
          {
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
             OPENSSL_cleanse(c->workspace->dek, sizeof(c->workspace->dek));
             goto rollback;
          }
@@ -307,36 +309,36 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
          r = db->stage_dek(tx, s->operation_id, s->fencing_token, &secrets[i],
                            c->workspace->wrapped);
          OPENSSL_cleanse(c->workspace->wrapped, sizeof(c->workspace->wrapped));
-         if (r != DB2_VAULT_REWRAP_OK)
+         if (r != KB_STORE_VAULT_REWRAP_OK)
             goto rollback;
          after = secrets[i].source_id;
          if (seen_secrets == INT64_MAX || ++seen_secrets > inventory.secret_count ||
              budget_advance(c->budget, c->progress) != 0)
          {
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
             goto rollback;
          }
       }
-      db2_vault_rewrap_secret_clear(secrets, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_secret_clear(secrets, KB_STORE_VAULT_REWRAP_PAGE_MAX);
    }
    for (;;)
    {
       size_t n = 0;
       r = db->source_check_page(tx, s->operation_id, s->fencing_token, &cursor,
-                                DB2_VAULT_REWRAP_PAGE_MAX, checks, DB2_VAULT_REWRAP_PAGE_MAX, &n,
-                                &next);
-      if (r != DB2_VAULT_REWRAP_OK)
+                                KB_STORE_VAULT_REWRAP_PAGE_MAX, checks,
+                                KB_STORE_VAULT_REWRAP_PAGE_MAX, &n, &next);
+      if (r != KB_STORE_VAULT_REWRAP_OK)
          goto rollback;
-      if (n > DB2_VAULT_REWRAP_PAGE_MAX)
+      if (n > KB_STORE_VAULT_REWRAP_PAGE_MAX)
       {
-         r = DB2_VAULT_REWRAP_INTEGRITY;
+         r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
       if (!n)
          break;
       if (!cursor_advances(&cursor, &next))
       {
-         r = DB2_VAULT_REWRAP_INTEGRITY;
+         r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
       for (size_t i = 0; i < n; i++)
@@ -348,7 +350,7 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
                 v->check_verify(old_kek, checks[i].kek_check) != 0 ||
                 v->check_wrap(c->workspace->new_kek, c->workspace->wrapped) != 0)
             {
-               r = DB2_VAULT_REWRAP_INTEGRITY;
+               r = KB_STORE_VAULT_REWRAP_INTEGRITY;
                goto rollback;
             }
             wn = VAULT_WRAPPED_DEK_LEN;
@@ -356,26 +358,26 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
          r = db->stage_check(tx, s->operation_id, s->fencing_token, &checks[i],
                              c->workspace->wrapped, wn);
          OPENSSL_cleanse(c->workspace->wrapped, sizeof(c->workspace->wrapped));
-         if (r != DB2_VAULT_REWRAP_OK)
+         if (r != KB_STORE_VAULT_REWRAP_OK)
             goto rollback;
          if (seen_checks == INT64_MAX || ++seen_checks > inventory.check_count ||
              budget_advance(c->budget, c->progress) != 0)
          {
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
             goto rollback;
          }
       }
       cursor = next;
-      db2_vault_rewrap_check_clear(checks, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_check_clear(checks, KB_STORE_VAULT_REWRAP_PAGE_MAX);
    }
    if (seen_secrets != inventory.secret_count || seen_checks != inventory.check_count)
    {
-      r = DB2_VAULT_REWRAP_INTEGRITY;
+      r = KB_STORE_VAULT_REWRAP_INTEGRITY;
       goto rollback;
    }
    r = db->stage_finish(tx, s->operation_id, s->fencing_token, &inventory);
-   if (r == DB2_VAULT_REWRAP_OK && budget_advance(c->budget, c->progress) != 0)
-      r = DB2_VAULT_REWRAP_TRANSIENT;
+   if (r == KB_STORE_VAULT_REWRAP_OK && budget_advance(c->budget, c->progress) != 0)
+      r = KB_STORE_VAULT_REWRAP_TRANSIENT;
    c->result = tx_finish(db, &tx, r);
    goto out;
 rollback:
@@ -384,16 +386,16 @@ rollback:
 out:
    if (secrets)
    {
-      db2_vault_rewrap_secret_clear(secrets, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_secret_clear(secrets, KB_STORE_VAULT_REWRAP_PAGE_MAX);
       free(secrets);
    }
    if (checks)
    {
-      db2_vault_rewrap_check_clear(checks, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_check_clear(checks, KB_STORE_VAULT_REWRAP_PAGE_MAX);
       free(checks);
    }
-   db2_vault_rewrap_cursor_clear(&cursor);
-   db2_vault_rewrap_cursor_clear(&next);
+   kb_store_vault_rewrap_cursor_clear(&cursor);
+   kb_store_vault_rewrap_cursor_clear(&next);
    OPENSSL_cleanse(&inventory, sizeof(inventory));
    OPENSSL_cleanse(c->workspace->dek, sizeof(c->workspace->dek));
    OPENSSL_cleanse(c->workspace->wrapped, sizeof(c->workspace->wrapped));
@@ -404,48 +406,49 @@ out:
 static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
 {
    crypto_context_t *c = opaque;
-   const db2_vault_rewrap_ops_t *db = c->deps->db;
+   const kb_store_vault_rewrap_ops_t *db = c->deps->db;
    const vault_reseal_custody_ops_t *v = c->deps->custody;
-   const db2_vault_rewrap_snapshot_t *s = c->snapshot;
-   db2_vault_rewrap_tx_t *tx = NULL;
-   db2_vault_rewrap_verify_summary_t sum;
-   db2_vault_rewrap_secret_t *secrets = calloc(DB2_VAULT_REWRAP_PAGE_MAX, sizeof(*secrets));
-   db2_vault_rewrap_check_t *checks = calloc(DB2_VAULT_REWRAP_PAGE_MAX, sizeof(*checks));
+   const kb_store_vault_rewrap_snapshot_t *s = c->snapshot;
+   kb_store_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_verify_summary_t sum;
+   kb_store_vault_rewrap_secret_t *secrets =
+       calloc(KB_STORE_VAULT_REWRAP_PAGE_MAX, sizeof(*secrets));
+   kb_store_vault_rewrap_check_t *checks = calloc(KB_STORE_VAULT_REWRAP_PAGE_MAX, sizeof(*checks));
    int64_t after = 0, seen_s = 0, seen_c = 0;
-   db2_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
-   db2_vault_rewrap_result_t r = DB2_VAULT_REWRAP_ERROR;
+   kb_store_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
+   kb_store_vault_rewrap_result_t r = KB_STORE_VAULT_REWRAP_ERROR;
    memset(&sum, 0, sizeof(sum));
    if (!secrets || !checks)
       goto out;
    r = db->tx_begin(&tx);
-   if (r != DB2_VAULT_REWRAP_OK)
+   if (r != KB_STORE_VAULT_REWRAP_OK)
    {
       c->result = db_result(r);
       goto out;
    }
    r = db->verify_summary(tx, s->operation_id, s->fencing_token, &sum);
-   if (r != DB2_VAULT_REWRAP_OK)
+   if (r != KB_STORE_VAULT_REWRAP_OK)
       goto rollback;
    if (vault_mutation_budget_bind_inventory(c->budget, (uint64_t)sum.secret_count,
                                             (uint64_t)sum.check_count, sum.inventory_digest) != 0 ||
        budget_advance(c->budget, c->progress) != 0)
    {
-      r = DB2_VAULT_REWRAP_INTEGRITY;
+      r = KB_STORE_VAULT_REWRAP_INTEGRITY;
       goto rollback;
    }
    while (seen_s < sum.secret_count)
    {
       size_t n = 0;
       int64_t remaining = sum.secret_count - seen_s;
-      int limit =
-          remaining < DB2_VAULT_REWRAP_PAGE_MAX ? (int)remaining : DB2_VAULT_REWRAP_PAGE_MAX;
+      int limit = remaining < KB_STORE_VAULT_REWRAP_PAGE_MAX ? (int)remaining
+                                                             : KB_STORE_VAULT_REWRAP_PAGE_MAX;
       r = db->verify_secret_page(tx, s->operation_id, s->fencing_token, after, limit, secrets,
-                                 DB2_VAULT_REWRAP_PAGE_MAX, &n);
-      if (r != DB2_VAULT_REWRAP_OK)
+                                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &n);
+      if (r != KB_STORE_VAULT_REWRAP_OK)
          goto rollback;
       if (!n || n > (size_t)limit || n > (size_t)remaining)
       {
-         r = DB2_VAULT_REWRAP_INTEGRITY;
+         r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
       for (size_t i = 0; i < n; i++)
@@ -453,7 +456,7 @@ static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
          if (secrets[i].source_id <= after ||
              v->dek_unwrap(new_kek, secrets[i].wrapped_dek, c->workspace->dek) != 0)
          {
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
             goto rollback;
          }
          OPENSSL_cleanse(c->workspace->dek, sizeof(c->workspace->dek));
@@ -462,19 +465,19 @@ static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
       seen_s += (int64_t)n;
       if (budget_advance(c->budget, c->progress) != 0)
       {
-         r = DB2_VAULT_REWRAP_TRANSIENT;
+         r = KB_STORE_VAULT_REWRAP_TRANSIENT;
          goto rollback;
       }
-      db2_vault_rewrap_secret_clear(secrets, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_secret_clear(secrets, KB_STORE_VAULT_REWRAP_PAGE_MAX);
    }
    {
       size_t n = 0;
       r = db->verify_secret_page(tx, s->operation_id, s->fencing_token, after, 1, secrets,
-                                 DB2_VAULT_REWRAP_PAGE_MAX, &n);
-      if (r != DB2_VAULT_REWRAP_OK || n != 0)
+                                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &n);
+      if (r != KB_STORE_VAULT_REWRAP_OK || n != 0)
       {
-         if (r == DB2_VAULT_REWRAP_OK)
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+         if (r == KB_STORE_VAULT_REWRAP_OK)
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
    }
@@ -482,59 +485,59 @@ static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
    {
       size_t n = 0;
       int64_t remaining = sum.check_count - seen_c;
-      int limit =
-          remaining < DB2_VAULT_REWRAP_PAGE_MAX ? (int)remaining : DB2_VAULT_REWRAP_PAGE_MAX;
+      int limit = remaining < KB_STORE_VAULT_REWRAP_PAGE_MAX ? (int)remaining
+                                                             : KB_STORE_VAULT_REWRAP_PAGE_MAX;
       r = db->verify_check_page(tx, s->operation_id, s->fencing_token, &cursor, limit, checks,
-                                DB2_VAULT_REWRAP_PAGE_MAX, &n, &next);
-      if (r != DB2_VAULT_REWRAP_OK)
+                                KB_STORE_VAULT_REWRAP_PAGE_MAX, &n, &next);
+      if (r != KB_STORE_VAULT_REWRAP_OK)
          goto rollback;
       if (!n || n > (size_t)limit || n > (size_t)remaining || !cursor_advances(&cursor, &next))
       {
-         r = DB2_VAULT_REWRAP_INTEGRITY;
+         r = KB_STORE_VAULT_REWRAP_INTEGRITY;
          goto rollback;
       }
       for (size_t i = 0; i < n; i++)
          if (checks[i].kek_check_len && (checks[i].kek_check_len != VAULT_WRAPPED_DEK_LEN ||
                                          v->check_verify(new_kek, checks[i].kek_check) != 0))
          {
-            r = DB2_VAULT_REWRAP_INTEGRITY;
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
             goto rollback;
          }
       seen_c += (int64_t)n;
       if (budget_advance(c->budget, c->progress) != 0)
       {
-         r = DB2_VAULT_REWRAP_TRANSIENT;
+         r = KB_STORE_VAULT_REWRAP_TRANSIENT;
          goto rollback;
       }
       cursor = next;
-      db2_vault_rewrap_check_clear(checks, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_check_clear(checks, KB_STORE_VAULT_REWRAP_PAGE_MAX);
    }
    {
       size_t n = 0;
-      db2_vault_rewrap_cursor_t before = cursor;
+      kb_store_vault_rewrap_cursor_t before = cursor;
       r = db->verify_check_page(tx, s->operation_id, s->fencing_token, &cursor, 1, checks,
-                                DB2_VAULT_REWRAP_PAGE_MAX, &n, &next);
-      if (r != DB2_VAULT_REWRAP_OK || n != 0 || next.len != before.len ||
+                                KB_STORE_VAULT_REWRAP_PAGE_MAX, &n, &next);
+      if (r != KB_STORE_VAULT_REWRAP_OK || n != 0 || next.len != before.len ||
           (before.len && CRYPTO_memcmp(next.bytes, before.bytes, before.len) != 0))
       {
-         if (r == DB2_VAULT_REWRAP_OK)
-            r = DB2_VAULT_REWRAP_INTEGRITY;
-         db2_vault_rewrap_cursor_clear(&before);
+         if (r == KB_STORE_VAULT_REWRAP_OK)
+            r = KB_STORE_VAULT_REWRAP_INTEGRITY;
+         kb_store_vault_rewrap_cursor_clear(&before);
          goto rollback;
       }
-      db2_vault_rewrap_cursor_clear(&before);
+      kb_store_vault_rewrap_cursor_clear(&before);
    }
    if (seen_s != sum.secret_count || seen_c != sum.check_count)
    {
-      r = DB2_VAULT_REWRAP_INTEGRITY;
+      r = KB_STORE_VAULT_REWRAP_INTEGRITY;
       goto rollback;
    }
    r = db->verify_crypto_ack(tx, s->operation_id, s->fencing_token);
-   if (r == DB2_VAULT_REWRAP_OK)
+   if (r == KB_STORE_VAULT_REWRAP_OK)
       r = db->complete(tx, s->operation_id, s->fencing_token, sum.receipt_digest,
                        sum.inventory_digest, sum.stage_digest);
-   if (r == DB2_VAULT_REWRAP_OK && budget_advance(c->budget, c->progress) != 0)
-      r = DB2_VAULT_REWRAP_TRANSIENT;
+   if (r == KB_STORE_VAULT_REWRAP_OK && budget_advance(c->budget, c->progress) != 0)
+      r = KB_STORE_VAULT_REWRAP_TRANSIENT;
    c->result = tx_finish(db, &tx, r);
    goto out;
 rollback:
@@ -543,29 +546,29 @@ rollback:
 out:
    if (secrets)
    {
-      db2_vault_rewrap_secret_clear(secrets, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_secret_clear(secrets, KB_STORE_VAULT_REWRAP_PAGE_MAX);
       free(secrets);
    }
    if (checks)
    {
-      db2_vault_rewrap_check_clear(checks, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_check_clear(checks, KB_STORE_VAULT_REWRAP_PAGE_MAX);
       free(checks);
    }
-   db2_vault_rewrap_verify_summary_clear(&sum);
-   db2_vault_rewrap_cursor_clear(&cursor);
-   db2_vault_rewrap_cursor_clear(&next);
+   kb_store_vault_rewrap_verify_summary_clear(&sum);
+   kb_store_vault_rewrap_cursor_clear(&cursor);
+   kb_store_vault_rewrap_cursor_clear(&next);
    OPENSSL_cleanse(c->workspace->dek, sizeof(c->workspace->dek));
    return c->result == VAULT_RESEAL_ORCHESTRATOR_COMPLETED ? VAULT_MAINTENANCE_OK
                                                            : VAULT_MAINTENANCE_ERROR;
 }
 
-static vault_reseal_orchestrator_result_t
-simple_edge(const vault_reseal_orchestrator_deps_t *d, const db2_vault_rewrap_snapshot_t *s,
-            db2_vault_rewrap_result_t (*fn)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t))
+static vault_reseal_orchestrator_result_t simple_edge(
+    const vault_reseal_orchestrator_deps_t *d, const kb_store_vault_rewrap_snapshot_t *s,
+    kb_store_vault_rewrap_result_t (*fn)(kb_store_vault_rewrap_tx_t *, const uint8_t[16], int64_t))
 {
-   db2_vault_rewrap_tx_t *tx = NULL;
-   db2_vault_rewrap_result_t r = d->db->tx_begin(&tx);
-   if (r == DB2_VAULT_REWRAP_OK)
+   kb_store_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_result_t r = d->db->tx_begin(&tx);
+   if (r == KB_STORE_VAULT_REWRAP_OK)
       r = fn(tx, s->operation_id, s->fencing_token);
    return tx_finish(d->db, &tx, r);
 }
@@ -587,7 +590,7 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
    protected_arena_t sa = {0}, wa = {0};
    void *guard = NULL;
    uint64_t progress = 0;
-   db2_vault_rewrap_state_t last_state = DB2_VAULT_REWRAP_PREPARING;
+   kb_store_vault_rewrap_state_t last_state = KB_STORE_VAULT_REWRAP_PREPARING;
    int last_state_valid = 0;
    vault_reseal_orchestrator_result_t result = VAULT_RESEAL_ORCHESTRATOR_ERROR;
    if (arena_new(req->provider_secret_len + 1, &sa) != 0 ||
@@ -608,10 +611,10 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
    int starting = req->mode == VAULT_RESEAL_ORCHESTRATOR_START;
    for (unsigned edges = 0; edges < VAULT_RESEAL_ORCHESTRATOR_EDGE_MAX; edges++)
    {
-      db2_vault_rewrap_snapshot_t s;
+      kb_store_vault_rewrap_snapshot_t s;
       memset(&s, 0, sizeof(s));
-      db2_vault_rewrap_result_t sr = d->db->snapshot(req->operation_id, &s);
-      if (sr == DB2_VAULT_REWRAP_NOT_FOUND && starting)
+      kb_store_vault_rewrap_result_t sr = d->db->snapshot(req->operation_id, &s);
+      if (sr == KB_STORE_VAULT_REWRAP_NOT_FOUND && starting)
       {
          uint64_t gen = 0;
          int cr = d->custody->nv_generation(secret, &gen);
@@ -619,32 +622,33 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
          {
             result = cr == VAULT_TPM2_RESEAL_OK ? VAULT_RESEAL_ORCHESTRATOR_INTEGRITY
                                                 : custody_result(cr);
-            db2_vault_rewrap_snapshot_clear(&s);
+            kb_store_vault_rewrap_snapshot_clear(&s);
             break;
          }
-         db2_vault_rewrap_tx_t *tx = NULL;
+         kb_store_vault_rewrap_tx_t *tx = NULL;
          int64_t epoch = 0, fence = 0;
-         db2_vault_rewrap_state_t state = DB2_VAULT_REWRAP_PREPARING;
+         kb_store_vault_rewrap_state_t state = KB_STORE_VAULT_REWRAP_PREPARING;
          sr = d->db->tx_begin(&tx);
-         if (sr == DB2_VAULT_REWRAP_OK)
+         if (sr == KB_STORE_VAULT_REWRAP_OK)
             sr = d->db->begin(tx, req->actor, req->request_id, req->operation_id, (int64_t)gen,
                               (int64_t)gen + 1, &epoch, &fence, &state);
-         db2_vault_rewrap_result_t begin_result = sr;
+         kb_store_vault_rewrap_result_t begin_result = sr;
          result = tx_finish(d->db, &tx, sr);
-         if (begin_result == DB2_VAULT_REWRAP_CONFLICT ||
-             begin_result == DB2_VAULT_REWRAP_INTEGRITY || begin_result == DB2_VAULT_REWRAP_INVALID)
+         if (begin_result == KB_STORE_VAULT_REWRAP_CONFLICT ||
+             begin_result == KB_STORE_VAULT_REWRAP_INTEGRITY ||
+             begin_result == KB_STORE_VAULT_REWRAP_INVALID)
             result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          if (result != VAULT_RESEAL_ORCHESTRATOR_COMPLETED)
             break;
          starting = 0;
          continue;
       }
-      if (sr != DB2_VAULT_REWRAP_OK)
+      if (sr != KB_STORE_VAULT_REWRAP_OK)
       {
-         result =
-             sr == DB2_VAULT_REWRAP_NOT_FOUND ? VAULT_RESEAL_ORCHESTRATOR_INVALID : db_result(sr);
-         db2_vault_rewrap_snapshot_clear(&s);
+         result = sr == KB_STORE_VAULT_REWRAP_NOT_FOUND ? VAULT_RESEAL_ORCHESTRATOR_INVALID
+                                                        : db_result(sr);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          break;
       }
       if (s.has_inventory &&
@@ -652,7 +656,7 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
                                                (uint64_t)s.check_count, s.inventory_digest) != 0)
       {
          result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          break;
       }
       if (!last_state_valid || s.state != last_state)
@@ -660,7 +664,7 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
          if (budget_advance(req->budget, &progress) != 0)
          {
             result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
-            db2_vault_rewrap_snapshot_clear(&s);
+            kb_store_vault_rewrap_snapshot_clear(&s);
             break;
          }
          last_state = s.state;
@@ -668,33 +672,34 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
       }
       if (starting)
       {
-         db2_vault_rewrap_tx_t *tx = NULL;
+         kb_store_vault_rewrap_tx_t *tx = NULL;
          int64_t epoch = 0, fence = 0;
-         db2_vault_rewrap_state_t state = DB2_VAULT_REWRAP_PREPARING;
+         kb_store_vault_rewrap_state_t state = KB_STORE_VAULT_REWRAP_PREPARING;
          sr = d->db->tx_begin(&tx);
-         if (sr == DB2_VAULT_REWRAP_OK)
+         if (sr == KB_STORE_VAULT_REWRAP_OK)
             sr = d->db->begin(tx, req->actor, req->request_id, req->operation_id, s.old_generation,
                               s.new_generation, &epoch, &fence, &state);
-         db2_vault_rewrap_result_t begin_result = sr;
+         kb_store_vault_rewrap_result_t begin_result = sr;
          result = tx_finish(d->db, &tx, sr);
-         if (begin_result == DB2_VAULT_REWRAP_CONFLICT ||
-             begin_result == DB2_VAULT_REWRAP_INTEGRITY || begin_result == DB2_VAULT_REWRAP_INVALID)
+         if (begin_result == KB_STORE_VAULT_REWRAP_CONFLICT ||
+             begin_result == KB_STORE_VAULT_REWRAP_INTEGRITY ||
+             begin_result == KB_STORE_VAULT_REWRAP_INVALID)
             result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          starting = 0;
          if (result != VAULT_RESEAL_ORCHESTRATOR_COMPLETED)
             break;
          continue;
       }
       output_snapshot(out, &s);
-      if (s.state == DB2_VAULT_REWRAP_RECOVERY_REQUIRED)
+      if (s.state == KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED)
       {
          result = VAULT_RESEAL_ORCHESTRATOR_RECOVERY_REQUIRED;
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          break;
       }
       int sync_result = VAULT_MAINTENANCE_OK;
-      if (s.state != DB2_VAULT_REWRAP_COMPLETED && s.state != DB2_VAULT_REWRAP_ABORTED)
+      if (s.state != KB_STORE_VAULT_REWRAP_COMPLETED && s.state != KB_STORE_VAULT_REWRAP_ABORTED)
          sync_result = d->custody->guard_sync_epoch(guard, (uint64_t)s.seal_epoch);
       if (sync_result != VAULT_MAINTENANCE_OK)
       {
@@ -706,7 +711,7 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
             result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
          else
             result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          break;
       }
 
@@ -714,8 +719,8 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
       vault_tpm2_reseal_status_t status = VAULT_TPM2_RESEAL_CORRUPT;
       memset(&receipt, 0, sizeof(receipt));
       int cr;
-      if (s.state == DB2_VAULT_REWRAP_PREPARING ||
-          (s.state == DB2_VAULT_REWRAP_ABORTED && !s.has_receipt))
+      if (s.state == KB_STORE_VAULT_REWRAP_PREPARING ||
+          (s.state == KB_STORE_VAULT_REWRAP_ABORTED && !s.has_receipt))
          cr = d->custody->discover(s.operation_id, (uint64_t)s.old_generation, secret, &receipt,
                                    &status);
       else if (receipt_from_snapshot(&s, &receipt))
@@ -726,10 +731,10 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
       {
          result = custody_result(cr);
          if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY &&
-             s.state != DB2_VAULT_REWRAP_COMPLETED && s.state != DB2_VAULT_REWRAP_ABORTED)
+             s.state != KB_STORE_VAULT_REWRAP_COMPLETED && s.state != KB_STORE_VAULT_REWRAP_ABORTED)
             result = terminal_edge(d, &s, "custody_integrity", 0);
          OPENSSL_cleanse(&receipt, sizeof(receipt));
-         db2_vault_rewrap_snapshot_clear(&s);
+         kb_store_vault_rewrap_snapshot_clear(&s);
          if (result == VAULT_RESEAL_ORCHESTRATOR_COMPLETED)
          {
             result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
@@ -738,18 +743,18 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
          break;
       }
 
-      if (s.state == DB2_VAULT_REWRAP_ABORTED)
+      if (s.state == KB_STORE_VAULT_REWRAP_ABORTED)
       {
          result = status == VAULT_TPM2_RESEAL_ABSENT ? VAULT_RESEAL_ORCHESTRATOR_ABORTED
                                                      : VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
       }
-      else if (s.state == DB2_VAULT_REWRAP_COMPLETED)
+      else if (s.state == KB_STORE_VAULT_REWRAP_COMPLETED)
       {
          result = status == VAULT_TPM2_RESEAL_INSTALLED || status == VAULT_TPM2_RESEAL_CLEANED
                       ? VAULT_RESEAL_ORCHESTRATOR_COMPLETED
                       : VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
       }
-      else if (s.state == DB2_VAULT_REWRAP_PREPARING &&
+      else if (s.state == KB_STORE_VAULT_REWRAP_PREPARING &&
                (status == VAULT_TPM2_RESEAL_ABSENT || status == VAULT_TPM2_RESEAL_PREPARED))
       {
          if (status == VAULT_TPM2_RESEAL_ABSENT)
@@ -813,9 +818,9 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
                result = terminal_edge(d, &s, "receipt_mismatch", 0);
             else
             {
-               db2_vault_rewrap_tx_t *tx = NULL;
+               kb_store_vault_rewrap_tx_t *tx = NULL;
                sr = d->db->tx_begin(&tx);
-               if (sr == DB2_VAULT_REWRAP_OK)
+               if (sr == KB_STORE_VAULT_REWRAP_OK)
                   sr = d->db->record_prepared(tx, s.operation_id, s.fencing_token, s.old_generation,
                                               s.new_generation, wire);
                result = tx_finish(d->db, &tx, sr);
@@ -826,7 +831,8 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
              result == VAULT_RESEAL_ORCHESTRATOR_INVALID)
             result = terminal_edge(d, &s, "receipt_mismatch", 0);
       }
-      else if (s.state == DB2_VAULT_REWRAP_CUSTODY_PREPARED && status == VAULT_TPM2_RESEAL_PREPARED)
+      else if (s.state == KB_STORE_VAULT_REWRAP_CUSTODY_PREPARED &&
+               status == VAULT_TPM2_RESEAL_PREPARED)
       {
          if (!workspace->has_new_kek)
          {
@@ -855,8 +861,8 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
             }
          }
       }
-      else if ((s.state == DB2_VAULT_REWRAP_CUSTODY_PREPARED ||
-                s.state == DB2_VAULT_REWRAP_WRAPS_STAGED) &&
+      else if ((s.state == KB_STORE_VAULT_REWRAP_CUSTODY_PREPARED ||
+                s.state == KB_STORE_VAULT_REWRAP_WRAPS_STAGED) &&
                status == VAULT_TPM2_RESEAL_ABSENT)
       {
          int ar = d->custody->abort(&receipt, secret);
@@ -887,14 +893,15 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
             OPENSSL_cleanse(&absent_receipt, sizeof(absent_receipt));
          }
       }
-      else if (s.state == DB2_VAULT_REWRAP_WRAPS_STAGED && status == VAULT_TPM2_RESEAL_PREPARED)
+      else if (s.state == KB_STORE_VAULT_REWRAP_WRAPS_STAGED &&
+               status == VAULT_TPM2_RESEAL_PREPARED)
       {
          result = simple_edge(d, &s, d->db->mark_committing);
          if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY ||
              result == VAULT_RESEAL_ORCHESTRATOR_INVALID)
             result = terminal_edge(d, &s, "commit_intent_integrity", 0);
       }
-      else if (s.state == DB2_VAULT_REWRAP_RESEAL_COMMITTING &&
+      else if (s.state == KB_STORE_VAULT_REWRAP_RESEAL_COMMITTING &&
                (status == VAULT_TPM2_RESEAL_PREPARED || status == VAULT_TPM2_RESEAL_NV_ADVANCED ||
                 status == VAULT_TPM2_RESEAL_INSTALLED))
       {
@@ -910,9 +917,9 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
             result = terminal_edge(d, &s, "custody_integrity", 0);
          else
          {
-            db2_vault_rewrap_tx_t *tx = NULL;
+            kb_store_vault_rewrap_tx_t *tx = NULL;
             sr = d->db->tx_begin(&tx);
-            if (sr == DB2_VAULT_REWRAP_OK)
+            if (sr == KB_STORE_VAULT_REWRAP_OK)
                sr = d->db->mark_resealed(tx, s.operation_id, s.fencing_token, s.receipt_digest);
             result = tx_finish(d->db, &tx, sr);
             if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY ||
@@ -920,14 +927,14 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
                result = terminal_edge(d, &s, "receipt_mismatch", 0);
          }
       }
-      else if (s.state == DB2_VAULT_REWRAP_RESEALED && status == VAULT_TPM2_RESEAL_INSTALLED)
+      else if (s.state == KB_STORE_VAULT_REWRAP_RESEALED && status == VAULT_TPM2_RESEAL_INSTALLED)
       {
          result = simple_edge(d, &s, d->db->promote);
          if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY ||
              result == VAULT_RESEAL_ORCHESTRATOR_INVALID)
             result = terminal_edge(d, &s, "promotion_integrity", 0);
       }
-      else if (s.state == DB2_VAULT_REWRAP_PROMOTED && status == VAULT_TPM2_RESEAL_INSTALLED)
+      else if (s.state == KB_STORE_VAULT_REWRAP_PROMOTED && status == VAULT_TPM2_RESEAL_INSTALLED)
       {
          int seal_result = d->custody->guard_seal(guard);
          if (seal_result != VAULT_MAINTENANCE_OK)
@@ -953,8 +960,8 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
 
    iteration_done:
       OPENSSL_cleanse(&receipt, sizeof(receipt));
-      db2_vault_rewrap_snapshot_clear(&s);
-      if (out->has_state && out->state == DB2_VAULT_REWRAP_COMPLETED &&
+      kb_store_vault_rewrap_snapshot_clear(&s);
+      if (out->has_state && out->state == KB_STORE_VAULT_REWRAP_COMPLETED &&
           result == VAULT_RESEAL_ORCHESTRATOR_COMPLETED)
          break;
       if (result != VAULT_RESEAL_ORCHESTRATOR_COMPLETED)
@@ -1035,6 +1042,6 @@ const vault_reseal_custody_ops_t vault_reseal_custody_default_ops = {
 };
 
 const vault_reseal_orchestrator_deps_t vault_reseal_orchestrator_default_deps = {
-    .db = &db2_vault_rewrap_default_ops,
+    .db = &kb_store_vault_rewrap_default_ops,
     .custody = &vault_reseal_custody_default_ops,
 };

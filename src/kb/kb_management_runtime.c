@@ -400,9 +400,9 @@ static kb_management_action_result_t runtime_action(void *unused, const kb_princ
                                              .body_len = body_len,
                                              .deadline_millis = now + 15000U};
    kb_management_action_dependencies_t deps = {
-       .operation_init = db2_management_action_operation_init,
-       .intent_start = db2_management_action_intent_start,
-       .outcome_append = db2_management_action_outcome_append,
+       .operation_init = kb_store_management_action_operation_init,
+       .intent_start = kb_store_management_action_intent_start,
+       .outcome_append = kb_store_management_action_outcome_append,
        .snapshot = kb_management_health_snapshot_primary,
        .bundle_load = kb_management_health_bundle_active,
        .bundle_ctx = lifecycle,
@@ -459,8 +459,8 @@ static void nonce64_runtime(const unsigned char in[32], char out[44])
    out[n] = 0;
 }
 
-static int read_snapshot_matches(const db2_server_snapshot_t *s,
-                                 const db2_management_read_intent_t *i)
+static int read_snapshot_matches(const kb_store_server_snapshot_t *s,
+                                 const kb_store_management_read_intent_t *i)
 {
    return s && i && !strcmp(s->server_id, i->target_server_id) &&
           !kb_mgmt_endpoint_validate(s->endpoint) && !strcmp(s->status, "active") &&
@@ -473,7 +473,7 @@ static int read_snapshot_matches(const db2_server_snapshot_t *s,
 
 static int read_status_matches(const char *wire, const unsigned char nonce[32],
                                const kb_management_cert_active_t *active,
-                               const db2_management_read_intent_t *intent, const char *key_id,
+                               const kb_store_management_read_intent_t *intent, const char *key_id,
                                const unsigned char public_key[32], uint64_t now,
                                const char *purpose)
 {
@@ -668,10 +668,10 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    ttl = runtime.token_ttl_seconds;
    pthread_mutex_unlock(&runtime.mutex);
 
-   db2_server_snapshot_t snapshot = {0};
+   kb_store_server_snapshot_t snapshot = {0};
    kb_management_cert_bundle_t bundle = {0};
    kb_management_cert_active_t active = {0};
-   db2_management_read_intent_t intent = {0};
+   kb_store_management_read_intent_t intent = {0};
    kb_mgmt_token_authority_output_t bearer = {0};
    unsigned char nonce[32] = {0};
    char challenge[512] = {0}, staple[KB_MGMT_STATUS_JSON_MAX + 1] = {0};
@@ -723,12 +723,12 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
        0)
       goto done;
    int64_t publication_generation = 0;
-   db2_management_read_result_t generation_result =
-       db2_management_read_publication_generation(&publication_generation);
-   if (generation_result != DB2_MANAGEMENT_READ_OK)
+   kb_store_management_read_result_t generation_result =
+       kb_store_management_read_publication_generation(&publication_generation);
+   if (generation_result != KB_STORE_MANAGEMENT_READ_OK)
    {
-      result = generation_result == DB2_MANAGEMENT_READ_DENIED ? KB_MANAGEMENT_READ_DENIED
-               : generation_result == DB2_MANAGEMENT_READ_INTEGRITY
+      result = generation_result == KB_STORE_MANAGEMENT_READ_DENIED ? KB_MANAGEMENT_READ_DENIED
+               : generation_result == KB_STORE_MANAGEMENT_READ_INTEGRITY
                    ? KB_MANAGEMENT_READ_INTEGRITY
                    : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
@@ -747,15 +747,15 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    char digest[65];
    if (server_mgmt_read_digest(&digest_input, digest))
       goto done;
-   db2_management_read_result_t jr =
-       db2_management_read_intent_start(actor, team_id, server_id, selector, external_path, nonce,
-                                        digest, token_issuer, installation, ttl, &intent);
-   if (jr != DB2_MANAGEMENT_READ_OK)
+   kb_store_management_read_result_t jr = kb_store_management_read_intent_start(
+       actor, team_id, server_id, selector, external_path, nonce, digest, token_issuer,
+       installation, ttl, &intent);
+   if (jr != KB_STORE_MANAGEMENT_READ_OK)
    {
-      result = jr == DB2_MANAGEMENT_READ_DENIED      ? KB_MANAGEMENT_READ_DENIED
-               : jr == DB2_MANAGEMENT_READ_CONFLICT  ? KB_MANAGEMENT_READ_CONFLICT
-               : jr == DB2_MANAGEMENT_READ_INTEGRITY ? KB_MANAGEMENT_READ_INTEGRITY
-                                                     : KB_MANAGEMENT_READ_UNAVAILABLE;
+      result = jr == KB_STORE_MANAGEMENT_READ_DENIED      ? KB_MANAGEMENT_READ_DENIED
+               : jr == KB_STORE_MANAGEMENT_READ_CONFLICT  ? KB_MANAGEMENT_READ_CONFLICT
+               : jr == KB_STORE_MANAGEMENT_READ_INTEGRITY ? KB_MANAGEMENT_READ_INTEGRITY
+                                                          : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
    }
    char active_fp[65];
@@ -805,7 +805,7 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
       result = KB_MANAGEMENT_READ_INTEGRITY;
       goto done;
    }
-   db2_server_snapshot_t current = {0};
+   kb_store_server_snapshot_t current = {0};
    hr = kb_management_health_snapshot_primary(NULL, actor, team_id, server_id, &current);
    if (hr != KB_MANAGEMENT_HEALTH_OK || !read_snapshot_matches(&current, &intent) ||
        strcmp(current.endpoint, snapshot.endpoint))

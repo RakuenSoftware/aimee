@@ -1,9 +1,9 @@
-/* db2/memory_lifecycle.h: lifecycle-state SQL primitives for the memories
- * table (and memory_conflicts for the alert bundle). DB2-owned.
+/* kb_store/memory_lifecycle.h: lifecycle-state SQL primitives for the memories
+ * table (and memory_conflicts for the alert bundle). KB_STORE-owned.
  *
  * Pure domain API. No backend types or handles in any signature. */
-#ifndef DEC_DB2_MEMORY_LIFECYCLE_H
-#define DEC_DB2_MEMORY_LIFECYCLE_H 1
+#ifndef DEC_KB_STORE_MEMORY_LIFECYCLE_H
+#define DEC_KB_STORE_MEMORY_LIFECYCLE_H 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -30,10 +30,10 @@ extern "C"
     * current, which is the truthful answer for it -- we do not know when it
     * stopped being true, and inventing a boundary would be worse than admitting
     * the interval is open. */
-   int db2_memory_valid_at(int64_t memory_id, const char *as_of);
+   int kb_store_memory_valid_at(int64_t memory_id, const char *as_of);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_MEMORY_LIFECYCLE_H */
+#endif /* DEC_KB_STORE_MEMORY_LIFECYCLE_H */

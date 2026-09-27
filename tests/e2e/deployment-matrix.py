@@ -1269,7 +1269,7 @@ def main():
             command('docker', 'restart', kb.application)
             kb.start()
             code, body = kb.kb_request('/v1/health')
-            check('KB boots with standardized PostgreSQL and local embedding', code == 200 and body.get('db2_ok') is True)
+            check('KB boots with standardized PostgreSQL and local embedding', code == 200 and body.get('postgres_ok') is True)
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')

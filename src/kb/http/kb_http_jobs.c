@@ -35,8 +35,8 @@ int handle_get_job_status(const char *path, char *out_buf, int out_cap)
       return 404;
    }
 
-   db2_kb_service_async_job_t job;
-   int found = db2_kb_service_async_job_get((int64_t)parsed, &job);
+   kb_store_kb_service_async_job_t job;
+   int found = kb_store_kb_service_async_job_get((int64_t)parsed, &job);
    if (found < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"job status unavailable\"}");

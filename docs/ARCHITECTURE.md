@@ -55,9 +55,9 @@ C resource hosts remain during the transition of their domain handlers into Go m
 | Process | Owns | Does not own |
 | --- | --- | --- |
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
-| `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | DB2, workflow lifecycle |
+| `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | KB_STORE, workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| `aimee-kb` | shared DB2 knowledge, documents, code graph, retrieval, curation, and local or external model services | Server personal memory, workflow state, another KB's corpus |
+| `aimee-kb` | shared KB_STORE knowledge, documents, code graph, retrieval, curation, and local or external model services | Server personal memory, workflow state, another KB's corpus |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
@@ -172,21 +172,21 @@ There are two product data tiers and separate WORM evidence stores.
 | Store | Owner | Contents |
 | --- | --- | --- |
 | DB1, PostgreSQL | `aimee` domain module through `postgres` | sessions, working memory, local state, agent jobs, policy and audit state, caches, workflow definitions and lifecycle rows |
-| DB2, PostgreSQL + pgvector | `aimee-kb` | shared memories, documents, facts, evidence, code graph, embeddings, curation state |
+| KB_STORE, PostgreSQL + pgvector | `aimee-kb` | shared memories, documents, facts, evidence, code graph, embeddings, curation state |
 | Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
 | KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
 
-The DB1/DB2 boundary is compile-enforced:
+The DB1/KB_STORE boundary is compile-enforced:
 
 - the server links no database driver at all: it reaches DB1 through the store module
-  over the bus, and DB2 through typed `/v1` calls;
+  over the bus, and KB_STORE through typed `/v1` calls;
 - KB builds never open DB1;
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 
 The server and KB worker share the complete SQLite WORM implementation, not two
 engine-specific approximations. Their files, keys, and process compartments are
-separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
+separate. PostgreSQL KB_STORE retains only the immutable producer outbox and delivery
 ledger needed for atomic KB mutation intent and idempotent delivery.
 
 Both compositions use a separate standard PostgreSQL 18 container with ordinary storage by
@@ -288,7 +288,7 @@ PostgreSQL and models remain separate service containers.
 - `src/core/event_bus/`: event transport, arena, host, client, capture.
 - `src/modules/`: owned C modules and public headers.
 - `src/server/`: C resource plane and `/v1` handlers.
-- `src/kb/`: KB daemon and DB2-facing routes.
+- `src/kb/`: KB daemon and KB_STORE-facing routes.
 - `server-go/`: workflow control plane and pure-Go bus client.
 - `runtime-web/`: browser-facing Go service.
 - `frontend/`: browser application.

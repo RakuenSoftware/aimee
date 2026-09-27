@@ -1,5 +1,5 @@
-/* db2/org_rate.c: P4b keyed fixed-window RPM rate limiter — Postgres via libpq. See
- * org_rate.h. Mirrors db2/org_budget.c: one prepared call into a SECURITY DEFINER
+/* kb_store/org_rate.c: P4b keyed fixed-window RPM rate limiter — Postgres via libpq. See
+ * org_rate.h. Mirrors kb_store/org_budget.c: one prepared call into a SECURITY DEFINER
  * function, the definer's RAISE mapped to a sentinel by message text (libpq surfaces the
  * RAISE message, not the SQLSTATE). org_rate_check returns a STRUCTURED row (admitted,
  * binding_dim, reset_epoch) — the stable P2b admission contract, never parsed error text.
@@ -8,8 +8,8 @@
 
 #include "org_rate.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -22,19 +22,19 @@ static int rate_step_err(const char *err)
    if (!err)
       return -1;
    if (strstr(err, "admin only") || strstr(err, "not authorized"))
-      return DB2_RATE_ERR_DENIED;
+      return KB_STORE_RATE_ERR_DENIED;
    return -1;
 }
 
-int db2_org_rate_policy_set(const char *dim, const char *scope_key, int64_t window_seconds,
-                            int64_t max_count, int64_t *out_id)
+int kb_store_org_rate_policy_set(const char *dim, const char *scope_key, int64_t window_seconds,
+                                 int64_t max_count, int64_t *out_id)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!dim || !dim[0] || !scope_key || !scope_key[0] || window_seconds <= 0 || max_count < 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -56,15 +56,15 @@ int db2_org_rate_policy_set(const char *dim, const char *scope_key, int64_t wind
    return 0;
 }
 
-int db2_org_rate_policy_show(const char *dim, const char *scope_key, db2_org_rate_policy_t *out,
-                             int max)
+int kb_store_org_rate_policy_show(const char *dim, const char *scope_key,
+                                  kb_store_org_rate_policy_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!dim || !dim[0] || !scope_key || !scope_key[0] || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -83,7 +83,7 @@ int db2_org_rate_policy_show(const char *dim, const char *scope_key, db2_org_rat
    {
       if (n >= max)
          break;
-      db2_org_rate_policy_t *r = &out[n++];
+      kb_store_org_rate_policy_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->id = aimee_pg_column_int64(st, 0);
       const char *c;
@@ -101,15 +101,15 @@ int db2_org_rate_policy_show(const char *dim, const char *scope_key, db2_org_rat
    return n;
 }
 
-int db2_org_rate_check(int64_t team, int has_project, int64_t project, const char *model,
-                       const char *cred_slot, db2_org_rate_result_t *out)
+int kb_store_org_rate_check(int64_t team, int has_project, int64_t project, const char *model,
+                            const char *cred_slot, kb_store_org_rate_result_t *out)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

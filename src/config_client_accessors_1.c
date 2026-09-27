@@ -543,18 +543,6 @@ int config_set_worktree_gc_enabled(int value)
    return config_client_set_number("worktree_gc_enabled", (double)value);
 }
 
-int64_t config_db2_vector_corpus_diskann_threshold(void)
-{
-   double value = 0;
-   (void)config_client_read_number("db2_vector_corpus_diskann_threshold", &value);
-   return (int64_t)value;
-}
-
-int config_set_db2_vector_corpus_diskann_threshold(int64_t value)
-{
-   return config_client_set_number("db2_vector_corpus_diskann_threshold", (double)value);
-}
-
 int config_roundtable_pipeline_max_passes(void)
 {
    double value = 0;

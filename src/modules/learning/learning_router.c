@@ -3,7 +3,7 @@
 #include "db1_client/db1.h"
 #include "modules/kb/c/artifacts.h"
 #include "modules/kb/c/collab_rules.h"
-#include "modules/kb/c/db2_learning.h"
+#include "modules/kb/c/kb_store_learning.h"
 #include "dogfood.h"
 #include "cJSON.h"
 #include "integrity.h"
@@ -153,9 +153,9 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
       if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
          rc = -1;
       else
-         rc = db2_collab_rules_propose(jtext->valuestring,
-                                       cJSON_IsString(jreason) ? jreason->valuestring : "",
-                                       "learning_router") >= 0
+         rc = kb_store_collab_rules_propose(jtext->valuestring,
+                                            cJSON_IsString(jreason) ? jreason->valuestring : "",
+                                            "learning_router") >= 0
                   ? 0
                   : -1;
    }
@@ -173,7 +173,7 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
           !jkind->valuestring[0] || !cJSON_IsString(jpayload) || !jpayload->valuestring[0])
          rc = -1;
       else
-         rc = db2_artifact_write(
+         rc = kb_store_artifact_write(
              jid->valuestring, jkind->valuestring, "proposed",
              cJSON_IsString(jscope) ? jscope->valuestring : "workspace", "", "kb-mining-learning",
              cJSON_IsNumber(jconf) ? jconf->valuedouble : 0.5, jpayload->valuestring);
@@ -202,16 +202,16 @@ static int learning_commit_proposal(int id, learning_proposal_t *out)
       return 0;
    }
 
-   if (db2_learning_commits_in_last_7_days(proposal.sink) >= learning_max_commits_per_week())
+   if (kb_store_learning_commits_in_last_7_days(proposal.sink) >= learning_max_commits_per_week())
    {
-      db2_learning_proposal_archive(id, "weekly_cap");
+      kb_store_learning_proposal_archive(id, "weekly_cap");
       return learning_get_proposal(id, out ? out : &proposal);
    }
 
    if (learning_apply_sink(&proposal) != 0)
       return -1;
 
-   db2_learning_proposal_mark_committed(id);
+   kb_store_learning_proposal_mark_committed(id);
    return learning_get_proposal(id, out ? out : &proposal);
 }
 
@@ -230,7 +230,8 @@ static int learning_commit_proposal(int id, learning_proposal_t *out)
 static void learning_mark_superseded(const char *sink, const char *target_key,
                                      int64_t target_memory_id, int new_id)
 {
-   int older = db2_learning_proposal_find_committed(sink, target_key, target_memory_id, new_id);
+   int older =
+       kb_store_learning_proposal_find_committed(sink, target_key, target_memory_id, new_id);
    if (older > 0)
       (void)learning_fate_record(older, LEARNING_FATE_SUPERSEDED, "replaced by a later commit");
 }
@@ -247,10 +248,10 @@ static int learning_queue_sink(int signal_id, const char *sink, const char *targ
    if (high_confidence && !learning_detector_may_fast_commit(signal_type))
       high_confidence = 0;
 
-   int proposal_id = db2_learning_proposal_find_pending(sink, target_key, target_memory_id);
+   int proposal_id = kb_store_learning_proposal_find_pending(sink, target_key, target_memory_id);
    if (proposal_id > 0)
    {
-      db2_learning_proposal_bump_corroboration(proposal_id);
+      kb_store_learning_proposal_bump_corroboration(proposal_id);
       if (out && out->proposal_count < LEARNING_MAX_PROPOSAL_IDS)
          out->proposal_ids[out->proposal_count++] = proposal_id;
       learning_proposal_t proposal;
@@ -271,8 +272,8 @@ static int learning_queue_sink(int signal_id, const char *sink, const char *targ
    {
       char expires_at[32];
       learning_expiry_after_days(learning_proposal_ttl_days(), expires_at, sizeof(expires_at));
-      proposal_id = db2_learning_proposal_insert(signal_id, sink, target_key, target_memory_id,
-                                                 action_json, evidence_refs, expires_at);
+      proposal_id = kb_store_learning_proposal_insert(signal_id, sink, target_key, target_memory_id,
+                                                      action_json, evidence_refs, expires_at);
    }
    if (proposal_id <= 0)
       return -1;
@@ -457,9 +458,9 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
       return -1;
    }
    learning_fill_target_key(&input);
-   db2_learning_proposals_archive_expired();
+   kb_store_learning_proposals_archive_expired();
 
-   int signal_id = db2_learning_signal_insert(&input, session_id());
+   int signal_id = kb_store_learning_signal_insert(&input, session_id());
    if (signal_id <= 0)
       return -1;
    if (out)
@@ -546,21 +547,21 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
 int learning_list_proposals(const char *state, const char *sink, int limit,
                             learning_proposal_t *out, int max)
 {
-   db2_learning_proposals_archive_expired();
-   return db2_learning_proposal_list(state, sink, limit, out, max);
+   kb_store_learning_proposals_archive_expired();
+   return kb_store_learning_proposal_list(state, sink, limit, out, max);
 }
 
 int learning_get_proposal(int id, learning_proposal_t *out)
 {
-   db2_learning_proposals_archive_expired();
-   return db2_learning_proposal_get(id, out);
+   kb_store_learning_proposals_archive_expired();
+   return kb_store_learning_proposal_get(id, out);
 }
 
 int learning_accept_proposal(int id, learning_proposal_t *out)
 {
    if (id <= 0)
       return -1;
-   db2_learning_proposals_archive_expired();
+   kb_store_learning_proposals_archive_expired();
    return learning_commit_proposal(id, out);
 }
 
@@ -571,7 +572,7 @@ int learning_reject_proposal(int id, learning_proposal_t *out)
       return -1;
 
    if (strcmp(proposal.state, "committed") != 0 && strcmp(proposal.state, "archived") != 0)
-      db2_learning_proposal_archive(id, "rejected");
+      kb_store_learning_proposal_archive(id, "rejected");
    else if (strcmp(proposal.state, "committed") == 0)
    {
       /* S5: rejecting something that ALREADY COMMITTED is the clearest regret
@@ -682,8 +683,8 @@ int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out)
     * window, excluding still-pending rows so the ratio reflects the
     * operator's actual accept/reject decisions rather than backlog
     * age. */
-   if (db2_learning_proposals_settled_counts(window_days, &out->proposals_committed,
-                                             &out->proposals_terminal) != 0)
+   if (kb_store_learning_proposals_settled_counts(window_days, &out->proposals_committed,
+                                                  &out->proposals_terminal) != 0)
       return -1;
    if (out->proposals_terminal > 0)
       out->commit_ratio = (double)out->proposals_committed / (double)out->proposals_terminal;
@@ -700,7 +701,8 @@ int learning_metrics_per_sink_caps(learning_sink_cap_t *out, int max)
    {
       memset(&out[i], 0, sizeof(out[i]));
       snprintf(out[i].sink, sizeof(out[i].sink), "%s", LEARNING_CANONICAL_SINKS[i]);
-      out[i].committed_this_week = db2_learning_commits_in_last_7_days(LEARNING_CANONICAL_SINKS[i]);
+      out[i].committed_this_week =
+          kb_store_learning_commits_in_last_7_days(LEARNING_CANONICAL_SINKS[i]);
       out[i].weekly_cap = cap;
       if (cap > 0)
          out[i].utilization = (double)out[i].committed_this_week / (double)cap;

@@ -3,14 +3,14 @@
 /* src/kb/kb_service_code_embed.c: KB-side code embedding refresh.
  *
  * All writes to code_embeddings run through this KB-side module; server and
- * CLI code must request refreshes via KB RPC and must not access DB2/pgvector
+ * CLI code must request refreshes via KB RPC and must not access KB_STORE/pgvector
  * directly. */
 
 #include "kb_service_code_embed.h"
 #include "aimee.h" /* EMBED_MAX_DIM */
 #include "modules/kb/c/code_index_ops.h"
-#include "modules/kb/c/kb_runtime_state.h" /* db2_kb_runtime_state_get/set — change short-circuit */
-#include "../modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_runtime_state.h" /* kb_store_kb_runtime_state_get/set — change short-circuit */
+#include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"
 #include "../modules/kb/c/entity_nodes.h"
 #include "../modules/kb/c/pgvec_kb_service.h"
@@ -116,9 +116,9 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
          cJSON_Delete(embed_0_reply);
          if (dim != embed_dim)
          {
-            db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, 0,
-                                     "code embedding failed (embedder unavailable or dim "
-                                     "mismatch)");
+            kb_store_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, 0,
+                                          "code embedding failed (embedder unavailable or dim "
+                                          "mismatch)");
             pend[i].point_id = -1; /* marks "no vector"; skipped by the upsert below */
             continue;
          }
@@ -145,8 +145,8 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
                                             r->hash, pend[i].body_hash, r->hash, pend[i].payload);
       /* Per-chunk replay bookkeeping so a failed embed is retried by
        * `memory repair --reset-stuck`, not orphaned. */
-      db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, up == 0,
-                               up == 0 ? NULL : "code vector upsert failed");
+      kb_store_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, up == 0,
+                                    up == 0 ? NULL : "code vector upsert failed");
       if (up == 0)
       {
          ok++;
@@ -171,7 +171,7 @@ static void ce_project_signature(void *conn, int64_t proj_id, int64_t generation
    out[0] = '\0';
    if (!conn)
       return;
-   int sc_dim = db2_embedding_dim();
+   int sc_dim = kb_store_embedding_dim();
    if (sc_dim <= 0 || sc_dim > CE_EMBED_MAX_DIM)
       sc_dim = 1024;
    char err[CE_ERRBUF] = "";
@@ -196,7 +196,7 @@ int kb_code_embed_project_fully_embedded(const char *project)
 {
    if (!project || !project[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -228,7 +228,7 @@ int kb_code_embed_project_fully_embedded(const char *project)
    char sig_key[320];
    snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
    char stored[160] = "";
-   if (db2_kb_runtime_state_get(sig_key, stored, sizeof(stored)) != 0)
+   if (kb_store_kb_runtime_state_get(sig_key, stored, sizeof(stored)) != 0)
       return 0;
    return stored[0] && strcmp(stored, sig_now) == 0;
 }
@@ -390,7 +390,7 @@ int kb_code_embed_build_fallback_text(const char *project, const char *file_path
    if (file_id <= 0)
       return written;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return written;
    char err[CE_ERRBUF] = "";
@@ -485,7 +485,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    int effective_batch = (batch_size > 0) ? batch_size : 128;
    int effective_max = (max_points > 0) ? max_points : 5000;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       /* No DB available — accept as a no-op (e.g., test env). */
@@ -540,7 +540,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          char sig_key[320];
          snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
          char stored_sig[160] = "";
-         if (db2_kb_runtime_state_get(sig_key, stored_sig, sizeof(stored_sig)) == 0 &&
+         if (kb_store_kb_runtime_state_get(sig_key, stored_sig, sizeof(stored_sig)) == 0 &&
              strcmp(stored_sig, sig_now) == 0)
          {
             /* Nothing changed since the last fully-embedded pass — skip entirely. */
@@ -620,7 +620,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
     * 384-dim deterministic hash never matched the 1024-d vector column, so every
     * upsert failed and no code vectors were ever stored. */
    const char *embed_command = config_embedder_command_current(NULL);
-   int embed_dim = db2_embedding_dim();
+   int embed_dim = kb_store_embedding_dim();
    if (embed_dim <= 0 || embed_dim > CE_EMBED_MAX_DIM)
       embed_dim = 1024;
 
@@ -671,12 +671,12 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
        *  - the STEADY STATE, where every file is already embedded so the loop only
        *    computes node_key + checks exists-by-hash and `continue`s — thousands of
        *    checks per poll, every poll, all under one held lease.
-       * The per-file DB lookups re-acquire lazily via db2_conn(); no-op inside an
+       * The per-file DB lookups re-acquire lazily via kb_store_conn(); no-op inside an
        * explicit lease scope. Mirrors kb_curator_extract_code's guard. */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
 
       char node_key[GRAPH_ENDPOINT_MAX];
-      if (db2_entity_node_key_file(project, rows[i].path, node_key, sizeof(node_key)) != 0)
+      if (kb_store_entity_node_key_file(project, rows[i].path, node_key, sizeof(node_key)) != 0)
          continue;
 
       char body_hash[32];
@@ -702,8 +702,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       {
          /* An empty text is not embeddable and would fail the batch for every
           * other row in it. Record it and move on, as the per-file path did. */
-         db2_code_index_op_record(rows[i].id, project, node_key, rows[i].path, 0,
-                                  "code embedding text empty");
+         kb_store_code_index_op_record(rows[i].id, project, node_key, rows[i].path, 0,
+                                       "code embedding text empty");
          continue;
       }
 
@@ -726,8 +726,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
                           project, node_key, rows[i].path, rows[i].hash, body_hash, line_count);
       if (plen < 0 || (size_t)plen >= sizeof(payload))
       {
-         db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,
-                                  "code payload too large to encode");
+         kb_store_code_index_op_record(point_id, project, node_key, rows[i].path, 0,
+                                       "code payload too large to encode");
          continue;
       }
 
@@ -767,7 +767,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    {
       char sig_key[320];
       snprintf(sig_key, sizeof(sig_key), "code_embed_sig:%s", project);
-      db2_kb_runtime_state_set(sig_key, sig_now);
+      kb_store_kb_runtime_state_set(sig_key, sig_now);
    }
 
    free(rows);

@@ -1,17 +1,17 @@
-/* db2/stopwords.c: promoted stopwords — Postgres via libpq. */
+/* kb_store/stopwords.c: promoted stopwords — Postgres via libpq. */
 
 #include "stopwords.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 #include <stdio.h>
 
-int db2_stopwords_list(char out[][32], int max)
+int kb_store_stopwords_list(char out[][32], int max)
 {
    if (!out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 

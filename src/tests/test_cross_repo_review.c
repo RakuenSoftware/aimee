@@ -5,23 +5,24 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/cross_repo_review.h"
-#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/kb_store.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static int up(const char *sym, const char *caller, const char *definer, double score, int qmax)
 {
-   return db2_cross_repo_review_upsert("rsh1", sym, caller, definer, "{}", score, "ambiguous", 0,
-                                       qmax);
+   return kb_store_cross_repo_review_upsert("rsh1", sym, caller, definer, "{}", score, "ambiguous",
+                                            0, qmax);
 }
 
 static void clear_queue(void)
 {
    char e[256] = "";
-   aimee_pg_exec(db2_conn(), "DELETE FROM cross_repo_review_queue", e, sizeof(e));
-   aimee_pg_exec(db2_conn(), "UPDATE cross_repo_meta SET review_overflow_dropped = 0 WHERE id = 1",
-                 e, sizeof(e));
+   aimee_pg_exec(kb_store_conn(), "DELETE FROM cross_repo_review_queue", e, sizeof(e));
+   aimee_pg_exec(kb_store_conn(),
+                 "UPDATE cross_repo_meta SET review_overflow_dropped = 0 WHERE id = 1", e,
+                 sizeof(e));
 }
 
 static void test_upsert_list(void)
@@ -34,7 +35,7 @@ static void test_upsert_list(void)
 
    xrepo_review_row_t rows[16];
    int64_t dropped = -1;
-   int n = db2_cross_repo_review_list(NULL, "open", rows, 16, &dropped);
+   int n = kb_store_cross_repo_review_list(NULL, "open", rows, 16, &dropped);
    assert(n == 2); /* render upserted, not duplicated */
    /* ordered by evidence_score DESC: render(9) before update(7). */
    assert(strcmp(rows[0].symbol, "render") == 0 && rows[0].evidence_score > 8.9);
@@ -43,9 +44,9 @@ static void test_upsert_list(void)
 
    /* filter by caller. */
    assert(up("foo_sym", "appB", "libZ", 1.0, 5000) == 0);
-   n = db2_cross_repo_review_list("appA", "open", rows, 16, NULL);
+   n = kb_store_cross_repo_review_list("appA", "open", rows, 16, NULL);
    assert(n == 2);
-   n = db2_cross_repo_review_list("appB", "open", rows, 16, NULL);
+   n = kb_store_cross_repo_review_list("appB", "open", rows, 16, NULL);
    assert(n == 1 && strcmp(rows[0].symbol, "foo_sym") == 0);
    printf("ok\n");
 }
@@ -54,15 +55,15 @@ static void test_adjudicate(void)
 {
    printf("test_adjudicate... ");
    xrepo_review_row_t rows[16];
-   int n = db2_cross_repo_review_list("appA", "open", rows, 16, NULL);
+   int n = kb_store_cross_repo_review_list("appA", "open", rows, 16, NULL);
    assert(n >= 1);
    int64_t id = rows[0].id;
-   assert(db2_cross_repo_review_set_status(id, "accepted") == 0);
-   assert(db2_cross_repo_review_set_status(id, "bogus") == -1); /* invalid status */
+   assert(kb_store_cross_repo_review_set_status(id, "accepted") == 0);
+   assert(kb_store_cross_repo_review_set_status(id, "bogus") == -1); /* invalid status */
    /* now one fewer open for appA; the accepted one shows under status=accepted. */
-   int open_after = db2_cross_repo_review_list("appA", "open", rows, 16, NULL);
+   int open_after = kb_store_cross_repo_review_list("appA", "open", rows, 16, NULL);
    assert(open_after == n - 1);
-   int acc = db2_cross_repo_review_list("appA", "accepted", rows, 16, NULL);
+   int acc = kb_store_cross_repo_review_list("appA", "accepted", rows, 16, NULL);
    assert(acc == 1 && rows[0].id == id);
    printf("ok\n");
 }
@@ -81,7 +82,7 @@ static void test_overflow_eviction(void)
    }
    xrepo_review_row_t rows[16];
    int64_t dropped = 0;
-   int n = db2_cross_repo_review_list("ovfCaller", "open", rows, 16, &dropped);
+   int n = kb_store_cross_repo_review_list("ovfCaller", "open", rows, 16, &dropped);
    assert(n == 2); /* capped */
    /* highest-evidence survive: scores 4 and 3. */
    assert(rows[0].evidence_score > 3.9 && rows[1].evidence_score > 2.9);
@@ -91,7 +92,7 @@ static void test_overflow_eviction(void)
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_upsert_list();
    test_adjudicate();
    test_overflow_eviction();

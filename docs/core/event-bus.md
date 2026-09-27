@@ -91,7 +91,7 @@ executable in `server-go/cmd/aimee-module`: `config`, `memory`, `learning`,
 an isolated identity and one module package under `server-go/modules`. The runtime
 bundle emits no C process source for those entries. Their C `module_adapter.c`
 files serve only as wire-parity fixtures while the deeper module-owned C surfaces
-are migrated in later batches. DB2 remains the separately supervised C process
+are migrated in later batches. KB_STORE remains the separately supervised C process
 in the current catalog and crosses the same bus admission and wire boundary.
 
 Each migrated process owns one bounded decision and nothing around it:

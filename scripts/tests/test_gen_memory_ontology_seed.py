@@ -60,13 +60,13 @@ class OntologySeedGeneratorTests(unittest.TestCase):
             self.assertEqual(result.returncode,1)
             for p in OUTPUTS:
                 self.assertEqual(before[p],(root/p).read_bytes())
-    def test_standalone_db2_output_and_failure(self):
+    def test_standalone_kb_store_output_and_failure(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw)/"seed.c"
-            result = self.run_generator("--db2-output",path)
+            result = self.run_generator("--kb-store-output",path)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(path.read_bytes(),(REPO/"src/modules/kb/support/rel_seed_primitives.c").read_bytes())
-            result = self.run_generator("--db2-output",Path(raw)/"missing"/"seed.c")
+            result = self.run_generator("--kb-store-output",Path(raw)/"missing"/"seed.c")
             self.assertEqual(result.returncode,1)
             result = self.run_generator("unexpected")
             self.assertEqual(result.returncode,2)

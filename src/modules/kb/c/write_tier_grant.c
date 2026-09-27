@@ -1,11 +1,11 @@
-/* db2/write_tier_grant.c: per-user /v1 write authorization (kb_write_tier_grant)
- * — Postgres via libpq. See write_tier_grant.h. Mirrors the db2/admin_grant.c
+/* kb_store/write_tier_grant.c: per-user /v1 write authorization (kb_write_tier_grant)
+ * — Postgres via libpq. See write_tier_grant.h. Mirrors the kb_store/admin_grant.c
  * access pattern. Tenant-scoped: every entry requires the RLS-enforcing
  * Postgres backend. */
 
 #include "write_tier_grant.h"
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -52,19 +52,19 @@ static int grant_args_valid(const char *server_id, int64_t team_id, const char *
    return server_id && server_id[0] && subject && subject[0] && team_id > 0;
 }
 
-int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
-                                kb_identity_tier_t *out)
+int kb_store_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                     kb_identity_tier_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    /* Pass the tenancy code through unchanged: the shim guard asserts every
     * tenant-scoped entrypoint reports the same typed refusal. */
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out || !grant_args_valid(server_id, team_id, subject))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -85,26 +85,27 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
       /* A row whose tier the mapping does not recognize is a corrupt grant.
        * Report an error, not NONE: both deny, but only one is a policy
        * decision. */
-      result = tier_from_text(aimee_pg_column_text(st, 0), out) ? DB2_WRITE_TIER_GRANT_FOUND : -1;
+      result =
+          tier_from_text(aimee_pg_column_text(st, 0), out) ? KB_STORE_WRITE_TIER_GRANT_FOUND : -1;
    }
    else if (step == AIMEE_PG_DONE)
-      result = DB2_WRITE_TIER_GRANT_NONE;
+      result = KB_STORE_WRITE_TIER_GRANT_NONE;
    aimee_pg_finalize(st);
-   if (result != DB2_WRITE_TIER_GRANT_FOUND)
+   if (result != KB_STORE_WRITE_TIER_GRANT_FOUND)
       memset(out, 0, sizeof(*out));
    return result;
 }
 
-int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
-                             kb_identity_tier_t tier, const char *granted_by)
+int kb_store_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
+                                  kb_identity_tier_t tier, const char *granted_by)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    const char *tier_str = tier_text(tier);
    if (!grant_args_valid(server_id, team_id, subject) || !tier_str || !granted_by || !granted_by[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* The definer function is the only write path: it re-checks admin/team-lead
@@ -125,9 +126,10 @@ int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char 
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
-                                       kb_identity_tier_t tier, const char *granted_by,
-                                       db2_write_tier_grant_report_t *out)
+int kb_store_write_tier_grant_set_reporting(const char *server_id, int64_t team_id,
+                                            const char *subject, kb_identity_tier_t tier,
+                                            const char *granted_by,
+                                            kb_store_write_tier_grant_report_t *out)
 {
    if (out)
    {
@@ -135,20 +137,20 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
        * which is a real tier (off). */
       memset(out, 0, sizeof(*out));
    }
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    const char *tier_str = tier_text(tier);
    if (!out || !grant_args_valid(server_id, team_id, subject) || !tier_str || !granted_by ||
        !granted_by[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* The reporting definer function. It DELEGATES to kb_write_tier_grant_set for
     * authorization, validation, the upsert and the audit row, and adds only the
     * observation of the pre-image under the same lock — so this is the same write path as
-    * db2_write_tier_grant_set, not a second one. */
+    * kb_store_write_tier_grant_set, not a second one. */
    char err[256] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
@@ -162,7 +164,7 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
    aimee_pg_bind_text(st, "?3", subject);
    aimee_pg_bind_text(st, "?4", tier_str);
    aimee_pg_bind_text(st, "?5", granted_by);
-   db2_write_tier_grant_report_t report;
+   kb_store_write_tier_grant_report_t report;
    memset(&report, 0, sizeof(report));
    int ok = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -191,18 +193,18 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
    return 0;
 }
 
-int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
+int kb_store_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!grant_args_valid(server_id, team_id, subject))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
-   /* Definer write path — see db2_write_tier_grant_set. */
+   /* Definer write path — see kb_store_write_tier_grant_set. */
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn, "SELECT kb_write_tier_grant_revoke(?1, ?2, ?3)", err, sizeof(err));
    if (!st)
@@ -215,25 +217,25 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
-                              db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+int kb_store_write_tier_grant_list(const char *server_id, int64_t team_id,
+                                   kb_store_write_tier_grant_row_t *out, size_t cap, size_t *count)
 {
-   return db2_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
+   return kb_store_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
 }
 
-int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
-                                 size_t *count)
+int kb_store_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
+                                      const char *subject, kb_store_write_tier_grant_row_t *out,
+                                      size_t cap, size_t *count)
 {
    if (count)
       *count = 0;
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out || !cap || !count || !server_id || !server_id[0] || team_id <= 0)
       return -1;
    memset(out, 0, cap * sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -272,7 +274,7 @@ int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int inc
    aimee_pg_step_t step;
    while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW && n < cap)
    {
-      db2_write_tier_grant_row_t *row = &out[n];
+      kb_store_write_tier_grant_row_t *row = &out[n];
       const char *c;
       c = aimee_pg_column_text(st, 0);
       snprintf(row->subject, sizeof(row->subject), "%s", c ? c : "");

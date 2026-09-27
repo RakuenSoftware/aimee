@@ -1,10 +1,10 @@
-/* db2/css_render.c: storage + evaluation for the rendered computed-style oracle.
+/* kb_store/css_render.c: storage + evaluation for the rendered computed-style oracle.
  * See css_render.h. */
 #include "css_render.h"
 
-#include "../support/db2_runtime_config.h"
-#include "db2.h"
-#include "db2_internal.h"
+#include "../support/kb_store_runtime_config.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdint.h>
@@ -14,15 +14,15 @@
 
 #define CSSR_ERRBUF 256
 
-static db2_css_render_compare_fn css_render_compare_provider;
+static kb_store_css_render_compare_fn css_render_compare_provider;
 
-void aimee_db2_register_css_render_compare_provider(db2_css_render_compare_fn provider)
+void aimee_kb_store_register_css_render_compare_provider(kb_store_css_render_compare_fn provider)
 {
    css_render_compare_provider = provider;
 }
 
-int db2_css_render_compare(const char *before_json, const char *after_json, int *before_valid,
-                           int *after_valid, int *available, int *equivalent, int *diff_count)
+int kb_store_css_render_compare(const char *before_json, const char *after_json, int *before_valid,
+                                int *after_valid, int *available, int *equivalent, int *diff_count)
 {
    if (!before_valid || !after_valid || !available || !equivalent || !diff_count)
       return -1;
@@ -74,8 +74,9 @@ static void cssr_hash(const char *s, char out[17])
    snprintf(out, 17, "%016llx", (unsigned long long)h);
 }
 
-int db2_css_render_snapshot_store(const char *project, const char *unit_path, const char *phase,
-                                  const char *snapshot_json, const char *now_iso)
+int kb_store_css_render_snapshot_store(const char *project, const char *unit_path,
+                                       const char *phase, const char *snapshot_json,
+                                       const char *now_iso)
 {
    if (!project || !project[0] || !unit_path || !unit_path[0] || !snapshot_json)
       return -1;
@@ -83,7 +84,7 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
       return -1;
    if (!cssr_enabled())
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -128,14 +129,14 @@ int db2_css_render_snapshot_store(const char *project, const char *unit_path, co
    return rc;
 }
 
-int db2_css_render_snapshot_get(const char *project, const char *unit_path, const char *phase,
-                                char **out)
+int kb_store_css_render_snapshot_get(const char *project, const char *unit_path, const char *phase,
+                                     char **out)
 {
    if (out)
       *out = NULL;
    if (!project || !unit_path || !phase_valid(phase) || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT s.snapshot FROM css_render_snapshots s"
@@ -184,8 +185,8 @@ static void cssr_record_verdict(void *conn, const char *project, const char *uni
    aimee_pg_finalize(st);
 }
 
-int db2_css_render_oracle_evaluate(const char *project, const char *unit_path, const char *now_iso,
-                                   css_render_verdict_t *out)
+int kb_store_css_render_oracle_evaluate(const char *project, const char *unit_path,
+                                        const char *now_iso, css_render_verdict_t *out)
 {
    if (!project || !unit_path || !out)
       return -1;
@@ -195,17 +196,17 @@ int db2_css_render_oracle_evaluate(const char *project, const char *unit_path, c
       snprintf(out->summary, sizeof(out->summary), "rendered oracle disabled");
       return 0;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
    char *bjson = NULL, *ajson = NULL;
-   db2_css_render_snapshot_get(project, unit_path, "before", &bjson);
-   db2_css_render_snapshot_get(project, unit_path, "after", &ajson);
+   kb_store_css_render_snapshot_get(project, unit_path, "before", &bjson);
+   kb_store_css_render_snapshot_get(project, unit_path, "after", &ajson);
 
    int before_valid = 0, after_valid = 0;
-   if (db2_css_render_compare(bjson, ajson, &before_valid, &after_valid, &out->available,
-                              &out->equivalent, &out->diff_count) != 0)
+   if (kb_store_css_render_compare(bjson, ajson, &before_valid, &after_valid, &out->available,
+                                   &out->equivalent, &out->diff_count) != 0)
    {
       free(bjson);
       free(ajson);

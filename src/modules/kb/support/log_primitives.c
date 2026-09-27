@@ -1,13 +1,13 @@
-#include "db2_log.h"
+#include "kb_store_log.h"
 
 #include <stdio.h>
 
-#define DB2_LOG_MESSAGE_CAP 1024
+#define KB_STORE_LOG_MESSAGE_CAP 1024
 
-static db2_log_sink_fn s_sink = NULL;
+static kb_store_log_sink_fn s_sink = NULL;
 static void *s_context = NULL;
 
-void db2_log_install(db2_log_sink_fn sink, void *context)
+void kb_store_log_install(kb_store_log_sink_fn sink, void *context)
 {
    s_context = context;
    s_sink = sink;
@@ -18,7 +18,7 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    if (!s_sink || !module || !fmt || level < LOG_ERROR || level > LOG_DEBUG)
       return;
 
-   char message[DB2_LOG_MESSAGE_CAP];
+   char message[KB_STORE_LOG_MESSAGE_CAP];
    va_list args;
    va_start(args, fmt);
    int written = vsnprintf(message, sizeof(message), fmt, args);

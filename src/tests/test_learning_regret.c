@@ -12,9 +12,9 @@
 #include <string.h>
 
 #include "db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_learning.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_learning.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "modules/learning/learning_signal_policy.h"
 
 #include <aimee/learning/learning.h>
@@ -155,19 +155,19 @@ static void test_fate_is_one_verdict_per_proposal(void)
 {
    int id = commit_with_fate("mark_rule", "revisited", LEARNING_FATE_STANDING);
    assert(id > 0);
-   char fate[DB2_LEARNING_FATE_LEN] = "";
-   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 1);
+   char fate[KB_STORE_LEARNING_FATE_LEN] = "";
+   assert(kb_store_learning_fate_get(id, fate, sizeof(fate)) == 1);
    assert(strcmp(fate, LEARNING_FATE_STANDING) == 0);
 
    /* A later verdict replaces the earlier one: the question is what BECAME of
     * it, not what we thought at each step. */
    assert(learning_fate_record(id, LEARNING_FATE_CONTRADICTED, "later evidence") == 0);
-   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 1);
+   assert(kb_store_learning_fate_get(id, fate, sizeof(fate)) == 1);
    assert(strcmp(fate, LEARNING_FATE_CONTRADICTED) == 0);
 
    /* A proposal nobody has judged has no fate, and that is distinct from
     * having a good one. */
-   assert(db2_learning_fate_get(999999, fate, sizeof(fate)) == 0);
+   assert(kb_store_learning_fate_get(999999, fate, sizeof(fate)) == 0);
 }
 
 /* The producers. Before these existed the regret controls consumed a fate that
@@ -179,35 +179,35 @@ static void test_a_second_commit_supersedes_the_first(void)
     * first's fate says so without anyone being asked. */
    int first = commit_with_fate("mark_rule", "same-target", NULL);
    assert(first > 0);
-   char fate[DB2_LEARNING_FATE_LEN] = "";
-   assert(db2_learning_fate_get(first, fate, sizeof(fate)) == 0); /* no verdict yet */
+   char fate[KB_STORE_LEARNING_FATE_LEN] = "";
+   assert(kb_store_learning_fate_get(first, fate, sizeof(fate)) == 0); /* no verdict yet */
 
    int second = commit_with_fate("mark_rule", "same-target", NULL);
    assert(second > 0);
    assert(second != first);
-   assert(db2_learning_fate_get(first, fate, sizeof(fate)) == 1);
+   assert(kb_store_learning_fate_get(first, fate, sizeof(fate)) == 1);
    assert(strcmp(fate, LEARNING_FATE_SUPERSEDED) == 0);
    /* The new one is not judged by its own arrival. */
-   assert(db2_learning_fate_get(second, fate, sizeof(fate)) == 0);
+   assert(kb_store_learning_fate_get(second, fate, sizeof(fate)) == 0);
 
    /* A commit to a DIFFERENT target supersedes nothing. */
    int other = commit_with_fate("mark_rule", "other-target", NULL);
    assert(other > 0);
-   assert(db2_learning_fate_get(second, fate, sizeof(fate)) == 0);
+   assert(kb_store_learning_fate_get(second, fate, sizeof(fate)) == 0);
 }
 
 static void test_rejecting_a_commit_is_regret(void)
 {
    int id = commit_with_fate("mark_rule", "regretted-target", NULL);
    assert(id > 0);
-   char fate[DB2_LEARNING_FATE_LEN] = "";
-   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 0);
+   char fate[KB_STORE_LEARNING_FATE_LEN] = "";
+   assert(kb_store_learning_fate_get(id, fate, sizeof(fate)) == 0);
 
    /* A human looked at what the loop did and undid it. That is the clearest
     * regret signal there is, and it must be recorded without being asked. */
    learning_proposal_t p;
    assert(learning_reject_proposal(id, &p) == 0);
-   assert(db2_learning_fate_get(id, fate, sizeof(fate)) == 1);
+   assert(kb_store_learning_fate_get(id, fate, sizeof(fate)) == 1);
    assert(strcmp(fate, LEARNING_FATE_REVERTED) == 0);
    assert(learning_fate_is_regret(fate) == 1);
 }
@@ -217,7 +217,7 @@ int main(void)
    printf("learning_regret: ");
 
    assert(db1_init(":memory:") == 0);
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    learning_router_register_signal_classifier(classifier);
 
    test_fate_vocabulary_is_closed();

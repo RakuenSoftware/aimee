@@ -48,10 +48,10 @@ def fail(msg):
 
 def main():
     # Plant-test: the guard must catch a lessons_ reference in a recall context.
-    planted = 'rc = db2_query("SELECT * FROM lessons_outcome_ledger JOIN memory_facts ...");'
+    planted = 'rc = kb_store_query("SELECT * FROM lessons_outcome_ledger JOIN memory_facts ...");'
     if not scan_text(planted):
         fail("plant-test FAILED — guard did not detect a planted lessons_ reference")
-    clean = 'rc = db2_query("SELECT * FROM memory_facts WHERE ...");'
+    clean = 'rc = kb_store_query("SELECT * FROM memory_facts WHERE ...");'
     if scan_text(clean):
         fail("plant-test FAILED — guard flagged a clean memory-fact query")
     print("check-lessons-isolation: plant-test ok")

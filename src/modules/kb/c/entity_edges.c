@@ -1,8 +1,8 @@
-/* db2/entity_edges.c: entity-graph storage primitives — Postgres via libpq. */
+/* kb_store/entity_edges.c: entity-graph storage primitives — Postgres via libpq. */
 
 #include "../headers/aimee.h" /* edge_t */
 #include "entity_edges.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "fact_mutation.h"
 #include "../headers/rel_types.h" /* correction_behavior + rel_type_is_functional (§4) */
@@ -53,29 +53,29 @@ static void edge_row_from_stmt_pg(aimee_pg_stmt_t *st, edge_t *out)
 {
    memset(out, 0, sizeof(*out));
    out->id = aimee_pg_column_int64(st, 0);
-   db2_copy_text(out->source, sizeof(out->source), aimee_pg_column_text(st, 1));
-   db2_copy_text(out->relation, sizeof(out->relation), aimee_pg_column_text(st, 2));
-   db2_copy_text(out->target, sizeof(out->target), aimee_pg_column_text(st, 3));
+   kb_store_copy_text(out->source, sizeof(out->source), aimee_pg_column_text(st, 1));
+   kb_store_copy_text(out->relation, sizeof(out->relation), aimee_pg_column_text(st, 2));
+   kb_store_copy_text(out->target, sizeof(out->target), aimee_pg_column_text(st, 3));
    out->weight = aimee_pg_column_int(st, 4);
 }
 
 /* Cached unique-index state: -1 = unchecked, 0 = absent, 1 = present. */
 static int s_unique_index_ready = -1;
 
-int db2_entity_edge_upsert(const char *source, const char *relation, const char *target,
-                           int64_t window_id, int relation_id, int subject_kind, int object_kind,
-                           int *out_added)
+int kb_store_entity_edge_upsert(const char *source, const char *relation, const char *target,
+                                int64_t window_id, int relation_id, int subject_kind,
+                                int object_kind, int *out_added)
 {
    if (out_added)
       *out_added = 0;
    if (!source || !relation || !target)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
    if (s_unique_index_ready < 0)
-      s_unique_index_ready = db2_entity_edge_unique_index_exists();
+      s_unique_index_ready = kb_store_entity_edge_unique_index_exists();
 
    if (s_unique_index_ready > 0)
    {
@@ -179,11 +179,11 @@ int db2_entity_edge_upsert(const char *source, const char *relation, const char 
    return 0;
 }
 
-int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
+int kb_store_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
 {
    if (!entity || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -209,9 +209,10 @@ int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
    return n;
 }
 
-int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
-                                    int relation_id, int subject_kind, int object_kind,
-                                    const char *confidence_class, double confidence, int *out_added)
+int kb_store_entity_edge_upsert_semantic(const char *source, const char *relation,
+                                         const char *target, int relation_id, int subject_kind,
+                                         int object_kind, const char *confidence_class,
+                                         double confidence, int *out_added)
 {
    /* Compatibility entrypoint only.  The authority-aware seam owns every
     * semantic mutation; callers that need user/operator authority must use it
@@ -229,8 +230,8 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
                                    .assertion_kind = FACT_KIND_WORLD_FACT};
    if (out_added)
       *out_added = 0;
-   if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0 ||
-       db2_fact_mutation_assert(&actor, &input, &result) != 0)
+   if (kb_store_fact_actor_internal(FACT_ACTOR_MODEL, &actor) != 0 ||
+       kb_store_fact_mutation_assert(&actor, &input, &result) != 0)
       return -1;
    if (out_added)
       *out_added = result.changed;
@@ -242,7 +243,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
       return -1;
    if (!confidence_class || !confidence_class[0])
       confidence_class = "C"; /* conservative default (§5) */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[EE_ERRBUF] = "";
@@ -292,7 +293,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
 
    /* asserted_at is stamped from the host clock in UTC (not SQL CURRENT_TIMESTAMP,
     * whose timezone differs between Postgres' session zone and the sqlite shim) so
-    * it shares one clock with db2_fact_expire_speculative's cutoff — the lexical
+    * it shares one clock with kb_store_fact_expire_speculative's cutoff — the lexical
     * compare there is then also chronological regardless of DB timezone. */
    time_t now_t = time(NULL);
    struct tm now_tm;
@@ -410,11 +411,11 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
 #endif
 }
 
-int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max)
+int kb_store_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max)
 {
    if (!entity || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql = "SELECT id, source, relation, target, weight FROM entity_edges"
@@ -437,8 +438,8 @@ int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max
    return n;
 }
 
-static int neighbor_collect(aimee_pg_stmt_t *st, db2_entity_neighbor_t *out, int max, char *err,
-                            size_t errlen)
+static int neighbor_collect(aimee_pg_stmt_t *st, kb_store_entity_neighbor_t *out, int max,
+                            char *err, size_t errlen)
 {
    int n = 0;
    while (n < max && aimee_pg_step(st, err, errlen) == AIMEE_PG_ROW)
@@ -455,14 +456,14 @@ static int neighbor_collect(aimee_pg_stmt_t *st, db2_entity_neighbor_t *out, int
    return n;
 }
 
-int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, int max,
-                              int limit_sql)
+int kb_store_entity_edge_neighbors(const char *entity, kb_store_entity_neighbor_t *out, int max,
+                                   int limit_sql)
 {
    if (!entity || !out || max <= 0)
       return 0;
    if (limit_sql <= 0)
       limit_sql = 50;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[2048];
@@ -483,15 +484,15 @@ int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, in
    return n;
 }
 
-int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, const char *rel_b,
-                                       int order_by_weight, db2_entity_neighbor_t *out, int max,
-                                       int limit_sql)
+int kb_store_entity_edge_neighbors_filtered(const char *entity, const char *rel_a,
+                                            const char *rel_b, int order_by_weight,
+                                            kb_store_entity_neighbor_t *out, int max, int limit_sql)
 {
    if (!entity || !rel_a || !out || max <= 0)
       return 0;
    if (limit_sql <= 0)
       limit_sql = 20;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -541,11 +542,11 @@ int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, co
    return n;
 }
 
-int db2_entity_edge_walk_step(const char *node, edge_t *out, int max)
+int kb_store_entity_edge_walk_step(const char *node, edge_t *out, int max)
 {
    if (!node || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -565,12 +566,12 @@ int db2_entity_edge_walk_step(const char *node, edge_t *out, int max)
    return n;
 }
 
-int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_kinds_t *out,
-                                         int max)
+int kb_store_entity_edge_walk_step_with_kinds(const char *node,
+                                              kb_store_entity_edge_with_kinds_t *out, int max)
 {
    if (!node || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -592,9 +593,9 @@ int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       memset(&out[n], 0, sizeof(out[n]));
-      db2_copy_text(out[n].source, sizeof(out[n].source), aimee_pg_column_text(st, 0));
-      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 1));
-      db2_copy_text(out[n].target, sizeof(out[n].target), aimee_pg_column_text(st, 2));
+      kb_store_copy_text(out[n].source, sizeof(out[n].source), aimee_pg_column_text(st, 0));
+      kb_store_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 1));
+      kb_store_copy_text(out[n].target, sizeof(out[n].target), aimee_pg_column_text(st, 2));
       out[n].relation_id = aimee_pg_column_int(st, 3);
       out[n].subject_kind = aimee_pg_column_int(st, 4);
       out[n].object_kind = aimee_pg_column_int(st, 5);
@@ -605,12 +606,12 @@ int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_
    return n;
 }
 
-int db2_entity_edge_top_targets_by_relation(const char *source, const char *relation,
-                                            db2_entity_neighbor_t *out, int max)
+int kb_store_entity_edge_top_targets_by_relation(const char *source, const char *relation,
+                                                 kb_store_entity_neighbor_t *out, int max)
 {
    if (!source || !relation || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[1024];
@@ -630,12 +631,12 @@ int db2_entity_edge_top_targets_by_relation(const char *source, const char *rela
    return n;
 }
 
-int db2_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
-                                             db2_entity_neighbor_t *out, int max)
+int kb_store_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
+                                                  kb_store_entity_neighbor_t *out, int max)
 {
    if (!entity || !relation || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[2048];
@@ -662,11 +663,11 @@ int db2_entity_edge_top_partners_by_relation(const char *entity, const char *rel
    return n;
 }
 
-int db2_entity_edge_top_distinct_triples(edge_t *out, int max)
+int kb_store_entity_edge_top_distinct_triples(edge_t *out, int max)
 {
    if (!out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[1024];
@@ -686,12 +687,12 @@ int db2_entity_edge_top_distinct_triples(edge_t *out, int max)
    return n;
 }
 
-int db2_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
-                               char (*out)[128], int max)
+int kb_store_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
+                                    char (*out)[128], int max)
 {
    if (!node || !relation || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[2048];
@@ -727,11 +728,11 @@ int db2_entity_edge_co_targets(const char *node, const char *relation, int min_w
    return n;
 }
 
-int db2_entity_edge_bump_utility(const char *key, double delta)
+int kb_store_entity_edge_bump_utility(const char *key, double delta)
 {
    if (!key)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* Clamp to [-5.0, 5.0] and record touch timestamp (Phase 1). */
@@ -752,14 +753,14 @@ int db2_entity_edge_bump_utility(const char *key, double delta)
    return rc;
 }
 
-int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t *out, int max,
-                                       int limit_sql)
+int kb_store_entity_edge_outbound_neighbors(const char *source, kb_store_entity_neighbor_t *out,
+                                            int max, int limit_sql)
 {
    if (!source || !out || max <= 0)
       return 0;
    if (limit_sql <= 0)
       limit_sql = 50;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[1024];
@@ -777,13 +778,13 @@ int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t
    return n;
 }
 
-int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql)
+int kb_store_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql)
 {
    if (!token || !out || max <= 0)
       return 0;
    if (limit_sql <= 0)
       limit_sql = max;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[2048];
@@ -809,9 +810,9 @@ int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int
    return n;
 }
 
-int db2_entity_edge_prune_orphans(void)
+int kb_store_entity_edge_prune_orphans(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -847,9 +848,9 @@ int db2_entity_edge_prune_orphans(void)
    return (rc == AIMEE_PG_DONE) ? changes : 0;
 }
 
-int db2_entity_edge_normalize_weights(void)
+int kb_store_entity_edge_normalize_weights(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Rescaling is a CO-OCCURRENCE concern. There, weight is an observation
@@ -895,7 +896,7 @@ int db2_entity_edge_normalize_weights(void)
    return (rc == AIMEE_PG_DONE) ? changes : 0;
 }
 
-/* db2_relation_schema_list() lived here and SELECTed from
+/* kb_store_relation_schema_list() lived here and SELECTed from
  * memory_relation_schema. Nothing in the tree ever inserts into that table, and
  * memory_ontology_validate() does not consult it, so the function returned zero
  * rows on every deployment and relations.schema_list published an empty list
@@ -905,9 +906,9 @@ int db2_entity_edge_normalize_weights(void)
 
 /* --- Phase 1: entity edge uniqueness migration --- */
 
-int db2_entity_edge_unique_index_exists(void)
+int kb_store_entity_edge_unique_index_exists(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT 1 FROM pg_indexes"
@@ -922,12 +923,12 @@ int db2_entity_edge_unique_index_exists(void)
    return found;
 }
 
-int db2_entity_edge_dedup_audit(db2_entity_edge_dedup_report_t *out)
+int kb_store_entity_edge_dedup_audit(kb_store_entity_edge_dedup_report_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT COUNT(*) total,"
@@ -960,17 +961,17 @@ int db2_entity_edge_dedup_audit(db2_entity_edge_dedup_report_t *out)
    return 0;
 }
 
-int db2_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
-                                  db2_entity_edge_dedup_report_t *out)
+int kb_store_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
+                                       kb_store_entity_edge_dedup_report_t *out)
 {
-   db2_entity_edge_dedup_report_t report;
-   if (db2_entity_edge_dedup_audit(&report) < 0)
+   kb_store_entity_edge_dedup_report_t report;
+   if (kb_store_entity_edge_dedup_audit(&report) < 0)
       return -1;
    if (out)
       *out = report;
    if (dry_run || report.dup_rows == 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (rollback_path && rollback_path[0])
@@ -1040,11 +1041,11 @@ int db2_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_entity_edge_build_unique_index(int *out_already_exists)
+int kb_store_entity_edge_build_unique_index(int *out_already_exists)
 {
    if (out_already_exists)
       *out_already_exists = 0;
-   int exists = db2_entity_edge_unique_index_exists();
+   int exists = kb_store_entity_edge_unique_index_exists();
    if (exists < 0)
       return -1;
    if (exists)
@@ -1053,7 +1054,7 @@ int db2_entity_edge_build_unique_index(int *out_already_exists)
          *out_already_exists = 1;
       return 0;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -1065,7 +1066,8 @@ int db2_entity_edge_build_unique_index(int *out_already_exists)
 
 /* --- Phase 4: utility-aware graph scoring --- */
 
-double db2_entity_edge_utility_decay(double raw_score, const char *touched_at, int half_life_days)
+double kb_store_entity_edge_utility_decay(double raw_score, const char *touched_at,
+                                          int half_life_days)
 {
    if (raw_score == 0.0)
       return 0.0;
@@ -1112,7 +1114,8 @@ double db2_entity_edge_utility_decay(double raw_score, const char *touched_at, i
    return decayed;
 }
 
-double db2_entity_edge_prune_priority(int weight, double decayed_utility, double utility_weight)
+double kb_store_entity_edge_prune_priority(int weight, double decayed_utility,
+                                           double utility_weight)
 {
    return (double)weight + utility_weight * decayed_utility;
 }
@@ -1130,17 +1133,18 @@ static void edge_class_fields(const char *edge_class, const char *confidence_cla
       return;
    out_class[0] = '\0';
    if (semantic && confidence_class && confidence_class[0])
-      db2_copy_text(out_class, class_cap, confidence_class);
+      kb_store_copy_text(out_class, class_cap, confidence_class);
 }
 
-int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weighted_neighbor_t *out,
-                                       int max, int limit_sql, int utility_scoring_enabled)
+int kb_store_entity_edge_neighbors_weighted(const char *entity,
+                                            kb_store_entity_edge_weighted_neighbor_t *out, int max,
+                                            int limit_sql, int utility_scoring_enabled)
 {
    if (!entity || !out || max <= 0)
       return 0;
    if (limit_sql <= 0)
       limit_sql = 50;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -1170,14 +1174,15 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
       snprintf(out[n].node, sizeof(out[n].node), "%s", node);
       out[n].weight = aimee_pg_column_int(st, 1);
       out[n].utility_score = aimee_pg_column_double(st, 2);
-      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
+      kb_store_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
       edge_class_fields(aimee_pg_column_text(st, 5), aimee_pg_column_text(st, 6),
                         &out[n].is_semantic, out[n].confidence_class,
                         sizeof(out[n].confidence_class));
       if (utility_scoring_enabled)
       {
          const char *ts = aimee_pg_column_text(st, 3);
-         out[n].effective_utility = db2_entity_edge_utility_decay(out[n].utility_score, ts, 90);
+         out[n].effective_utility =
+             kb_store_entity_edge_utility_decay(out[n].utility_score, ts, 90);
       }
       else
       {
@@ -1189,9 +1194,10 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
    return n;
 }
 
-int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
-                                             db2_entity_edge_weighted_neighbor_t *out, int max,
-                                             int limit_per_node, int utility_scoring_enabled)
+int kb_store_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
+                                                  kb_store_entity_edge_weighted_neighbor_t *out,
+                                                  int max, int limit_per_node,
+                                                  int utility_scoring_enabled)
 {
    if (!nodes || node_count <= 0 || !out || max <= 0)
       return 0;
@@ -1199,13 +1205,13 @@ int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_
       node_count = EE_FRONTIER_BATCH_MAX;
    if (limit_per_node <= 0)
       limit_per_node = 50;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
    /* Two placeholder lists over the same node set: ?1..?n match an edge whose
     * SOURCE is on the frontier, ?n+1..?2n one whose TARGET is. Same shape as
-    * db2_memory_filter_archived_ids -- positional binds rather than a
+    * kb_store_memory_filter_archived_ids -- positional binds rather than a
     * stringified IN clause, so a node key may contain anything. */
    char src_ph[EE_FRONTIER_BATCH_MAX * 8];
    char tgt_ph[EE_FRONTIER_BATCH_MAX * 8];
@@ -1266,14 +1272,15 @@ int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_
       snprintf(out[n].node, sizeof(out[n].node), "%s", node);
       out[n].weight = aimee_pg_column_int(st, 1);
       out[n].utility_score = aimee_pg_column_double(st, 2);
-      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
+      kb_store_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
       edge_class_fields(aimee_pg_column_text(st, 5), aimee_pg_column_text(st, 6),
                         &out[n].is_semantic, out[n].confidence_class,
                         sizeof(out[n].confidence_class));
       if (utility_scoring_enabled)
       {
          const char *ts = aimee_pg_column_text(st, 3);
-         out[n].effective_utility = db2_entity_edge_utility_decay(out[n].utility_score, ts, 90);
+         out[n].effective_utility =
+             kb_store_entity_edge_utility_decay(out[n].utility_score, ts, 90);
       }
       else
       {
@@ -1285,9 +1292,9 @@ int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_
    return n;
 }
 
-int db2_entity_edge_backfill_utility_touched_at(void)
+int kb_store_entity_edge_backfill_utility_touched_at(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Update rows with non-zero utility but empty/1970 utility_touched_at. */
@@ -1309,11 +1316,12 @@ int db2_entity_edge_backfill_utility_touched_at(void)
 
 /* --- graph explain: rich incident-edge read --- */
 
-int db2_entity_edge_explain_by_entity(const char *entity, db2_entity_edge_explain_t *out, int max)
+int kb_store_entity_edge_explain_by_entity(const char *entity, kb_store_entity_edge_explain_t *out,
+                                           int max)
 {
    if (!entity || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[1536];
@@ -1336,13 +1344,14 @@ int db2_entity_edge_explain_by_entity(const char *entity, db2_entity_edge_explai
    {
       memset(&out[n], 0, sizeof(out[n]));
       out[n].id = aimee_pg_column_int64(st, 0);
-      db2_copy_text(out[n].source, sizeof(out[n].source), aimee_pg_column_text(st, 1));
-      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 2));
-      db2_copy_text(out[n].target, sizeof(out[n].target), aimee_pg_column_text(st, 3));
+      kb_store_copy_text(out[n].source, sizeof(out[n].source), aimee_pg_column_text(st, 1));
+      kb_store_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 2));
+      kb_store_copy_text(out[n].target, sizeof(out[n].target), aimee_pg_column_text(st, 3));
       out[n].weight = aimee_pg_column_int(st, 4);
       out[n].structural_weight = aimee_pg_column_int(st, 5);
       out[n].utility_score = aimee_pg_column_double(st, 6);
-      db2_copy_text(out[n].edge_origin, sizeof(out[n].edge_origin), aimee_pg_column_text(st, 7));
+      kb_store_copy_text(out[n].edge_origin, sizeof(out[n].edge_origin),
+                         aimee_pg_column_text(st, 7));
       n++;
    }
    aimee_pg_finalize(st);

@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 process support for model-catalog admission policy. */
-#include "db2_model_validation.h"
+/* Descriptor-owned KB_STORE process support for model-catalog admission policy. */
+#include "kb_store_model_validation.h"
 
 #include <string.h>
 

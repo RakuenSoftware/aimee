@@ -35,9 +35,9 @@ type vectorCollectionStatus struct {
 	Exists        bool   `json:"collection_exists"`
 	Points        int64  `json:"vector_points"`
 	IndexedFields string `json:"indexed_fields"`
-	Memories      int64  `json:"db2_memories"`
-	Units         int64  `json:"db2_units"`
-	Chunks        int64  `json:"db2_chunks"`
+	Memories      int64  `json:"kb_store_memories"`
+	Units         int64  `json:"kb_store_units"`
+	Chunks        int64  `json:"kb_store_chunks"`
 	Expected      int64  `json:"expected_points"`
 	Drift         int64  `json:"drift"`
 }

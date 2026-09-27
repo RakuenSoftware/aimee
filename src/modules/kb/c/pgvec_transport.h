@@ -1,10 +1,10 @@
-#ifndef DEC_DB2_PGVEC_TRANSPORT_H
-#define DEC_DB2_PGVEC_TRANSPORT_H 1
+#ifndef DEC_KB_STORE_PGVEC_TRANSPORT_H
+#define DEC_KB_STORE_PGVEC_TRANSPORT_H 1
 
 #include <stdint.h>
 
-/* Low-level pgvector transport — internal to db2.
- * All operations use the shared db2 postgres connection (db2_conn()). */
+/* Low-level pgvector transport — internal to kb_store.
+ * All operations use the shared kb_store postgres connection (kb_store_conn()). */
 
 /* Table name constants. */
 #define PGVEC_MEMORY_TABLE            "memory_embeddings"
@@ -208,7 +208,7 @@ int pgvec_code_exists_by_hash(const char *project, const char *node_key, const c
  * its top-`k` nearest OTHER embeddings by cosine; emits unordered node_key pairs
  * whose cosine >= `min_cosine`, deduped (canonical a<b, best cosine kept) in C.
  * a_keys/b_keys are flat buffers of `max` slots of `key_cap` bytes; cosines[max].
- * A row's node_key is the projection file-node key (db2_entity_node_key_file), so
+ * A row's node_key is the projection file-node key (kb_store_entity_node_key_file), so
  * each pair joins the code-projection graph directly. `project` is required (the
  * self-join is project-scoped); `anchor_cap` bounds the outer scan (HNSW probes)
  * so cost is O(anchor_cap*k) independent of project size. Read-only analytics;
@@ -220,4 +220,4 @@ int pgvec_code_similar_pairs(const char *project, int k, double min_cosine, int 
  * node is unknown / on error. Used by the §4 surprising-links LLM judge. */
 int pgvec_code_node_path(const char *project, const char *node_key, char *out, int out_cap);
 
-#endif /* DEC_DB2_PGVEC_TRANSPORT_H */
+#endif /* DEC_KB_STORE_PGVEC_TRANSPORT_H */

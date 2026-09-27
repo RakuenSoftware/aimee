@@ -29,7 +29,7 @@
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "aimee.h"            /* KIND_COUNT, required by memory.h */
 #include "memory.h"           /* MEMORY_EMBED_TEST_FIXTURE */
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb/kb_evidence_embed.h"
 
 /* ---- stub embedder ---------------------------------------------------- */
@@ -55,19 +55,19 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 /* Write an evidence artifact and enqueue it for embedding. Returns via id_out. */
 static void seed_evidence(char *id_out, size_t id_len, const char *payload)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
-   int rc =
-       db2_artifact_write(id, "evidence", "proposed", "user", "jbailes", "jbailes", 1.0, payload);
+   kb_store_artifact_gen_id(id, sizeof(id));
+   int rc = kb_store_artifact_write(id, "evidence", "proposed", "user", "jbailes", "jbailes", 1.0,
+                                    payload);
    assert(rc == 0);
-   assert(db2_evidence_enqueue(id, "evidence") == 0);
+   assert(kb_store_evidence_enqueue(id, "evidence") == 0);
    snprintf(id_out, id_len, "%s", id);
 }
 
@@ -83,7 +83,7 @@ static void test_embed_success(void)
        id, sizeof(id),
        "{\"source_kind\":\"feedback\",\"content\":\"prefer composition over inheritance\"}");
 
-   assert(db2_evidence_ops_count("pending") == 1);
+   assert(kb_store_evidence_ops_count("pending") == 1);
 
    int n = kb_evidence_embed_drain(8, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 1);
@@ -92,9 +92,9 @@ static void test_embed_success(void)
    assert(strcmp(g_embed_last_text, "prefer composition over inheritance") == 0);
 
    /* store_vector inserts the row AND marks the op 'ok' atomically. */
-   assert(db2_evidence_ops_count("ok") == 1);
-   assert(db2_evidence_ops_count("pending") == 0);
-   assert(db2_evidence_ops_count("failed") == 0);
+   assert(kb_store_evidence_ops_count("ok") == 1);
+   assert(kb_store_evidence_ops_count("pending") == 0);
+   assert(kb_store_evidence_ops_count("failed") == 0);
 
    printf("  test_embed_success: PASS\n");
 }
@@ -111,11 +111,11 @@ static void test_embed_wrong_dim(void)
    int n = kb_evidence_embed_drain(8, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 1); /* op was handled (marked failed) */
 
-   assert(db2_evidence_ops_count("ok") == 0);
-   assert(db2_evidence_ops_count("failed") == 1);
+   assert(kb_store_evidence_ops_count("ok") == 0);
+   assert(kb_store_evidence_ops_count("failed") == 1);
 
    /* A failed op is no longer 'pending', so the drain does not spin on it. */
-   assert(db2_evidence_ops_count("pending") == 0);
+   assert(kb_store_evidence_ops_count("pending") == 0);
 
    printf("  test_embed_wrong_dim: PASS\n");
 }
@@ -133,12 +133,12 @@ static void test_embed_drain_batch(void)
       snprintf(payload, sizeof(payload), "{\"content\":\"evidence number %d\"}", i);
       seed_evidence(id, sizeof(id), payload);
    }
-   assert(db2_evidence_ops_count("pending") == 5);
+   assert(kb_store_evidence_ops_count("pending") == 5);
 
    int n = kb_evidence_embed_drain(32, MEMORY_EMBED_TEST_FIXTURE);
    assert(n == 5);
-   assert(db2_evidence_ops_count("ok") == 5);
-   assert(db2_evidence_ops_count("pending") == 0);
+   assert(kb_store_evidence_ops_count("ok") == 5);
+   assert(kb_store_evidence_ops_count("pending") == 0);
 
    /* Empty queue: drain reports zero work, not an error. */
    assert(kb_evidence_embed_drain(32, MEMORY_EMBED_TEST_FIXTURE) == 0);
@@ -152,7 +152,7 @@ int main(void)
    test_embed_success();
    test_embed_wrong_dim();
    test_embed_drain_batch();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("test_evidence_embed: ALL PASS\n");
    return 0;
 }

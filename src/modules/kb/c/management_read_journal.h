@@ -1,5 +1,5 @@
-#ifndef AIMEE_DB2_MANAGEMENT_READ_JOURNAL_H
-#define AIMEE_DB2_MANAGEMENT_READ_JOURNAL_H
+#ifndef AIMEE_KB_STORE_MANAGEMENT_READ_JOURNAL_H
+#define AIMEE_KB_STORE_MANAGEMENT_READ_JOURNAL_H
 
 #include "kb_identity.h"
 #include "management_read.h"
@@ -7,14 +7,14 @@
 
 typedef enum
 {
-   DB2_MANAGEMENT_READ_OK = 0,
-   DB2_MANAGEMENT_READ_INVALID,
-   DB2_MANAGEMENT_READ_DENIED,
-   DB2_MANAGEMENT_READ_CONFLICT,
-   DB2_MANAGEMENT_READ_INTEGRITY,
-   DB2_MANAGEMENT_READ_UNAVAILABLE,
-   DB2_MANAGEMENT_READ_COMMIT_AMBIGUOUS
-} db2_management_read_result_t;
+   KB_STORE_MANAGEMENT_READ_OK = 0,
+   KB_STORE_MANAGEMENT_READ_INVALID,
+   KB_STORE_MANAGEMENT_READ_DENIED,
+   KB_STORE_MANAGEMENT_READ_CONFLICT,
+   KB_STORE_MANAGEMENT_READ_INTEGRITY,
+   KB_STORE_MANAGEMENT_READ_UNAVAILABLE,
+   KB_STORE_MANAGEMENT_READ_COMMIT_AMBIGUOUS
+} kb_store_management_read_result_t;
 
 typedef struct
 {
@@ -25,13 +25,13 @@ typedef struct
    char local_cert_issuer[512], local_cert_serial_norm[80], local_cert_fingerprint[65];
    char target_mgmt_issuer[512], target_mgmt_serial_norm[80], target_mgmt_fingerprint[65];
    int64_t revocation_generation, publication_generation;
-} db2_management_read_intent_t;
+} kb_store_management_read_intent_t;
 
-db2_management_read_result_t db2_management_read_publication_generation(int64_t *);
-db2_management_read_result_t
-db2_management_read_intent_start(const kb_principal_t *, int64_t, const char *,
-                                 server_mgmt_read_selector_t, const char *, const uint8_t[32],
-                                 const char *, const char *, const char *, int,
-                                 db2_management_read_intent_t *);
+kb_store_management_read_result_t kb_store_management_read_publication_generation(int64_t *);
+kb_store_management_read_result_t
+kb_store_management_read_intent_start(const kb_principal_t *, int64_t, const char *,
+                                      server_mgmt_read_selector_t, const char *, const uint8_t[32],
+                                      const char *, const char *, const char *, int,
+                                      kb_store_management_read_intent_t *);
 
 #endif

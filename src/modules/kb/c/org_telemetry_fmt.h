@@ -1,13 +1,13 @@
-/* db2/org_telemetry_fmt.h: pure (no-libpq) P9a telemetry helpers.
+/* kb_store/org_telemetry_fmt.h: pure (no-libpq) P9a telemetry helpers.
  *
  * The dependency-light half of P9a: Prometheus text rendering + label escaping,
  * the metric_name PII-structural validator, and the scrape/ingest token SHA-256 +
- * constant-time compare. Kept separate from org_telemetry.c (the db2 access layer)
- * so these are unit-testable WITHOUT the Postgres shim. Used by both the db2 layer
+ * constant-time compare. Kept separate from org_telemetry.c (the kb_store access layer)
+ * so these are unit-testable WITHOUT the Postgres shim. Used by both the kb_store layer
  * (render over a fetched snapshot) and the HTTP layer (token auth + metric_name
  * validation). Depends only on libc + OpenSSL (SHA-256). */
-#ifndef DEC_DB2_ORG_TELEMETRY_FMT_H
-#define DEC_DB2_ORG_TELEMETRY_FMT_H 1
+#ifndef DEC_KB_STORE_ORG_TELEMETRY_FMT_H
+#define DEC_KB_STORE_ORG_TELEMETRY_FMT_H 1
 
 #include <stddef.h>
 
@@ -67,4 +67,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_DB2_ORG_TELEMETRY_FMT_H */
+#endif /* DEC_KB_STORE_ORG_TELEMETRY_FMT_H */

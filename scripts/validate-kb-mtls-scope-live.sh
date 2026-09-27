@@ -25,7 +25,7 @@ KB="${AIMEE_KB_BIN:-$SRC/aimee-kb}"
 # A UNIQUE directory per run, deliberately. The enrollment-token registry is a
 # Vault record named after the store PATH but encrypted with the per-AIMEE_HOME
 # master key, so reusing a fixed path after wiping AIMEE_HOME leaves an
-# undecryptable record in the shared DB2 vault and every later enrollment fails
+# undecryptable record in the shared KB_STORE vault and every later enrollment fails
 # with a misleading "invalid or used token". A fixed path would make this suite
 # pass once and fail forever after.
 # Use the shared disposable PostgreSQL fixture and the production module graph.

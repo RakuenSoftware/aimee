@@ -1,7 +1,7 @@
 /* kb_client_code_embed.c: KB RPC wrappers for Phase 5 code embedding refresh.
  *
  * All calls go through kb_v1_action_request (defined in kb_client.c).
- * Server/CLI must use this module; direct DB2/pgvector access is forbidden. */
+ * Server/CLI must use this module; direct KB_STORE/pgvector access is forbidden. */
 
 #include "kb_client.h"
 #include "cJSON.h"

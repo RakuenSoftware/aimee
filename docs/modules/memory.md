@@ -43,7 +43,7 @@ adapter also replaces any supplied scope with `user`, so a client cannot use the
 server placement to address KB memory. The KB placement rejects user scope.
 
 The Go owner stores embedding generations in an unconstrained `vector` column,
-with dimensions recorded per version. Global DB2 dimension reset only discovers
+with dimensions recorded per version. Global KB_STORE dimension reset only discovers
 columns declared with a fixed vector dimension, so it cannot drop these Go-owned
 generations. Unknown dimension-bound tables still refuse the reset, including
 with force enabled. Rebuild/cutover of memory generations stays with Go.
@@ -242,7 +242,7 @@ typed-fact planning/grounding, and PII behavior. Active C transport tests cover 
 retired-engine fixtures are not substitutes for Go owner regressions.
 The required `postgres-knowledge-replay` CI job exercises the PostgreSQL provider
 and memory owner with separate replay and scratch connections. The manual
-`make -C src memory-owner-replay-check` gate requires `AIMEE_DB2_REPLAY_URL`,
+`make -C src memory-owner-replay-check` gate requires `AIMEE_KB_STORE_REPLAY_URL`,
 `AIMEE_MEMORY_EVAL_URL` and
 `AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
 The target runs the full memory, isolated evaluator and module race suites with
@@ -351,7 +351,7 @@ end-to-end ranking parity, legacy query/candidate expansion and unversioned-vect
 admission remain separate work. No production enablement or quality improvement
 is claimed without paired evaluation.
 
-There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
+There is no C memory engine and no C KB_STORE `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
 success; a local fallback is forbidden.
 

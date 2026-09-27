@@ -14,7 +14,7 @@ were used.
 ## Embedding
 
 One embedder identity and dimension applies to a corpus under one KB storage authority. The KB stores
-derived vectors in DB2 and owns the embedding role. The selected model can run inside its container
+derived vectors in KB_STORE and owns the embedding role. The selected model can run inside its container
 or at a configured remote endpoint. The bundled `bekko-a25m` is 384-dimension.
 
 The embedder is selected in the wizard's Deploy topology step. Until one is selected the KB serves a
@@ -22,7 +22,7 @@ builtin lexical embedder. Retrieval works, but it is keyword matching rather tha
 
 Check [KB model tiers](AIMEE_KB_SYNTH_TIERS.md) for sizing an internal synthesis role.
 
-The configured dimension must equal the model output. DB2 records the dimension used to create its
+The configured dimension must equal the model output. KB_STORE records the dimension used to create its
 vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
 failure.
 
@@ -98,12 +98,12 @@ limits worth knowing:
 
 `aimee kb reembed` is a dimension-change reset. It does not rebuild a same-dimension corpus; when
 the target equals the recorded dimension, it reports that no dimension change is needed and exits.
-Use a fresh DB2 and re-ingest authoritative sources for same-dimension model or serving-identity
+Use a fresh KB_STORE and re-ingest authoritative sources for same-dimension model or serving-identity
 changes.
 
 Before changing it:
 
-1. back up DB2;
+1. back up KB_STORE;
 2. stop KB writers;
 3. record the old model, dimension, and row counts;
 4. enable `kb.reembed_on_dim_change` in the KB's own configuration;

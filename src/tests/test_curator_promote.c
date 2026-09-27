@@ -10,10 +10,10 @@
 
 #include <stdlib.h>
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_promote.h"
 
-void *(db2_conn)(void);
+void *(kb_store_conn)(void);
 
 static void test_scope_lattice(void)
 {
@@ -27,11 +27,11 @@ static void test_scope_lattice(void)
 
 static void test_drain_graceful(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    int rc = kb_curator_promote_entity_one(NULL);
    assert(rc == 0 || rc == 1);
    printf("  promote graceful on empty/disabled shim OK (rc=%d)\n", rc);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 static void seed(sqlite3 *db, const char *sql)
@@ -45,8 +45,8 @@ static void test_pick_seeded(void)
     * `payload_json`). A project-scoped entity cited by >= min_sources distinct
     * `mentions` sources must be picked; under the old column name the SELECT
     * fails to prepare and nothing is picked. */
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
             " ('ent','entity','committed','project','projA','{\"name\":\"pgvector\"}'),"
@@ -58,8 +58,8 @@ static void test_pick_seeded(void)
 
    char id[64] = "", sk[64] = "", si[128] = "";
    char *payload = NULL;
-   int found = kb_curator_promote_pick(db2_conn(), 3, id, sizeof(id), &payload, sk, sizeof(sk), si,
-                                       sizeof(si));
+   int found = kb_curator_promote_pick(kb_store_conn(), 3, id, sizeof(id), &payload, sk, sizeof(sk),
+                                       si, sizeof(si));
    assert(found == 1);
    assert(strcmp(id, "ent") == 0);
    assert(strcmp(sk, "project") == 0 && strcmp(si, "projA") == 0);
@@ -68,18 +68,18 @@ static void test_pick_seeded(void)
    /* threshold not met (min_sources=4) → no pick */
    char id2[64] = "";
    char *p2 = NULL;
-   int f2 = kb_curator_promote_pick(db2_conn(), 4, id2, sizeof(id2), &p2, sk, sizeof(sk), si,
+   int f2 = kb_curator_promote_pick(kb_store_conn(), 4, id2, sizeof(id2), &p2, sk, sizeof(sk), si,
                                     sizeof(si));
    assert(f2 == 0);
    free(p2);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  promote_pick selects an entity with >= min_sources OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_promote"))
+   if (kb_store_test_shim_skip_on_postgres("curator_promote"))
       return 0;
 
    test_scope_lattice();

@@ -24,15 +24,14 @@ typedef enum
    KB_MANAGEMENT_HEALTH_INVALID
 } kb_management_health_result_t;
 
-typedef kb_management_health_result_t (*kb_management_health_snapshot_fn)(void *,
-                                                                          const kb_principal_t *,
-                                                                          int64_t, const char *,
-                                                                          db2_server_snapshot_t *);
+typedef kb_management_health_result_t (*kb_management_health_snapshot_fn)(
+    void *, const kb_principal_t *, int64_t, const char *, kb_store_server_snapshot_t *);
 typedef kb_management_health_result_t (*kb_management_health_bundle_fn)(
     void *, kb_management_cert_bundle_t *, kb_management_cert_active_t *);
 typedef void (*kb_management_health_bundle_clear_fn)(void *, kb_management_cert_bundle_t *);
 typedef kb_management_health_result_t (*kb_management_health_server_open_fn)(
-    void *, const db2_server_snapshot_t *, const kb_management_cert_bundle_t *, uint64_t, void **);
+    void *, const kb_store_server_snapshot_t *, const kb_management_cert_bundle_t *, uint64_t,
+    void **);
 typedef kb_management_health_result_t (*kb_management_health_server_request_fn)(
     void *, void *, const char *, const char *, const char *, const char *, uint64_t, char *,
     size_t, int *);
@@ -84,7 +83,7 @@ int kb_management_health_response_decode(const char *, size_t, const char *);
 /* Production primary-snapshot and lifecycle adapters. */
 kb_management_health_result_t kb_management_health_snapshot_primary(void *, const kb_principal_t *,
                                                                     int64_t, const char *,
-                                                                    db2_server_snapshot_t *);
+                                                                    kb_store_server_snapshot_t *);
 kb_management_health_result_t kb_management_health_bundle_active(void *,
                                                                  kb_management_cert_bundle_t *,
                                                                  kb_management_cert_active_t *);
@@ -95,7 +94,7 @@ typedef struct
    const char *server_ca_pem;
 } kb_management_health_server_config_t;
 kb_management_health_result_t
-kb_management_health_server_open_production(void *, const db2_server_snapshot_t *,
+kb_management_health_server_open_production(void *, const kb_store_server_snapshot_t *,
                                             const kb_management_cert_bundle_t *, uint64_t, void **);
 kb_management_health_result_t
 kb_management_health_server_request_production(void *, void *, const char *, const char *,

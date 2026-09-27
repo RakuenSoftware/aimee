@@ -4,7 +4,7 @@
  * "status:error must surface, never be silently flattened to projects:0" —
  * can be unit-tested without linking the cli transport. The bug this
  * guards: an error response from aimee-kb used to be parsed into a
- * successful empty scan, hiding real DB2/canonical-index failures. */
+ * successful empty scan, hiding real KB_STORE/canonical-index failures. */
 #include "cJSON.h"
 #include "json_fluent.h"
 #include "kb_client.h"

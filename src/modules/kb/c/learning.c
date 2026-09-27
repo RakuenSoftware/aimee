@@ -1,11 +1,11 @@
-/* db2/learning.c: learning_signals + learning_proposals primitives —
+/* kb_store/learning.c: learning_signals + learning_proposals primitives —
  * Postgres via libpq. */
 
-#include "db2_learning.h"
-#include "db2.h"
-#include "db2_internal.h"
+#include "kb_store_learning.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -183,12 +183,12 @@ static int lrn_recompute_observation(void *conn, const char *observation_id)
    return rc;
 }
 
-int db2_learning_observation_refresh(const char *observation_id, const char *scope_kind,
-                                     const char *scope_id, const char *observation_type,
-                                     const char *title, const char *summary,
-                                     const char *policy_version,
-                                     const learning_observation_evidence_input_t *evidence,
-                                     int evidence_count, const char *supersedes)
+int kb_store_learning_observation_refresh(const char *observation_id, const char *scope_kind,
+                                          const char *scope_id, const char *observation_type,
+                                          const char *title, const char *summary,
+                                          const char *policy_version,
+                                          const learning_observation_evidence_input_t *evidence,
+                                          int evidence_count, const char *supersedes)
 {
    const char *sk = scope_kind && scope_kind[0] ? scope_kind : "workspace";
    const char *si = scope_id ? scope_id : "";
@@ -196,7 +196,7 @@ int db2_learning_observation_refresh(const char *observation_id, const char *sco
        !policy_version || !policy_version[0] || evidence_count < 0 ||
        (evidence_count > 0 && !evidence))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    for (int i = 0; i < evidence_count; i++)
@@ -290,31 +290,31 @@ done:
    else
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
-      LOG_WARN("db2.learning", "observation refresh: %s", err);
+      LOG_WARN("kb_store.learning", "observation refresh: %s", err);
    }
    return rc;
 }
 
-int db2_learning_observation_add_evidence(const char *observation_id, int64_t source_event_id,
-                                          const char *source_span, const char *stance)
+int kb_store_learning_observation_add_evidence(const char *observation_id, int64_t source_event_id,
+                                               const char *source_span, const char *stance)
 {
    learning_observation_t obs;
-   if (db2_learning_observation_get(observation_id, &obs) != 0)
+   if (kb_store_learning_observation_get(observation_id, &obs) != 0)
       return -1;
    learning_observation_evidence_input_t ev = {source_event_id, source_span, stance};
-   return db2_learning_observation_refresh(observation_id, obs.scope_kind, obs.scope_id,
-                                           obs.observation_type, obs.title, obs.summary,
-                                           obs.synthesis_policy_version, &ev, 1, obs.supersedes);
+   return kb_store_learning_observation_refresh(
+       observation_id, obs.scope_kind, obs.scope_id, obs.observation_type, obs.title, obs.summary,
+       obs.synthesis_policy_version, &ev, 1, obs.supersedes);
 }
 
-int db2_learning_observation_refresh_recurrence(const char *observation_id, const char *role,
-                                                const char *failure_mode, const char *title,
-                                                const char *summary, int64_t max_event_id)
+int kb_store_learning_observation_refresh_recurrence(const char *observation_id, const char *role,
+                                                     const char *failure_mode, const char *title,
+                                                     const char *summary, int64_t max_event_id)
 {
    if (!observation_id || !observation_id[0] || !failure_mode || !failure_mode[0] ||
        max_event_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[LRN_ERRBUF] = "";
@@ -402,16 +402,16 @@ done:
    else
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
-      LOG_WARN("db2.learning", "observation refresh: %s", err);
+      LOG_WARN("kb_store.learning", "observation refresh: %s", err);
    }
    return rc;
 }
 
-int db2_learning_observation_get(const char *observation_id, learning_observation_t *out)
+int kb_store_learning_observation_get(const char *observation_id, learning_observation_t *out)
 {
    if (!observation_id || !observation_id[0] || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -431,12 +431,13 @@ int db2_learning_observation_get(const char *observation_id, learning_observatio
    return rc;
 }
 
-int db2_learning_observation_list(const char *status, const char *scope_kind, const char *scope_id,
-                                  int limit, learning_observation_t *out, int max)
+int kb_store_learning_observation_list(const char *status, const char *scope_kind,
+                                       const char *scope_id, int limit, learning_observation_t *out,
+                                       int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (limit <= 0 || limit > max)
@@ -459,11 +460,11 @@ int db2_learning_observation_list(const char *status, const char *scope_kind, co
    return n;
 }
 
-int db2_learning_observation_evidence_ids(const char *observation_id, int64_t *out, int max)
+int kb_store_learning_observation_evidence_ids(const char *observation_id, int64_t *out, int max)
 {
    if (!observation_id || !observation_id[0] || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT source_event_id FROM learning_observation_evidence"
@@ -481,13 +482,13 @@ int db2_learning_observation_evidence_ids(const char *observation_id, int64_t *o
    return n;
 }
 
-int db2_learning_observation_set_status(const char *observation_id, const char *status)
+int kb_store_learning_observation_set_status(const char *observation_id, const char *status)
 {
    if (!observation_id || !observation_id[0] || !status ||
        (strcmp(status, "candidate") != 0 && strcmp(status, "active") != 0 &&
         strcmp(status, "retired") != 0 && strcmp(status, "rejected") != 0))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "UPDATE learning_observations SET status=?2,refreshed_at=pg_now_text(),"
@@ -504,9 +505,9 @@ int db2_learning_observation_set_status(const char *observation_id, const char *
    return rc;
 }
 
-int db2_learning_observations_reconcile(void)
+int kb_store_learning_observations_reconcile(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[LRN_ERRBUF] = "";
@@ -545,7 +546,7 @@ int db2_learning_observations_reconcile(void)
    return rc;
 }
 
-int db2_learning_application_record(const learning_application_event_t *event)
+int kb_store_learning_application_record(const learning_application_event_t *event)
 {
    if (!event || !event->application_id[0] || event->source_event_id <= 0 ||
        !lrn_outcome_valid(event->outcome) || event->latency_ms < 0 || event->tool_count < 0 ||
@@ -553,9 +554,9 @@ int db2_learning_application_record(const learning_application_event_t *event)
        (event->selected && !event->rendered) || (event->applied && !event->selected))
       return -1;
    const char *sk = event->scope_kind[0] ? event->scope_kind : "workspace";
-   if (!lrn_event_in_scope(db2_conn(), event->source_event_id, sk, event->scope_id))
+   if (!lrn_event_in_scope(kb_store_conn(), event->source_event_id, sk, event->scope_id))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -608,16 +609,16 @@ int db2_learning_application_record(const learning_application_event_t *event)
    aimee_pg_bind_text(st, "?24", event->applied_refs[0] ? event->applied_refs : "[]");
    int rc = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE ? 0 : -1;
    if (rc != 0)
-      LOG_WARN("db2.learning", "application record: %s", err);
+      LOG_WARN("kb_store.learning", "application record: %s", err);
    aimee_pg_finalize(st);
    return rc;
 }
 
-int db2_learning_application_get(const char *application_id, learning_application_event_t *out)
+int kb_store_learning_application_get(const char *application_id, learning_application_event_t *out)
 {
    if (!application_id || !application_id[0] || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -670,9 +671,9 @@ int db2_learning_application_get(const char *application_id, learning_applicatio
    return 0;
 }
 
-void db2_learning_proposals_archive_expired(void)
+void kb_store_learning_proposals_archive_expired(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -685,15 +686,15 @@ void db2_learning_proposals_archive_expired(void)
    if (!st)
       return;
    if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
-      LOG_WARN("db2.learning", "archive_expired: %s", err);
+      LOG_WARN("kb_store.learning", "archive_expired: %s", err);
    aimee_pg_finalize(st);
 }
 
-int db2_learning_proposal_archive(int id, const char *reason)
+int kb_store_learning_proposal_archive(int id, const char *reason)
 {
    if (id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -712,11 +713,11 @@ int db2_learning_proposal_archive(int id, const char *reason)
    return rc;
 }
 
-int db2_learning_proposal_bump_corroboration(int id)
+int kb_store_learning_proposal_bump_corroboration(int id)
 {
    if (id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -734,11 +735,11 @@ int db2_learning_proposal_bump_corroboration(int id)
    return rc;
 }
 
-int db2_learning_proposal_refresh_evidence(int id, const char *evidence_refs_json)
+int kb_store_learning_proposal_refresh_evidence(int id, const char *evidence_refs_json)
 {
    if (id <= 0 || !evidence_refs_json)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -755,21 +756,22 @@ int db2_learning_proposal_refresh_evidence(int id, const char *evidence_refs_jso
    return rc;
 }
 
-int db2_learning_commits_in_last_7_days(const char *sink)
+int kb_store_learning_commits_in_last_7_days(const char *sink)
 {
    if (!sink || !*sink)
       return 0;
-   return db2_scalar_int_text("SELECT COUNT(*) FROM learning_proposals"
-                              " WHERE sink = ?1 AND state = 'committed'"
-                              "   AND committed_at >= pg_now_text('-7 days')",
-                              sink, 0);
+   return kb_store_scalar_int_text("SELECT COUNT(*) FROM learning_proposals"
+                                   " WHERE sink = ?1 AND state = 'committed'"
+                                   "   AND committed_at >= pg_now_text('-7 days')",
+                                   sink, 0);
 }
 
-int db2_learning_signal_insert(const learning_signal_input_t *input, const char *source_session)
+int kb_store_learning_signal_insert(const learning_signal_input_t *input,
+                                    const char *source_session)
 {
    if (!input)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -804,12 +806,12 @@ int db2_learning_signal_insert(const learning_signal_input_t *input, const char 
    return id;
 }
 
-int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
-                                       int64_t target_memory_id)
+int kb_store_learning_proposal_find_pending(const char *sink, const char *target_key,
+                                            int64_t target_memory_id)
 {
    if (!sink || !*sink)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -831,12 +833,12 @@ int db2_learning_proposal_find_pending(const char *sink, const char *target_key,
    return id;
 }
 
-int db2_learning_proposal_find_committed(const char *sink, const char *target_key,
-                                         int64_t target_memory_id, int exclude_id)
+int kb_store_learning_proposal_find_committed(const char *sink, const char *target_key,
+                                              int64_t target_memory_id, int exclude_id)
 {
    if (!sink || !*sink)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -860,13 +862,13 @@ int db2_learning_proposal_find_committed(const char *sink, const char *target_ke
    return id;
 }
 
-int db2_learning_proposal_insert(int signal_id, const char *sink, const char *target_key,
-                                 int64_t target_memory_id, const char *action_json,
-                                 const char *evidence_refs, const char *expires_at)
+int kb_store_learning_proposal_insert(int signal_id, const char *sink, const char *target_key,
+                                      int64_t target_memory_id, const char *action_json,
+                                      const char *evidence_refs, const char *expires_at)
 {
    if (!sink || !*sink || !action_json)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -895,11 +897,11 @@ int db2_learning_proposal_insert(int signal_id, const char *sink, const char *ta
    return id;
 }
 
-int db2_learning_proposal_mark_committed(int id)
+int kb_store_learning_proposal_mark_committed(int id)
 {
    if (id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -914,16 +916,16 @@ int db2_learning_proposal_mark_committed(int id)
    aimee_pg_bind_int(st, "?1", id);
    int rc = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE) ? 0 : -1;
    if (rc != 0)
-      LOG_ERROR("db2.learning", "mark_committed: %s", err);
+      LOG_ERROR("kb_store.learning", "mark_committed: %s", err);
    aimee_pg_finalize(st);
    return rc;
 }
 
-int db2_learning_proposal_get(int id, learning_proposal_t *out)
+int kb_store_learning_proposal_get(int id, learning_proposal_t *out)
 {
    if (!out || id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -947,11 +949,12 @@ int db2_learning_proposal_get(int id, learning_proposal_t *out)
    return rc;
 }
 
-int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, int64_t *terminal)
+int kb_store_learning_proposals_settled_counts(int window_days, int64_t *committed,
+                                               int64_t *terminal)
 {
    if (window_days <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -982,12 +985,12 @@ int db2_learning_proposals_settled_counts(int window_days, int64_t *committed, i
    return rc;
 }
 
-int db2_learning_committed_source_counts(int window_days, const char *sink_or_null,
-                                         db2_learning_source_count_t *out, int max)
+int kb_store_learning_committed_source_counts(int window_days, const char *sink_or_null,
+                                              kb_store_learning_source_count_t *out, int max)
 {
    if (window_days <= 0 || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1026,12 +1029,12 @@ int db2_learning_committed_source_counts(int window_days, const char *sink_or_nu
    return count;
 }
 
-int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_signal_t *out,
-                                         int max)
+int kb_store_learning_negative_signals_recent(int window_days,
+                                              kb_store_learning_negative_signal_t *out, int max)
 {
    if (window_days <= 0 || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1054,7 +1057,7 @@ int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_
    int count = 0;
    while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_learning_negative_signal_t *row = &out[count];
+      kb_store_learning_negative_signal_t *row = &out[count];
       memset(row, 0, sizeof(*row));
       row->id = aimee_pg_column_int64(st, 0);
       lrn_copy_text(row->signal_type, sizeof(row->signal_type), aimee_pg_column_text(st, 1), "");
@@ -1071,11 +1074,11 @@ int db2_learning_negative_signals_recent(int window_days, db2_learning_negative_
    return count;
 }
 
-int db2_learning_fate_record(int proposal_id, const char *fate, const char *reason)
+int kb_store_learning_fate_record(int proposal_id, const char *fate, const char *reason)
 {
    if (proposal_id <= 0 || !fate || !fate[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1098,12 +1101,12 @@ int db2_learning_fate_record(int proposal_id, const char *fate, const char *reas
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
+int kb_store_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
 {
    if (proposal_id <= 0 || !fate_out || fate_out_len == 0)
       return -1;
    fate_out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1123,12 +1126,12 @@ int db2_learning_fate_get(int proposal_id, char *fate_out, size_t fate_out_len)
    return found;
 }
 
-int db2_learning_fate_counts(int window_days, const char *regret_fates,
-                             db2_learning_fate_count_t *out, int max)
+int kb_store_learning_fate_counts(int window_days, const char *regret_fates,
+                                  kb_store_learning_fate_count_t *out, int max)
 {
    if (window_days <= 0 || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1174,12 +1177,12 @@ int db2_learning_fate_counts(int window_days, const char *regret_fates,
    return count;
 }
 
-int db2_learning_proposal_list(const char *state, const char *sink, int limit,
-                               learning_proposal_t *out, int max)
+int kb_store_learning_proposal_list(const char *state, const char *sink, int limit,
+                                    learning_proposal_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (limit <= 0 || limit > max)

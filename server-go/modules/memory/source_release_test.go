@@ -379,9 +379,9 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 }
 
 func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL for structured source observations")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL for structured source observations")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -533,7 +533,7 @@ func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
 // The shipping storage barrier is tested independently of the HTTP guard. A
 // passing result here is not evidence that provider call sites hold a lease.
 func TestSourceSendStorageBarrierPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("packaged PostgreSQL required")
 	}
@@ -768,9 +768,9 @@ func TestSourceSendCompletionNeedsOnlyOpaqueToken(t *testing.T) {
 }
 
 func TestHardRuleSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -865,9 +865,9 @@ func TestHardRuleSourceObservationsPostgres(t *testing.T) {
 }
 
 func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -944,9 +944,9 @@ func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
 }
 
 func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -1284,9 +1284,9 @@ func TestExplorationIndexGenerationFollowsRetainedParts(t *testing.T) {
 // Model a memory owner disappearing after its release statement, before COMMIT.
 // The store process (and its transaction) survives that owner independently.
 func TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

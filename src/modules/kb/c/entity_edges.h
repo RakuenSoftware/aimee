@@ -1,14 +1,14 @@
-/* db2/entity_edges.h: storage primitives for entity_edges — DB2 subsystem.
+/* kb_store/entity_edges.h: storage primitives for entity_edges — KB_STORE subsystem.
  *
  * Tables: entity_edges (the graph itself). Profiles live in
- * db2/entity_profiles.h.
+ * kb_store/entity_profiles.h.
  *
  * The edge_t typedef lives in headers/memory.h; callers include
  * "aimee.h" first so the type resolves.
  *
  * Pure domain API. No backend types or handles in any signature. */
-#ifndef DEC_DB2_ENTITY_EDGES_H
-#define DEC_DB2_ENTITY_EDGES_H 1
+#ifndef DEC_KB_STORE_ENTITY_EDGES_H
+#define DEC_KB_STORE_ENTITY_EDGES_H 1
 
 #include <stdint.h>
 
@@ -29,21 +29,21 @@ extern "C"
    {
       char node[GRAPH_ENDPOINT_MAX];
       int weight;
-   } db2_entity_neighbor_t;
+   } kb_store_entity_neighbor_t;
 
    /* Insert a fresh edge or bump the weight of an existing
     * (source, relation, target) triple. On a fresh insert,
     * relation_id / subject_kind / object_kind are recorded. Sets
     * *out_added = 1 when a new row was inserted. Returns 0 on success,
     * -1 on error. */
-   int db2_entity_edge_upsert(const char *source, const char *relation, const char *target,
-                              int64_t window_id, int relation_id, int subject_kind, int object_kind,
-                              int *out_added);
+   int kb_store_entity_edge_upsert(const char *source, const char *relation, const char *target,
+                                   int64_t window_id, int relation_id, int subject_kind,
+                                   int object_kind, int *out_added);
 
-   /* Typed-fact (§1 / P1) semantic-edge writer: like db2_entity_edge_upsert but
+   /* Typed-fact (§1 / P1) semantic-edge writer: like kb_store_entity_edge_upsert but
     * stamps edge_class='semantic' so the row is separable from co-occurrence rows
     * sharing this table (R1-A1). The single commit point for semantic edges is
-    * the typed-fact gate (db2_fact_commit) — callers route through it, not here
+    * the typed-fact gate (kb_store_fact_commit) — callers route through it, not here
     * directly. Bumps weight on a repeat (source,relation,target) and upgrades the
     * stored confidence_class/confidence when the new write outranks it (§5; never
     * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C").
@@ -55,37 +55,38 @@ extern "C"
     * So a model-authored (Class B/C) assertion can neither supersede nor sit
     * beside a user-stated Class-A fact. Returns 0 on success (including a dropped
     * outranked write, which leaves *out_added = 0), -1 on error. */
-   int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
-                                       int relation_id, int subject_kind, int object_kind,
-                                       const char *confidence_class, double confidence,
-                                       int *out_added);
+   int kb_store_entity_edge_upsert_semantic(const char *source, const char *relation,
+                                            const char *target, int relation_id, int subject_kind,
+                                            int object_kind, const char *confidence_class,
+                                            double confidence, int *out_added);
 
    /* Recall over typed facts: edges where (source=entity OR target=entity) AND
     * edge_class='semantic' (co-occurrence rows excluded). Returns count. */
-   int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max);
+   int kb_store_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max);
 
    /* List edges where source = entity OR target = entity (symmetric).
     * Fills full edge_t rows. Returns count. */
-   int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max);
+   int kb_store_entity_edge_list_by_entity(const char *entity, edge_t *out, int max);
 
    /* Neighbors of `entity` (symmetric). `limit_sql` caps the SQL LIMIT
     * (per-direction). Returns count written into `out`. */
-   int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, int max,
-                                 int limit_sql);
+   int kb_store_entity_edge_neighbors(const char *entity, kb_store_entity_neighbor_t *out, int max,
+                                      int limit_sql);
 
    /* Neighbors of `entity` filtered to relation == `rel_a`, optionally
     * also matching `rel_b` (NULL = single-relation filter). When
     * `order_by_weight` is non-zero, the SQL adds ORDER BY weight DESC
     * before LIMIT. */
-   int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, const char *rel_b,
-                                          int order_by_weight, db2_entity_neighbor_t *out, int max,
-                                          int limit_sql);
+   int kb_store_entity_edge_neighbors_filtered(const char *entity, const char *rel_a,
+                                               const char *rel_b, int order_by_weight,
+                                               kb_store_entity_neighbor_t *out, int max,
+                                               int limit_sql);
 
    /* Walk-step: top-50 neighbors of `node` (symmetric, ORDER BY weight
     * DESC). Used by memory_episodes BFS. Returns full edge_t rows. */
-   int db2_entity_edge_walk_step(const char *node, edge_t *out, int max);
+   int kb_store_entity_edge_walk_step(const char *node, edge_t *out, int max);
 
-   /* Walk-step with ontology kinds: same traversal as db2_entity_edge_walk_step,
+   /* Walk-step with ontology kinds: same traversal as kb_store_entity_edge_walk_step,
     * but fills a richer struct carrying relation_id / subject_kind / object_kind
     * for the BFS in memory_episodes. Legacy NULL columns surface as
     * REL_CO_DISCUSSED (12) / NODE_OTHER (99).
@@ -104,54 +105,54 @@ extern "C"
       int subject_kind;
       int object_kind;
       int weight;
-   } db2_entity_edge_with_kinds_t;
+   } kb_store_entity_edge_with_kinds_t;
 
-   int db2_entity_edge_walk_step_with_kinds(const char *node, db2_entity_edge_with_kinds_t *out,
-                                            int max);
+   int kb_store_entity_edge_walk_step_with_kinds(const char *node,
+                                                 kb_store_entity_edge_with_kinds_t *out, int max);
 
    /* memory_scan recurring topics: top targets where source=? AND
     * relation=?, GROUP BY target ORDER BY SUM(weight) DESC. */
-   int db2_entity_edge_top_targets_by_relation(const char *source, const char *relation,
-                                               db2_entity_neighbor_t *out, int max);
+   int kb_store_entity_edge_top_targets_by_relation(const char *source, const char *relation,
+                                                    kb_store_entity_neighbor_t *out, int max);
 
    /* memory_scan top partners: both directions UNION ALL, grouped by
     * partner, summed by weight, ordered DESC. */
-   int db2_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
-                                                db2_entity_neighbor_t *out, int max);
+   int kb_store_entity_edge_top_partners_by_relation(const char *entity, const char *relation,
+                                                     kb_store_entity_neighbor_t *out, int max);
 
    /* memory_assemble: top distinct triples by weight. */
-   int db2_entity_edge_top_distinct_triples(edge_t *out, int max);
+   int kb_store_entity_edge_top_distinct_triples(edge_t *out, int max);
 
    /* index.c co-citation: targets where source=? AND relation=? AND
     * weight > min_weight, plus symmetric sources where target=? same
     * filter. Returns up to `max` distinct names. */
-   int db2_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
-                                  char (*out)[128], int max);
+   int kb_store_entity_edge_co_targets(const char *node, const char *relation, int min_weight,
+                                       char (*out)[128], int max);
 
    /* memory_improve.c: bump utility_score by delta on every edge that
     * touches the given key (source = key OR target = key). */
-   int db2_entity_edge_bump_utility(const char *key, double delta);
+   int kb_store_entity_edge_bump_utility(const char *key, double delta);
 
    /* memory_core_search outbound only: targets where source=?, ordered
     * by weight DESC up to limit_sql rows. */
-   int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t *out, int max,
-                                          int limit_sql);
+   int kb_store_entity_edge_outbound_neighbors(const char *source, kb_store_entity_neighbor_t *out,
+                                               int max, int limit_sql);
 
    /* memory_core_search token search: edges whose source/target/
     * relation matches `token` case-insensitively. Returns full edge_t
     * rows ordered by weight DESC. */
-   int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql);
+   int kb_store_entity_edge_search_by_token(const char *token, edge_t *out, int max, int limit_sql);
 
    /* Maintenance: drop CO-OCCURRENCE edges where neither endpoint appears in any
     * L1/L2 memory key/content. Typed-fact ('semantic') edges are never pruned
     * this way — they were asserted directly rather than observed, and leave only
     * by §4/§5 retraction or expiry, both of which retain the row. Returns rows
     * deleted. */
-   int db2_entity_edge_prune_orphans(void);
+   int kb_store_entity_edge_prune_orphans(void);
 
    /* Maintenance: normalize weights per relation so the maximum is 100.
     * Returns rows updated. */
-   int db2_entity_edge_normalize_weights(void);
+   int kb_store_entity_edge_normalize_weights(void);
 
    /* Rich edge row for `graph explain`: full provenance + scoring fields. */
    typedef struct
@@ -164,12 +165,12 @@ extern "C"
       int structural_weight;
       double utility_score;
       char edge_origin[32];
-   } db2_entity_edge_explain_t;
+   } kb_store_entity_edge_explain_t;
 
    /* List edges incident to |entity| (source OR target) with full provenance,
     * ordered by structural_weight + weight DESC.  Returns count written. */
-   int db2_entity_edge_explain_by_entity(const char *entity, db2_entity_edge_explain_t *out,
-                                         int max);
+   int kb_store_entity_edge_explain_by_entity(const char *entity,
+                                              kb_store_entity_edge_explain_t *out, int max);
 
    /* --- Phase 4: utility-aware graph scoring --- */
 
@@ -187,28 +188,29 @@ extern "C"
       char relation[64];
       char confidence_class[4]; /* "A"/"B"/"C"; empty for co-occurrence */
       int is_semantic;
-   } db2_entity_edge_weighted_neighbor_t;
+   } kb_store_entity_edge_weighted_neighbor_t;
 
    /* Utility half-life decay.
     * Returns decayed utility given a stored score, a touch timestamp
     * (ISO-8601 UTC text), and a half-life in days (default 90).
     * Empty or invalid timestamp returns 0.0 when score is 0, or the
     * raw score when non-zero (legacy sentinel). */
-   double db2_entity_edge_utility_decay(double raw_score, const char *touched_at,
-                                        int half_life_days);
+   double kb_store_entity_edge_utility_decay(double raw_score, const char *touched_at,
+                                             int half_life_days);
 
    /* Compute prune_priority = weight + (utility_weight * decayed_utility).
     * Used to rank neighbours when the neighbour budget is exceeded.
     * utility_weight=0 disables utility contribution (Phase 4 default). */
-   double db2_entity_edge_prune_priority(int weight, double decayed_utility, double utility_weight);
+   double kb_store_entity_edge_prune_priority(int weight, double decayed_utility,
+                                              double utility_weight);
 
-   /* Weighted neighbours: like db2_entity_edge_neighbors but also returns
+   /* Weighted neighbours: like kb_store_entity_edge_neighbors but also returns
     * utility_score and effective_utility (decayed with half_life_days=90).
     * When utility_scoring_enabled=0, effective_utility is set to 0.
     * Returns count written into out. */
-   int db2_entity_edge_neighbors_weighted(const char *entity,
-                                          db2_entity_edge_weighted_neighbor_t *out, int max,
-                                          int limit_sql, int utility_scoring_enabled);
+   int kb_store_entity_edge_neighbors_weighted(const char *entity,
+                                               kb_store_entity_edge_weighted_neighbor_t *out,
+                                               int max, int limit_sql, int utility_scoring_enabled);
 
 /* Largest frontier a single batched neighbour read will accept. Bounds the
  * generated SQL, so the caller expands a wider frontier in chunks rather than
@@ -216,7 +218,7 @@ extern "C"
 #define EE_FRONTIER_BATCH_MAX 64
 
    /* Neighbours of a WHOLE FRONTIER in one round trip -- the batched form of
-    * db2_entity_edge_neighbors_weighted, returning identical fields so a
+    * kb_store_entity_edge_neighbors_weighted, returning identical fields so a
     * traversal can swap one for the other without changing how it scores.
     *
     * Replaces the earlier two-hop CTE. That reader expanded a single seed to
@@ -226,14 +228,15 @@ extern "C"
     * capped per frontier node, not globally -- see the implementation.
     *
     * `nodes` is read but not retained. Returns count written into out. */
-   int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
-                                                db2_entity_edge_weighted_neighbor_t *out, int max,
-                                                int limit_per_node, int utility_scoring_enabled);
+   int kb_store_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
+                                                     kb_store_entity_edge_weighted_neighbor_t *out,
+                                                     int max, int limit_per_node,
+                                                     int utility_scoring_enabled);
 
    /* Backfill utility_touched_at for rows with non-zero utility_score and
     * empty utility_touched_at.  Returns rows updated.  Safe to call
     * repeatedly (idempotent). */
-   int db2_entity_edge_backfill_utility_touched_at(void);
+   int kb_store_entity_edge_backfill_utility_touched_at(void);
 
    /* --- Phase 1: entity edge uniqueness migration --- */
 
@@ -244,29 +247,29 @@ extern "C"
       int64_t dup_rows;      /* extra rows to remove (count - 1 per group) */
       int64_t largest_group; /* max rows sharing one triple */
       int64_t table_size_kb; /* estimated table + index size in KB */
-   } db2_entity_edge_dedup_report_t;
+   } kb_store_entity_edge_dedup_report_t;
 
    /* Dry-run audit: count duplicate triples and estimate cost.
     * Returns 0 on success, -1 on DB error. */
-   int db2_entity_edge_dedup_audit(db2_entity_edge_dedup_report_t *out);
+   int kb_store_entity_edge_dedup_audit(kb_store_entity_edge_dedup_report_t *out);
 
    /* Migrate: write rollback JSONL to rollback_path (if non-NULL), then
     * merge duplicates — sum weights, clamp utility to [-5, 5], keep
     * newest utility_touched_at.  dry_run=1 skips writes and fills *out.
     * Returns 0 on success, -1 on error. */
-   int db2_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
-                                     db2_entity_edge_dedup_report_t *out);
+   int kb_store_entity_edge_dedup_migrate(const char *rollback_path, int dry_run,
+                                          kb_store_entity_edge_dedup_report_t *out);
 
    /* Returns 1 if idx_ee_unique_triple exists, 0 if not, -1 on DB error. */
-   int db2_entity_edge_unique_index_exists(void);
+   int kb_store_entity_edge_unique_index_exists(void);
 
    /* Build idx_ee_unique_triple UNIQUE index (blocking DDL; call outside
     * a long transaction).  Sets *out_already_exists if index was present.
     * Returns 0 on success, -1 on error. */
-   int db2_entity_edge_build_unique_index(int *out_already_exists);
+   int kb_store_entity_edge_build_unique_index(int *out_already_exists);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_ENTITY_EDGES_H */
+#endif /* DEC_KB_STORE_ENTITY_EDGES_H */

@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "feature_rows.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "support/json_canonical.h"
 #include "../modules/kb/c/db_postgres.h"
 #include "../modules/kb/c/lifecycle.h"
@@ -31,13 +31,13 @@
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* ---- 1. feature_row_upsert ---- */
@@ -46,11 +46,11 @@ static void test_feature_row_upsert(void)
    open_db();
 
    const char *json = "{\"lex.cos\":0.85,\"dense.cos\":0.92}";
-   int rc = db2_feature_row_upsert("doc-1", "kb_document", "", "", "v1", json, NULL);
+   int rc = kb_store_feature_row_upsert("doc-1", "kb_document", "", "", "v1", json, NULL);
    assert(rc == 0);
 
    char buf[512];
-   int rr = db2_feature_row_read("doc-1", "kb_document", "v1", buf, sizeof(buf));
+   int rr = kb_store_feature_row_read("doc-1", "kb_document", "v1", buf, sizeof(buf));
    assert(rr == 0);
    assert(strstr(buf, "0.85") != NULL);
    assert(strstr(buf, "0.92") != NULL);
@@ -64,11 +64,11 @@ static void test_feature_row_upsert_conflict(void)
 {
    open_db();
 
-   db2_feature_row_upsert("doc-2", "kb_document", "", "", "v1", "{\"lex.cos\":0.5}", NULL);
-   db2_feature_row_upsert("doc-2", "kb_document", "", "", "v1", "{\"lex.cos\":0.75}", NULL);
+   kb_store_feature_row_upsert("doc-2", "kb_document", "", "", "v1", "{\"lex.cos\":0.5}", NULL);
+   kb_store_feature_row_upsert("doc-2", "kb_document", "", "", "v1", "{\"lex.cos\":0.75}", NULL);
 
    char buf[256];
-   assert(db2_feature_row_read("doc-2", "kb_document", "v1", buf, sizeof(buf)) == 0);
+   assert(kb_store_feature_row_read("doc-2", "kb_document", "v1", buf, sizeof(buf)) == 0);
    assert(strstr(buf, "0.75") != NULL);
 
    close_db();
@@ -219,7 +219,7 @@ static void read_sketch_params(const char *sketch_kind, const char *scope_id,
    const char *sql = "SELECT params_json FROM sketch_store"
                      " WHERE sketch_kind = ?1 AND scope_kind = 'kb_project'"
                      "   AND scope_id = ?2 AND feature_family = ?3";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    aimee_pg_bind_text(st, "?1", sketch_kind);
    aimee_pg_bind_text(st, "?2", scope_id);
@@ -263,10 +263,11 @@ static void test_sketch_store_params_json(void)
    sketch_count_min_add_hash(&count_min, sketch_fnv1a("alpha", 5), 3);
    sketch_hll_add_hash(&hll, sketch_fnv1a("source-a", 8));
 
-   assert(db2_sketch_bloom_save(&bloom, "kb_project", "params_project", "file_hash") == 0);
-   assert(db2_sketch_minhash_save(&minhash, "kb_project", "params_project", "text_shingles") == 0);
-   assert(db2_sketch_count_min_save(&count_min, "kb_project", "params_project", "token") == 0);
-   assert(db2_sketch_hll_save(&hll, "kb_project", "params_project", "source_id") == 0);
+   assert(kb_store_sketch_bloom_save(&bloom, "kb_project", "params_project", "file_hash") == 0);
+   assert(kb_store_sketch_minhash_save(&minhash, "kb_project", "params_project", "text_shingles") ==
+          0);
+   assert(kb_store_sketch_count_min_save(&count_min, "kb_project", "params_project", "token") == 0);
+   assert(kb_store_sketch_hll_save(&hll, "kb_project", "params_project", "source_id") == 0);
 
    char params[256];
    read_sketch_params("bloom", "params_project", "file_hash", params, sizeof(params));
@@ -290,11 +291,11 @@ static void test_sketch_store_params_json(void)
    assert_contains(params, "\"hll_reset\":\"never\"");
 
    char err[256] = "";
-   assert(aimee_pg_exec(db2_conn(),
+   assert(aimee_pg_exec(kb_store_conn(),
                         "UPDATE sketch_store SET params_json = '{}'"
                         " WHERE sketch_kind = 'bloom' AND scope_id = 'params_project'",
                         err, sizeof(err)) == 0);
-   assert(db2_sketch_bloom_save(&bloom, "kb_project", "params_project", "file_hash") == 0);
+   assert(kb_store_sketch_bloom_save(&bloom, "kb_project", "params_project", "file_hash") == 0);
    read_sketch_params("bloom", "params_project", "file_hash", params, sizeof(params));
    assert_contains(params, "\"bloom_rotate\":\"30d\"");
 

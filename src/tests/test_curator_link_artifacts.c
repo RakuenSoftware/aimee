@@ -12,7 +12,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_link_artifacts.h"
 
 /* Controllable stubs for the embed + vector-NN deps (the sqlite shim has no
@@ -82,16 +82,16 @@ static int count(sqlite3 *db, const char *sql)
 
 static void test_empty(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    assert(kb_curator_link_artifacts_one(NULL) == 0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  link_artifacts graceful on empty/shim OK\n");
 }
 
 static void test_seeded_links(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload)"
             " VALUES ('e1','entity','committed','{\"name\":\"pgvector\"}')");
@@ -108,7 +108,7 @@ static void test_seeded_links(void)
    /* idempotent / cursor advances: next call finds nothing */
    assert(kb_curator_link_artifacts_one(NULL) == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  link_artifacts writes a mentions edge for a seeded code_unit OK\n");
 }
 
@@ -117,8 +117,8 @@ static void test_normalized_links(void)
    /* Code extraction emits snake_case `workspace_provider`; doc extraction
     * emits the prose entity name `Workspace Provider`. They name the same
     * concept, so a format-insensitive match must still link them. */
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload)"
             " VALUES ('e1','entity','committed','{\"name\":\"Workspace Provider\"}')");
@@ -131,7 +131,7 @@ static void test_normalized_links(void)
    assert(count(db, "SELECT COUNT(*) FROM artifact_links WHERE from_id='cu' AND to_id='e1'"
                     " AND kind='mentions'") == 1);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  link_artifacts matches snake_case concept to prose entity name OK\n");
 }
 
@@ -139,8 +139,8 @@ static void test_semantic_link(void)
 {
    /* The concept string matches no entity name, but the NN search resolves it
     * to a committed entity above threshold -> link via embedding similarity. */
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload)"
             " VALUES ('e2','entity','committed','{\"name\":\"Detached Resource Provider\"}')");
@@ -159,15 +159,15 @@ static void test_semantic_link(void)
 
    g_search_n = 0;
    g_lookup_aid[0] = '\0';
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  link_artifacts links via embedding NN when the string doesn't match OK\n");
 }
 
 static void test_semantic_below_threshold(void)
 {
    /* A near neighbour below threshold must NOT be linked. */
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,payload)"
             " VALUES ('e3','entity','committed','{\"name\":\"Unrelated Thing\"}')");
@@ -185,13 +185,13 @@ static void test_semantic_below_threshold(void)
 
    g_search_n = 0;
    g_lookup_aid[0] = '\0';
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  link_artifacts skips below-threshold NN neighbours OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_link_artifacts"))
+   if (kb_store_test_shim_skip_on_postgres("curator_link_artifacts"))
       return 0;
 
    test_empty();

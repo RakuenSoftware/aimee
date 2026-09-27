@@ -1,5 +1,5 @@
-/* db2/org_telemetry.c: P9a telemetry export + content-free ingest — Postgres via
- * libpq. See org_telemetry.h. Mirrors db2/org_rate.c: one prepared call into a
+/* kb_store/org_telemetry.c: P9a telemetry export + content-free ingest — Postgres via
+ * libpq. See org_telemetry.h. Mirrors kb_store/org_rate.c: one prepared call into a
  * SECURITY DEFINER function, the definer's admin-gate RAISE mapped to a sentinel
  * by message text (libpq surfaces the RAISE message, not the SQLSTATE). The
  * ingest returns a STRUCTURED outcome ('stored'|'deduped'|'dropped'), never
@@ -7,8 +7,8 @@
 
 #include "org_telemetry.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -21,23 +21,23 @@ static int telemetry_step_err(const char *err)
    if (!err)
       return -1;
    if (strstr(err, "admin only") || strstr(err, "not authorized"))
-      return DB2_TELEMETRY_ERR_DENIED;
+      return KB_STORE_TELEMETRY_ERR_DENIED;
    return -1;
 }
 
-int db2_telemetry_ingest(const char *source_event_id, const char *origin_cn, int has_team,
-                         int64_t team, const char *event_schema, const char *metric_name,
-                         const char *metric_kind, const char *value_text, int64_t ts,
-                         char *out_result, int cap)
+int kb_store_telemetry_ingest(const char *source_event_id, const char *origin_cn, int has_team,
+                              int64_t team, const char *event_schema, const char *metric_name,
+                              const char *metric_kind, const char *value_text, int64_t ts,
+                              char *out_result, int cap)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!source_event_id || !origin_cn || !event_schema || !metric_name || !metric_kind ||
        !value_text || !out_result || cap <= 0)
       return -1;
    out_result[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -69,14 +69,14 @@ int db2_telemetry_ingest(const char *source_event_id, const char *origin_cn, int
    return 0;
 }
 
-int db2_telemetry_allow(const char *event_schema, const char *metric_names_array, int enabled)
+int kb_store_telemetry_allow(const char *event_schema, const char *metric_names_array, int enabled)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!event_schema || !event_schema[0] || !metric_names_array)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -95,14 +95,14 @@ int db2_telemetry_allow(const char *event_schema, const char *metric_names_array
    return 0;
 }
 
-int db2_telemetry_allow_show(db2_telemetry_allow_row_t *out, int max)
+int kb_store_telemetry_allow_show(kb_store_telemetry_allow_row_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -118,7 +118,7 @@ int db2_telemetry_allow_show(db2_telemetry_allow_row_t *out, int max)
    {
       if (n >= max)
          break;
-      db2_telemetry_allow_row_t *r = &out[n++];
+      kb_store_telemetry_allow_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       const char *c;
       c = aimee_pg_column_text(st, 0);
@@ -137,14 +137,14 @@ int db2_telemetry_allow_show(db2_telemetry_allow_row_t *out, int max)
    return n;
 }
 
-int db2_metrics_snapshot(org_metric_row_t *out, int max)
+int kb_store_metrics_snapshot(org_metric_row_t *out, int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -182,6 +182,6 @@ int db2_metrics_snapshot(org_metric_row_t *out, int max)
    if (failed)
       return telemetry_step_err(err);
    if (overflow)
-      return DB2_TELEMETRY_ERR_TOOBIG;
+      return KB_STORE_TELEMETRY_ERR_TOOBIG;
    return n;
 }

@@ -1,7 +1,7 @@
 #include "org_vault_rotation.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <limits.h>
@@ -20,14 +20,16 @@ static void copy_text(char *dst, size_t cap, const char *src)
    snprintf(dst, cap, "%s", src ? src : "");
 }
 
-int db2_vault_rotation_start(const char *actor, const char *key_id, const char *principal,
-                             int has_team, int64_t team_id, const char *agent, const char *cred,
-                             int64_t from_version, int compromise, int64_t *out_id)
+int kb_store_vault_rotation_start(const char *actor, const char *key_id, const char *principal,
+                                  int has_team, int64_t team_id, const char *agent,
+                                  const char *cred, int64_t from_version, int compromise,
+                                  int64_t *out_id)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || !key_id || !key_id[0] || !principal ||
-       !principal[0] || !agent || !cred || from_version < 1 || from_version == INT64_MAX)
+   if (kb_store_tenant_require_pg() != 0 || !actor || !actor[0] || !key_id || !key_id[0] ||
+       !principal || !principal[0] || !agent || !cred || from_version < 1 ||
+       from_version == INT64_MAX)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_start(?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -53,16 +55,17 @@ int db2_vault_rotation_start(const char *actor, const char *key_id, const char *
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_stage(const char *actor, int64_t rotation_id, const uint8_t *wrapped_dek,
-                             size_t wrapped_dek_len, const uint8_t *nonce, size_t nonce_len,
-                             const uint8_t *ciphertext, size_t ciphertext_len, const uint8_t *tag,
-                             size_t tag_len, int64_t *out_version)
+int kb_store_vault_rotation_stage(const char *actor, int64_t rotation_id,
+                                  const uint8_t *wrapped_dek, size_t wrapped_dek_len,
+                                  const uint8_t *nonce, size_t nonce_len, const uint8_t *ciphertext,
+                                  size_t ciphertext_len, const uint8_t *tag, size_t tag_len,
+                                  int64_t *out_version)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 ||
+   if (kb_store_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 ||
        !valid_blob(wrapped_dek, wrapped_dek_len) || !valid_blob(nonce, nonce_len) ||
        !valid_blob(ciphertext, ciphertext_len) || !valid_blob(tag, tag_len))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_stage(?1,?2,?3,?4,?5,?6)", err,
@@ -83,13 +86,13 @@ int db2_vault_rotation_stage(const char *actor, int64_t rotation_id, const uint8
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_transition(const char *actor, int64_t rotation_id, const char *expected,
-                                  const char *next, const char *error)
+int kb_store_vault_rotation_transition(const char *actor, int64_t rotation_id, const char *expected,
+                                       const char *next, const char *error)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 || !expected ||
+   if (kb_store_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 || !expected ||
        !expected[0] || !next || !next[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char errbuf[ROT_ERR] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_transition(?1,?2,?3,?4,?5)", errbuf,
@@ -107,13 +110,13 @@ int db2_vault_rotation_transition(const char *actor, int64_t rotation_id, const 
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id, const uint8_t *attestation,
-                                size_t attestation_len)
+int kb_store_vault_rotation_finalize(const char *actor, int64_t rotation_id,
+                                     const uint8_t *attestation, size_t attestation_len)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 ||
+   if (kb_store_tenant_require_pg() != 0 || !actor || !actor[0] || rotation_id < 1 ||
        !valid_blob(attestation, attestation_len))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_vault_rotation_finalize(?1,?2,?3)", err,
@@ -129,12 +132,12 @@ int db2_vault_rotation_finalize(const char *actor, int64_t rotation_id, const ui
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_get(int64_t rotation_id, db2_vault_rotation_row_t *out)
+int kb_store_vault_rotation_get(int64_t rotation_id, kb_store_vault_rotation_row_t *out)
 {
-   if (db2_tenant_require_pg() != 0 || rotation_id < 1 || !out)
+   if (kb_store_tenant_require_pg() != 0 || rotation_id < 1 || !out)
       return -1;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT * FROM org_vault_rotation_get(?1)", err, sizeof(err))
@@ -186,15 +189,15 @@ int db2_vault_rotation_get(int64_t rotation_id, db2_vault_rotation_row_t *out)
    return 0;
 }
 
-int db2_vault_rotation_claim(const char *actor, int64_t rotation_id, const char *expected,
-                             const char *owner, int ttl_seconds, int64_t *token)
+int kb_store_vault_rotation_claim(const char *actor, int64_t rotation_id, const char *expected,
+                                  const char *owner, int ttl_seconds, int64_t *token)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !expected ||
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !expected ||
        !*expected || !owner || !*owner || ttl_seconds < 5 || ttl_seconds > 300 || !token)
       return -1;
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rotation_claim(?1,?2,?3,?4,?5)", err, sizeof(err));
+       kb_store_conn(), "SELECT org_vault_rotation_claim(?1,?2,?3,?4,?5)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -212,11 +215,11 @@ int db2_vault_rotation_claim(const char *actor, int64_t rotation_id, const char 
 static int claim_boolean(const char *sql, const char *actor, int64_t rotation_id, const char *owner,
                          int64_t token, int ttl_seconds)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner || !*owner ||
-       token < 1)
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner ||
+       !*owner || token < 1)
       return -1;
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -232,8 +235,8 @@ static int claim_boolean(const char *sql, const char *actor, int64_t rotation_id
    return ok ? 0 : -1;
 }
 
-int db2_vault_rotation_heartbeat(const char *actor, int64_t rotation_id, const char *owner,
-                                 int64_t token, int ttl_seconds)
+int kb_store_vault_rotation_heartbeat(const char *actor, int64_t rotation_id, const char *owner,
+                                      int64_t token, int ttl_seconds)
 {
    if (ttl_seconds < 5 || ttl_seconds > 300)
       return -1;
@@ -241,24 +244,25 @@ int db2_vault_rotation_heartbeat(const char *actor, int64_t rotation_id, const c
                         owner, token, ttl_seconds);
 }
 
-int db2_vault_rotation_release(const char *actor, int64_t rotation_id, const char *owner,
-                               int64_t token)
+int kb_store_vault_rotation_release(const char *actor, int64_t rotation_id, const char *owner,
+                                    int64_t token)
 {
    return claim_boolean("SELECT org_vault_rotation_release(?1,?2,?3,?4)", actor, rotation_id, owner,
                         token, 0);
 }
 
-int db2_vault_rotation_checkpoint_old_ref(const char *actor, int64_t rotation_id, const char *owner,
-                                          int64_t token, const char *old_vendor_ref)
+int kb_store_vault_rotation_checkpoint_old_ref(const char *actor, int64_t rotation_id,
+                                               const char *owner, int64_t token,
+                                               const char *old_vendor_ref)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner || !*owner ||
-       token < 1 || !old_vendor_ref || !*old_vendor_ref ||
-       strlen(old_vendor_ref) > DB2_VAULT_ROTATION_REF_MAX)
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner ||
+       !*owner || token < 1 || !old_vendor_ref || !*old_vendor_ref ||
+       strlen(old_vendor_ref) > KB_STORE_VAULT_ROTATION_REF_MAX)
       return -1;
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT org_vault_rotation_checkpoint_old_ref(?1,?2,?3,?4,?5)",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT org_vault_rotation_checkpoint_old_ref(?1,?2,?3,?4,?5)", err,
+       sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -271,18 +275,18 @@ int db2_vault_rotation_checkpoint_old_ref(const char *actor, int64_t rotation_id
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_stage_claimed(const char *actor, int64_t rotation_id, const char *owner,
-                                     int64_t token, const char *new_vendor_ref,
-                                     const db2_vault_rotation_envelope_t *e)
+int kb_store_vault_rotation_stage_claimed(const char *actor, int64_t rotation_id, const char *owner,
+                                          int64_t token, const char *new_vendor_ref,
+                                          const kb_store_vault_rotation_envelope_t *e)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner || !*owner ||
-       token < 1 || !e || !new_vendor_ref || !*new_vendor_ref ||
-       strlen(new_vendor_ref) > DB2_VAULT_ROTATION_REF_MAX || !e->ciphertext_len ||
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner ||
+       !*owner || token < 1 || !e || !new_vendor_ref || !*new_vendor_ref ||
+       strlen(new_vendor_ref) > KB_STORE_VAULT_ROTATION_REF_MAX || !e->ciphertext_len ||
        e->ciphertext_len > sizeof(e->ciphertext))
       return -1;
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rotation_stage_claimed(?1,?2,?3,?4,?5,?6,?7,?8,?9)", err,
+       kb_store_conn(), "SELECT org_vault_rotation_stage_claimed(?1,?2,?3,?4,?5,?6,?7,?8,?9)", err,
        sizeof(err));
    if (!st)
       return -1;
@@ -310,18 +314,19 @@ static int copy_blob_column(aimee_pg_stmt_t *st, int column, void *out, size_t e
    return 0;
 }
 
-int db2_vault_rotation_probe_admit(const char *actor, int64_t rotation_id, const char *owner,
-                                   int64_t token, const char *operation_key,
-                                   db2_vault_rotation_envelope_t *e)
+int kb_store_vault_rotation_probe_admit(const char *actor, int64_t rotation_id, const char *owner,
+                                        int64_t token, const char *operation_key,
+                                        kb_store_vault_rotation_envelope_t *e)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner || !*owner ||
-       token < 1 || !e || !operation_key || !*operation_key || strlen(operation_key) > 200)
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner ||
+       !*owner || token < 1 || !e || !operation_key || !*operation_key ||
+       strlen(operation_key) > 200)
       return -1;
    memset(e, 0, sizeof(*e));
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT * FROM org_vault_rotation_probe_admit(?1,?2,?3,?4,?5)",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT * FROM org_vault_rotation_probe_admit(?1,?2,?3,?4,?5)", err,
+       sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -361,11 +366,11 @@ static int claimed_action(const char *sql, const char *actor, int64_t rotation_i
                           const char *owner, int64_t token, const char *a, const char *b,
                           const char *c)
 {
-   if (db2_tenant_require_pg() != 0 || !sql || !actor || !*actor || rotation_id < 1 || !owner ||
-       !*owner || token < 1 || !a || !*a || !b || !*b)
+   if (kb_store_tenant_require_pg() != 0 || !sql || !actor || !*actor || rotation_id < 1 ||
+       !owner || !*owner || token < 1 || !a || !*a || !b || !*b)
       return -1;
    char err[ROT_ERR] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);
@@ -380,32 +385,33 @@ static int claimed_action(const char *sql, const char *actor, int64_t rotation_i
    return step == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_vault_rotation_transition_claimed(const char *actor, int64_t rotation_id, const char *owner,
-                                          int64_t token, const char *expected, const char *next,
-                                          const char *receipt)
+int kb_store_vault_rotation_transition_claimed(const char *actor, int64_t rotation_id,
+                                               const char *owner, int64_t token,
+                                               const char *expected, const char *next,
+                                               const char *receipt)
 {
    return claimed_action("SELECT org_vault_rotation_transition_claimed(?1,?2,?3,?4,?5,?6,?7)",
                          actor, rotation_id, owner, token, expected, next, receipt);
 }
 
-int db2_vault_rotation_fail_claimed(const char *actor, int64_t rotation_id, const char *owner,
-                                    int64_t token, const char *expected, const char *phase,
-                                    const char *error)
+int kb_store_vault_rotation_fail_claimed(const char *actor, int64_t rotation_id, const char *owner,
+                                         int64_t token, const char *expected, const char *phase,
+                                         const char *error)
 {
    return claimed_action("SELECT org_vault_rotation_fail_claimed(?1,?2,?3,?4,?5,?6,?7)", actor,
                          rotation_id, owner, token, expected, phase, error);
 }
 
-int db2_vault_rotation_remediate(const char *actor, int64_t rotation_id, const char *owner,
-                                 int64_t token, int64_t anchor_version, const char *evidence)
+int kb_store_vault_rotation_remediate(const char *actor, int64_t rotation_id, const char *owner,
+                                      int64_t token, int64_t anchor_version, const char *evidence)
 {
-   if (db2_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner || !*owner ||
-       token < 1 || anchor_version < 1 || !evidence || !*evidence ||
-       strlen(evidence) > DB2_VAULT_ROTATION_REF_MAX)
+   if (kb_store_tenant_require_pg() != 0 || !actor || !*actor || rotation_id < 1 || !owner ||
+       !*owner || token < 1 || anchor_version < 1 || !evidence || !*evidence ||
+       strlen(evidence) > KB_STORE_VAULT_ROTATION_REF_MAX)
       return -1;
    char err[ROT_ERR] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rotation_remediate(?1,?2,?3,?4,?5,?6)", err, sizeof(err));
+       kb_store_conn(), "SELECT org_vault_rotation_remediate(?1,?2,?3,?4,?5,?6)", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", actor);

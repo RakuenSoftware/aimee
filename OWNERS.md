@@ -14,7 +14,7 @@ be a different identity. Quarterly ruleset/access exports are retained under
 | event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
 | audit and governance | audit module | `src/modules/audit/` | completeness, PII bounds, WORM parity, witness behavior |
 | DB1 | `aimee` and `postgres` modules | `server-go/modules/aimee/`, `server-go/modules/postgres/`, `src/db1_client/` | domain schema, typed operations, pool and transaction ownership, local privacy |
-| DB2 | KB | `src/modules/kb/c/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
+| KB_STORE | KB | `src/modules/kb/c/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
 | workflow lifecycle | Go WFE | `server-go/internal/` | single writer, durable transition before dispatch, recovery, forge confinement |
 | tool execution | server tools/policy | tool and guardrail modules | schemas, capabilities, worktree/path checks, audit |
 | delegate sandbox | sandbox module | `src/modules/sandbox/`, delegate backends | mounts, network, credentials, packages, resource bounds |
@@ -28,7 +28,7 @@ be a different identity. Quarterly ruleset/access exports are retained under
 ## Boundary rules
 
 - Lower-level helpers cannot include a higher-level owner to get at its state.
-- Code outside DB1 or DB2 uses the public typed API, never a database handle.
+- Code outside DB1 or KB_STORE uses the public typed API, never a database handle.
 - A migrated workflow family has one writer. Shadow reads may compare; dual writes are forbidden.
 - Provider wire formats end at translation. Core stages consume canonical IR.
 - A new inter-module path uses the event bus or an existing typed resource API, not a private queue.

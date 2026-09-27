@@ -14,7 +14,7 @@
 #include <sqlite3.h>
 
 #include <aimee/core/event_bus/module_runtime.h>
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"
@@ -56,7 +56,7 @@ static void test_force_curator_gate_off(void)
 int kb_curator_queue_code_unit(const char *project, const char *file_path, const char *symbol,
                                int line);
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
-int db2_artifact_count(const char *kind, const char *state);
+int kb_store_artifact_count(const char *kind, const char *state);
 
 extern aimee_module_status_t aimee_kb_synthesis_module_handler(const aimee_module_invocation_t *,
                                                                const uint8_t *, uint32_t, uint8_t *,
@@ -139,7 +139,7 @@ static int ccu_test_job_field(sqlite3 *db, long long id, const char *col, char *
 /* ccu_reclaim_stale_running: the code-unit analogue of the extract_doc reclaim.
  * ccu_claim_job only ever selects status='pending', so a job orphaned in
  * 'running' (worker crash/restart, wedged sidecar) is never retried and pins a
- * db2 pool member past its ceiling.
+ * kb_store pool member past its ceiling.
  *
  * MUST run before any other test that calls kb_curator_extract_code_unit_one:
  * the reclaim throttles on a process-wide static, and a successful reclaim in an
@@ -148,8 +148,8 @@ static int ccu_test_job_field(sqlite3 *db, long long id, const char *col, char *
  * and these assertions are about the reclaim alone. */
 static void test_reclaim_stale_running_code_unit(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    /* (a) orphan: stale claim, attempts exhausted -> 'failed', and its existing
@@ -197,14 +197,14 @@ static void test_reclaim_stale_running_code_unit(void)
    assert(ccu_test_job_field(db, 9103, "status", buf, sizeof(buf)) == 0);
    assert(strcmp(buf, "running") == 0); /* in-flight untouched */
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: test_reclaim_stale_running_code_unit (orphans reclaimed; diagnostic preserved; "
           "in-flight untouched)\n");
 }
 
 static void test_extract_code_unit_one_empty_queue(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -214,14 +214,14 @@ static void test_extract_code_unit_one_empty_queue(void)
    int rc = kb_curator_extract_code_unit_one(&opts);
    assert(rc == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: test_extract_code_unit_one_empty_queue\n");
 }
 
 static void test_provider_outage_requeues_code_unit(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    assert(sqlite3_exec(db,
                        "INSERT INTO kb_code_unit_jobs (id,project,file_path,symbol,status,attempts,"
@@ -241,14 +241,14 @@ static void test_provider_outage_requeues_code_unit(void)
    assert(kb_curator_provider_backoff_active());
    kb_curator_provider_backoff_recovered();
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: provider outage requeues code unit without spending attempt budget\n");
 }
 
 static void test_queue_dedup_via_conflict(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    const char *ins = "INSERT INTO kb_code_unit_jobs"
@@ -268,7 +268,7 @@ static void test_queue_dedup_via_conflict(void)
    sqlite3_finalize(st);
    assert(count == 1);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: test_queue_dedup_via_conflict\n");
 }
 
@@ -318,8 +318,8 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
                                  int *proposed_out, int *rejected_out, int *audit_out,
                                  int *pending_out)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    /* A real source file on disk: ccu_read_body() fopen()s job.file_path. */
@@ -379,8 +379,8 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    int rc = kb_curator_extract_code_unit_one(&opts);
    assert(rc == 1); /* claimed and processed one job */
 
-   *proposed_out = db2_artifact_count("code_unit", "proposed");
-   *rejected_out = db2_artifact_count("code_unit", "rejected");
+   *proposed_out = kb_store_artifact_count("code_unit", "proposed");
+   *rejected_out = kb_store_artifact_count("code_unit", "rejected");
 
    sqlite3_stmt *st;
    assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM audit_events", -1, &st, NULL) == SQLITE_OK);
@@ -396,7 +396,7 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
       sqlite3_finalize(st);
    }
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    unlink(src_path);
    unlink(resp_path);
 }
@@ -448,15 +448,15 @@ static void test_extract_retries_when_grounding_module_fails(void)
 }
 
 /* The curator drain runs server-side, where thin-client-ingested files do not
- * exist on disk. The body must come from DB2's file_contents (pushed at ingest),
+ * exist on disk. The body must come from KB_STORE's file_contents (pushed at ingest),
  * not an open() of the project-relative path. Seed file_contents but NO disk file
  * and a non-existent project root: extraction must still succeed, proving the
- * body was read from DB2. (Regression for ~36k curator jobs failing with
+ * body was read from KB_STORE. (Regression for ~36k curator jobs failing with
  * "cannot read body".) */
-static void test_extract_reads_body_from_db2_when_file_absent(void)
+static void test_extract_reads_body_from_kb_store_when_file_absent(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    const char *src_body = "int target_fn(void) { return 0; }\n";
@@ -472,7 +472,7 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
    close(resp_fd);
 
    /* Project root that does not exist on disk + a project-relative path with no
-    * on-disk file — only DB2 file_contents has the body. */
+    * on-disk file — only KB_STORE file_contents has the body. */
    const char *sql =
        "INSERT INTO projects (id, name, root, scanned_at)"
        " VALUES (1,'testproj','/nonexistent-root-xyzzy','t');"
@@ -492,12 +492,12 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
    snprintf(opts.extract_command, sizeof(opts.extract_command), "cat %s", resp_path);
 
    int rc = kb_curator_extract_code_unit_one(&opts);
-   assert(rc == 1); /* claimed + processed (body came from DB2, not disk) */
-   assert(db2_artifact_count("code_unit", "proposed") == 1);
+   assert(rc == 1); /* claimed + processed (body came from KB_STORE, not disk) */
+   assert(kb_store_artifact_count("code_unit", "proposed") == 1);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    unlink(resp_path);
-   printf("  PASS: test_extract_reads_body_from_db2_when_file_absent\n");
+   printf("  PASS: test_extract_reads_body_from_kb_store_when_file_absent\n");
 }
 
 /* ── main ─────────────────────────────────────────────────────────────── */
@@ -749,8 +749,8 @@ static void test_pick_sidecar_command_resolution(void)
  * because the count alone does not tell an operator what to fix. */
 static void test_queue_counts_surface_failures(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    assert(sqlite3_exec(db, "INSERT INTO projects (name,root,scanned_at) VALUES ('p','/p','t')",
@@ -797,15 +797,15 @@ static void test_queue_counts_surface_failures(void)
    assert(strcmp(qc.last_error, "latest extract failure") == 0);
    assert(strstr(qc.last_error, "recovered") == NULL);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: test_queue_counts_surface_failures (failed jobs counted, not silently dropped "
           "between pending and done)\n");
 }
 
 static void test_stale_generation_job_is_not_claimed(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    assert(sqlite3_exec(db,
                        "INSERT INTO projects"
@@ -827,7 +827,7 @@ static void test_stale_generation_job_is_not_claimed(void)
    opts.max_tokens = 256;
    assert(kb_curator_extract_code_unit_one(&opts) == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: stale-generation code-unit job is not claimed for a re-added path\n");
 }
 
@@ -854,8 +854,8 @@ static int ccu_count(sqlite3 *db, const char *sql)
  * place, so the same corpus is enqueued again WITH an endpoint configured. */
 static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    assert(sqlite3_exec(db,
                        "INSERT INTO projects"
@@ -893,13 +893,13 @@ static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
    unsetenv("SYNTHESIS_ENDPOINT");
 
    ccu_set_extract_code_gate(0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  PASS: code-unit enqueue skipped when no synthesis endpoint can consume the rows\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_code_unit"))
+   if (kb_store_test_shim_skip_on_postgres("curator_code_unit"))
       return 0;
 
    printf("curator_code_unit:\n");
@@ -924,7 +924,7 @@ int main(void)
    test_extract_accepts_honest_claim();
    test_extract_accepts_pure_function();
    test_extract_retries_when_grounding_module_fails();
-   test_extract_reads_body_from_db2_when_file_absent();
+   test_extract_reads_body_from_kb_store_when_file_absent();
    test_pick_sidecar_command_resolution();
    test_describe_wait_status();
    test_shell_quote();

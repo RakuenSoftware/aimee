@@ -1,4 +1,4 @@
-/* db2/curator_terms.c: corpus terminology normalization.
+/* kb_store/curator_terms.c: corpus terminology normalization.
  *
  * Stage 6: extract surface terms from doc normalized_text, match against
  * existing entities/term_mappings, write term_mapping artifacts for new
@@ -11,7 +11,7 @@
 
 #include "curator_terms.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <ctype.h>
@@ -154,7 +154,7 @@ static void tok_collect(const char *text, term_cands_t *out)
 /* Check if a term_mapping already exists for raw_term (case-insensitive text match). */
 static int term_mapping_exists(const char *raw_term)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !raw_term || !raw_term[0])
       return 0;
    char err[CT_ERRBUF] = "";
@@ -193,9 +193,9 @@ static void canonical_form(const char *src, char *dst, size_t dst_len)
    dst[j] = '\0';
 }
 
-int db2_corpus_normalize_terms(int64_t doc_id)
+int kb_store_corpus_normalize_terms(int64_t doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || doc_id <= 0)
       return -1;
    char err[CT_ERRBUF] = "";
@@ -237,7 +237,7 @@ int db2_corpus_normalize_terms(int64_t doc_id)
          continue;
 
       char artifact_id[37];
-      db2_artifact_gen_id(artifact_id, sizeof(artifact_id));
+      kb_store_artifact_gen_id(artifact_id, sizeof(artifact_id));
 
       char preferred[128];
       canonical_form(raw, preferred, sizeof(preferred));
@@ -248,10 +248,10 @@ int db2_corpus_normalize_terms(int64_t doc_id)
                "\"term_kind\":\"alias\",\"scope_note\":\"auto-detected\"}",
                raw, preferred);
 
-      if (db2_artifact_write(artifact_id, "term_mapping", "proposed", "global", "global",
-                             "corpus.terms", 0.7, payload) == 0)
+      if (kb_store_artifact_write(artifact_id, "term_mapping", "proposed", "global", "global",
+                                  "corpus.terms", 0.7, payload) == 0)
       {
-         db2_artifact_cite(artifact_id, "doc", doc_id_str);
+         kb_store_artifact_cite(artifact_id, "doc", doc_id_str);
          written++;
       }
    }

@@ -1,4 +1,4 @@
-/* test_graph_fusion.c: DB2 graph provenance read coverage. */
+/* test_graph_fusion.c: KB_STORE graph provenance read coverage. */
 
 #include <assert.h>
 #include <math.h>
@@ -7,8 +7,8 @@
 
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "platform_test_util.h"
 #include "modules/kb/c/entity_edges.h"
 
@@ -20,12 +20,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   db2_test_shim_open_path(g_db_path);
+   kb_store_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }
@@ -34,9 +34,9 @@ static void test_explain_read_provenance(void)
 {
    setup();
    int added = 0;
-   db2_entity_edge_upsert("file:p:a.c", "defines", "symbol:p:foo", 0, 5, 0, 1, &added);
-   db2_entity_edge_explain_t rows[16];
-   int n = db2_entity_edge_explain_by_entity("symbol:p:foo", rows, 16);
+   kb_store_entity_edge_upsert("file:p:a.c", "defines", "symbol:p:foo", 0, 5, 0, 1, &added);
+   kb_store_entity_edge_explain_t rows[16];
+   int n = kb_store_entity_edge_explain_by_entity("symbol:p:foo", rows, 16);
    assert(n >= 1);
    int seen = 0;
    for (int i = 0; i < n; i++)

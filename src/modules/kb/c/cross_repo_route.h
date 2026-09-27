@@ -15,6 +15,6 @@
  *     (the repo-unique HIGH-vs-MEDIUM refinement is applied by H1 §1a).
  * Vendored definers are excluded. Transactional (DELETE + rebuild). Returns rows
  * written, -1 on error. */
-int db2_cross_repo_rebuild_routes(void);
+int kb_store_cross_repo_rebuild_routes(void);
 
 #endif /* AIMEE_CROSS_REPO_ROUTE_H */

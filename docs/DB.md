@@ -91,7 +91,7 @@ the same explicit namespace to both credentials, and cleans up its own objects.
 
 ## PostgreSQL provider ownership
 
-Both application roles now use the Go PostgreSQL module. The DB2 process and
+Both application roles now use the Go PostgreSQL module. The KB_STORE process and
 native libpq driver/pool are removed. KB owns knowledge schema and algorithms;
 its native callers use PostgreSQL session capabilities for SQL and transactions.
 `AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` are the runtime and migration

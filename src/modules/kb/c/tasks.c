@@ -1,7 +1,7 @@
-/* db2/tasks.c: task graph — Postgres via libpq. */
+/* kb_store/tasks.c: task graph — Postgres via libpq. */
 
 #include "tasks.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h" /* now_utc, MAX_QUERY_LEN */
 
@@ -15,19 +15,20 @@ static void row_to_task(aimee_pg_stmt_t *st, aimee_task_t *t)
    memset(t, 0, sizeof(*t));
    t->id = aimee_pg_column_int64(st, 0);
    t->parent_id = aimee_pg_column_int64(st, 1);
-   db2_copy_col_text(t->title, sizeof(t->title), st, 2);
-   db2_copy_col_text(t->state, sizeof(t->state), st, 3);
+   kb_store_copy_col_text(t->title, sizeof(t->title), st, 2);
+   kb_store_copy_col_text(t->state, sizeof(t->state), st, 3);
    t->confidence = aimee_pg_column_double(st, 4);
-   db2_copy_col_text(t->session_id, sizeof(t->session_id), st, 5);
-   db2_copy_col_text(t->created_at, sizeof(t->created_at), st, 6);
-   db2_copy_col_text(t->updated_at, sizeof(t->updated_at), st, 7);
+   kb_store_copy_col_text(t->session_id, sizeof(t->session_id), st, 5);
+   kb_store_copy_col_text(t->created_at, sizeof(t->created_at), st, 6);
+   kb_store_copy_col_text(t->updated_at, sizeof(t->updated_at), st, 7);
 }
 
 /* --- Task CRUD --- */
 
-int db2_task_create(const char *title, const char *session_id, int64_t parent_id, aimee_task_t *out)
+int kb_store_task_create(const char *title, const char *session_id, int64_t parent_id,
+                         aimee_task_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !title)
       return -1;
 
@@ -58,13 +59,13 @@ int db2_task_create(const char *title, const char *session_id, int64_t parent_id
       return -1;
 
    if (out)
-      db2_task_get(new_id, out);
+      kb_store_task_get(new_id, out);
    return 0;
 }
 
-int db2_task_get(int64_t id, aimee_task_t *out)
+int kb_store_task_get(int64_t id, aimee_task_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -88,9 +89,9 @@ int db2_task_get(int64_t id, aimee_task_t *out)
    return rc;
 }
 
-int db2_task_update_state(int64_t id, const char *state)
+int kb_store_task_update_state(int64_t id, const char *state)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !state)
       return -1;
 
@@ -113,9 +114,10 @@ int db2_task_update_state(int64_t id, const char *state)
    return changes > 0 ? 0 : -1;
 }
 
-int db2_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out, int max)
+int kb_store_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out,
+                       int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -170,9 +172,9 @@ int db2_task_list(const char *state, const char *session_id, int limit, aimee_ta
    return count;
 }
 
-int db2_task_delete(int64_t id)
+int kb_store_task_delete(int64_t id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -202,9 +204,9 @@ int db2_task_delete(int64_t id)
    return changes > 0 ? 0 : -1;
 }
 
-int db2_task_add_edge(int64_t source, int64_t target, const char *relation)
+int kb_store_task_add_edge(int64_t source, int64_t target, const char *relation)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !relation)
       return -1;
 
@@ -222,9 +224,9 @@ int db2_task_add_edge(int64_t source, int64_t target, const char *relation)
    return rc;
 }
 
-int db2_task_get_edges(int64_t task_id, task_edge_t *out, int max)
+int kb_store_task_get_edges(int64_t task_id, task_edge_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -247,16 +249,16 @@ int db2_task_get_edges(int64_t task_id, task_edge_t *out, int max)
       out[count].id = aimee_pg_column_int64(st, 0);
       out[count].source_id = aimee_pg_column_int64(st, 1);
       out[count].target_id = aimee_pg_column_int64(st, 2);
-      db2_copy_col_text(out[count].relation, sizeof(out[count].relation), st, 3);
+      kb_store_copy_col_text(out[count].relation, sizeof(out[count].relation), st, 3);
       count++;
    }
    aimee_pg_finalize(st);
    return count;
 }
 
-int db2_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
+int kb_store_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -277,9 +279,9 @@ int db2_task_get_subtasks(int64_t parent_id, aimee_task_t *out, int max)
    return count;
 }
 
-int64_t db2_task_get_active(const char *session_id)
+int64_t kb_store_task_get_active(const char *session_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !session_id)
       return 0;
 

@@ -21,7 +21,7 @@ typedef struct
    int force;
 } kb_managed_server_identity_install_options_t;
 
-/* Install or resume the wizard-managed server's durable mTLS identity. DB2 must
+/* Install or resume the wizard-managed server's durable mTLS identity. KB_STORE must
  * already be initialized. Prints only non-secret readiness metadata on success. */
 int kb_managed_server_identity_install(const kb_managed_server_identity_install_options_t *options);
 

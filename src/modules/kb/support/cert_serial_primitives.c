@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 process support for certificate-serial canonicalization. */
-#include "db2_cert_serial.h"
+/* Descriptor-owned KB_STORE process support for certificate-serial canonicalization. */
+#include "kb_store_cert_serial.h"
 
 #include <ctype.h>
 #include <string.h>

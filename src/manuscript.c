@@ -10,7 +10,7 @@
 #include <string.h>
 
 /* Local path cap so this file stays dependency-free (no aimee.h, which pulls
- * db2 headers not on the thin client's include path). */
+ * kb_store headers not on the thin client's include path). */
 #define MS_PATH_MAX 4096
 
 long manuscript_count_words(const char *text)

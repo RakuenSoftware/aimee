@@ -1,7 +1,7 @@
 /* src/modules/kb/c/code_projection.c: code-index graph projection ledger. */
 
 #include "code_projection.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "entity_nodes.h"
 #include "aimee/kb/graph_kinds.h"
@@ -36,11 +36,11 @@ static int structural_weight_for_relation(const char *relation)
 
 /* --- Generation lifecycle --- */
 
-int64_t db2_code_projection_generation_create(const char *project)
+int64_t kb_store_code_projection_generation_create(const char *project)
 {
    if (!project || !*project)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* Stamp the aimee build that produced this generation (graph-feedback S2), so
@@ -64,11 +64,11 @@ int64_t db2_code_projection_generation_create(const char *project)
    return id;
 }
 
-int db2_code_projection_generation_publish(int64_t gen_id, const char *project)
+int kb_store_code_projection_generation_publish(int64_t gen_id, const char *project)
 {
    if (gen_id <= 0 || !project || !*project)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CP_ERRBUF] = "";
@@ -139,11 +139,11 @@ rollback:
    return -1;
 }
 
-int db2_code_projection_generation_abort(int64_t gen_id, const char *error_msg)
+int kb_store_code_projection_generation_abort(int64_t gen_id, const char *error_msg)
 {
    if (gen_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "UPDATE code_projection_generations"
@@ -162,11 +162,11 @@ int db2_code_projection_generation_abort(int64_t gen_id, const char *error_msg)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int64_t db2_code_projection_visible_id(const char *project)
+int64_t kb_store_code_projection_visible_id(const char *project)
 {
    if (!project || !*project)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT g.id FROM code_projection_generations g"
@@ -185,11 +185,11 @@ int64_t db2_code_projection_visible_id(const char *project)
    return id;
 }
 
-int db2_code_projection_list_edges(const char *project, code_projection_edge_t *out, int max)
+int kb_store_code_projection_list_edges(const char *project, code_projection_edge_t *out, int max)
 {
    if (!project || !*project || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* Edges of the project's currently-visible generation. The JOIN to
@@ -225,11 +225,12 @@ int db2_code_projection_list_edges(const char *project, code_projection_edge_t *
    return n;
 }
 
-int db2_code_projection_list_edges_for_gen(int64_t gen_id, code_projection_edge_t *out, int max)
+int kb_store_code_projection_list_edges_for_gen(int64_t gen_id, code_projection_edge_t *out,
+                                                int max)
 {
    if (gen_id <= 0 || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* Total order (source, target, relation) so that if the LIMIT boundary cuts
@@ -264,12 +265,12 @@ int db2_code_projection_list_edges_for_gen(int64_t gen_id, code_projection_edge_
 
 /* --- Community membership (graph-feedback S-community) --- */
 
-int db2_code_projection_communities_replace(int64_t gen_id, const char *project,
-                                            const code_projection_community_t *rows, int n)
+int kb_store_code_projection_communities_replace(int64_t gen_id, const char *project,
+                                                 const code_projection_community_t *rows, int n)
 {
    if (gen_id <= 0 || n < 0 || (n > 0 && !rows))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -329,11 +330,12 @@ rollback:
    return -1;
 }
 
-int db2_code_projection_communities_list(int64_t gen_id, code_projection_community_t *out, int max)
+int kb_store_code_projection_communities_list(int64_t gen_id, code_projection_community_t *out,
+                                              int max)
 {
    if (gen_id <= 0 || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT node_id, community_id"
@@ -360,11 +362,11 @@ int db2_code_projection_communities_list(int64_t gen_id, code_projection_communi
    return n;
 }
 
-int db2_code_projection_generation_meta(int64_t gen_id, code_projection_generation_meta_t *out)
+int kb_store_code_projection_generation_meta(int64_t gen_id, code_projection_generation_meta_t *out)
 {
    if (gen_id <= 0 || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -397,12 +399,12 @@ int db2_code_projection_generation_meta(int64_t gen_id, code_projection_generati
    return 0;
 }
 
-int db2_code_projection_generations_list(const char *project, code_projection_generation_row_t *out,
-                                         int max)
+int kb_store_code_projection_generations_list(const char *project,
+                                              code_projection_generation_row_t *out, int max)
 {
    if (!project || !*project || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT id, state, started_at FROM code_projection_generations"
@@ -427,12 +429,12 @@ int db2_code_projection_generations_list(const char *project, code_projection_ge
    return n;
 }
 
-int db2_code_projection_project_fingerprint(const char *project, char *out, size_t out_len)
+int kb_store_code_projection_project_fingerprint(const char *project, char *out, size_t out_len)
 {
    if (!project || !*project || !out || out_len == 0)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    /* md5 over (path, content-hash) of every file in the project, ordered — two
@@ -462,11 +464,11 @@ int db2_code_projection_project_fingerprint(const char *project, char *out, size
    return rc;
 }
 
-int db2_code_projection_generation_set_source_hash(int64_t gen_id, const char *source_hash)
+int kb_store_code_projection_generation_set_source_hash(int64_t gen_id, const char *source_hash)
 {
    if (gen_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "UPDATE code_projection_generations SET source_hash = ?2 WHERE id = ?1";
@@ -481,12 +483,12 @@ int db2_code_projection_generation_set_source_hash(int64_t gen_id, const char *s
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
+int kb_store_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
 {
    if (!project || !*project || !out || out_len == 0)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT g.source_hash FROM code_projection_generations g"
@@ -507,12 +509,12 @@ int db2_code_projection_visible_source_hash(const char *project, char *out, size
    return 0; /* out == "" when there is no visible generation yet */
 }
 
-int db2_code_projection_generation_update_counts(int64_t gen_id, int64_t edge_count,
-                                                 int64_t node_count)
+int kb_store_code_projection_generation_update_counts(int64_t gen_id, int64_t edge_count,
+                                                      int64_t node_count)
 {
    if (gen_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "UPDATE code_projection_generations"
@@ -530,11 +532,11 @@ int db2_code_projection_generation_update_counts(int64_t gen_id, int64_t edge_co
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_code_projection_cleanup_old(const char *project, int min_days_old)
+int kb_store_code_projection_cleanup_old(const char *project, int min_days_old)
 {
    if (!project || !*project || min_days_old < 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[512];
@@ -559,13 +561,13 @@ int db2_code_projection_cleanup_old(const char *project, int min_days_old)
 
 /* --- Edge ledger --- */
 
-int db2_code_projection_edge_record(int64_t gen_id, const char *project, const char *source,
-                                    const char *relation, const char *target,
-                                    const char *source_hash)
+int kb_store_code_projection_edge_record(int64_t gen_id, const char *project, const char *source,
+                                         const char *relation, const char *target,
+                                         const char *source_hash)
 {
    if (gen_id <= 0 || !source || !relation || !target)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "INSERT INTO code_projection_edges"
@@ -587,13 +589,13 @@ int db2_code_projection_edge_record(int64_t gen_id, const char *project, const c
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_code_projection_edge_upsert(int64_t gen_id, const char *project, const char *source,
-                                    const char *relation, const char *target, int relation_id,
-                                    int subject_kind, int object_kind, int structural_weight)
+int kb_store_code_projection_edge_upsert(int64_t gen_id, const char *project, const char *source,
+                                         const char *relation, const char *target, int relation_id,
+                                         int subject_kind, int object_kind, int structural_weight)
 {
    if (!source || !relation || !target)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int sw = (structural_weight > 0) ? structural_weight : structural_weight_for_relation(relation);
@@ -644,17 +646,17 @@ static int project_edge(int64_t gen_id, const char *project, const char *source,
                         const char *relation, const char *target, int rel_id, int subject_kind,
                         int object_kind)
 {
-   if (db2_code_projection_edge_upsert(gen_id, project, source, relation, target, rel_id,
-                                       subject_kind, object_kind, 0) != 0)
+   if (kb_store_code_projection_edge_upsert(gen_id, project, source, relation, target, rel_id,
+                                            subject_kind, object_kind, 0) != 0)
       return -1;
-   return db2_code_projection_edge_record(gen_id, project, source, relation, target, "");
+   return kb_store_code_projection_edge_record(gen_id, project, source, relation, target, "");
 }
 
-int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
+int64_t kb_store_code_projection_sync_project(const char *project, int64_t gen_id)
 {
    if (!project || !*project || gen_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -677,7 +679,7 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
 
    /* Build project node key. */
    char proj_key[GRAPH_ENDPOINT_MAX];
-   if (db2_entity_node_key_project(project, proj_key, sizeof(proj_key)) != 0)
+   if (kb_store_entity_node_key_project(project, proj_key, sizeof(proj_key)) != 0)
       return -1;
 
    /* --- Iterate files: emit contains + per-file edges --- */
@@ -731,7 +733,7 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
    for (int fi = 0; fi < file_count; fi++)
    {
       char file_key[GRAPH_ENDPOINT_MAX];
-      if (db2_entity_node_key_file(project, files[fi].path, file_key, sizeof(file_key)) != 0)
+      if (kb_store_entity_node_key_file(project, files[fi].path, file_key, sizeof(file_key)) != 0)
          continue;
 
       /* contains: project → file */
@@ -755,7 +757,8 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                if (!sym_name)
                   continue;
                char sym_key[GRAPH_ENDPOINT_MAX];
-               if (db2_entity_node_key_symbol(project, sym_name, sym_key, sizeof(sym_key)) != 0)
+               if (kb_store_entity_node_key_symbol(project, sym_name, sym_key, sizeof(sym_key)) !=
+                   0)
                   continue;
                int nkind = NODE_OTHER;
                if (kind)
@@ -788,9 +791,9 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                   continue;
                char exp_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                char enc_name[GRAPH_ENDPOINT_MAX];
-               db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
+               kb_store_entity_node_encode_component(name, enc_name, sizeof(enc_name));
                char enc_proj[GRAPH_ENDPOINT_MAX];
-               db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
+               kb_store_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
                snprintf(exp_key, sizeof(exp_key), "export:%s:%s", enc_proj, enc_name);
                if (strlen(exp_key) >= GRAPH_ENDPOINT_MAX)
                   continue;
@@ -815,8 +818,8 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                if (!name)
                   continue;
                char enc_proj[GRAPH_ENDPOINT_MAX], enc_name[GRAPH_ENDPOINT_MAX];
-               db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
-               db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
+               kb_store_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
+               kb_store_entity_node_encode_component(name, enc_name, sizeof(enc_name));
                char imp_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                snprintf(imp_key, sizeof(imp_key), "import:%s:%s", enc_proj, enc_name);
                if (strlen(imp_key) >= GRAPH_ENDPOINT_MAX)
@@ -843,8 +846,8 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                if (!name)
                   continue;
                char enc_proj[GRAPH_ENDPOINT_MAX], enc_name[GRAPH_ENDPOINT_MAX];
-               db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
-               db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
+               kb_store_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
+               kb_store_entity_node_encode_component(name, enc_name, sizeof(enc_name));
                char route_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                snprintf(route_key, sizeof(route_key), "route:%s:%s", enc_proj, enc_name);
                if (strlen(route_key) >= GRAPH_ENDPOINT_MAX)
@@ -872,9 +875,11 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                if (!caller || !callee)
                   continue;
                char caller_key[GRAPH_ENDPOINT_MAX], callee_key[GRAPH_ENDPOINT_MAX];
-               if (db2_entity_node_key_symbol(project, caller, caller_key, sizeof(caller_key)) != 0)
+               if (kb_store_entity_node_key_symbol(project, caller, caller_key,
+                                                   sizeof(caller_key)) != 0)
                   continue;
-               if (db2_entity_node_key_symbol(project, callee, callee_key, sizeof(callee_key)) != 0)
+               if (kb_store_entity_node_key_symbol(project, callee, callee_key,
+                                                   sizeof(callee_key)) != 0)
                   continue;
                if (project_edge(gen_id, project, caller_key, "calls", callee_key, REL_CALLS,
                                 NODE_FUNCTION, NODE_FUNCTION) == 0)
@@ -886,6 +891,6 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
    }
 
    free(files);
-   db2_code_projection_generation_update_counts(gen_id, edge_count, file_count);
+   kb_store_code_projection_generation_update_counts(gen_id, edge_count, file_count);
    return edge_count;
 }

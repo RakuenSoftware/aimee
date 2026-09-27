@@ -13,7 +13,7 @@
 
 typedef struct
 {
-   unsigned char plaintext[DB2_VAULT_KEY_USE_CIPHERTEXT_MAX];
+   unsigned char plaintext[KB_STORE_VAULT_KEY_USE_CIPHERTEXT_MAX];
    unsigned char kek[VAULT_KEK_LEN];
    unsigned char dek[VAULT_DEK_LEN];
    uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
@@ -56,7 +56,7 @@ static void arena_free(protected_arena_t *p, size_t n)
 }
 
 static kb_vault_key_use_status_t
-protected_use_aad(uint64_t expected_epoch, const db2_vault_key_use_envelope_t *e,
+protected_use_aad(uint64_t expected_epoch, const kb_store_vault_key_use_envelope_t *e,
                   const uint8_t *aad, size_t aad_len, const uint8_t *fallback_aad,
                   size_t fallback_aad_len, kb_vault_key_use_fn callback, void *ctx)
 {
@@ -109,17 +109,17 @@ protected_use_aad(uint64_t expected_epoch, const db2_vault_key_use_envelope_t *e
    return rc;
 }
 
-kb_vault_key_use_status_t kb_vault_protected_use_with_aad(uint64_t expected_epoch,
-                                                          const db2_vault_key_use_envelope_t *e,
-                                                          const uint8_t *aad, size_t aad_len,
-                                                          kb_vault_key_use_fn callback, void *ctx)
+kb_vault_key_use_status_t
+kb_vault_protected_use_with_aad(uint64_t expected_epoch, const kb_store_vault_key_use_envelope_t *e,
+                                const uint8_t *aad, size_t aad_len, kb_vault_key_use_fn callback,
+                                void *ctx)
 {
    return protected_use_aad(expected_epoch, e, aad, aad_len, NULL, 0, callback, ctx);
 }
 
 kb_vault_key_use_status_t kb_vault_protected_use(uint64_t expected_epoch, const char *principal,
                                                  const char *agent, const char *cred,
-                                                 const db2_vault_key_use_envelope_t *e,
+                                                 const kb_store_vault_key_use_envelope_t *e,
                                                  kb_vault_key_use_fn callback, void *ctx)
 {
    uint8_t aad[VAULT_ENVELOPE_AAD_MAX] = {0}, fallback[VAULT_ENVELOPE_AAD_MAX] = {0};

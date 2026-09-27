@@ -46,8 +46,8 @@ typedef struct
    int64_t not_before_epoch;
    int64_t not_after_epoch;
    int64_t revocation_generation;
-   char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
-   char serial_norm[DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
+   char issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char serial_norm[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
    uint8_t fingerprint[KB_MANAGEMENT_CERT_DIGEST_LEN];
    uint8_t spki_digest[KB_MANAGEMENT_CERT_DIGEST_LEN];
    uint8_t public_bundle_digest[KB_MANAGEMENT_CERT_DIGEST_LEN];

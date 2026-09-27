@@ -1,17 +1,17 @@
-/* kb_payload.c: DB2 payload builder for vector kb chunks.
+/* kb_payload.c: KB_STORE payload builder for vector kb chunks.
  * Postgres via libpq. Callers build payload JSON before handing it to
  * the pgvector upsert helpers. */
 
 #include "kb_payload.h"
 #include "aimee.h"
 #include "artifacts.h"
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "pgvec_transport.h"
 
 #include "db_postgres.h"
 #include "cJSON.h"
-#include "db2_internal.h"
-#include "../support/db2_log.h"
+#include "kb_store_internal.h"
+#include "../support/kb_store_log.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -22,18 +22,19 @@
 
 #define KBP_ERRBUF 256
 
-static db2_embed_fn g_embed_provider;
+static kb_store_embed_fn g_embed_provider;
 
-void aimee_db2_register_embed_provider(db2_embed_fn provider)
+void aimee_kb_store_register_embed_provider(kb_store_embed_fn provider)
 {
    g_embed_provider = provider;
 }
 
-int db2_kb_embed_text(const char *text, const char *command, int input_type, float *out,
-                      int max_dim)
+int kb_store_kb_embed_text(const char *text, const char *command, int input_type, float *out,
+                           int max_dim)
 {
    if (!text || !command || !command[0] || !out || max_dim <= 0 ||
-       (input_type != DB2_EMBED_DOCUMENT && input_type != DB2_EMBED_QUERY) || !g_embed_provider)
+       (input_type != KB_STORE_EMBED_DOCUMENT && input_type != KB_STORE_EMBED_QUERY) ||
+       !g_embed_provider)
       return 0;
    int dim = g_embed_provider(text, command, input_type, out, max_dim);
    if (dim <= 0 || dim > max_dim)
@@ -44,11 +45,11 @@ int db2_kb_embed_text(const char *text, const char *command, int input_type, flo
    return dim;
 }
 
-char *db2_kb_build_document_payload(int64_t doc_id)
+char *kb_store_kb_build_document_payload(int64_t doc_id)
 {
    if (doc_id <= 0)
       return NULL;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 
@@ -93,14 +94,14 @@ char *db2_kb_build_document_payload(int64_t doc_id)
    return payload_json;
 }
 
-int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t *out)
+int kb_store_kb_document_fetch(int64_t id, const char *project, kb_store_kb_document_row_t *out)
 {
    if (!out)
       return 0;
    memset(out, 0, sizeof(*out));
    if (id <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -150,15 +151,15 @@ int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t
    return hit;
 }
 
-int db2_kb_documents_get_stored_hash(const char *project, const char *file_path, char *out,
-                                     size_t out_len)
+int kb_store_kb_documents_get_stored_hash(const char *project, const char *file_path, char *out,
+                                          size_t out_len)
 {
    if (!out || out_len == 0)
       return -1;
    out[0] = '\0';
    if (!project || !*project || !file_path || !*file_path)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -186,14 +187,14 @@ int db2_kb_documents_get_stored_hash(const char *project, const char *file_path,
    return rc;
 }
 
-int db2_kb_documents_hash_exists(const char *project, const char *file_hash, char *sample_path,
-                                 size_t sample_path_len)
+int kb_store_kb_documents_hash_exists(const char *project, const char *file_hash, char *sample_path,
+                                      size_t sample_path_len)
 {
    if (sample_path && sample_path_len)
       sample_path[0] = '\0';
    if (!project || !*project || !file_hash || !*file_hash)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -227,15 +228,15 @@ int db2_kb_documents_hash_exists(const char *project, const char *file_hash, cha
    return found;
 }
 
-int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_hash,
-                                          sketch_hll_t *out)
+int kb_store_kb_documents_hll_sources_for_hash(const char *project, const char *file_hash,
+                                               sketch_hll_t *out)
 {
    if (!out)
       return -1;
    sketch_hll_init(out);
    if (!project || !*project || !file_hash || !*file_hash)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -270,20 +271,21 @@ int db2_kb_documents_hll_sources_for_hash(const char *project, const char *file_
    return n;
 }
 
-int db2_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
-                                double *scores, int max)
+int kb_store_kb_documents_fts_search(const char *project, const char *query, int64_t *ids,
+                                     double *scores, int max)
 {
-   return db2_kb_documents_fts_search_scoped(project, NULL, query, ids, scores, max);
+   return kb_store_kb_documents_fts_search_scoped(project, NULL, query, ids, scores, max);
 }
 
-int db2_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
-                                       const char *query, int64_t *ids, double *scores, int max)
+int kb_store_kb_documents_fts_search_scoped(const char *project, const char *exclude_project,
+                                            const char *query, int64_t *ids, double *scores,
+                                            int max)
 {
    if (!ids || !scores || max <= 0)
       return -1;
    if (!query || !query[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -380,11 +382,11 @@ int db2_kb_documents_fts_search_scoped(const char *project, const char *exclude_
    return n;
 }
 
-int db2_kb_async_enqueue(const char *kind, int64_t document_id, const char *project)
+int kb_store_kb_async_enqueue(const char *kind, int64_t document_id, const char *project)
 {
    if (!kind || !*kind || document_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -417,9 +419,9 @@ static void kbp_exec(void *conn, const char *sql)
    aimee_pg_finalize(st);
 }
 
-int db2_curator_reenqueue_extract_all(void)
+int kb_store_curator_reenqueue_extract_all(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Two cross-backend statements (the sqlite test shim rejects ON CONFLICT DO
@@ -456,12 +458,12 @@ int db2_curator_reenqueue_extract_all(void)
    return n;
 }
 
-int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
-                                             int64_t *out, int max)
+int kb_store_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
+                                                  int64_t *out, int max)
 {
    if (!project || !*project || !file_path || !*file_path || !out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -486,31 +488,31 @@ int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *fi
  * artifacts (which are then re-extracted by the post-ingest queue). Returns the
  * number of artifacts marked stale. Must be called before the chunks are
  * deleted so their ids are still resolvable. */
-int db2_curator_invalidate_doc(const char *project, const char *file_path)
+int kb_store_curator_invalidate_doc(const char *project, const char *file_path)
 {
    if (!project || !*project || !file_path || !*file_path)
       return 0;
    int64_t ids[1024];
-   int n = db2_kb_documents_list_chunk_ids_for_file(project, file_path, ids,
-                                                    (int)(sizeof(ids) / sizeof(ids[0])));
+   int n = kb_store_kb_documents_list_chunk_ids_for_file(project, file_path, ids,
+                                                         (int)(sizeof(ids) / sizeof(ids[0])));
    int total = 0;
    for (int i = 0; i < n; i++)
    {
       char id_str[32];
       snprintf(id_str, sizeof(id_str), "%lld", (long long)ids[i]);
-      int m = db2_artifact_invalidate_citing("kb_document", id_str, 0, 0);
+      int m = kb_store_artifact_invalidate_citing("kb_document", id_str, 0, 0);
       if (m > 0)
          total += m;
    }
    if (total > 0)
-      db2_curator_invalidation_record("kb_file", file_path, total);
+      kb_store_curator_invalidation_record("kb_file", file_path, total);
    return total;
 }
 
-void db2_curator_invalidation_record(const char *source_kind, const char *source_id,
-                                     int artifacts_stale)
+void kb_store_curator_invalidation_record(const char *source_kind, const char *source_id,
+                                          int artifacts_stale)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    static const char *sql = "INSERT INTO curator_invalidation_events"
@@ -526,11 +528,12 @@ void db2_curator_invalidation_record(const char *source_kind, const char *source
    aimee_pg_finalize(st);
 }
 
-int db2_curator_invalidations_since(int64_t since_id, db2_curator_invalidation_t *out, int max)
+int kb_store_curator_invalidations_since(int64_t since_id, kb_store_curator_invalidation_t *out,
+                                         int max)
 {
    if (!out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -559,11 +562,11 @@ int db2_curator_invalidations_since(int64_t since_id, db2_curator_invalidation_t
    return n;
 }
 
-void db2_kb_documents_delete_for_file(const char *project, const char *file_path)
+void kb_store_kb_documents_delete_for_file(const char *project, const char *file_path)
 {
    if (!project || !*project || !file_path || !*file_path)
       return;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -580,11 +583,11 @@ void db2_kb_documents_delete_for_file(const char *project, const char *file_path
    aimee_pg_finalize(st);
 }
 
-int db2_kb_documents_delete_older_than(int days)
+int kb_store_kb_documents_delete_older_than(int days)
 {
    if (days <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql = "SELECT kb_document_retention_reap(?1)";
@@ -600,9 +603,9 @@ int db2_kb_documents_delete_older_than(int days)
    return deleted;
 }
 
-int db2_subject_erasure_begin(const char *request_id, const char *subject,
-                              const char *sessions_json, int64_t *memory_count,
-                              int64_t *document_count, int *already_done)
+int kb_store_subject_erasure_begin(const char *request_id, const char *subject,
+                                   const char *sessions_json, int64_t *memory_count,
+                                   int64_t *document_count, int *already_done)
 {
    if (memory_count)
       *memory_count = 0;
@@ -610,7 +613,7 @@ int db2_subject_erasure_begin(const char *request_id, const char *subject,
       *document_count = 0;
    if (already_done)
       *already_done = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !request_id || !request_id[0] || !subject || !subject[0] || !sessions_json)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -637,12 +640,12 @@ int db2_subject_erasure_begin(const char *request_id, const char *subject,
    return ok ? 0 : -1;
 }
 
-int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
-                                 int *event_created)
+int kb_store_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                      int *event_created)
 {
    if (event_created)
       *event_created = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !request_id || !request_id[0] || !actor || !actor[0] || db1_count < 0)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -660,9 +663,9 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    return ok ? 0 : -1;
 }
 
-int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
-                            int64_t db1_count, int *event_created, int *coverage_complete,
-                            int64_t *pending_owners)
+int kb_store_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                                 int64_t db1_count, int *event_created, int *coverage_complete,
+                                 int64_t *pending_owners)
 {
    if (event_created)
       *event_created = 0;
@@ -670,7 +673,7 @@ int db2_subject_erasure_ack(const char *request_id, const char *actor, const cha
       *coverage_complete = 0;
    if (pending_owners)
       *pending_owners = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !request_id || !actor || !transport || db1_count < 0)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -698,12 +701,12 @@ int db2_subject_erasure_ack(const char *request_id, const char *actor, const cha
    return ok ? 0 : -1;
 }
 
-int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
-                                      const char *file_hash, int chunk_index,
-                                      const char *heading_path, int line_start, int line_end,
-                                      const char *content, int token_count)
+int64_t kb_store_kb_documents_insert_chunk(const char *project, const char *file_path,
+                                           const char *file_hash, int chunk_index,
+                                           const char *heading_path, int line_start, int line_end,
+                                           const char *content, int token_count)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -750,11 +753,11 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    return new_id;
 }
 
-void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
+void kb_store_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
 {
    if (prev_id <= 0 || doc_id <= 0)
       return;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -783,19 +786,19 @@ void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
    }
 }
 
-/* structured-pdf Phase 1: like db2_kb_documents_insert_chunk but also stamps the
+/* structured-pdf Phase 1: like kb_store_kb_documents_insert_chunk but also stamps the
  * PDF-specific columns in the same INSERT (doc_kind='pdf', the caller's
  * chunk_strategy — 'heading' or the 'page' fallback — and the page_start/page_end
  * span). Kept separate from the 9-arg insert so the markdown path is untouched. */
-int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_path,
-                                          const char *file_hash, int chunk_index,
-                                          const char *heading_path, int line_start, int line_end,
-                                          const char *content, int token_count,
-                                          const char *chunk_strategy, int page_start, int page_end,
-                                          const char *sensitivity_class,
-                                          const char *quarantine_state)
+int64_t kb_store_kb_documents_insert_chunk_pdf(const char *project, const char *file_path,
+                                               const char *file_hash, int chunk_index,
+                                               const char *heading_path, int line_start,
+                                               int line_end, const char *content, int token_count,
+                                               const char *chunk_strategy, int page_start,
+                                               int page_end, const char *sensitivity_class,
+                                               const char *quarantine_state)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -847,27 +850,27 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
 /* Thin transaction wrappers (work on both Postgres and the sqlite test shim) so a
  * multi-statement write — e.g. the structured-PDF delete-then-insert re-ingest — is
  * all-or-nothing. Return 0 on success, <0 on error. */
-int db2_kb_txn_begin(void)
+int kb_store_kb_txn_begin(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[KBP_ERRBUF] = "";
    return aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) == 0 ? 0 : -1;
 }
 
-int db2_kb_txn_commit(void)
+int kb_store_kb_txn_commit(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[KBP_ERRBUF] = "";
    return aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) == 0 ? 0 : -1;
 }
 
-void db2_kb_txn_rollback(void)
+void kb_store_kb_txn_rollback(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[KBP_ERRBUF] = "";
@@ -876,12 +879,12 @@ void db2_kb_txn_rollback(void)
 
 /* structured-pdf Phase 1: insert one per-line coordinate region for a chunk. bbox
  * is already normalized to [0,1] (top-left origin, per page) by the caller. */
-int64_t db2_kb_doc_regions_insert(int64_t chunk_id, const char *document_key, int page_no,
-                                  double x0, double y0, double x1, double y1, const char *quote,
-                                  int line_index, const char *content_type,
-                                  const char *sensitivity_class)
+int64_t kb_store_kb_doc_regions_insert(int64_t chunk_id, const char *document_key, int page_no,
+                                       double x0, double y0, double x1, double y1,
+                                       const char *quote, int line_index, const char *content_type,
+                                       const char *sensitivity_class)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || chunk_id <= 0)
       return -1;
 
@@ -978,7 +981,7 @@ static int kbp_ci_contains(const char *hay, const char *needle)
  * appear (case-insensitively) in the concatenation of matched chunk contents. A pure
  * function of (query, matched rows), so the same (query, corpus state) always yields the
  * same value. */
-static double kbp_query_coverage(const char *query, const db2_kb_pdf_chunk_t *rows, int n)
+static double kbp_query_coverage(const char *query, const kb_store_kb_pdf_chunk_t *rows, int n)
 {
    if (!query || n <= 0)
       return 0.0;
@@ -1026,8 +1029,8 @@ static double kbp_query_coverage(const char *query, const db2_kb_pdf_chunk_t *ro
 }
 
 /* Compute the Phase A3 answerability judgment from the merged candidate set. */
-static void kbp_compute_answerability(const char *query, const db2_kb_pdf_chunk_t *rows, int n,
-                                      db2_kb_answerability_t *ans)
+static void kbp_compute_answerability(const char *query, const kb_store_kb_pdf_chunk_t *rows, int n,
+                                      kb_store_kb_answerability_t *ans)
 {
    memset(ans, 0, sizeof(*ans));
    double top = 0.0;
@@ -1053,7 +1056,7 @@ static void kbp_compute_answerability(const char *query, const db2_kb_pdf_chunk_
 }
 
 /* Find the index of chunk_id in out[0..n), or -1. */
-static int kbp_find_chunk(const db2_kb_pdf_chunk_t *out, int n, int64_t chunk_id)
+static int kbp_find_chunk(const kb_store_kb_pdf_chunk_t *out, int n, int64_t chunk_id)
 {
    for (int i = 0; i < n; i++)
       if (out[i].chunk_id == chunk_id)
@@ -1066,7 +1069,8 @@ static int kbp_find_chunk(const db2_kb_pdf_chunk_t *out, int n, int64_t chunk_id
  * Re-checking project here means the access scope rides the authoritative kb_documents row,
  * not the denormalized kb_pdf_embeddings.project — so a stale/mismatched vector project
  * cannot surface a chunk the lexical leg would not. Returns 1 if written, else 0. */
-static int kbp_fetch_pdf_chunk(void *conn, const char *project, int64_t id, db2_kb_pdf_chunk_t *row)
+static int kbp_fetch_pdf_chunk(void *conn, const char *project, int64_t id,
+                               kb_store_kb_pdf_chunk_t *row)
 {
    int has_project = (project && project[0]);
    char err[KBP_ERRBUF] = "";
@@ -1106,14 +1110,15 @@ static int kbp_fetch_pdf_chunk(void *conn, const char *project, int64_t id, db2_
    return got;
 }
 
-int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
-                             db2_kb_pdf_chunk_t *out, db2_kb_answerability_t *ans_out)
+int kb_store_kb_pdf_search_chunks(const char *project, const char *query, int max,
+                                  kb_store_kb_pdf_chunk_t *out,
+                                  kb_store_kb_answerability_t *ans_out)
 {
    if (ans_out)
       memset(ans_out, 0, sizeof(*ans_out));
    if (!out || max <= 0 || !query)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -1183,7 +1188,8 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
       if (embed_cmd && embed_cmd[0])
       {
          float qvec[EMBED_MAX_DIM];
-         int dim = db2_kb_embed_text(query, embed_cmd, DB2_EMBED_QUERY, qvec, EMBED_MAX_DIM);
+         int dim =
+             kb_store_kb_embed_text(query, embed_cmd, KB_STORE_EMBED_QUERY, qvec, EMBED_MAX_DIM);
          if (dim > 0)
          {
             /* Request enough candidates to fill the remaining result budget even after
@@ -1224,11 +1230,11 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
    return n;
 }
 
-int db2_kb_async_count_kind_pending(const char *kind)
+int kb_store_kb_async_count_kind_pending(const char *kind)
 {
    if (!kind || !*kind)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -1245,11 +1251,11 @@ int db2_kb_async_count_kind_pending(const char *kind)
    return n;
 }
 
-int db2_kb_async_count_kind(const char *kind)
+int kb_store_kb_async_count_kind(const char *kind)
 {
    if (!kind || !*kind)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -1265,13 +1271,13 @@ int db2_kb_async_count_kind(const char *kind)
    return n;
 }
 
-int db2_kb_pdf_reembed_project(const char *project)
+int kb_store_kb_pdf_reembed_project(const char *project)
 {
    /* Preserve the capability gate from the former all-project helper: a
     * dimension reset must not create jobs when no PDF-vector consumer exists. */
    if (!config_kb_pdf_vector_enabled())
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return 0;
    char err[KBP_ERRBUF] = "";
@@ -1305,14 +1311,14 @@ int db2_kb_pdf_reembed_project(const char *project)
    return n;
 }
 
-int db2_kb_table_cell_insert(int64_t region_id, const char *document_key, int page_no, int cell_row,
-                             int cell_col, const char *cell_text, const char *subject,
-                             const char *relation, const char *object, int tsr_confidence,
-                             const char *sensitivity_class)
+int kb_store_kb_table_cell_insert(int64_t region_id, const char *document_key, int page_no,
+                                  int cell_row, int cell_col, const char *cell_text,
+                                  const char *subject, const char *relation, const char *object,
+                                  int tsr_confidence, const char *sensitivity_class)
 {
    if (region_id <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -1341,12 +1347,12 @@ int db2_kb_table_cell_insert(int64_t region_id, const char *document_key, int pa
    return id > 0 ? (int)id : -1;
 }
 
-int db2_kb_table_cells_lookup(const char *project, const char *document_key, int page_no,
-                              db2_kb_table_cell_t *out, int max)
+int kb_store_kb_table_cells_lookup(const char *project, const char *document_key, int page_no,
+                                   kb_store_kb_table_cell_t *out, int max)
 {
    if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Gate via a join to the AUTHORITATIVE kb_documents row: doc_kind='pdf' AND
@@ -1415,9 +1421,10 @@ int db2_kb_table_cells_lookup(const char *project, const char *document_key, int
    return n;
 }
 
-void db2_kb_documents_set_tsr_state(const char *project, const char *file_path, const char *state)
+void kb_store_kb_documents_set_tsr_state(const char *project, const char *file_path,
+                                         const char *state)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !*project || !file_path || !*file_path)
       return;
    static const char *sql = "UPDATE kb_documents SET tsr_state = ?3"
@@ -1435,13 +1442,14 @@ void db2_kb_documents_set_tsr_state(const char *project, const char *file_path, 
    aimee_pg_finalize(st);
 }
 
-int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len)
+int kb_store_kb_pdf_tsr_state(const char *project, const char *document_key, char *out,
+                              size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
    if (!out || !out_len || !project || !*project || !document_key || !*document_key)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Same ACL as lookup: only a readable (non-withheld) PDF doc yields a state. */
@@ -1467,12 +1475,12 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    return hit;
 }
 
-int db2_kb_doc_asset_insert(const char *project, const char *document_key, int page_no, double x0,
-                            double y0, double x1, double y1, const char *kind, const char *caption,
-                            const char *content_type, const char *blob_ref,
-                            const char *sensitivity_class)
+int kb_store_kb_doc_asset_insert(const char *project, const char *document_key, int page_no,
+                                 double x0, double y0, double x1, double y1, const char *kind,
+                                 const char *caption, const char *content_type,
+                                 const char *blob_ref, const char *sensitivity_class)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !*project || !document_key || !*document_key || !blob_ref || !*blob_ref)
       return -1;
    static const char *sql =
@@ -1505,8 +1513,8 @@ int db2_kb_doc_asset_insert(const char *project, const char *document_key, int p
    return id > 0 ? (int)id : -1;
 }
 
-int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_out, size_t ref_cap,
-                          char *content_type_out, size_t ct_cap)
+int kb_store_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_out,
+                               size_t ref_cap, char *content_type_out, size_t ct_cap)
 {
    if (blob_ref_out && ref_cap)
       blob_ref_out[0] = '\0';
@@ -1514,7 +1522,7 @@ int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_
       content_type_out[0] = '\0';
    if (!project || !*project || asset_id <= 0 || !blob_ref_out || !ref_cap)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Resolve id → blob_ref ONLY when the asset's document is a readable PDF in this project.
@@ -1548,12 +1556,12 @@ int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_
    return hit;
 }
 
-int db2_kb_doc_assets_list(const char *project, const char *document_key, db2_kb_doc_asset_t *out,
-                           int max)
+int kb_store_kb_doc_assets_list(const char *project, const char *document_key,
+                                kb_store_kb_doc_asset_t *out, int max)
 {
    if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Gate via the authoritative kb_documents row (bound on file_path); never returns blob_ref. */
@@ -1599,9 +1607,9 @@ int db2_kb_doc_assets_list(const char *project, const char *document_key, db2_kb
    return n;
 }
 
-int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_key)
+int kb_store_kb_doc_assets_delete_for_doc(const char *project, const char *document_key)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !*project || !document_key || !*document_key)
       return -1;
    /* Scoped to this document's assets. Rows go now; the blobs are reclaimed by the
@@ -1627,11 +1635,11 @@ int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_k
    return rc == AIMEE_PG_DONE ? n : -1;
 }
 
-int db2_kb_blob_ref_referenced(const char *blob_ref)
+int kb_store_kb_blob_ref_referenced(const char *blob_ref)
 {
    if (!blob_ref || !*blob_ref)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT 1 FROM kb_doc_assets WHERE blob_ref = ?1 LIMIT 1";
@@ -1645,11 +1653,11 @@ int db2_kb_blob_ref_referenced(const char *blob_ref)
    return referenced;
 }
 
-int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int max)
+int kb_store_kb_doc_regions_for_chunk(int64_t chunk_id, kb_store_kb_pdf_region_t *out, int max)
 {
    if (!out || max <= 0 || chunk_id <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -1688,7 +1696,7 @@ int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int
  * reported is exactly what changed. Returns the affected-row count (>=0), or -1 on error. */
 static int kb_pdf_quarantine_apply(const char *sql, const char *project, const char *document_key)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !*project || !document_key || !*document_key)
       return -1;
    char err[KBP_ERRBUF] = "";
@@ -1704,7 +1712,7 @@ static int kb_pdf_quarantine_apply(const char *sql, const char *project, const c
    return rc == AIMEE_PG_DONE ? n : -1;
 }
 
-int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
+int kb_store_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
 {
    /* Scoped to exactly the pending PDF chunks at this (project, file_path); RETURNING gives
     * the true affected count. A confirmed doc has quarantine_state='' and is retrievable. */
@@ -1725,7 +1733,7 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
     * is on. Row-by-row so an arbitrarily large doc is fully covered. */
    if (!config_kb_pdf_vector_enabled())
       return n;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return n;
    char err[KBP_ERRBUF] = "";
@@ -1746,7 +1754,7 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
       /* Best-effort: a failed enqueue leaves the confirmed chunk lexical-only (still fully
        * retrievable + cited), recoverable by the dim-reset reembed or a re-confirm. Log it
        * so a silent vector gap is observable rather than invisible. */
-      if (db2_kb_async_enqueue("embed_pdf", id, project) != 0)
+      if (kb_store_kb_async_enqueue("embed_pdf", id, project) != 0)
          LOG_WARN("kb_pdf", "confirm: embed_pdf enqueue failed for chunk %lld (%s)", (long long)id,
                   document_key);
    }
@@ -1754,7 +1762,7 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
    return n;
 }
 
-int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key)
+int kb_store_kb_pdf_quarantine_reject(const char *project, const char *document_key)
 {
    /* Delete ONLY the pending PDF chunks at this (project, file_path) — NOT every row sharing
     * the file_path (a non-PDF or already-confirmed doc could collide). Regions cascade via
@@ -1768,7 +1776,7 @@ int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key)
    return kb_pdf_quarantine_apply(sql, project, document_key);
 }
 
-static void fill_region_row(aimee_pg_stmt_t *st, db2_kb_pdf_region_t *r)
+static void fill_region_row(aimee_pg_stmt_t *st, kb_store_kb_pdf_region_t *r)
 {
    memset(r, 0, sizeof(*r));
    r->page_no = aimee_pg_column_int(st, 0);
@@ -1783,12 +1791,12 @@ static void fill_region_row(aimee_pg_stmt_t *st, db2_kb_pdf_region_t *r)
    snprintf(r->content_type, sizeof(r->content_type), "%s", ct ? ct : "");
 }
 
-int db2_kb_pdf_open_page(const char *project, const char *document_key, int page_no,
-                         db2_kb_pdf_region_t *out, int max)
+int kb_store_kb_pdf_open_page(const char *project, const char *document_key, int page_no,
+                              kb_store_kb_pdf_region_t *out, int max)
 {
    if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Join to kb_documents so the chunk's quarantine gate applies — a pending (restricted)
@@ -1816,12 +1824,12 @@ int db2_kb_pdf_open_page(const char *project, const char *document_key, int page
    return n;
 }
 
-int db2_kb_pdf_open_neighbors(const char *project, int64_t chunk_id, db2_kb_pdf_chunk_t *out,
-                              int max)
+int kb_store_kb_pdf_open_neighbors(const char *project, int64_t chunk_id,
+                                   kb_store_kb_pdf_chunk_t *out, int max)
 {
    if (!out || max <= 0 || chunk_id <= 0 || !project || !*project)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* The prev/next chunks of chunk_id in reading order (via prev_chunk_id/next_chunk_id), each
@@ -1864,12 +1872,12 @@ int db2_kb_pdf_open_neighbors(const char *project, int64_t chunk_id, db2_kb_pdf_
    return n;
 }
 
-int db2_kb_pdf_inspect_structure(const char *project, const char *document_key,
-                                 db2_kb_pdf_outline_t *out, int max)
+int kb_store_kb_pdf_inspect_structure(const char *project, const char *document_key,
+                                      kb_store_kb_pdf_outline_t *out, int max)
 {
    if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =

@@ -9,13 +9,13 @@
 #include "config_database.h"
 #include "css_render_cmd.h"
 #include "modules/kb/c/code_index.h"
-#include "modules/kb/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "kb_witness_cadence.h"
 #include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "team.h"
 #include "membership.h"
 #include "kb_insights_util.h"
@@ -91,7 +91,7 @@ typedef struct
 static void kb_vault_operator_components_destroy(kb_vault_operator_components_t *components);
 
 static int kb_vault_operator_components_init(kb_vault_operator_components_t *components,
-                                             db2_vault_operator_runtime_t *database,
+                                             kb_store_vault_operator_runtime_t *database,
                                              kb_vault_tpm_runtime_lock_t *singleton)
 {
    if (!components || !database || !singleton)
@@ -132,15 +132,16 @@ static void kb_vault_operator_components_destroy(kb_vault_operator_components_t 
    memset(components, 0, sizeof(*components));
 }
 
-_Static_assert((int)DB2_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
+_Static_assert((int)KB_STORE_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
                "vault operator state wire mismatch");
-_Static_assert((int)DB2_VAULT_OPERATION_RECOVERY_REQUIRED ==
+_Static_assert((int)KB_STORE_VAULT_OPERATION_RECOVERY_REQUIRED ==
                    (int)KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED,
                "vault operator operation wire mismatch");
-_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE == (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+_Static_assert((int)KB_STORE_VAULT_REMEDIATION_FINALIZE ==
+                   (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
                "vault operator remediation wire mismatch");
 
-static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_status_t *out)
+static int kb_vault_operator_provider_status(void *opaque, kb_store_vault_provider_status_t *out)
 {
    (void)opaque;
    if (!out)
@@ -148,16 +149,16 @@ static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_st
    switch (vault_custody_selected_local_status())
    {
    case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
-      *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+      *out = KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
-      *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+      *out = KB_STORE_VAULT_PROVIDER_AVAILABLE_UNSEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
-      *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
+      *out = KB_STORE_VAULT_PROVIDER_UNAVAILABLE;
       return 0;
    case VAULT_CUSTODY_LOCAL_MALFORMED:
-      *out = DB2_VAULT_PROVIDER_MALFORMED;
+      *out = KB_STORE_VAULT_PROVIDER_MALFORMED;
       return 0;
    }
    return -1;
@@ -165,11 +166,11 @@ static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_st
 
 static int kb_vault_operator_project(kb_vault_operator_status_t *out, void *opaque)
 {
-   db2_vault_operator_runtime_t *runtime = opaque;
-   db2_vault_operator_status_t status;
-   int rc =
-       db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL, &status);
-   if (rc == DB2_VAULT_OPERATOR_UNAVAILABLE || !out)
+   kb_store_vault_operator_runtime_t *runtime = opaque;
+   kb_store_vault_operator_status_t status;
+   int rc = kb_store_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL,
+                                                   &status);
+   if (rc == KB_STORE_VAULT_OPERATOR_UNAVAILABLE || !out)
       return -1;
    memset(out, 0, sizeof(*out));
    out->state = (kb_vault_operator_state_t)status.state;
@@ -216,12 +217,12 @@ static int kb_vault_operator_service_post_wipe(kb_vault_operator_opcode_t opcode
               : -1;
 }
 
-static int kb_vault_operator_status_equal(const db2_vault_operator_status_t *a,
-                                          const db2_vault_operator_status_t *b)
+static int kb_vault_operator_status_equal(const kb_store_vault_operator_status_t *a,
+                                          const kb_store_vault_operator_status_t *b)
 {
    return a && b && a->state == b->state && a->remediation == b->remediation &&
           a->provider == b->provider &&
-          db2_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
+          kb_store_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
 }
 
 static int kb_cmd_vault(int argc, char **argv)
@@ -367,10 +368,10 @@ static void kb_install_signal_handlers(void)
  * closed: lifecycle shutdown deliberately clears these process-local values. */
 static void kb_configure_knowledge_store(void)
 {
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_resolve_embedder_dims_current());
-   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
-   db2_set_embedder_model_id(config_embedder_model());
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_resolve_embedder_dims_current());
+   kb_store_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
+   kb_store_set_embedder_model_id(config_embedder_model());
    embedder_probe_register(config_embedder_command_current(NULL));
 }
 
@@ -378,14 +379,14 @@ static void kb_configure_knowledge_store(void)
  * KB-owned schema; normal service traffic acquires the separate runtime role. */
 static int kb_bootstrap_postgres_resolve(cJSON *resp)
 {
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_embedder_dims_current());
-   int initialized = db2_init_migration() == 0;
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_embedder_dims_current());
+   int initialized = kb_store_init_migration() == 0;
    int schema_ok = 0, have_pg_trgm = 0;
-   int ok =
-       initialized && db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm;
+   int ok = initialized && kb_store_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok &&
+            have_pg_trgm;
    if (initialized)
-      db2_shutdown();
+      kb_store_shutdown();
    cJSON_AddStringToObject(resp, "status", ok ? "ok" : "error");
    cJSON_AddBoolToObject(resp, "knowledge_ready", ok);
    if (!ok)
@@ -503,26 +504,26 @@ static int kb_run_fusion_probe(const char *query)
  *   aimee-kb project create <team_id> <name> [team-open|restricted]
  *   aimee-kb project list [team_id]
  *   aimee-kb project attribute <code_project> <kb_project_id>
- * Runs in-process against DB2 as the 'owner' (bootstrap) principal, so an operator
+ * Runs in-process against KB_STORE as the 'owner' (bootstrap) principal, so an operator
  * with the kb DB credential can manage tenancy without a running listener. (The
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
-static int kb_cmd_tenancy_init_db2(void)
+static int kb_cmd_tenancy_init_kb_store(void)
 {
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_embedder_dims_current());
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_embedder_dims_current());
    /* Tenant entry delegates canonical key construction to the identity owner.
     * Daemon startup registers this through module-stage setup, which CLI
     * subcommands intentionally do not run. Register the narrow adapter here so
     * owner/team operations do not fail closed before their first SQL statement. */
-   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
+   aimee_kb_store_register_identity_key_provider(kb_identity_key_from_fields);
    /* These commands read a deployment somebody else is running. Applying the
     * schema from here races the daemon's own pass, and Postgres answers "tuple
-    * concurrently updated", which surfaced below as "DB2 not reachable" against a
+    * concurrently updated", which surfaced below as "KB_STORE not reachable" against a
     * KB that was reachable and healthy. Verify instead. */
-   db2_set_schema_readonly(1);
-   if (db2_init_configured() != 0)
+   kb_store_set_schema_readonly(1);
+   if (kb_store_init_configured() != 0)
    {
-      fputs("aimee-kb: DB2 not reachable (check the Vault connection credential)\n", stderr);
+      fputs("aimee-kb: KB_STORE not reachable (check the Vault connection credential)\n", stderr);
       return -1;
    }
    return 0;
@@ -598,7 +599,7 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    int initialized = 0;
    for (int attempt = 0; attempt < 60 && !initialized; attempt++)
    {
-      if (kb_cmd_tenancy_init_db2() == 0)
+      if (kb_cmd_tenancy_init_kb_store() == 0)
          initialized = 1;
       else
          sleep(1);
@@ -608,13 +609,13 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    int rc = kb_managed_server_identity_install(&options) == 0 ? 0 : 1;
    if (rc)
       fputs("aimee-kb managed-server-identity: install failed\n", stderr);
-   db2_shutdown();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing spend reporting CLI (P3b):
  *   aimee-kb spend --team X [--project Y] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_spend_query()'s admin gate passes and --team may be omitted for
  * the org-wide report). Read-only. cost_usd is a NUMERIC string, never a float. */
 static int kb_cmd_spend(int argc, char **argv)
@@ -658,43 +659,43 @@ static int kb_cmd_spend(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
-   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
-   int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
-                               (int)(sizeof(rows) / sizeof(rows[0])));
+   kb_store_org_spend_row_t rows[KB_STORE_SPEND_MAX_ROWS];
+   int n = kb_store_org_spend_query(has_team, team, has_project, project, since, until, rows,
+                                    (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
-      db2_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
+      kb_store_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
    else
-      db2_tenant_scope_commit();
+      kb_store_tenant_scope_commit();
 
    int rc = 0;
    if (n < 0)
    {
-      if (n == DB2_SPEND_ERR_DENIED)
+      if (n == KB_STORE_SPEND_ERR_DENIED)
          fprintf(stderr, "aimee-kb: not authorized (org-admin or team-lead required)\n");
-      else if (n == DB2_SPEND_ERR_BADDATE)
+      else if (n == KB_STORE_SPEND_ERR_BADDATE)
          fprintf(stderr, "aimee-kb: invalid date range\n");
-      else if (n == DB2_SPEND_ERR_TOOBIG)
+      else if (n == KB_STORE_SPEND_ERR_TOOBIG)
          fprintf(stderr,
                  "aimee-kb: report too large (>%d rows); narrow --team/--project/"
                  "--since/--until\n",
-                 DB2_SPEND_MAX_ROWS);
+                 KB_STORE_SPEND_MAX_ROWS);
       else
          fprintf(stderr, "aimee-kb: spend query failed\n");
       rc = 1;
@@ -731,14 +732,14 @@ static int kb_cmd_spend(int argc, char **argv)
                 rows[i].cost_usd, (long long)rows[i].calls);
       }
    }
-   db2_shutdown();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing budget admin CLI (P4a):
  *   aimee-kb budget set --team X [--project Y] --period day|month --limit USD [--soft USD]
  *   aimee-kb budget show --team X [--project Y]
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_budget_set/show admin gate passes). Money is a NUMERIC string,
  * never a float. BUDGET ONLY (the rate limiter is P4b; the egress wiring is P2b). */
 static int kb_cmd_budget(int argc, char **argv)
@@ -780,20 +781,20 @@ static int kb_cmd_budget(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -803,12 +804,12 @@ static int kb_cmd_budget(int argc, char **argv)
       if (!period || (strcmp(period, "day") != 0 && strcmp(period, "month") != 0) || !limit)
       {
          fprintf(stderr, "aimee-kb: budget set needs --period day|month and --limit USD\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       int64_t id = 0;
-      int r = db2_org_budget_set(team, has_project, project, period, limit, soft, &id);
+      int r = kb_store_org_budget_set(team, has_project, project, period, limit, soft, &id);
       if (r == 0)
       {
          printf("{\"id\":%lld,\"team\":%lld,", (long long)id, (long long)team);
@@ -817,9 +818,9 @@ static int kb_cmd_budget(int argc, char **argv)
          printf("\"period\":\"%s\",\"limit_usd\":\"%s\"}\n", period, limit);
          rc = 0;
       }
-      else if (r == DB2_BUDGET_ERR_DENIED)
+      else if (r == KB_STORE_BUDGET_ERR_DENIED)
          fprintf(stderr, "budget set failed (not authorized — org-admin required)\n");
-      else if (r == DB2_BUDGET_ERR_RETRO)
+      else if (r == KB_STORE_BUDGET_ERR_RETRO)
          fprintf(stderr,
                  "budget set failed (retroactive reduction below committed spend+reserved)\n");
       else
@@ -827,8 +828,8 @@ static int kb_cmd_budget(int argc, char **argv)
    }
    else /* show */
    {
-      db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
-      int n = db2_org_budget_show(team, has_project, project, rows, DB2_BUDGET_MAX_ROWS);
+      kb_store_org_budget_row_t rows[KB_STORE_BUDGET_MAX_ROWS];
+      int n = kb_store_org_budget_show(team, has_project, project, rows, KB_STORE_BUDGET_MAX_ROWS);
       if (n >= 0)
       {
          printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_"
@@ -846,7 +847,7 @@ static int kb_cmd_budget(int argc, char **argv)
          }
          rc = 0;
       }
-      else if (n == DB2_BUDGET_ERR_DENIED)
+      else if (n == KB_STORE_BUDGET_ERR_DENIED)
          fprintf(stderr, "budget show failed (not authorized — org-admin or team-lead required)\n");
       else
          fprintf(stderr, "budget show failed\n");
@@ -854,22 +855,22 @@ static int kb_cmd_budget(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing rate-policy admin CLI (P4b):
  *   aimee-kb rate set --dim D --scope S --window SECS --max N
  *   aimee-kb rate show --dim D --scope S
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_rate_policy_set/show admin gate passes). RATE ONLY (the budget
  * core is P4a; the org_rate_check egress enforcement is P2b). */
 static int kb_cmd_rate(int argc, char **argv)
@@ -903,20 +904,20 @@ static int kb_cmd_rate(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -926,12 +927,12 @@ static int kb_cmd_rate(int argc, char **argv)
       if (!has_window || window <= 0 || !has_max || maxc < 0)
       {
          fprintf(stderr, "aimee-kb: rate set needs --window >0 and --max >=0\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       int64_t id = 0;
-      int r = db2_org_rate_policy_set(dim, scope, window, maxc, &id);
+      int r = kb_store_org_rate_policy_set(dim, scope, window, maxc, &id);
       if (r == 0)
       {
          printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_"
@@ -939,15 +940,15 @@ static int kb_cmd_rate(int argc, char **argv)
                 (long long)id, dim, scope, (long long)window, (long long)maxc);
          rc = 0;
       }
-      else if (r == DB2_RATE_ERR_DENIED)
+      else if (r == KB_STORE_RATE_ERR_DENIED)
          fprintf(stderr, "rate set failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "rate set failed\n");
    }
    else /* show */
    {
-      db2_org_rate_policy_t rows[DB2_RATE_MAX_ROWS];
-      int n = db2_org_rate_policy_show(dim, scope, rows, DB2_RATE_MAX_ROWS);
+      kb_store_org_rate_policy_t rows[KB_STORE_RATE_MAX_ROWS];
+      int n = kb_store_org_rate_policy_show(dim, scope, rows, KB_STORE_RATE_MAX_ROWS);
       if (n >= 0)
       {
          printf("id\tdim\tscope\twindow_seconds\tmax_count\n");
@@ -957,7 +958,7 @@ static int kb_cmd_rate(int argc, char **argv)
                    (long long)rows[i].max_count);
          rc = 0;
       }
-      else if (n == DB2_RATE_ERR_DENIED)
+      else if (n == KB_STORE_RATE_ERR_DENIED)
          fprintf(stderr, "rate show failed (not authorized — org-admin or team-lead required)\n");
       else
          fprintf(stderr, "rate show failed\n");
@@ -965,15 +966,15 @@ static int kb_cmd_rate(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
@@ -1002,36 +1003,36 @@ static int kb_cmd_telemetry(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
    int rc = 1;
    if (strcmp(sub, "show") == 0)
    {
-      db2_telemetry_allow_row_t rows[DB2_TELEMETRY_ALLOW_MAX_ROWS];
-      int n = db2_telemetry_allow_show(rows, DB2_TELEMETRY_ALLOW_MAX_ROWS);
+      kb_store_telemetry_allow_row_t rows[KB_STORE_TELEMETRY_ALLOW_MAX_ROWS];
+      int n = kb_store_telemetry_allow_show(rows, KB_STORE_TELEMETRY_ALLOW_MAX_ROWS);
       if (n >= 0)
       {
          printf("event_schema\tenabled\tmetric_names\tupdated_at\n");
          for (int i = 0; i < n; i++)
             printf("%s\t%d\t%s\t%s\n", rows[i].event_schema, rows[i].enabled, rows[i].metric_names,
                    rows[i].updated_at);
-         static org_metric_row_t mrows[DB2_TELEMETRY_MAX_ROWS];
-         int m = db2_metrics_snapshot(mrows, DB2_TELEMETRY_MAX_ROWS);
+         static org_metric_row_t mrows[KB_STORE_TELEMETRY_MAX_ROWS];
+         int m = kb_store_metrics_snapshot(mrows, KB_STORE_TELEMETRY_MAX_ROWS);
          if (m >= 0)
          {
             static char buf[256 * 1024];
@@ -1042,12 +1043,12 @@ static int kb_cmd_telemetry(int argc, char **argv)
             }
             rc = 0;
          }
-         else if (m == DB2_TELEMETRY_ERR_DENIED)
+         else if (m == KB_STORE_TELEMETRY_ERR_DENIED)
             fprintf(stderr, "telemetry metrics failed (not authorized — org-admin required)\n");
          else
             fprintf(stderr, "telemetry metrics snapshot failed\n");
       }
-      else if (n == DB2_TELEMETRY_ERR_DENIED)
+      else if (n == KB_STORE_TELEMETRY_ERR_DENIED)
          fprintf(stderr, "telemetry show failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "telemetry show failed\n");
@@ -1057,8 +1058,8 @@ static int kb_cmd_telemetry(int argc, char **argv)
       if (!schema || !metrics)
       {
          fprintf(stderr, "aimee-kb: telemetry allow needs --schema S --metrics a,b,c\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       /* Build the Postgres array literal '{a,b,c}' from the comma list. Each name
@@ -1093,20 +1094,20 @@ static int kb_cmd_telemetry(int argc, char **argv)
       if (bad || first)
       {
          fprintf(stderr, "aimee-kb: each --metrics name must match [a-zA-Z0-9_:]{1,128}\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       arr[o++] = '}';
       arr[o] = '\0';
-      int r = db2_telemetry_allow(schema, arr, enabled);
+      int r = kb_store_telemetry_allow(schema, arr, enabled);
       if (r == 0)
       {
          printf("{\"event_schema\":\"%s\",\"metric_names\":\"%s\",\"enabled\":%s}\n", schema, arr,
                 enabled ? "true" : "false");
          rc = 0;
       }
-      else if (r == DB2_TELEMETRY_ERR_DENIED)
+      else if (r == KB_STORE_TELEMETRY_ERR_DENIED)
          fprintf(stderr, "telemetry allow failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "telemetry allow failed\n");
@@ -1114,15 +1115,15 @@ static int kb_cmd_telemetry(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
@@ -1130,7 +1131,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
 {
    const char *group = argv[1]; /* "team" | "project" */
    const char *sub = argc > 2 ? argv[2] : "";
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
 
    /* Act as the install owner (bootstrap admin). */
@@ -1141,17 +1142,17 @@ static int kb_cmd_tenancy(int argc, char **argv)
       return 1;
 
    int rc_http = 1;
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
    if (strcmp(group, "team") == 0 && strcmp(sub, "create") == 0 && argc >= 4)
    {
       int64_t id = 0;
-      if (db2_team_create(argv[3], "cli", &id) == 0)
+      if (kb_store_team_create(argv[3], "cli", &id) == 0)
       {
          printf("{\"id\":%lld,\"name\":\"%s\"}\n", (long long)id, argv[3]);
          rc_http = 0;
@@ -1161,8 +1162,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
    }
    else if (strcmp(group, "team") == 0 && strcmp(sub, "list") == 0)
    {
-      db2_team_row_t rows[256];
-      int n = db2_team_list(rows, 256);
+      kb_store_team_row_t rows[256];
+      int n = kb_store_team_list(rows, 256);
       for (int i = 0; i < n; i++)
          printf("%lld\t%s\n", (long long)rows[i].id, rows[i].name);
       rc_http = (n < 0) ? 1 : 0;
@@ -1171,8 +1172,9 @@ static int kb_cmd_tenancy(int argc, char **argv)
    {
       int is_default = (argc >= 6 && strcmp(argv[5], "--default") == 0) ? 1 : 0;
       int64_t id = 0;
-      rc_http =
-          db2_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0 ? 0 : 1;
+      rc_http = kb_store_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0
+                    ? 0
+                    : 1;
       if (rc_http == 0)
          printf("ok\n");
       else
@@ -1180,7 +1182,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
    }
    else if (strcmp(group, "team") == 0 && strcmp(sub, "remove-member") == 0 && argc >= 5)
    {
-      rc_http = db2_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
+      rc_http = kb_store_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
       if (rc_http == 0)
          printf("ok\n");
       else
@@ -1190,7 +1192,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
    {
       const char *mode = argc >= 6 ? argv[5] : "team-open";
       int64_t id = 0;
-      if (db2_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
+      if (kb_store_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
       {
          printf("{\"id\":%lld,\"parent\":%s,\"name\":\"%s\"}\n", (long long)id, argv[3], argv[4]);
          rc_http = 0;
@@ -1201,8 +1203,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
    else if (strcmp(group, "project") == 0 && strcmp(sub, "list") == 0)
    {
       int64_t parent = argc >= 4 ? strtoll(argv[3], NULL, 10) : 0;
-      db2_project_row_t rows[256];
-      int n = db2_project_list(parent, rows, 256);
+      kb_store_project_row_t rows[256];
+      int n = kb_store_project_list(parent, rows, 256);
       for (int i = 0; i < n; i++)
          printf("%lld\t%lld\t%s\t%s\n", (long long)rows[i].id, (long long)rows[i].parent,
                 rows[i].name, rows[i].access_mode);
@@ -1212,8 +1214,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
       rc_http = kb_tenancy_cli_project_attribute(argv[3], argv[4]);
    else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
    {
-      db2_model_catalog_row_t rows[512];
-      int n = db2_model_catalog_list(rows, 512);
+      kb_store_model_catalog_row_t rows[512];
+      int n = kb_store_model_catalog_list(rows, 512);
       for (int i = 0; i < n; i++)
          printf("%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].model_id,
                 rows[i].enabled ? "enabled" : "disabled", rows[i].provider, rows[i].wire,
@@ -1231,8 +1233,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
       const char *display_name = (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
       const char *endpoint = (argc >= 9 && strncmp(argv[8], "--", 2) != 0) ? argv[8] : "";
       int64_t id = 0;
-      if (db2_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
-                                   &id) == 0)
+      if (kb_store_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
+                                        &id) == 0)
       {
          printf("{\"id\":%lld,\"model_id\":\"%s\"}\n", (long long)id, argv[4]);
          rc_http = 0;
@@ -1244,7 +1246,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "remove") == 0)
    {
       int64_t removed = 0;
-      if (db2_model_catalog_remove(argv[4], &removed) == 0)
+      if (kb_store_model_catalog_remove(argv[4], &removed) == 0)
       {
          printf("{\"model_id\":\"%s\",\"removed\":%lld}\n", argv[4], (long long)removed);
          rc_http = 0;
@@ -1256,7 +1258,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "entitle") == 0)
    {
       int64_t id = 0;
-      if (db2_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
+      if (kb_store_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
       {
          printf("{\"model_id\":\"%s\",\"team\":%s,\"id\":%lld}\n", argv[4], argv[5], (long long)id);
          rc_http = 0;
@@ -1268,7 +1270,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "unentitle") == 0)
    {
       int64_t removed = 0;
-      if (db2_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
+      if (kb_store_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
       {
          printf("{\"model_id\":\"%s\",\"team\":%s,\"removed\":%lld}\n", argv[4], argv[5],
                 (long long)removed);
@@ -1290,15 +1292,15 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
    if (rc_http == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc_http = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc_http;
 }
 
@@ -1473,7 +1475,8 @@ int main(int argc, char **argv)
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
              "  --http-port=N        TCP port for /v1/* REST API (required; default 0 = off)\n"
              "  --log-level=LEVEL    Log level: error, warn, info, debug (default: info)\n"
-             "  --bootstrap-postgres      Provision/verify the configured DB2 Postgres database\n"
+             "  --bootstrap-postgres      Provision/verify the configured KB_STORE Postgres "
+             "database\n"
              "  --json               Emit JSON for bootstrap commands\n"
              "  --version            Print version\n"
              "  --help               Show this help\n";
@@ -1559,13 +1562,13 @@ int main(int argc, char **argv)
       return 1;
    }
    kb_vault_tpm_runtime_lock_t *vault_tpm_runtime_lock = NULL;
-   db2_vault_operator_runtime_t vault_operator_runtime;
+   kb_store_vault_operator_runtime_t vault_operator_runtime;
    memset(&vault_operator_runtime, 0, sizeof(vault_operator_runtime));
    int vault_operator_runtime_opened = 0;
    kb_vault_operator_service_t *vault_operator_service = NULL;
    kb_vault_operator_components_t vault_operator_components;
    memset(&vault_operator_components, 0, sizeof(vault_operator_components));
-   db2_vault_operator_status_t vault_operator_startup_before;
+   kb_store_vault_operator_status_t vault_operator_startup_before;
    memset(&vault_operator_startup_before, 0, sizeof(vault_operator_startup_before));
 
    kb_configure_knowledge_store();
@@ -1576,44 +1579,44 @@ int main(int argc, char **argv)
    /* Runtime credentials and connection acquisition belong exclusively to the
     * PostgreSQL module. Schema provisioning is a separate owner operation. */
 
-   /* DB2 owns project, workspace, and global knowledge for aimee-kb.
+   /* KB_STORE owns project, workspace, and global knowledge for aimee-kb.
     *
     * Wait out a not-yet-ready Postgres on a bounded backoff instead of exiting
     * on the first failure. In a container/plugin deploy aimee-kb and its Postgres
     * come up as sibling services; Postgres is routinely still starting (or, as
     * seen on the smoothnas plugin runtime, started slightly later) when kb boots.
     * A hard exit here turns that ordinary startup race into a hard outage: the
-    * process dies with DB2 reported "unavailable" and, absent an external
+    * process dies with KB_STORE reported "unavailable" and, absent an external
     * supervisor that restarts it, the kb stays down until a manual restart. The
-    * retry is bounded, so a genuinely misconfigured/missing DB2 still surfaces as
+    * retry is bounded, so a genuinely misconfigured/missing KB_STORE still surfaces as
     * a startup failure — just after giving a slow Postgres time to arrive. */
    {
-      const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
-      const int db2_retry_secs = 5;
+      const int kb_store_max_attempts = 24; /* ~2 min at 5s spacing */
+      const int kb_store_retry_secs = 5;
       int attempt = 1;
-      while (db2_init_runtime() != 0)
+      while (kb_store_init_runtime() != 0)
       {
          /* A published installation can require newer KB schema even when
           * memory's own migrations have completed. Apply it in a separate
           * provider-owned migration session, close that authority, then verify
           * and serve exclusively through the supervised runtime role. */
-         if (db2_init_migration() == 0)
+         if (kb_store_init_migration() == 0)
          {
-            db2_shutdown();
+            kb_store_shutdown();
             kb_configure_knowledge_store();
-            if (db2_init_runtime() == 0)
+            if (kb_store_init_runtime() == 0)
                break;
          }
-         if (attempt >= db2_max_attempts)
+         if (attempt >= kb_store_max_attempts)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed after %d attempts (%ds)\n", attempt,
-                    attempt * db2_retry_secs);
+            fprintf(stderr, "aimee-kb: KB_STORE init failed after %d attempts (%ds)\n", attempt,
+                    attempt * kb_store_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready; retry %d/%d in %ds\n", attempt, db2_max_attempts,
-                 db2_retry_secs);
-         sleep(db2_retry_secs);
+         fprintf(stderr, "aimee-kb: KB_STORE not ready; retry %d/%d in %ds\n", attempt,
+                 kb_store_max_attempts, kb_store_retry_secs);
+         sleep(kb_store_retry_secs);
          attempt++;
       }
    }
@@ -1627,7 +1630,7 @@ int main(int argc, char **argv)
    if (!vault_bound)
    {
       fputs("aimee-kb: instance Vault migration failed; refusing to start\n", stderr);
-      db2_shutdown();
+      kb_store_shutdown();
       agent_http_cleanup();
       return 1;
    }
@@ -1646,7 +1649,7 @@ int main(int argc, char **argv)
       {
          fprintf(stderr, "aimee-kb: %s; refusing to start\n",
                  lock_error[0] ? lock_error : "TPM runtime singleton validation failed");
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1663,7 +1666,7 @@ int main(int argc, char **argv)
       if (kb_vault_policy_select(vault_custody, custody_err, sizeof(custody_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", custody_err);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1678,7 +1681,7 @@ int main(int argc, char **argv)
       if (kb_witness_boot_check(witness_err, sizeof(witness_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", witness_err);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1693,36 +1696,36 @@ int main(int argc, char **argv)
           vault_seal() != 0)
       {
          fputs("aimee-kb: cannot establish sealed D3 operator startup state\n", stderr);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
 #if defined(AIMEE_P7_D3_INTEGRATION_TEST_OVERRIDE)
       LOG_WARN("kb.vault", "P7-D3 integration-only loopback TPM override is ACTIVE");
-      if (db2_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
-                              "allow", "integration-only build flag active") != 0)
+      if (kb_store_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
+                                   "allow", "integration-only build flag active") != 0)
       {
          fputs("aimee-kb: cannot WORM-audit P7-D3 test override; refusing to start\n", stderr);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
 #endif
-      if (db2_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
-                                          operator_error,
-                                          sizeof(operator_error)) != DB2_VAULT_OPERATOR_OK ||
-          db2_vault_operator_runtime_status(
+      if (kb_store_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
+                                               operator_error, sizeof(operator_error)) !=
+              KB_STORE_VAULT_OPERATOR_OK ||
+          kb_store_vault_operator_runtime_status(
               &vault_operator_runtime, kb_vault_operator_provider_status, NULL,
-              &vault_operator_startup_before) != DB2_VAULT_OPERATOR_OK ||
+              &vault_operator_startup_before) != KB_STORE_VAULT_OPERATOR_OK ||
           kb_vault_operator_startup_mode(
               (kb_vault_operator_state_t)vault_operator_startup_before.state) < 0)
       {
          fprintf(stderr, "aimee-kb: vault operator authority/status unavailable: %s\n",
                  operator_error[0] ? operator_error : "initial status failed");
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1736,8 +1739,8 @@ int main(int argc, char **argv)
    {
       int rc = kb_run_fusion_probe(fusion_probe_query);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return rc;
@@ -1752,7 +1755,7 @@ int main(int argc, char **argv)
    {
       int64_t primary_epoch = 0;
       int primary_sealed = 0;
-      int startup_tx = db2_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
+      int startup_tx = kb_store_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
       int startup_ok =
           startup_tx && primary_epoch > 0 && (primary_sealed == 0 || primary_sealed == 1);
       const char *startup_error = "vault control startup status invalid";
@@ -1767,7 +1770,7 @@ int main(int argc, char **argv)
          startup_ok = 0;
          startup_error = "vault primary seal epoch initialization failed";
       }
-      if (startup_tx && db2_vault_control_startup_end(startup_ok) != 0)
+      if (startup_tx && kb_store_vault_control_startup_end(startup_ok) != 0)
       {
          startup_ok = 0;
          startup_error = "vault control startup transaction failed";
@@ -1777,8 +1780,8 @@ int main(int argc, char **argv)
          (void)vault_seal();
          fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
          if (vault_operator_runtime_opened)
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1787,11 +1790,11 @@ int main(int argc, char **argv)
 
    if (vault_operator_enabled)
    {
-      db2_vault_operator_status_t startup_after;
+      kb_store_vault_operator_status_t startup_after;
       memset(&startup_after, 0, sizeof(startup_after));
-      if (db2_vault_operator_runtime_status(&vault_operator_runtime,
-                                            kb_vault_operator_provider_status, NULL,
-                                            &startup_after) != DB2_VAULT_OPERATOR_OK ||
+      if (kb_store_vault_operator_runtime_status(&vault_operator_runtime,
+                                                 kb_vault_operator_provider_status, NULL,
+                                                 &startup_after) != KB_STORE_VAULT_OPERATOR_OK ||
           !kb_vault_operator_status_equal(&vault_operator_startup_before, &startup_after) ||
           kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) < 0 ||
           kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
@@ -1805,9 +1808,9 @@ int main(int argc, char **argv)
       {
          fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n", stderr);
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1847,10 +1850,10 @@ int main(int argc, char **argv)
             kb_vault_operator_service_stop(vault_operator_service);
             vault_operator_service = NULL;
             kb_vault_operator_components_destroy(&vault_operator_components);
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
             vault_operator_runtime_opened = 0;
             embedder_probe_unregister();
-            db2_shutdown();
+            kb_store_shutdown();
             kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
             agent_http_cleanup();
             return g_ctx.running ? 1 : 0;
@@ -1862,9 +1865,9 @@ int main(int argc, char **argv)
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1875,9 +1878,9 @@ int main(int argc, char **argv)
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1888,16 +1891,16 @@ int main(int argc, char **argv)
    if (kb_egress_release_allowed())
    {
       LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
-      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
-                              "integration-only build flag active") != 0)
+      if (kb_store_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b",
+                                   "allow", "integration-only build flag active") != 0)
       {
          fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
          if (vault_operator_runtime_opened)
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1911,7 +1914,7 @@ int main(int argc, char **argv)
     * purge cleans up rows from projects that registered before that
     * guard. No-op once the index is clean. */
    {
-      int purged = db2_code_index_purge_hidden_pollution();
+      int purged = kb_store_code_index_purge_hidden_pollution();
       if (purged > 0)
          LOG_INFO("kb_index", "purged %d hidden-dir index rows on startup", purged);
    }
@@ -1922,8 +1925,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -1943,8 +1946,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       fprintf(stderr,
@@ -1969,8 +1972,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -1983,8 +1986,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -1999,9 +2002,9 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
       obs_bus_stop();
-      db2_shutdown();
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       audit_log_close();
       agent_http_cleanup();
@@ -2025,9 +2028,9 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
       obs_bus_stop();
-      db2_shutdown();
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       audit_log_close();
       agent_http_cleanup();
@@ -2113,9 +2116,9 @@ int main(int argc, char **argv)
       do
       {
          recovered = 0;
-      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+      } while (kb_store_org_egress_recover(100, &recovered) == 0 && recovered == 100);
    }
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
    time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
@@ -2125,14 +2128,14 @@ int main(int argc, char **argv)
       if (now >= next_egress_recovery)
       {
          int64_t recovered = 0;
-         (void)db2_org_egress_recover(100, &recovered);
+         (void)kb_store_org_egress_recover(100, &recovered);
          next_egress_recovery = now + 5;
       }
       kb_management_runtime_tick((int64_t)now);
       kb_witness_cadence_tick(now); /* P7-witness-e2: periodic checkpoint cadence */
-      /* Main-thread maintenance leases lazily from the DB2 pool. Return the
+      /* Main-thread maintenance leases lazily from the KB_STORE pool. Return the
        * lease before sleeping so the daemon does not pin one member forever. */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
@@ -2148,10 +2151,10 @@ int main(int argc, char **argv)
    vault_operator_service = NULL;
    kb_vault_operator_components_destroy(&vault_operator_components);
    if (vault_operator_runtime_opened)
-      db2_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_vault_operator_runtime_close(&vault_operator_runtime);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
-   embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
-   db2_shutdown();
+   embedder_probe_unregister(); /* §2b: deregister the probe before kb_store_shutdown */
+   kb_store_shutdown();
    kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
    audit_log_close();
    agent_http_cleanup();

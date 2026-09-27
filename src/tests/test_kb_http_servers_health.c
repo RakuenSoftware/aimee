@@ -1,6 +1,6 @@
 #include "kb/http/kb_http_servers.h"
 #include "kb_reqctx.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -26,19 +26,19 @@ static int scope_begins, scope_commits;
 static int64_t scope_team;
 static int next_scope_result;
 
-int db2_tenant_scope_begin(const kb_principal_t *actor, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *actor, int64_t team)
 {
    assert(actor && actor->authenticated);
    scope_begins++;
    scope_team = team;
    return next_scope_result;
 }
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    scope_commits++;
    return 0;
 }
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
 }
 
@@ -113,7 +113,7 @@ static kb_management_read_result_t blocking_read_handler(void *ctx, const kb_pri
    return KB_MANAGEMENT_READ_OK;
 }
 
-int db2_server_registry_list(int64_t team, db2_server_row_t *rows, int max)
+int kb_store_server_registry_list(int64_t team, kb_store_server_row_t *rows, int max)
 {
    got_list_team = team;
    if (!rows || max < 1)
@@ -243,9 +243,9 @@ static void test_rejections_and_list_isolation(void)
    assert(got_list_team == 1 && scope_begins == 1);
    assert(calls == before);
 
-   next_scope_result = DB2_ERR_TENANT_DENIED;
+   next_scope_result = KB_STORE_ERR_TENANT_DENIED;
    assert(route("GET", "/v1/servers", "team=2", out, sizeof(out)) == 403);
-   next_scope_result = DB2_ERR_TENANT_NO_CONN;
+   next_scope_result = KB_STORE_ERR_TENANT_NO_CONN;
    assert(route("GET", "/v1/servers", "team=2", out, sizeof(out)) == 503);
    next_scope_result = 0;
    assert(scope_begins == 3 && scope_commits == 1 && got_list_team == 1);

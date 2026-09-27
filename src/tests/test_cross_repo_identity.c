@@ -5,9 +5,9 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/cross_repo_identity.h"
-#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/kb_store.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static const xrepo_identity_t *find_id(const xrepo_identity_t *ids, int n, const char *kind,
@@ -70,7 +70,7 @@ static void test_extract_pure(void)
 static void X(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "seed failed: %s\n  sql: %s\n", err, sql);
    assert(rc == 0);
@@ -81,7 +81,7 @@ static int64_t id_count(const char *project, const char *kind, const char *value
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT COUNT(*) FROM cross_repo_identity WHERE project = ?1 AND kind = ?2 AND value = ?3",
        err, sizeof(err));
    assert(st);
@@ -128,7 +128,7 @@ static void test_rebuild_end_to_end(void)
    seed_manifest_v("clib", "third_party/vlib/Cargo.toml", "[package]\nname = \"vendored_crate\"\n",
                    1);
 
-   int rc = db2_cross_repo_rebuild_identities();
+   int rc = kb_store_cross_repo_rebuild_identities();
    assert(rc >= 4); /* serde_helpers + CLib + clib_core + clib */
    assert(id_count("rustlib", "crate", "serde_helpers") == 1);
    assert(id_count("clib", "crate", "vendored_crate") == 0); /* vendored, excluded */
@@ -139,7 +139,7 @@ static void test_rebuild_end_to_end(void)
    assert(id_count("rustlib", "cmake_project", "CLib") == 0);
 
    /* idempotent: a second rebuild yields the same set (no dups, DELETE+rebuild). */
-   int rc2 = db2_cross_repo_rebuild_identities();
+   int rc2 = kb_store_cross_repo_rebuild_identities();
    assert(rc2 == rc);
    assert(id_count("clib", "cmake_target", "clib_core") == 1);
    printf("ok\n");
@@ -148,7 +148,7 @@ static void test_rebuild_end_to_end(void)
 int main(void)
 {
    test_extract_pure();
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_rebuild_end_to_end();
    printf("cross_repo_identity: all tests passed\n");
    return 0;

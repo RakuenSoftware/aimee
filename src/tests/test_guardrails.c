@@ -10,8 +10,8 @@
 #include "aimee.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1_client/db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "server/obs_bus_adapter.h"
 #include <aimee/workspace/workspace.h>
 #include "db1_client/session_state.h" /* db1_session_state_delete -- teardown only */
@@ -23,17 +23,17 @@
 #include "modules/git/git_verify.h"
 #include "support/git_module_fixture.h"
 
-/* Per-case in-memory DB2 backing for test bodies that round-trip
+/* Per-case in-memory KB_STORE backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
- * the db2_init/shutdown ceremony. */
+ * the kb_store_init/shutdown ceremony. */
 static void guardrails_open_test_sqlite(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 }
 
 static void guardrails_close_test_sqlite(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* --- Verify config test helpers ---
@@ -1451,9 +1451,9 @@ static void test_malformed_tool_payloads(void)
 static void clear_anti_patterns_for_test(void)
 {
    anti_pattern_t aps[64];
-   int n = db2_anti_pattern_list(aps, 64);
+   int n = kb_store_anti_pattern_list(aps, 64);
    for (int i = 0; i < n; i++)
-      db2_anti_pattern_delete(aps[i].id);
+      kb_store_anti_pattern_delete(aps[i].id);
 }
 
 static void test_anti_pattern_in_session_warning(void)
@@ -1463,8 +1463,8 @@ static void test_anti_pattern_in_session_warning(void)
 
    /* Insert an anti-pattern that phrase-matches "rm -rf" commands. */
    anti_pattern_t ap;
-   int rc = db2_anti_pattern_insert("rm -rf", "Do not use rm -rf on project dirs", "test",
-                                    "test-ref", 0.9, &ap);
+   int rc = kb_store_anti_pattern_insert("rm -rf", "Do not use rm -rf on project dirs", "test",
+                                         "test-ref", 0.9, &ap);
    assert(rc == 0);
 
    session_state_t state;
@@ -1519,7 +1519,7 @@ static void test_anti_pattern_empty_description_falls_back_to_pattern(void)
     * after the colon. The fallback must surface the pattern string so the
     * agent can tell which row fired. */
    anti_pattern_t ap;
-   int rc = db2_anti_pattern_insert("rm -rf", "", "test", "", 0.9, &ap);
+   int rc = kb_store_anti_pattern_insert("rm -rf", "", "test", "", 0.9, &ap);
    assert(rc == 0);
 
    session_state_t state;
@@ -1546,7 +1546,7 @@ static void test_anti_pattern_bypass_env(void)
    clear_anti_patterns_for_test();
 
    anti_pattern_t ap;
-   db2_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
+   kb_store_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
 
    session_state_t state;
    memset(&state, 0, sizeof(state));
@@ -1581,7 +1581,7 @@ static void test_anti_pattern_bypass_env_falsey_still_blocks(void)
       clear_anti_patterns_for_test();
 
       anti_pattern_t ap;
-      db2_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
+      kb_store_anti_pattern_insert("rm -rf", "d", "test", "", 0.9, &ap);
 
       session_state_t state;
       memset(&state, 0, sizeof(state));
@@ -1610,7 +1610,7 @@ static void test_anti_pattern_no_match_no_warning(void)
 
    /* Pattern that only matches literal "rm -rf". Must not match "ls". */
    anti_pattern_t ap;
-   db2_anti_pattern_insert("rm -rf", "Dangerous deletion", "test", "ref", 0.9, &ap);
+   kb_store_anti_pattern_insert("rm -rf", "Dangerous deletion", "test", "ref", 0.9, &ap);
 
    session_state_t state;
    memset(&state, 0, sizeof(state));
@@ -1624,7 +1624,7 @@ static void test_anti_pattern_no_match_no_warning(void)
 
    /* Also: a pattern like "git fetch origin" must not fire on commands that
     * merely share a token with it — the old half-tokens matcher failed here. */
-   db2_anti_pattern_insert("git fetch origin", "no network fetches", "test", "", 0.9, &ap);
+   kb_store_anti_pattern_insert("git fetch origin", "no network fetches", "test", "", 0.9, &ap);
    rc = pre_tool_check("Bash", "{\"command\":\"echo hello && git status\"}", &state, MODE_APPROVE,
                        "/tmp", msg, sizeof(msg));
    assert(rc == 0);
@@ -3989,7 +3989,7 @@ int main(void)
     * gate rather than on what it means to test. After the suite's own bus
     * configuration, not before: reconfiguring a running bus is refused. */
    git_module_fixture_start();
-   /* anti_patterns is DB2 (Postgres). */
+   /* anti_patterns is KB_STORE (Postgres). */
 
    test_classify_sensitive();
    test_classify_database();

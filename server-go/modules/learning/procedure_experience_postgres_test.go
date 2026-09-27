@@ -10,7 +10,7 @@ import (
 )
 
 func TestProcedureLedgerPostgresImmutableScopedVersionsAndErasure(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("PostgreSQL fixture unavailable")
 	}

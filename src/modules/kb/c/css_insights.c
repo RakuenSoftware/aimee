@@ -1,8 +1,8 @@
-/* db2/css_insights.c: read-only CSS analysis signals. See css_insights.h. */
+/* kb_store/css_insights.c: read-only CSS analysis signals. See css_insights.h. */
 #include "css_insights.h"
 
-#include "db2.h"
-#include "db2_internal.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <ctype.h>
@@ -14,11 +14,11 @@
 
 /* ── !important audit ──────────────────────────────────────────────────── */
 
-int db2_css_important_audit(const char *pf, css_important_t *out, int max)
+int kb_store_css_important_audit(const char *pf, css_important_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (pf && pf[0]) ? 1 : 0;
@@ -65,11 +65,11 @@ int db2_css_important_audit(const char *pf, css_important_t *out, int max)
 
 /* ── high-specificity (id-bearing) selectors ───────────────────────────── */
 
-int db2_css_high_specificity(const char *pf, css_high_spec_t *out, int max)
+int kb_store_css_high_specificity(const char *pf, css_high_spec_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (pf && pf[0]) ? 1 : 0;
@@ -171,11 +171,11 @@ static void scan_var_refs(const char *val, refset_t *rs)
    }
 }
 
-int db2_css_unused_custom_properties(const char *pf, css_unused_var_t *out, int max)
+int kb_store_css_unused_custom_properties(const char *pf, css_unused_var_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (pf && pf[0]) ? 1 : 0;
@@ -398,13 +398,13 @@ static int tok_cmp_desc(const void *a, const void *b)
    return strcmp(x->value, y->value);
 }
 
-int db2_css_token_candidates(const char *pf, int min_count, css_token_cand_t *out, int max)
+int kb_store_css_token_candidates(const char *pf, int min_count, css_token_cand_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
    if (min_count < 2)
       min_count = 2;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (pf && pf[0]) ? 1 : 0;

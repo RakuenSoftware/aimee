@@ -1,6 +1,6 @@
 /* audit_worm_chain.h: the pure, engine-agnostic WORM chain primitives shared by
  * the aimee-server SQLite store (audit_worm.c) and the aimee-kb Postgres store
- * (db2/kb_audit_worm.c), so both produce BYTE-IDENTICAL row hashes + checkpoint
+ * (kb_store/kb_audit_worm.c), so both produce BYTE-IDENTICAL row hashes + checkpoint
  * MACs (R1-1: shared code + test vectors). No storage engine dependency — just
  * SHA-256 (wfe), dstr, and the chain key file. */
 #ifndef AIMEE_AUDIT_WORM_CHAIN_H
@@ -15,7 +15,7 @@ extern "C"
 
 /* Domain-separation + algorithm tag folded into every row_hash. Bump to version
  * the canonicalization/hash. */
-#define AUDIT_WORM_DOMAIN "aimee.audit.worm.v1"
+#define AUDIT_WORM_DOMAIN    "aimee.audit.worm.v1"
 #define AUDIT_WORM_DOMAIN_V2 "aimee.audit.worm.v2"
 /* Genesis prev_hash: 32 zero bytes as 64 lowercase hex chars. */
 #define AUDIT_WORM_GENESIS_PREV "0000000000000000000000000000000000000000000000000000000000000000"

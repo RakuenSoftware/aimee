@@ -8,20 +8,20 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "support/test_time.h"
-#include "modules/kb/c/memory_lifecycle.h" /* db2_memory_valid_at */
-#include "modules/kb/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
+#include "modules/kb/c/memory_lifecycle.h" /* kb_store_memory_valid_at */
+#include "modules/kb/c/memory_query.h"     /* kb_store_memory_count_orphaned_l0 */
 #include "aimee/kb/graph_kinds.h"
 #include "../modules/kb/c/bandit.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static void reset_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 /* Long-content insert/merge coverage now runs against the Go owner in
@@ -30,7 +30,7 @@ static int64_t insert_raw_fact(const char *key, const char *content)
 {
    char err[128] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
        " VALUES('L2','fact',?1,?2,0.8,0.8,'lineage-test') RETURNING id",
        err, sizeof(err));
@@ -72,15 +72,15 @@ int main(void)
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
 
-   /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
-    * against db2_conn() — same surface production code uses. */
-   db2_test_shim_open();
+   /* KB_STORE backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
+    * against kb_store_conn() — same surface production code uses. */
+   kb_store_test_shim_open();
 
    /* --- anti_pattern_insert --- */
    {
       anti_pattern_t ap;
-      int rc =
-          db2_anti_pattern_insert("rm -rf", "dangerous delete", "manual", "incident-1", 0.9, &ap);
+      int rc = kb_store_anti_pattern_insert("rm -rf", "dangerous delete", "manual", "incident-1",
+                                            0.9, &ap);
       assert(rc == 0);
       assert(ap.id > 0);
       assert(strcmp(ap.pattern, "rm -rf") == 0);
@@ -90,7 +90,7 @@ int main(void)
    /* --- anti_pattern_list --- */
    {
       anti_pattern_t aps[8];
-      int count = db2_anti_pattern_list(aps, 8);
+      int count = kb_store_anti_pattern_list(aps, 8);
       assert(count == 1);
       assert(strcmp(aps[0].pattern, "rm -rf") == 0);
    }
@@ -98,7 +98,7 @@ int main(void)
    /* --- anti_pattern_check: matching phrase at a word boundary --- */
    {
       anti_pattern_t matches[8];
-      int count = db2_anti_pattern_check("", "rm -rf /var/data", matches, 8);
+      int count = kb_store_anti_pattern_check("", "rm -rf /var/data", matches, 8);
       assert(count > 0);
       assert(matches[0].hit_count >= 0);
    }
@@ -109,13 +109,13 @@ int main(void)
        * target but whose whole phrase does not. Old matcher (half-tokens)
        * would have flagged this; the new phrase matcher must not. */
       anti_pattern_t ap;
-      db2_anti_pattern_insert("git fetch origin", "network fetch", "manual", "", 0.9, &ap);
+      kb_store_anti_pattern_insert("git fetch origin", "network fetch", "manual", "", 0.9, &ap);
 
       anti_pattern_t matches[8];
-      int count = db2_anti_pattern_check("", "echo hello && git status", matches, 8);
+      int count = kb_store_anti_pattern_check("", "echo hello && git status", matches, 8);
       for (int i = 0; i < count; i++)
          assert(strcmp(matches[i].pattern, "git fetch origin") != 0);
-      db2_anti_pattern_delete(ap.id);
+      kb_store_anti_pattern_delete(ap.id);
    }
 
    /* --- anti_pattern_check: no substring-inside-word false positives --- */
@@ -123,59 +123,59 @@ int main(void)
       /* "rm -rf" should NOT match a command that contains "rm" as a substring
        * of another word (e.g. "format", "permission"). */
       anti_pattern_t matches[8];
-      int count = db2_anti_pattern_check("", "chmod +rw format permission", matches, 8);
+      int count = kb_store_anti_pattern_check("", "chmod +rw format permission", matches, 8);
       assert(count == 0);
    }
 
    /* --- anti_pattern_check: empty pattern row never matches --- */
    {
       anti_pattern_t ep;
-      db2_anti_pattern_insert("", "", "test", "", 1.0, &ep);
+      kb_store_anti_pattern_insert("", "", "test", "", 1.0, &ep);
       anti_pattern_t matches[8];
-      int count = db2_anti_pattern_check("", "anything at all", matches, 8);
+      int count = kb_store_anti_pattern_check("", "anything at all", matches, 8);
       /* The empty-pattern row must not show up. */
       for (int i = 0; i < count; i++)
          assert(matches[i].id != ep.id);
-      db2_anti_pattern_delete(ep.id);
+      kb_store_anti_pattern_delete(ep.id);
    }
 
    /* --- anti_pattern_check: no match --- */
    {
       anti_pattern_t matches[8];
-      int count = db2_anti_pattern_check("", "echo hello", matches, 8);
+      int count = kb_store_anti_pattern_check("", "echo hello", matches, 8);
       assert(count == 0);
    }
 
    /* --- anti_pattern_check does NOT bump lifetime hit_count --- */
    {
       anti_pattern_t before[8];
-      int bc = db2_anti_pattern_list(before, 8);
+      int bc = kb_store_anti_pattern_list(before, 8);
       assert(bc >= 1);
       int hc0 = before[0].hit_count;
 
       anti_pattern_t matches[8];
-      db2_anti_pattern_check("", "rm -rf /tmp/xyz", matches, 8);
-      db2_anti_pattern_check("", "rm -rf /tmp/xyz", matches, 8);
+      kb_store_anti_pattern_check("", "rm -rf /tmp/xyz", matches, 8);
+      kb_store_anti_pattern_check("", "rm -rf /tmp/xyz", matches, 8);
 
       anti_pattern_t after[8];
-      db2_anti_pattern_list(after, 8);
+      kb_store_anti_pattern_list(after, 8);
       assert(after[0].hit_count == hc0);
 
       /* anti_pattern_bump is the only path that should increment it. */
-      db2_anti_pattern_bump(before[0].id);
-      db2_anti_pattern_list(after, 8);
+      kb_store_anti_pattern_bump(before[0].id);
+      kb_store_anti_pattern_list(after, 8);
       assert(after[0].hit_count == hc0 + 1);
    }
 
    /* --- anti_pattern_delete --- */
    {
       anti_pattern_t ap;
-      db2_anti_pattern_insert("temp pattern", "test", "manual", "", 0.5, &ap);
-      int rc = db2_anti_pattern_delete(ap.id);
+      kb_store_anti_pattern_insert("temp pattern", "test", "manual", "", 0.5, &ap);
+      int rc = kb_store_anti_pattern_delete(ap.id);
       assert(rc == 0);
 
       anti_pattern_t aps[8];
-      int count = db2_anti_pattern_list(aps, 8);
+      int count = kb_store_anti_pattern_list(aps, 8);
       /* Should only have the first one left */
       assert(count == 1);
    }
@@ -199,7 +199,7 @@ int main(void)
        * only its first page. */
       char err[128] = "";
       aimee_pg_stmt_t *deep_insert = aimee_pg_prepare(
-          db2_conn(),
+          kb_store_conn(),
           "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
           " VALUES('L1','fact','deep-conflict-scan',?1,0.7,0.8,'deep-scan')",
           err, sizeof(err));
@@ -275,13 +275,13 @@ int main(void)
       assert(memory_insert(TIER_L2, KIND_FACT, "ceiling-model", "model supplied claim", 1.0,
                            "ceiling", &model) == 0);
       assert(model.confidence <= 0.800001);
-      assert(db2_memory_merge_update_ex(model.id, model.content, "", 1.0, 2, 2, 0.8, 0.5, 0.5,
-                                        "2026-08-25T00:00:00Z") == 0);
+      assert(kb_store_memory_merge_update_ex(model.id, model.content, "", 1.0, 2, 2, 0.8, 0.5, 0.5,
+                                             "2026-08-25T00:00:00Z") == 0);
       char confidence_sql[128], confidence_err[128] = "";
       snprintf(confidence_sql, sizeof(confidence_sql),
                "SELECT confidence FROM memories WHERE id=%lld", (long long)model.id);
       aimee_pg_stmt_t *confidence_stmt =
-          aimee_pg_prepare(db2_conn(), confidence_sql, confidence_err, sizeof(confidence_err));
+          aimee_pg_prepare(kb_store_conn(), confidence_sql, confidence_err, sizeof(confidence_err));
       assert(confidence_stmt && aimee_pg_step(confidence_stmt, confidence_err,
                                               sizeof(confidence_err)) == AIMEE_PG_ROW);
       model.confidence = aimee_pg_column_double(confidence_stmt, 0);
@@ -311,7 +311,7 @@ int main(void)
       /* Seed canonical ownership directly; scope-tag policy lives in Go. */
       char scope_err[256] = "";
       aimee_pg_stmt_t *scope_stmt =
-          aimee_pg_prepare(db2_conn(),
+          aimee_pg_prepare(kb_store_conn(),
                            "UPDATE memories SET scope_type='project',scope_value=CASE id WHEN ?1 "
                            "THEN 'project-a' ELSE 'project-b' END WHERE id IN (?1,?2)",
                            scope_err, sizeof(scope_err));
@@ -338,7 +338,7 @@ int main(void)
       {
          char err[128] = "";
          aimee_pg_stmt_t *q = aimee_pg_prepare(
-             db2_conn(),
+             kb_store_conn(),
              "SELECT m.id,m.confidence FROM memories m JOIN memory_scopes s ON s.memory_id=m.id"
              " WHERE m.tier='L5' AND s.scope_type='project' AND s.scope_value=?1"
              " AND m.content LIKE '%scope isolated evidence%'",
@@ -351,8 +351,8 @@ int main(void)
          assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_DONE);
          aimee_pg_finalize(q);
 
-         db2_memory_scope_tag_row_t scopes[4];
-         int scope_count = db2_memory_scopes_list(derived_ids[i], scopes, 4);
+         kb_store_memory_scope_tag_row_t scopes[4];
+         int scope_count = kb_store_memory_scopes_list(derived_ids[i], scopes, 4);
          assert(scope_count == 1);
          assert(strcmp(scopes[0].type, "project") == 0);
          assert(strcmp(scopes[0].value, projects[i]) == 0);
@@ -360,7 +360,7 @@ int main(void)
       assert(derived_ids[0] != derived_ids[1]);
 
       char err[128] = "";
-      aimee_pg_stmt_t *q = aimee_pg_prepare(db2_conn(),
+      aimee_pg_stmt_t *q = aimee_pg_prepare(kb_store_conn(),
                                             "SELECT COUNT(*) FROM memories WHERE tier='L5'"
                                             " AND content LIKE '%unresolved evidence%'",
                                             err, sizeof(err));
@@ -412,7 +412,7 @@ int main(void)
       static const char *edge_sql =
           "INSERT OR IGNORE INTO entity_edges (source, relation, target, weight, window_id)"
           " VALUES (?1, 'co_discussed', ?2, ?3, 1)";
-      aimee_pg_stmt_t *es = aimee_pg_prepare(db2_conn(), edge_sql, err, sizeof(err));
+      aimee_pg_stmt_t *es = aimee_pg_prepare(kb_store_conn(), edge_sql, err, sizeof(err));
       assert(es);
       /* 3 topics for "Alice" */
       aimee_pg_bind_text(es, "?1", "alice");
@@ -435,7 +435,7 @@ int main(void)
       /* Simulate a memory_entities entry for alice using the memory ID */
       static const char *ent_sql =
           "INSERT OR IGNORE INTO memory_entities (memory_id, entity) VALUES (?1, ?2)";
-      aimee_pg_stmt_t *me = aimee_pg_prepare(db2_conn(), ent_sql, err, sizeof(err));
+      aimee_pg_stmt_t *me = aimee_pg_prepare(kb_store_conn(), ent_sql, err, sizeof(err));
       assert(me);
       aimee_pg_bind_int64(me, "?1", m.id);
       aimee_pg_bind_text(me, "?2", "alice");
@@ -466,7 +466,7 @@ int main(void)
           "INSERT INTO memories (tier, kind, key, content, confidence, use_count, source_session,"
           " created_at, updated_at)"
           " VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, pg_now_text(), pg_now_text())";
-      aimee_pg_stmt_t *ins = aimee_pg_prepare(db2_conn(), ins_sql, err, sizeof(err));
+      aimee_pg_stmt_t *ins = aimee_pg_prepare(kb_store_conn(), ins_sql, err, sizeof(err));
       assert(ins);
 
       /* First row — lower confidence */
@@ -499,8 +499,9 @@ int main(void)
 
       /* Verify: only one row with key "dup-key-improve" should have merged_into=0 */
       aimee_pg_stmt_t *chk = aimee_pg_prepare(
-          db2_conn(), "SELECT COUNT(*) FROM memories WHERE key='dup-key-improve' AND merged_into=0",
-          err, sizeof(err));
+          kb_store_conn(),
+          "SELECT COUNT(*) FROM memories WHERE key='dup-key-improve' AND merged_into=0", err,
+          sizeof(err));
       assert(chk);
       assert(aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW);
       assert(aimee_pg_column_int(chk, 0) == 1);
@@ -514,7 +515,7 @@ int main(void)
        * MERGED row: that is the row whose meaning changed and the one an undo
        * would have to find. */
       aimee_pg_stmt_t *prov =
-          aimee_pg_prepare(db2_conn(),
+          aimee_pg_prepare(kb_store_conn(),
                            "SELECT p.action, p.details FROM memory_provenance p"
                            "  JOIN memories m ON m.id = p.memory_id"
                            " WHERE m.key = 'dup-key-improve' AND m.merged_into != 0"
@@ -694,21 +695,21 @@ int main(void)
       char err[256] = "";
       memory_insert(TIER_L2, KIND_FACT, "jon:city-1", "Jon visited Tokyo in March", 0.9, "s1", &m);
       int64_t jon_tokyo = m.id;
-      assert(aimee_pg_exec(db2_conn(),
+      assert(aimee_pg_exec(kb_store_conn(),
                            "INSERT INTO memory_entities(memory_id, entity) VALUES"
                            " ((SELECT id FROM memories WHERE key='jon:city-1'), 'jon')",
                            err, sizeof(err)) == 0);
 
       memory_insert(TIER_L2, KIND_FACT, "jon:city-2", "Jon visited Osaka last month", 0.9, "s1",
                     &m);
-      assert(aimee_pg_exec(db2_conn(),
+      assert(aimee_pg_exec(kb_store_conn(),
                            "INSERT INTO memory_entities(memory_id, entity) VALUES"
                            " ((SELECT id FROM memories WHERE key='jon:city-2'), 'jon')",
                            err, sizeof(err)) == 0);
 
       memory_insert(TIER_L2, KIND_FACT, "jon:city-3", "Jon visited Kyoto on vacation", 0.9, "s1",
                     &m);
-      assert(aimee_pg_exec(db2_conn(),
+      assert(aimee_pg_exec(kb_store_conn(),
                            "INSERT INTO memory_entities(memory_id, entity) VALUES"
                            " ((SELECT id FROM memories WHERE key='jon:city-3'), 'jon')",
                            err, sizeof(err)) == 0);
@@ -810,7 +811,7 @@ int main(void)
       /* Lexical match: FTS on trigger_text catches "rotation".
        * Postgres-only — the in-memory aimee_pg sqlite shim doesn't
        * faithfully emulate to_tsvector/to_tsquery, so the FTS path is
-       * exercised by the db2 contract tests against real Postgres. */
+       * exercised by the kb_store contract tests against real Postgres. */
       n = memory_prospective_match("we should rotate the staging tokens", "", "", rows, 16);
       (void)n;
 
@@ -944,7 +945,7 @@ int main(void)
          snprintf(archived_sql, sizeof(archived_sql), "SELECT key FROM memories WHERE id=%lld",
                   (long long)m.id);
          aimee_pg_stmt_t *archived_stmt =
-             aimee_pg_prepare(db2_conn(), archived_sql, archived_err, sizeof(archived_err));
+             aimee_pg_prepare(kb_store_conn(), archived_sql, archived_err, sizeof(archived_err));
          assert(archived_stmt &&
                 aimee_pg_step(archived_stmt, archived_err, sizeof(archived_err)) == AIMEE_PG_ROW);
          assert(strcmp(aimee_pg_column_text(archived_stmt, 0), "sm:active") == 0);
@@ -965,7 +966,7 @@ int main(void)
                               "s1", &m) == 0);
          /* Seed ttl_at directly in the past so the sweep must archive it. */
          char err[256] = "";
-         assert(aimee_pg_exec(db2_conn(),
+         assert(aimee_pg_exec(kb_store_conn(),
                               "UPDATE memories SET lifecycle_state = 'pending',"
                               " ttl_at = '2020-01-01 00:00:00'",
                               err, sizeof(err)) == 0);
@@ -997,7 +998,7 @@ int main(void)
           * memory_insert would run derived-metadata and opportunistic-maintenance
           * work after every row, neither of which is part of this assertion. */
          char err[256] = "";
-         aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err));
+         aimee_pg_exec(kb_store_conn(), "BEGIN", err, sizeof(err));
          for (int i = 0; i < 500; i++)
          {
             char key[64];
@@ -1013,14 +1014,14 @@ int main(void)
                      " 'I''ll ship this next week',0.9,'s1','pending','%s','%s')",
                      key, created_ts, ttl_ts);
             err[0] = '\0';
-            int urc = aimee_pg_exec(db2_conn(), ageq, err, sizeof(err));
+            int urc = aimee_pg_exec(kb_store_conn(), ageq, err, sizeof(err));
             if (urc != 0)
             {
                fprintf(stderr, "stress seed failed at i=%d: %s\nSQL: %s\n", i, err, ageq);
                assert(0);
             }
          }
-         aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err));
+         aimee_pg_exec(kb_store_conn(), "COMMIT", err, sizeof(err));
 
          int archived_first = memory_lifecycle_sweep_expired();
          assert(archived_first > 0);
@@ -1229,7 +1230,7 @@ int main(void)
          assert(memory_record_conflict(mb.id, ma.id) == 0);
          char err[128] = "";
          aimee_pg_stmt_t *q = aimee_pg_prepare(
-             db2_conn(),
+             kb_store_conn(),
              "SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"
              " AND ((memory_a=?1 AND memory_b=?2) OR (memory_a=?2 AND memory_b=?1))",
              err, sizeof(err));
@@ -1298,7 +1299,7 @@ int main(void)
       memory_t m;
       memory_insert(TIER_L2, KIND_FACT, "maint:pending", "I'll ship this next week", 0.9, "s1", &m);
       char err[256] = "";
-      assert(aimee_pg_exec(db2_conn(),
+      assert(aimee_pg_exec(kb_store_conn(),
                            "UPDATE memories SET lifecycle_state = 'pending',"
                            " ttl_at = '2020-01-01 00:00:00' WHERE key = 'maint:pending'",
                            err, sizeof(err)) == 0);
@@ -1344,22 +1345,22 @@ int main(void)
 
       /* While active the interval is open at both ends: true then, true now,
        * true at an absurd future date. An open bound must never read as closed. */
-      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
-      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 1);
+      assert(kb_store_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      assert(kb_store_memory_valid_at(m.id, "2099-01-01 00:00:00") == 1);
 
       /* Supersede it. This is the transition that closes the interval. */
       assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_SUPERSEDED, NULL) == 0);
 
       /* The past is unchanged -- it WAS true then, and rewriting history is
        * exactly what a state flag does by omission. */
-      assert(db2_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
+      assert(kb_store_memory_valid_at(m.id, "2000-01-01 00:00:00") == 1);
       /* ...and it is no longer true at a date after the close. */
-      assert(db2_memory_valid_at(m.id, "2099-01-01 00:00:00") == 0);
+      assert(kb_store_memory_valid_at(m.id, "2099-01-01 00:00:00") == 0);
 
       /* Bad calls are refused rather than guessed. */
-      assert(db2_memory_valid_at(m.id, NULL) == -1);
-      assert(db2_memory_valid_at(m.id, "") == -1);
-      assert(db2_memory_valid_at(0, "2020-01-01 00:00:00") == -1);
+      assert(kb_store_memory_valid_at(m.id, NULL) == -1);
+      assert(kb_store_memory_valid_at(m.id, "") == -1);
+      assert(kb_store_memory_valid_at(0, "2020-01-01 00:00:00") == -1);
 
       /* A row that never closed reads as still true at any date. Rows written
        * before this stamping existed fall here, and "still true" is the honest
@@ -1368,7 +1369,7 @@ int main(void)
       memory_t open_row;
       assert(memory_insert(TIER_L2, KIND_FACT, "bt:open", "never superseded", 0.9, "s-bt",
                            &open_row) == 0);
-      assert(db2_memory_valid_at(open_row.id, "2099-01-01 00:00:00") == 1);
+      assert(kb_store_memory_valid_at(open_row.id, "2099-01-01 00:00:00") == 1);
 
       /* SAME-DAY comparison, in both spellings of a timestamp.
        *
@@ -1396,10 +1397,10 @@ int main(void)
 
       /* valid_until side: m closed earlier today, so a later time today is out.
        * The spaced form is the one that read "still in force" against the bug. */
-      assert(db2_memory_valid_at(m.id, iso_after) == 0);
-      assert(db2_memory_valid_at(m.id, spaced_after) == 0);
-      assert(db2_memory_valid_at(m.id, iso_before) == 1);
-      assert(db2_memory_valid_at(m.id, spaced_before) == 1);
+      assert(kb_store_memory_valid_at(m.id, iso_after) == 0);
+      assert(kb_store_memory_valid_at(m.id, spaced_after) == 0);
+      assert(kb_store_memory_valid_at(m.id, iso_before) == 1);
+      assert(kb_store_memory_valid_at(m.id, spaced_before) == 1);
 
       printf("  bitemporal_rows: ok\n");
    }
@@ -1435,7 +1436,7 @@ int main(void)
       snprintf(stamp_sql, sizeof(stamp_sql), "SELECT updated_at FROM memories WHERE id=%lld",
                (long long)probe.id);
       aimee_pg_stmt_t *stamp_stmt =
-          aimee_pg_prepare(db2_conn(), stamp_sql, stamp_err, sizeof(stamp_err));
+          aimee_pg_prepare(kb_store_conn(), stamp_sql, stamp_err, sizeof(stamp_err));
       assert(stamp_stmt && aimee_pg_step(stamp_stmt, stamp_err, sizeof(stamp_err)) == AIMEE_PG_ROW);
       snprintf(after.updated_at, sizeof(after.updated_at), "%s",
                aimee_pg_column_text(stamp_stmt, 0));
@@ -1461,26 +1462,26 @@ int main(void)
       assert(parse_utc_ts(after.updated_at) > 0);
 
       /* The modifier overload feeds the same text comparisons, so it must keep
-       * the format too. db2_memory_count_orphaned_l0 runs
+       * the format too. kb_store_memory_count_orphaned_l0 runs
        * "created_at < pg_now_text('-7 days')": a row created moments ago must not
        * be counted as seven days old. A modifier overload emitting a different
        * shape shows up here as a fresh row being swept. */
       memory_t fresh;
       assert(memory_insert(TIER_L0, KIND_FACT, "fmt:fresh", "created just now", 0.9, "s-fmt",
                            &fresh) == 0);
-      int orphaned_before = db2_memory_count_orphaned_l0();
+      int orphaned_before = kb_store_memory_count_orphaned_l0();
       assert(orphaned_before >= 0);
       memory_t fresh2;
       assert(memory_insert(TIER_L0, KIND_FACT, "fmt:fresh2", "also just now", 0.9, "s-fmt",
                            &fresh2) == 0);
       /* Adding another brand-new L0 row must not increase the "older than 7 days"
        * count. */
-      assert(db2_memory_count_orphaned_l0() == orphaned_before);
+      assert(kb_store_memory_count_orphaned_l0() == orphaned_before);
 
       printf("  timestamp_writers_agree: ok\n");
    }
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    db1_shutdown();
 
    printf("all tests passed\n");

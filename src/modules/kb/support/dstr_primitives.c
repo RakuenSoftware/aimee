@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 process support for the required dstr_t lifecycle. */
-#include "db2_dstr.h"
+/* Descriptor-owned KB_STORE process support for the required dstr_t lifecycle. */
+#include "kb_store_dstr.h"
 
 #include <stdarg.h>
 #include <stdio.h>

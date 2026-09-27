@@ -1,22 +1,22 @@
-/* db2/vault_pg.c: the Postgres storage backend for the kb credential vault (P10
- * slice 2). Implements vault_store_backend_t over DB2 (db2_conn() + aimee_pg_*),
+/* kb_store/vault_pg.c: the Postgres storage backend for the kb credential vault (P10
+ * slice 2). Implements vault_store_backend_t over KB_STORE (kb_store_conn() + aimee_pg_*),
  * with the SAME envelope crypto as the jsonfile backend (vault_crypto): a fresh
  * random DEK per credential, AES-KW-wrapped under the caller-supplied KEK, the
  * secret AES-256-GCM'd under the DEK with canonical versioned slot AAD.
  * Persists ONLY ciphertext — never the KEK, DEK, or plaintext. See vault_pg.h.
  *
- * Reads/writes go through the SECURITY DEFINER vault functions in db2/schema.sql
+ * Reads/writes go through the SECURITY DEFINER vault functions in kb_store/schema.sql
  * (org_vault_put, org_vault_get_current, org_vault_has, org_vault_list, org_vault_delete,
  * the salt/kek_check helpers, and org_vault_rewrap), so the immutable-version +
  * current-pointer discipline and the advisory-locked version counter live in one place.
- * This file is kb-only (joins KB_DB2_OBJS), never the server link. */
+ * This file is kb-only (joins KB_KB_STORE_OBJS), never the server link. */
 #include "vault_pg.h"
-#include "db2_internal.h" /* db2_conn */
-#include "db_postgres.h"  /* aimee_pg_* */
+#include "kb_store_internal.h" /* kb_store_conn */
+#include "db_postgres.h"       /* aimee_pg_* */
 #include "vault_crypto.h"
 #include "vault_store.h"     /* VAULT_STORE_NO_ENTRY, vault_store_entry_t */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <errno.h>
@@ -30,9 +30,9 @@
 #define VP_AAD_MAX    VAULT_ENVELOPE_AAD_MAX
 #define VP_MAX_SLOTS  512 /* per-principal slot cap for list/rekey iteration */
 
-static db2_vault_crypto_provider_t vp_crypto;
+static kb_store_vault_crypto_provider_t vp_crypto;
 
-void aimee_db2_register_vault_crypto_provider(const db2_vault_crypto_provider_t *provider)
+void aimee_kb_store_register_vault_crypto_provider(const kb_store_vault_crypto_provider_t *provider)
 {
    if (provider)
       vp_crypto = *provider;
@@ -40,7 +40,7 @@ void aimee_db2_register_vault_crypto_provider(const db2_vault_crypto_provider_t 
       memset(&vp_crypto, 0, sizeof(vp_crypto));
 }
 
-int db2_vault_crypto_random(uint8_t *out, size_t len)
+int kb_store_vault_crypto_random(uint8_t *out, size_t len)
 {
    if (!out || len == 0 || len > VP_SECRET_MAX || !vp_crypto.random ||
        vp_crypto.random(out, len) != 0)
@@ -76,20 +76,20 @@ static int vp_aad_build(int legacy, const char *principal, const char *agent, co
    return 0;
 }
 
-int db2_vault_aad_build_v2(const char *principal, const char *agent, const char *cred,
-                           int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+int kb_store_vault_aad_build_v2(const char *principal, const char *agent, const char *cred,
+                                int64_t version, uint8_t *out, size_t cap, size_t *out_len)
 {
    return vp_aad_build(0, principal, agent, cred, version, out, cap, out_len);
 }
 
-int db2_vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
-                                int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+int kb_store_vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                                     int64_t version, uint8_t *out, size_t cap, size_t *out_len)
 {
    return vp_aad_build(1, principal, agent, cred, version, out, cap, out_len);
 }
 
-int db2_vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT_DEK_LEN],
-                       uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+int kb_store_vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT_DEK_LEN],
+                            uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
 {
    if (!kek || !dek || !wrapped || !vp_crypto.dek_wrap ||
        vp_crypto.dek_wrap(kek, dek, wrapped) != 0)
@@ -101,8 +101,9 @@ int db2_vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT
    return 0;
 }
 
-int db2_vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN],
-                         const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], uint8_t dek[VAULT_DEK_LEN])
+int kb_store_vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN],
+                              const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN],
+                              uint8_t dek[VAULT_DEK_LEN])
 {
    if (!kek || !wrapped || !dek || !vp_crypto.dek_unwrap ||
        vp_crypto.dek_unwrap(kek, wrapped, dek) != 0)
@@ -114,10 +115,10 @@ int db2_vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN],
    return 0;
 }
 
-int db2_vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
-                             const uint8_t *plaintext, size_t plaintext_len,
-                             uint8_t nonce[VAULT_GCM_NONCE_LEN], uint8_t *ciphertext,
-                             uint8_t tag[VAULT_GCM_TAG_LEN])
+int kb_store_vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad,
+                                  size_t aad_len, const uint8_t *plaintext, size_t plaintext_len,
+                                  uint8_t nonce[VAULT_GCM_NONCE_LEN], uint8_t *ciphertext,
+                                  uint8_t tag[VAULT_GCM_TAG_LEN])
 {
    if (!dek || (!aad && aad_len) || aad_len > VP_AAD_MAX || !plaintext ||
        plaintext_len > VP_SECRET_MAX || !nonce || !ciphertext || !tag ||
@@ -136,10 +137,10 @@ int db2_vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aa
    return 0;
 }
 
-int db2_vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
-                             const uint8_t nonce[VAULT_GCM_NONCE_LEN], const uint8_t *ciphertext,
-                             size_t ciphertext_len, const uint8_t tag[VAULT_GCM_TAG_LEN],
-                             uint8_t *plaintext)
+int kb_store_vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad,
+                                  size_t aad_len, const uint8_t nonce[VAULT_GCM_NONCE_LEN],
+                                  const uint8_t *ciphertext, size_t ciphertext_len,
+                                  const uint8_t tag[VAULT_GCM_TAG_LEN], uint8_t *plaintext)
 {
    if (!dek || (!aad && aad_len) || aad_len > VP_AAD_MAX || !nonce || !ciphertext ||
        ciphertext_len > VP_SECRET_MAX || !tag || !plaintext || !vp_crypto.secret_decrypt ||
@@ -153,8 +154,8 @@ int db2_vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aa
    return 0;
 }
 
-int db2_vault_kek_check_wrap(const uint8_t kek[VAULT_KEK_LEN],
-                             uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+int kb_store_vault_kek_check_wrap(const uint8_t kek[VAULT_KEK_LEN],
+                                  uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
 {
    if (!kek || !wrapped || !vp_crypto.kek_check_wrap || vp_crypto.kek_check_wrap(kek, wrapped) != 0)
    {
@@ -165,8 +166,8 @@ int db2_vault_kek_check_wrap(const uint8_t kek[VAULT_KEK_LEN],
    return 0;
 }
 
-int db2_vault_kek_check_verify(const uint8_t kek[VAULT_KEK_LEN],
-                               const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
+int kb_store_vault_kek_check_verify(const uint8_t kek[VAULT_KEK_LEN],
+                                    const uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
 {
    return kek && wrapped && vp_crypto.kek_check_verify &&
                   vp_crypto.kek_check_verify(kek, wrapped) == 0
@@ -203,7 +204,7 @@ static int principal_team_id(const char *principal, int64_t *team)
 static int pg_scalar_i64(const char *sql, const char *a1, const char *a2, const char *a3, int argc,
                          int64_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -237,11 +238,11 @@ static int vault_pg_get_or_create_salt(void *ctx, const char *principal,
    (void)ctx;
    if (!principal || !principal[0] || !salt)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    uint8_t fresh[VAULT_SALT_LEN];
-   if (db2_vault_crypto_random(fresh, sizeof(fresh)) != 0)
+   if (kb_store_vault_crypto_random(fresh, sizeof(fresh)) != 0)
       return -1;
 
    char err[VP_ERR] = "";
@@ -278,7 +279,7 @@ static int vault_pg_salt_readonly(void *ctx, const char *principal, uint8_t salt
    (void)ctx;
    if (!principal || !principal[0] || !salt)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[VP_ERR] = "";
@@ -343,7 +344,7 @@ static int kek_check_read(void *conn, const char *principal, uint8_t out[VAULT_W
 static int kek_check_set(void *conn, const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (db2_vault_kek_check_wrap(kek, wrapped) != 0)
+   if (kb_store_vault_kek_check_wrap(kek, wrapped) != 0)
       return -1;
    char err[VP_ERR] = "";
    aimee_pg_stmt_t *st =
@@ -363,7 +364,7 @@ static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t
    (void)ctx;
    if (!principal || !kek)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
@@ -380,9 +381,9 @@ static int vault_pg_unlock_check(void *ctx, const char *principal, const uint8_t
          return -1;
       if (kek_check_read(conn, principal, wrapped) != 1)
          return -1;
-      return db2_vault_kek_check_verify(kek, wrapped);
+      return kb_store_vault_kek_check_verify(kek, wrapped);
    }
-   return db2_vault_kek_check_verify(kek, wrapped);
+   return kb_store_vault_kek_check_verify(kek, wrapped);
 }
 
 /* ── set / get ────────────────────────────────────────────────────────────── */
@@ -396,7 +397,7 @@ static int vault_pg_set(void *ctx, const char *principal, const uint8_t kek[VAUL
    size_t pt_len = strlen(secret);
    if (pt_len > VP_SECRET_MAX)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -418,14 +419,15 @@ static int vault_pg_set(void *ctx, const char *principal, const uint8_t kek[VAUL
    uint8_t *ct = malloc(pt_len ? pt_len : 1);
    if (!ct)
       goto out;
-   if (db2_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
+   if (kb_store_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) !=
+       0)
       goto out;
-   if (db2_vault_crypto_random(dek, sizeof(dek)) != 0)
+   if (kb_store_vault_crypto_random(dek, sizeof(dek)) != 0)
       goto out;
-   if (db2_vault_secret_encrypt(dek, aad, aad_len, (const uint8_t *)secret, pt_len, nonce, ct,
-                                tag) != 0)
+   if (kb_store_vault_secret_encrypt(dek, aad, aad_len, (const uint8_t *)secret, pt_len, nonce, ct,
+                                     tag) != 0)
       goto out;
-   if (db2_vault_dek_wrap(kek, dek, wrapped) != 0)
+   if (kb_store_vault_dek_wrap(kek, dek, wrapped) != 0)
       goto out;
 
    {
@@ -470,7 +472,7 @@ static int vault_pg_get(void *ctx, const char *principal, const uint8_t kek[VAUL
       out[0] = '\0';
    if (!principal || !kek || !agent || !cred || !out || !out_len)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -537,15 +539,16 @@ static int vault_pg_get(void *ctx, const char *principal, const uint8_t kek[VAUL
          goto out;
       uint8_t aad[VP_AAD_MAX];
       size_t aad_len = 0;
-      if (db2_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad), &aad_len) != 0)
+      if (kb_store_vault_aad_build_v2(principal, agent, cred, version, aad, sizeof(aad),
+                                      &aad_len) != 0)
          goto out;
-      if (db2_vault_dek_unwrap(kek, wrapped, dek) != 0 ||
-          (db2_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
-                                    tag, pt) != 0 &&
-           (db2_vault_aad_build_v1_safe(principal, agent, cred, version, aad, sizeof(aad),
-                                        &aad_len) != 0 ||
-            db2_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf, (size_t)clen,
-                                     tag, pt) != 0)))
+      if (kb_store_vault_dek_unwrap(kek, wrapped, dek) != 0 ||
+          (kb_store_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf,
+                                         (size_t)clen, tag, pt) != 0 &&
+           (kb_store_vault_aad_build_v1_safe(principal, agent, cred, version, aad, sizeof(aad),
+                                             &aad_len) != 0 ||
+            kb_store_vault_secret_decrypt(dek, aad, aad_len, nonce, (const uint8_t *)ctbuf,
+                                          (size_t)clen, tag, pt) != 0)))
          goto out; /* fail-closed: wrong KEK / tamper / AAD mismatch */
       memcpy(out, pt, (size_t)clen);
       out[clen] = '\0';
@@ -585,7 +588,7 @@ static int vault_pg_list(void *ctx, const char *principal, vault_store_entry_t *
    (void)ctx;
    if (!principal || (max > 0 && !out))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[VP_ERR] = "";
@@ -613,7 +616,7 @@ static int vault_pg_delete(void *ctx, const char *principal, const char *agent, 
    (void)ctx;
    if (!principal || !agent || !cred)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[VP_ERR] = "";
@@ -634,7 +637,7 @@ static int vault_pg_list_principals(void *ctx, char (*out)[VAULT_PRINCIPAL_MAX],
    (void)ctx;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[VP_ERR] = "";
@@ -693,8 +696,8 @@ static int rekey_compute(void *conn, const char *principal, const uint8_t old_ke
       int wlen = aimee_pg_column_bytes(st, 3);
       uint8_t dek[VAULT_DEK_LEN];
       if (!w || wlen != VAULT_WRAPPED_DEK_LEN ||
-          db2_vault_dek_unwrap(old_kek, (const uint8_t *)w, dek) != 0 ||
-          db2_vault_dek_wrap(new_kek, dek, plan[n].rewrapped) != 0)
+          kb_store_vault_dek_unwrap(old_kek, (const uint8_t *)w, dek) != 0 ||
+          kb_store_vault_dek_wrap(new_kek, dek, plan[n].rewrapped) != 0)
       {
          OPENSSL_cleanse(dek, sizeof(dek));
          rc = -1; /* wrong old KEK / tamper -> abort, write nothing */
@@ -741,7 +744,7 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
    (void)ctx;
    if (!principal || !old_kek || !new_kek)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -754,7 +757,7 @@ static int vault_pg_rekey(void *ctx, const char *principal, const uint8_t old_ke
     * verifier was never unlocked: refuse. */
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
    if (kek_check_read(conn, principal, wrapped) != 1 ||
-       db2_vault_kek_check_verify(old_kek, wrapped) != 0)
+       kb_store_vault_kek_check_verify(old_kek, wrapped) != 0)
       goto rollback;
 
    vp_rewrap_t *plan = calloc(VP_MAX_SLOTS, sizeof(*plan));
@@ -787,7 +790,7 @@ static int vault_pg_rekey_field(void *ctx, const char *principal, const char *fi
     * jsonfile backend which leaves creds lacking the field untouched. */
    if (strcmp(field, "wrapped_dek") != 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    vp_rewrap_t *plan = calloc(VP_MAX_SLOTS, sizeof(*plan));

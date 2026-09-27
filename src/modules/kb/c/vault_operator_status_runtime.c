@@ -16,10 +16,10 @@
 #include <time.h>
 
 _Static_assert(sizeof(pthread_mutex_t) <=
-                   sizeof(((db2_vault_operator_runtime_t *)0)->mutex_storage),
+                   sizeof(((kb_store_vault_operator_runtime_t *)0)->mutex_storage),
                "vault operator mutex storage too small");
 
-static pthread_mutex_t *runtime_mutex(db2_vault_operator_runtime_t *r)
+static pthread_mutex_t *runtime_mutex(kb_store_vault_operator_runtime_t *r)
 {
    return (pthread_mutex_t *)(void *)r->mutex_storage;
 }
@@ -75,7 +75,7 @@ static void prod_close(void *context, void *connection)
    (void)aimee_postgres_session_close(connection);
 }
 static int prod_query(void *context, void *connection, const char *sql, int64_t deadline,
-                      db2_vault_operator_db_result_t *out, char *error, size_t capacity)
+                      kb_store_vault_operator_db_result_t *out, char *error, size_t capacity)
 {
    (void)context;
    memset(out, 0, sizeof(*out));
@@ -88,7 +88,7 @@ static int prod_query(void *context, void *connection, const char *sql, int64_t 
    {
       if (!strcmp(state, "55000") &&
           strstr(sql, "aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()"))
-         return DB2_VAULT_OPERATOR_INTEGRITY;
+         return KB_STORE_VAULT_OPERATOR_INTEGRITY;
       set_error(error, capacity, "vault orchestrator database query unavailable");
       return -1;
    }
@@ -126,8 +126,8 @@ static int prod_idle(void *context, void *connection)
    return aimee_postgres_session_cached_state(connection) == 'I';
 }
 
-static const db2_vault_operator_db_vtable_t production_database = {prod_open, prod_close,
-                                                                   prod_query, prod_idle};
+static const kb_store_vault_operator_db_vtable_t production_database = {prod_open, prod_close,
+                                                                        prod_query, prod_idle};
 
 static int bool_text(const char *s, int *out)
 {
@@ -140,7 +140,7 @@ static int bool_text(const char *s, int *out)
    return 0;
 }
 
-static void discard(db2_vault_operator_runtime_t *r)
+static void discard(kb_store_vault_operator_runtime_t *r)
 {
    if (r->connection)
       r->database->close(r->database_context, r->connection);
@@ -148,8 +148,8 @@ static void discard(db2_vault_operator_runtime_t *r)
    r->transaction_active = 0;
 }
 
-static int query(db2_vault_operator_runtime_t *r, const char *sql, int64_t deadline,
-                 db2_vault_operator_db_result_t *result)
+static int query(kb_store_vault_operator_runtime_t *r, const char *sql, int64_t deadline,
+                 kb_store_vault_operator_db_result_t *result)
 {
    char error[256] = "";
    int64_t now = now_ms();
@@ -159,13 +159,13 @@ static int query(db2_vault_operator_runtime_t *r, const char *sql, int64_t deadl
                              sizeof(error));
 }
 
-static int command(db2_vault_operator_runtime_t *r, const char *sql, int64_t deadline)
+static int command(kb_store_vault_operator_runtime_t *r, const char *sql, int64_t deadline)
 {
-   db2_vault_operator_db_result_t result;
+   kb_store_vault_operator_db_result_t result;
    return query(r, sql, deadline, &result) || result.rows != 0 || result.columns != 0;
 }
 
-static int session_assert(db2_vault_operator_runtime_t *r, int after_role, int64_t deadline)
+static int session_assert(kb_store_vault_operator_runtime_t *r, int after_role, int64_t deadline)
 {
    static const char before[] =
        "SELECT (session_user='aimee_kb_vault_orchestrator_login' AND current_user=session_user AND "
@@ -262,26 +262,26 @@ static int session_assert(db2_vault_operator_runtime_t *r, int after_role, int64
        "pg_catalog.pg_auth_members membership WHERE membership.member=o.oid)) FROM "
        "pg_catalog.pg_roles o "
        "WHERE o.rolname=current_user";
-   db2_vault_operator_db_result_t result;
+   kb_store_vault_operator_db_result_t result;
    int value = 0;
    return query(r, after_role ? after : before, deadline, &result) || result.rows != 1 ||
           result.columns != 1 || result.is_null[0][0] || bool_text(result.value[0][0], &value) ||
           !value;
 }
 
-int db2_vault_operator_runtime_open_with_vtable(db2_vault_operator_runtime_t *r,
-                                                const char *conninfo,
-                                                const db2_vault_operator_db_vtable_t *db,
-                                                void *db_context, char *err, size_t errlen)
+int kb_store_vault_operator_runtime_open_with_vtable(kb_store_vault_operator_runtime_t *r,
+                                                     const char *conninfo,
+                                                     const kb_store_vault_operator_db_vtable_t *db,
+                                                     void *db_context, char *err, size_t errlen)
 {
    if (!r || !conninfo || !*conninfo || !db || !db->open || !db->close || !db->query ||
        !db->transaction_idle)
-      return DB2_VAULT_OPERATOR_UNAVAILABLE;
+      return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
    memset(r, 0, sizeof(*r));
    r->database = db;
    r->database_context = db_context;
    if (pthread_mutex_init(runtime_mutex(r), NULL))
-      return DB2_VAULT_OPERATOR_UNAVAILABLE;
+      return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
    r->mutex_initialized = 1;
    int64_t deadline;
    if (deadline_new(&deadline))
@@ -294,23 +294,23 @@ int db2_vault_operator_runtime_open_with_vtable(db2_vault_operator_runtime_t *r,
        command(r, "SET ROLE aimee_kb_vault_orchestrator", deadline) ||
        session_assert(r, 1, deadline))
       goto fail;
-   return DB2_VAULT_OPERATOR_OK;
+   return KB_STORE_VAULT_OPERATOR_OK;
 fail:
    discard(r);
    pthread_mutex_destroy(runtime_mutex(r));
    r->mutex_initialized = 0;
    set_error(err, errlen, "vault orchestrator database authority assertion failed");
-   return DB2_VAULT_OPERATOR_UNAVAILABLE;
+   return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
 }
 
-int db2_vault_operator_runtime_open(db2_vault_operator_runtime_t *r, const char *conninfo,
-                                    char *err, size_t errlen)
+int kb_store_vault_operator_runtime_open(kb_store_vault_operator_runtime_t *r, const char *conninfo,
+                                         char *err, size_t errlen)
 {
-   return db2_vault_operator_runtime_open_with_vtable(r, conninfo, &production_database, NULL, err,
-                                                      errlen);
+   return kb_store_vault_operator_runtime_open_with_vtable(r, conninfo, &production_database, NULL,
+                                                           err, errlen);
 }
 
-void db2_vault_operator_runtime_close(db2_vault_operator_runtime_t *r)
+void kb_store_vault_operator_runtime_close(kb_store_vault_operator_runtime_t *r)
 {
    if (!r)
       return;
@@ -372,21 +372,22 @@ static int decode_id(const char *s, unsigned char out[16])
    }
    return 0;
 }
-static db2_vault_operation_state_t decode_state(const char *s)
+static kb_store_vault_operation_state_t decode_state(const char *s)
 {
    static const char *names[] = {
        "",         "preparing", "custody_prepared", "wraps_staged", "reseal_committing",
        "resealed", "promoted",  "completed",        "aborted",      "recovery_required"};
    for (int i = 1; i <= 9; ++i)
       if (!strcmp(s, names[i]))
-         return (db2_vault_operation_state_t)i;
+         return (kb_store_vault_operation_state_t)i;
    return 0;
 }
-static int decode(const db2_vault_operator_db_result_t *r, db2_vault_operator_snapshot_t *out)
+static int decode(const kb_store_vault_operator_db_result_t *r,
+                  kb_store_vault_operator_snapshot_t *out)
 {
    if (r->rows != 1 || r->columns != 11)
       return -1;
-   db2_vault_operator_snapshot_t v;
+   kb_store_vault_operator_snapshot_t v;
    memset(&v, 0, sizeof(v));
    for (int i = 0; i < 4; ++i)
       if (r->is_null[0][i])
@@ -410,8 +411,8 @@ static int decode(const db2_vault_operator_db_result_t *r, db2_vault_operator_sn
           parse_i64(r->value[0][9], &v.new_generation) || v.operation_seal_epoch < 1 ||
           v.operation_fence < 1 || v.old_generation < 0 || v.old_generation == INT64_MAX ||
           v.new_generation != v.old_generation + 1 || !lower_token(r->value[0][10]) ||
-          ((v.operation_state == DB2_VAULT_OPERATION_ABORTED ||
-            v.operation_state == DB2_VAULT_OPERATION_RECOVERY_REQUIRED) !=
+          ((v.operation_state == KB_STORE_VAULT_OPERATION_ABORTED ||
+            v.operation_state == KB_STORE_VAULT_OPERATION_RECOVERY_REQUIRED) !=
            (r->value[0][10][0] != 0)))
          return -1;
       size_t failure_len = strlen(r->value[0][10]);
@@ -422,8 +423,8 @@ static int decode(const db2_vault_operator_db_result_t *r, db2_vault_operator_sn
    return 0;
 }
 
-static int snapshot_locked(db2_vault_operator_runtime_t *r, int64_t deadline,
-                           db2_vault_operator_snapshot_t *out)
+static int snapshot_locked(kb_store_vault_operator_runtime_t *r, int64_t deadline,
+                           kb_store_vault_operator_snapshot_t *out)
 {
    if (!r->connection || r->transaction_active ||
        !r->database->transaction_idle(r->database_context, r->connection))
@@ -431,23 +432,23 @@ static int snapshot_locked(db2_vault_operator_runtime_t *r, int64_t deadline,
    if (session_assert(r, 1, deadline) || command(r, "BEGIN", deadline))
       goto unavailable;
    r->transaction_active = 1;
-   db2_vault_operator_db_result_t result;
+   kb_store_vault_operator_db_result_t result;
    int q = query(r,
                  "SELECT "
                  "seal_epoch,sealed,control_fence,last_opened_fence,operation_id,operation_state,"
                  "operation_seal_epoch,operation_fence,old_generation,new_generation,failure_class "
                  "FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()",
                  deadline, &result);
-   int rc =
-       q == DB2_VAULT_OPERATOR_INTEGRITY
-           ? DB2_VAULT_OPERATOR_INTEGRITY
-           : (q ? DB2_VAULT_OPERATOR_UNAVAILABLE
-                : (decode(&result, out) ? DB2_VAULT_OPERATOR_INTEGRITY : DB2_VAULT_OPERATOR_OK));
-   if (command(r, rc == DB2_VAULT_OPERATOR_OK ? "COMMIT" : "ROLLBACK", deadline) &&
-       rc != DB2_VAULT_OPERATOR_INTEGRITY)
-      rc = DB2_VAULT_OPERATOR_UNAVAILABLE;
+   int rc = q == KB_STORE_VAULT_OPERATOR_INTEGRITY
+                ? KB_STORE_VAULT_OPERATOR_INTEGRITY
+                : (q ? KB_STORE_VAULT_OPERATOR_UNAVAILABLE
+                     : (decode(&result, out) ? KB_STORE_VAULT_OPERATOR_INTEGRITY
+                                             : KB_STORE_VAULT_OPERATOR_OK));
+   if (command(r, rc == KB_STORE_VAULT_OPERATOR_OK ? "COMMIT" : "ROLLBACK", deadline) &&
+       rc != KB_STORE_VAULT_OPERATOR_INTEGRITY)
+      rc = KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
    r->transaction_active = 0;
-   if (rc != DB2_VAULT_OPERATOR_OK)
+   if (rc != KB_STORE_VAULT_OPERATOR_OK)
    {
       discard(r);
       return rc;
@@ -455,117 +456,119 @@ static int snapshot_locked(db2_vault_operator_runtime_t *r, int64_t deadline,
    return rc;
 unavailable:
    discard(r);
-   return DB2_VAULT_OPERATOR_UNAVAILABLE;
+   return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
 }
 
-int db2_vault_operator_runtime_snapshot(db2_vault_operator_runtime_t *r,
-                                        db2_vault_operator_snapshot_t *out)
+int kb_store_vault_operator_runtime_snapshot(kb_store_vault_operator_runtime_t *r,
+                                             kb_store_vault_operator_snapshot_t *out)
 {
    int64_t deadline;
    if (!r || !out || !r->mutex_initialized || deadline_new(&deadline) ||
        mutex_until(runtime_mutex(r), deadline))
-      return DB2_VAULT_OPERATOR_UNAVAILABLE;
+      return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
    memset(out, 0, sizeof(*out));
    int rc = snapshot_locked(r, deadline, out);
    pthread_mutex_unlock(runtime_mutex(r));
    return rc;
 }
-int db2_vault_operator_snapshot_equal(const db2_vault_operator_snapshot_t *a,
-                                      const db2_vault_operator_snapshot_t *b)
+int kb_store_vault_operator_snapshot_equal(const kb_store_vault_operator_snapshot_t *a,
+                                           const kb_store_vault_operator_snapshot_t *b)
 {
    return a && b && !memcmp(a, b, sizeof(*a));
 }
 
-static int classify(const db2_vault_operator_snapshot_t *s, db2_vault_provider_status_t p,
-                    db2_vault_operator_status_t *o)
+static int classify(const kb_store_vault_operator_snapshot_t *s, kb_store_vault_provider_status_t p,
+                    kb_store_vault_operator_status_t *o)
 {
-   if (p == DB2_VAULT_PROVIDER_MALFORMED)
+   if (p == KB_STORE_VAULT_PROVIDER_MALFORMED)
       goto bad;
    if (s->operation_present)
    {
-      if (s->operation_state == DB2_VAULT_OPERATION_RECOVERY_REQUIRED)
+      if (s->operation_state == KB_STORE_VAULT_OPERATION_RECOVERY_REQUIRED)
       {
-         o->state = DB2_VAULT_STATE_RECOVERY_REQUIRED;
-         o->remediation = p == DB2_VAULT_PROVIDER_UNAVAILABLE ? DB2_VAULT_REMEDIATION_BACKEND
-                                                              : DB2_VAULT_REMEDIATION_RECOVER;
+         o->state = KB_STORE_VAULT_STATE_RECOVERY_REQUIRED;
+         o->remediation = p == KB_STORE_VAULT_PROVIDER_UNAVAILABLE
+                              ? KB_STORE_VAULT_REMEDIATION_BACKEND
+                              : KB_STORE_VAULT_REMEDIATION_RECOVER;
          return 0;
       }
-      if (s->operation_state == DB2_VAULT_OPERATION_COMPLETED &&
-          p == DB2_VAULT_PROVIDER_AVAILABLE_SEALED)
+      if (s->operation_state == KB_STORE_VAULT_OPERATION_COMPLETED &&
+          p == KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED)
       {
-         o->state = DB2_VAULT_STATE_COMPLETED_SEALED;
-         o->remediation = DB2_VAULT_REMEDIATION_FINALIZE;
+         o->state = KB_STORE_VAULT_STATE_COMPLETED_SEALED;
+         o->remediation = KB_STORE_VAULT_REMEDIATION_FINALIZE;
          return 0;
       }
-      if (s->operation_state >= DB2_VAULT_OPERATION_PREPARING &&
-          s->operation_state <= DB2_VAULT_OPERATION_PROMOTED)
+      if (s->operation_state >= KB_STORE_VAULT_OPERATION_PREPARING &&
+          s->operation_state <= KB_STORE_VAULT_OPERATION_PROMOTED)
       {
-         o->state = DB2_VAULT_STATE_RESUME_REQUIRED;
-         o->remediation = p == DB2_VAULT_PROVIDER_UNAVAILABLE ? DB2_VAULT_REMEDIATION_BACKEND
-                                                              : DB2_VAULT_REMEDIATION_RESUME;
+         o->state = KB_STORE_VAULT_STATE_RESUME_REQUIRED;
+         o->remediation = p == KB_STORE_VAULT_PROVIDER_UNAVAILABLE
+                              ? KB_STORE_VAULT_REMEDIATION_BACKEND
+                              : KB_STORE_VAULT_REMEDIATION_RESUME;
          return 0;
       }
       goto bad;
    }
-   if (s->sealed && p == DB2_VAULT_PROVIDER_AVAILABLE_SEALED)
+   if (s->sealed && p == KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED)
    {
-      o->state = DB2_VAULT_STATE_SEALED_IDLE;
-      o->remediation = DB2_VAULT_REMEDIATION_UNSEAL;
+      o->state = KB_STORE_VAULT_STATE_SEALED_IDLE;
+      o->remediation = KB_STORE_VAULT_REMEDIATION_UNSEAL;
       return 0;
    }
-   if (s->sealed && p == DB2_VAULT_PROVIDER_UNAVAILABLE)
+   if (s->sealed && p == KB_STORE_VAULT_PROVIDER_UNAVAILABLE)
    {
-      o->state = DB2_VAULT_STATE_BACKEND_UNAVAILABLE;
-      o->remediation = DB2_VAULT_REMEDIATION_BACKEND;
+      o->state = KB_STORE_VAULT_STATE_BACKEND_UNAVAILABLE;
+      o->remediation = KB_STORE_VAULT_REMEDIATION_BACKEND;
       return 0;
    }
-   if (!s->sealed && p == DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED)
+   if (!s->sealed && p == KB_STORE_VAULT_PROVIDER_AVAILABLE_UNSEALED)
    {
-      o->state = DB2_VAULT_STATE_OPERATIONAL;
-      o->remediation = DB2_VAULT_REMEDIATION_NONE;
+      o->state = KB_STORE_VAULT_STATE_OPERATIONAL;
+      o->remediation = KB_STORE_VAULT_REMEDIATION_NONE;
       return 0;
    }
-   if (!s->sealed && p == DB2_VAULT_PROVIDER_AVAILABLE_SEALED)
+   if (!s->sealed && p == KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED)
    {
-      o->state = DB2_VAULT_STATE_LOCAL_UNSEAL_REQUIRED;
-      o->remediation = DB2_VAULT_REMEDIATION_UNSEAL;
+      o->state = KB_STORE_VAULT_STATE_LOCAL_UNSEAL_REQUIRED;
+      o->remediation = KB_STORE_VAULT_REMEDIATION_UNSEAL;
       return 0;
    }
-   if (!s->sealed && p == DB2_VAULT_PROVIDER_UNAVAILABLE)
+   if (!s->sealed && p == KB_STORE_VAULT_PROVIDER_UNAVAILABLE)
    {
-      o->state = DB2_VAULT_STATE_BACKEND_UNAVAILABLE;
-      o->remediation = DB2_VAULT_REMEDIATION_BACKEND;
+      o->state = KB_STORE_VAULT_STATE_BACKEND_UNAVAILABLE;
+      o->remediation = KB_STORE_VAULT_REMEDIATION_BACKEND;
       return 0;
    }
 bad:
-   o->state = DB2_VAULT_STATE_INTEGRITY_FAILURE;
-   o->remediation = DB2_VAULT_REMEDIATION_INTEGRITY;
-   return DB2_VAULT_OPERATOR_INTEGRITY;
+   o->state = KB_STORE_VAULT_STATE_INTEGRITY_FAILURE;
+   o->remediation = KB_STORE_VAULT_REMEDIATION_INTEGRITY;
+   return KB_STORE_VAULT_OPERATOR_INTEGRITY;
 }
 
-int db2_vault_operator_runtime_status(db2_vault_operator_runtime_t *r,
-                                      db2_vault_provider_status_fn fn, void *ctx,
-                                      db2_vault_operator_status_t *out)
+int kb_store_vault_operator_runtime_status(kb_store_vault_operator_runtime_t *r,
+                                           kb_store_vault_provider_status_fn fn, void *ctx,
+                                           kb_store_vault_operator_status_t *out)
 {
    int64_t deadline;
    if (!r || !fn || !out || !r->mutex_initialized || deadline_new(&deadline) ||
        mutex_until(runtime_mutex(r), deadline))
-      return DB2_VAULT_OPERATOR_UNAVAILABLE;
+      return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
    memset(out, 0, sizeof(*out));
    for (int i = 0; i < 3; ++i)
    {
-      db2_vault_operator_snapshot_t a, b;
+      kb_store_vault_operator_snapshot_t a, b;
       int rc = snapshot_locked(r, deadline, &a);
       if (rc)
       {
          pthread_mutex_unlock(runtime_mutex(r));
          return rc;
       }
-      db2_vault_provider_status_t p = 0;
+      kb_store_vault_provider_status_t p = 0;
       if (fn(ctx, &p) || p < 1 || p > 4 || now_ms() < 0 || now_ms() >= deadline)
       {
          pthread_mutex_unlock(runtime_mutex(r));
-         return DB2_VAULT_OPERATOR_UNAVAILABLE;
+         return KB_STORE_VAULT_OPERATOR_UNAVAILABLE;
       }
       rc = snapshot_locked(r, deadline, &b);
       if (rc)
@@ -573,7 +576,7 @@ int db2_vault_operator_runtime_status(db2_vault_operator_runtime_t *r,
          pthread_mutex_unlock(runtime_mutex(r));
          return rc;
       }
-      if (!db2_vault_operator_snapshot_equal(&a, &b))
+      if (!kb_store_vault_operator_snapshot_equal(&a, &b))
          continue;
       out->snapshot = b;
       out->provider = p;
@@ -581,8 +584,8 @@ int db2_vault_operator_runtime_status(db2_vault_operator_runtime_t *r,
       pthread_mutex_unlock(runtime_mutex(r));
       return rc;
    }
-   out->state = DB2_VAULT_STATE_INTEGRITY_FAILURE;
-   out->remediation = DB2_VAULT_REMEDIATION_INTEGRITY;
+   out->state = KB_STORE_VAULT_STATE_INTEGRITY_FAILURE;
+   out->remediation = KB_STORE_VAULT_REMEDIATION_INTEGRITY;
    pthread_mutex_unlock(runtime_mutex(r));
-   return DB2_VAULT_OPERATOR_INTEGRITY;
+   return KB_STORE_VAULT_OPERATOR_INTEGRITY;
 }

@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS tasks (  id INTEGER PRIMARY KEY AUTOINCREMENT,  paren
 CREATE TABLE IF NOT EXISTS task_edges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  target_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  relation TEXT NOT NULL DEFAULT 'depends_on');
 CREATE TABLE IF NOT EXISTS decision_log (  id INTEGER PRIMARY KEY AUTOINCREMENT,  task_id INTEGER DEFAULT 0,  options TEXT NOT NULL,  chosen TEXT NOT NULL,  rationale TEXT NOT NULL DEFAULT '',  assumptions TEXT NOT NULL DEFAULT '',  outcome TEXT,  created_at TEXT NOT NULL,  status TEXT NOT NULL DEFAULT 'active',  revisit_when TEXT NOT NULL DEFAULT '',  supersedes_id INTEGER NOT NULL DEFAULT 0,  subject TEXT NOT NULL DEFAULT '',  author TEXT NOT NULL DEFAULT '',  linked_policy_id INTEGER NOT NULL DEFAULT 0);
 -- Shape-only mirror of the PostgreSQL producer/worker outbox. The actual KB
--- chain uses the shared audit_worm SQLite store, outside the DB2 shim.
+-- chain uses the shared audit_worm SQLite store, outside the KB_STORE shim.
 CREATE TABLE IF NOT EXISTS kb_audit_outbox (  outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,  enqueued_at TEXT NOT NULL DEFAULT '',  producer_txid INTEGER NOT NULL DEFAULT 0,  actor_role TEXT NOT NULL DEFAULT '',  actor_principal TEXT NOT NULL DEFAULT '',  action TEXT NOT NULL CHECK (action <> ''),  subject TEXT NOT NULL DEFAULT '',  verdict TEXT NOT NULL DEFAULT '',  detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_audit_delivery (  outbox_id INTEGER PRIMARY KEY REFERENCES kb_audit_outbox(outbox_id),  audit_seq INTEGER NOT NULL UNIQUE,  sealed_at TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS idx_kb_audit_delivery_seq ON kb_audit_delivery(audit_seq);
@@ -128,8 +128,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kbenroll_fp ON kb_enrollments(fingerprint)
 CREATE INDEX IF NOT EXISTS idx_kbenroll_scope ON kb_enrollments(scope);
 CREATE INDEX IF NOT EXISTS idx_kbenroll_authority ON kb_enrollments(authority_id);
 -- P1 tenancy tables — SQLite shim mirror (plain tables only; RLS/roles/functions
--- are Postgres-only. Tenant-scoped db2 entrypoints hard-fail on the shim via the
--- C guard db2_tenant_require_pg(), so the shim never enforces tenancy — these
+-- are Postgres-only. Tenant-scoped kb_store entrypoints hard-fail on the shim via the
+-- C guard kb_store_tenant_require_pg(), so the shim never enforces tenancy — these
 -- mirrors exist only so schema application and non-tenant reads do not error.)
 CREATE TABLE IF NOT EXISTS kb_team (  id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT NOT NULL UNIQUE,  created_at TEXT NOT NULL DEFAULT '',  operator_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_project (  id INTEGER PRIMARY KEY AUTOINCREMENT,  parent INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  name TEXT NOT NULL,  access_mode TEXT NOT NULL DEFAULT 'team-open',  created_at TEXT NOT NULL DEFAULT '',  operator_id TEXT NOT NULL DEFAULT '',  UNIQUE(parent, name));
@@ -139,9 +139,9 @@ CREATE TABLE IF NOT EXISTS kb_project_membership (  id INTEGER PRIMARY KEY AUTOI
 CREATE TABLE IF NOT EXISTS kb_admin_grant (  id INTEGER PRIMARY KEY AUTOINCREMENT,  identity_key TEXT NOT NULL UNIQUE,  source TEXT NOT NULL DEFAULT '',  granted_at TEXT NOT NULL DEFAULT '',  granted_by TEXT NOT NULL DEFAULT '',  revoked_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_oidc_jwks (  id INTEGER PRIMARY KEY AUTOINCREMENT,  issuer TEXT NOT NULL,  kid TEXT NOT NULL,  jwk_json TEXT NOT NULL,  added_at TEXT NOT NULL DEFAULT '',  retired_at TEXT NOT NULL DEFAULT '',  UNIQUE(issuer, kid));
 CREATE TABLE IF NOT EXISTS kb_console_oidc (  id INTEGER PRIMARY KEY,  issuer TEXT NOT NULL DEFAULT '',  audience TEXT NOT NULL DEFAULT '',  jwks_url TEXT NOT NULL DEFAULT '',  admin_claim TEXT NOT NULL DEFAULT '',  admin_values TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
--- P3a cost attribution (tiered-llm-p3a) — shim mirrors the DB2 tables ONLY; RLS,
+-- P3a cost attribution (tiered-llm-p3a) — shim mirrors the KB_STORE tables ONLY; RLS,
 -- WORM triggers, and the SECURITY DEFINER pricing/ledger functions CANNOT exist on
--- SQLite, so every P3a runtime path is gated by db2_tenant_require_pg() and hard-fails
+-- SQLite, so every P3a runtime path is gated by kb_store_tenant_require_pg() and hard-fails
 -- on the shim. These CREATE TABLEs exist purely so a shim DB opens cleanly.
 CREATE TABLE IF NOT EXISTS org_model_pricing (  id INTEGER PRIMARY KEY AUTOINCREMENT,  provider TEXT NOT NULL DEFAULT '',  billable_model TEXT NOT NULL,  version INTEGER NOT NULL,  input_usd_per_mtok TEXT NOT NULL,  output_usd_per_mtok TEXT NOT NULL,  cache_read_usd_per_mtok TEXT NOT NULL DEFAULT '0',  cache_write_usd_per_mtok TEXT NOT NULL DEFAULT '0',  effective_at TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT '',  UNIQUE(billable_model, version));
 CREATE TABLE IF NOT EXISTS org_model_pricing_current (  billable_model TEXT PRIMARY KEY,  version INTEGER NOT NULL,  updated_at TEXT NOT NULL DEFAULT '');
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS collab_rules_meta (  key TEXT PRIMARY KEY,  value TEX
 CREATE TABLE IF NOT EXISTS kb_meta (  key TEXT PRIMARY KEY,  value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_documents (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),  file_path TEXT NOT NULL,  file_hash TEXT NOT NULL,  chunk_index INTEGER NOT NULL,  heading_path TEXT NOT NULL DEFAULT '',  line_start INTEGER NOT NULL DEFAULT 0,  line_end INTEGER NOT NULL DEFAULT 0,  content TEXT NOT NULL,  token_count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')), prev_chunk_id INTEGER DEFAULT NULL, next_chunk_id INTEGER DEFAULT NULL,  chunk_strategy TEXT NOT NULL DEFAULT 'heading',  doc_kind TEXT NOT NULL DEFAULT '',  chunk_context TEXT NOT NULL DEFAULT '',  page_start INTEGER DEFAULT NULL,  page_end INTEGER DEFAULT NULL,  sensitivity_class TEXT NOT NULL DEFAULT '',  quarantine_state TEXT NOT NULL DEFAULT '',  tsr_state TEXT NOT NULL DEFAULT '', owner_principal TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (request_id TEXT PRIMARY KEY, coverage_policy TEXT NOT NULL DEFAULT 'legacy', subject_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', memory_count INTEGER NOT NULL DEFAULT 0, document_count INTEGER NOT NULL DEFAULT 0, db1_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT NOT NULL DEFAULT '');
--- structured-pdf Phase 1: per-line coordinate evidence index (see db2/schema.sql).
+-- structured-pdf Phase 1: per-line coordinate evidence index (see kb_store/schema.sql).
 CREATE TABLE IF NOT EXISTS kb_doc_regions (  id INTEGER PRIMARY KEY AUTOINCREMENT,  chunk_id INTEGER NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  x0 REAL NOT NULL DEFAULT 0,  y0 REAL NOT NULL DEFAULT 0,  x1 REAL NOT NULL DEFAULT 0,  y1 REAL NOT NULL DEFAULT 0,  quote TEXT NOT NULL DEFAULT '',  line_index INTEGER NOT NULL DEFAULT 0,  content_type TEXT NOT NULL DEFAULT 'text',  sensitivity_class TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_table_cells (  id INTEGER PRIMARY KEY AUTOINCREMENT,  region_id INTEGER NOT NULL REFERENCES kb_doc_regions(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  cell_row INTEGER NOT NULL DEFAULT 0,  cell_col INTEGER NOT NULL DEFAULT 0,  cell_text TEXT NOT NULL DEFAULT '',  subject TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  tsr_confidence INTEGER NOT NULL DEFAULT 0,  source_type TEXT NOT NULL DEFAULT 'table_cell',  sensitivity_class TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_kb_table_cells_dockey ON kb_table_cells (document_key, page_no);
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS memory_scene_members (  scene_id INTEGER NOT NULL REF
 CREATE TABLE IF NOT EXISTS memory_relation_schema (  id INTEGER PRIMARY KEY AUTOINCREMENT,  relation_id INTEGER NOT NULL,  subject_kind INTEGER NOT NULL DEFAULT 99,  object_kind  INTEGER NOT NULL DEFAULT 99);
 CREATE TABLE IF NOT EXISTS memory_active_embedder (  id         INTEGER PRIMARY KEY CHECK (id = 1),  version    TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_reembed_progress (  id             INTEGER PRIMARY KEY CHECK (id = 1),  target_version TEXT    NOT NULL DEFAULT '',  last_id        INTEGER NOT NULL DEFAULT 0,  total          INTEGER NOT NULL DEFAULT 0,  done           INTEGER NOT NULL DEFAULT 0,  started_at     TEXT    NOT NULL DEFAULT (datetime('now')),  finished_at    TEXT    DEFAULT NULL);
--- Shape-only compatibility for native DB2 fixtures; versioned memory behavior is Go-owned.
+-- Shape-only compatibility for native KB_STORE fixtures; versioned memory behavior is Go-owned.
 CREATE TABLE IF NOT EXISTS memory_embedder_versions (
  version TEXT PRIMARY KEY, command TEXT NOT NULL, dimension INTEGER NOT NULL,
  serving_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -592,7 +592,7 @@ CREATE TABLE IF NOT EXISTS kb_vault_witness_emit_cursor (  kind INTEGER NOT NULL
 -- P2a org model catalog + entitlement (sqlite shim mirror of schema.sql: columns
 -- only; RLS, the SECURITY DEFINER catalog CRUD + org_catalog_entitled(), and the WORM
 -- audit append are Postgres-only, so every P2a runtime path is gated by
--- db2_tenant_require_pg() and hard-fails on the shim rather than reading unprotected).
+-- kb_store_tenant_require_pg() and hard-fails on the shim rather than reading unprotected).
 CREATE TABLE IF NOT EXISTS org_model_catalog (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL UNIQUE,  display_name TEXT NOT NULL DEFAULT '',  provider TEXT NOT NULL,  wire TEXT NOT NULL,  endpoint TEXT NOT NULL DEFAULT '',  enabled INTEGER NOT NULL DEFAULT 1,  bedrock_api TEXT,  model_family TEXT,  bedrock_target_type TEXT,  aws_partition TEXT,  aws_account TEXT,  aws_region_set TEXT,  underlying_fm_arns TEXT,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS org_model_entitlement (  id INTEGER PRIMARY KEY AUTOINCREMENT,  model_id TEXT NOT NULL REFERENCES org_model_catalog(model_id),  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  created_at TEXT NOT NULL DEFAULT '',  UNIQUE(model_id, team_id));
 CREATE INDEX IF NOT EXISTS idx_org_ent_team ON org_model_entitlement(team_id);
@@ -601,7 +601,7 @@ CREATE INDEX IF NOT EXISTS idx_org_ent_model ON org_model_entitlement(model_id);
 -- P4a budget reservation core (sqlite shim mirror of schema.sql: columns only; RLS, the
 -- expression UNIQUE INDEXes, the atomic SECURITY DEFINER reserve/settle/set/show, and
 -- the WORM audit append are Postgres-only, so every P4a runtime path is gated by
--- db2_tenant_require_pg() and hard-fails on the shim rather than reserving unprotected).
+-- kb_store_tenant_require_pg() and hard-fails on the shim rather than reserving unprotected).
 CREATE TABLE IF NOT EXISTS org_budget (  id INTEGER PRIMARY KEY AUTOINCREMENT,  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  project_id INTEGER REFERENCES kb_project(id) ON DELETE CASCADE,  period TEXT NOT NULL,  limit_usd TEXT NOT NULL,  soft_limit_usd TEXT,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS org_budget_counter (  id INTEGER PRIMARY KEY AUTOINCREMENT,  team_id INTEGER NOT NULL REFERENCES kb_team(id) ON DELETE CASCADE,  project_id INTEGER REFERENCES kb_project(id) ON DELETE CASCADE,  period TEXT NOT NULL,  period_id TEXT NOT NULL,  spend_usd TEXT NOT NULL DEFAULT '0',  reserved_usd TEXT NOT NULL DEFAULT '0',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS org_budget_reservation (  id INTEGER PRIMARY KEY AUTOINCREMENT,  request_id TEXT NOT NULL,  origin_cert_cn TEXT NOT NULL,  team_id INTEGER NOT NULL REFERENCES kb_team(id),  project_id INTEGER REFERENCES kb_project(id),  pricing_version INTEGER NOT NULL,  reserved_max_usd TEXT NOT NULL,  state TEXT NOT NULL DEFAULT 'admitted',  lease_expires_at TEXT NOT NULL DEFAULT '',  realized_usd TEXT,  created_at TEXT NOT NULL DEFAULT '',  settled_at TEXT NOT NULL DEFAULT '',  UNIQUE(origin_cert_cn, request_id));
@@ -611,7 +611,7 @@ CREATE INDEX IF NOT EXISTS idx_org_budget_alloc_resv ON org_budget_reservation_a
 -- P4b keyed fixed-window rate limiter (schema-sync mirror only). The RLS + the atomic
 -- lock-all/check-all/bump SECURITY DEFINER org_rate_check and the WORM-audited
 -- org_rate_policy_set are Postgres-only, so every P4b runtime path is gated by
--- db2_tenant_require_pg() and hard-fails on the shim rather than rate-limiting unsafely.
+-- kb_store_tenant_require_pg() and hard-fails on the shim rather than rate-limiting unsafely.
 CREATE TABLE IF NOT EXISTS org_rate_policy (  id INTEGER PRIMARY KEY AUTOINCREMENT,  dim TEXT NOT NULL,  scope_key TEXT NOT NULL,  window_seconds INTEGER NOT NULL,  max_count INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_rate_policy_key ON org_rate_policy(dim, scope_key);
 CREATE TABLE IF NOT EXISTS org_rate_window (  dim_key TEXT NOT NULL,  window_id TEXT NOT NULL,  count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT '',  PRIMARY KEY (dim_key, window_id));
@@ -619,7 +619,7 @@ CREATE TABLE IF NOT EXISTS org_rate_window (  dim_key TEXT NOT NULL,  window_id 
 -- P9a telemetry export + content-free ingest target (schema-sync mirror only).
 -- The RLS + the allowlist-gated fail-closed SECURITY DEFINER org_telemetry_ingest,
 -- the WORM-audited org_telemetry_allow, and the org_metrics_snapshot aggregate are
--- Postgres-only, so every P9a runtime path is gated by db2_tenant_require_pg() and
+-- Postgres-only, so every P9a runtime path is gated by kb_store_tenant_require_pg() and
 -- hard-fails on the shim rather than ingesting/exporting unsafely.
 CREATE TABLE IF NOT EXISTS org_telemetry (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_event_id TEXT NOT NULL,  origin_cert_cn TEXT NOT NULL,  team_id INTEGER REFERENCES kb_team(id),  event_schema TEXT NOT NULL,  metric_name TEXT NOT NULL,  metric_kind TEXT NOT NULL,  value TEXT NOT NULL DEFAULT '0',  ts INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_telemetry_source ON org_telemetry(source_event_id);

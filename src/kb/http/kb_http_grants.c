@@ -3,8 +3,8 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
-#include "modules/kb/c/management_intent_fields.h" /* db2_intent_canonical_actor (header-only) */
-#include "modules/kb/c/db2_tenant.h"               /* db2_tenant_scope_*: sets aimee.principal */
+#include "modules/kb/c/management_intent_fields.h" /* kb_store_intent_canonical_actor (header-only) */
+#include "modules/kb/c/kb_store_tenant.h" /* kb_store_tenant_scope_*: sets aimee.principal */
 #include "modules/kb/c/write_tier_grant.h"
 #include "kb_identity.h" /* kb_identity_key: the actor's canonical identity */
 #include "kb_identity_token.h"
@@ -46,15 +46,15 @@ static int json_body(char *out_buf, int out_cap, int status, cJSON *o)
    return status;
 }
 
-/* db2 returns a negative tenancy code for "this needs Postgres" and -1 for everything
+/* kb_store returns a negative tenancy code for "this needs Postgres" and -1 for everything
  * else. They must not collapse: the first is a deployment running the SQLite shim, the
  * second may be a refusal from the definer function (no admin/lead authority) or a
  * malformed argument the DB rejected. Reporting them alike would have an operator
  * debugging their credentials when the backend is simply wrong. */
 static int map_db_failure(int rc, char *out_buf, int out_cap)
 {
-   /* Only DB2_ERR_TENANT_REQUIRES_PG means the backend is wrong. `rc < -1` swept
-    * up EVERY tenancy code, so DB2_ERR_TENANT_DENIED (-104, "team not in
+   /* Only KB_STORE_ERR_TENANT_REQUIRES_PG means the backend is wrong. `rc < -1` swept
+    * up EVERY tenancy code, so KB_STORE_ERR_TENANT_DENIED (-104, "team not in
     * principal memberships") -- an ordinary authorization refusal -- was reported
     * as "requires the postgres backend" on a deployment already running Postgres.
     * That is exactly the confusion this function was written to prevent, in the
@@ -63,17 +63,17 @@ static int map_db_failure(int rc, char *out_buf, int out_cap)
     *
     * Measured: a grant set against team 7 logged `tenant scope refused (rc=-104)`
     * and answered 503 "requires the postgres backend" on a Postgres kb. */
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return json_error(out_buf, out_cap, 503,
                         "grant administration requires the postgres backend");
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return json_error(out_buf, out_cap, 401,
                         "authentication required: the acting principal is not verifier-produced");
-   if (rc == DB2_ERR_TENANT_NO_CONN || rc == DB2_ERR_TENANT_BEGIN)
+   if (rc == KB_STORE_ERR_TENANT_NO_CONN || rc == KB_STORE_ERR_TENANT_BEGIN)
       return json_error(out_buf, out_cap, 503,
                         "grant administration is temporarily unavailable: the tenant scope "
                         "could not be opened");
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return json_error(out_buf, out_cap, 403,
                         "refused: the acting principal is not a member of that team. Grant "
                         "administration needs admin or team-lead authority IN the named team, "
@@ -88,7 +88,7 @@ static int map_db_failure(int rc, char *out_buf, int out_cap)
  *
  * kb_write_tier_grant_set / _revoke are SECURITY DEFINER and read the acting identity from
  * aimee.principal, which only a tenant scope sets. The first version of these routes called the
- * db2 seam with NO scope open, so aimee.principal was unset, and the definer correctly refused
+ * kb_store seam with NO scope open, so aimee.principal was unset, and the definer correctly refused
  * every call as "admin or team lead only" — increment 5 was wired end to end and could not
  * create a grant. Found by standing the whole stack up; nothing below this layer can see it,
  * because each layer's tests supply their own actor.
@@ -116,7 +116,7 @@ static int grant_scope_begin(int64_t team_id, char *actor_key, size_t actor_cap,
       *status_out = json_error(out_buf, out_cap, 403, "the caller has no usable identity");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(actor, team_id);
+   int rc = kb_store_tenant_scope_begin(actor, team_id);
    if (rc != 0)
    {
       LOG_WARN("kb.grants", "tenant scope refused for team %lld (rc=%d)", (long long)team_id, rc);
@@ -276,18 +276,18 @@ static int query_team_id(const char *qs, int64_t *out)
  * malformed subject is a clean 400 rather than a constraint violation surfaced as a
  * generic refusal.
  *
- * db2_intent_canonical_actor takes a FIXED-SIZE ZERO-PADDED RECORD, not an arbitrary
+ * kb_store_intent_canonical_actor takes a FIXED-SIZE ZERO-PADDED RECORD, not an arbitrary
  * pointer — it verifies the unused tail is zero, so handing it a bare string reads past
  * the end of that string. Hence the copy. Getting this wrong reads out of bounds and
  * yields a confident "invalid" for a perfectly good subject. */
 static int subject_valid(const char *s)
 {
-   char record[DB2_INTENT_ACTOR_MAX + 1];
-   if (!s || !s[0] || strlen(s) > DB2_INTENT_ACTOR_MAX)
+   char record[KB_STORE_INTENT_ACTOR_MAX + 1];
+   if (!s || !s[0] || strlen(s) > KB_STORE_INTENT_ACTOR_MAX)
       return 0;
    memset(record, 0, sizeof(record));
    memcpy(record, s, strlen(s));
-   return db2_intent_canonical_actor(record, sizeof(record));
+   return kb_store_intent_canonical_actor(record, sizeof(record));
 }
 
 static int server_id_valid(const char *s)
@@ -347,18 +347,18 @@ static int post_set(const char *body, char *out_buf, int out_cap)
    /* granted_by is the AUTHENTICATED actor, not the `granted_by` the request carried. The wire
     * field is ignored precisely because an audit trail recording a caller-supplied name can be
     * written to order. */
-   db2_write_tier_grant_report_t report;
-   int rc =
-       db2_write_tier_grant_set_reporting(server_id, team_id, subject, tier, actor_key, &report);
+   kb_store_write_tier_grant_report_t report;
+   int rc = kb_store_write_tier_grant_set_reporting(server_id, team_id, subject, tier, actor_key,
+                                                    &report);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       LOG_WARN("kb.grants", "write-tier grant set refused for %s on %s (rc=%d)", subject, server_id,
                rc);
       return map_db_failure(rc, out_buf, out_cap);
    }
 
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       /* The grant may or may not exist. Unavailable rather than success: a caller told
        * "granted" would not retry, and one told nothing would. */
       return json_error(out_buf, out_cap, 503,
@@ -418,27 +418,27 @@ static int post_revoke(const char *body, char *out_buf, int out_cap)
       return scope_status;
 
    kb_identity_tier_t existing = KB_IDENTITY_TIER_OFF;
-   int lookup = db2_write_tier_grant_lookup(server_id, team_id, subject, &existing);
+   int lookup = kb_store_write_tier_grant_lookup(server_id, team_id, subject, &existing);
    if (lookup < 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       /* A failed lookup must not be reported as "no grant existed": that is an authoritative
        * claim this call is in no position to make. */
       LOG_WARN("kb.grants", "could not determine whether a grant existed for %s on %s (rc=%d)",
                subject, server_id, lookup);
       return map_db_failure(lookup, out_buf, out_cap);
    }
-   int found = (lookup == DB2_WRITE_TIER_GRANT_FOUND);
+   int found = (lookup == KB_STORE_WRITE_TIER_GRANT_FOUND);
 
-   int rc = db2_write_tier_grant_revoke(server_id, team_id, subject);
+   int rc = kb_store_write_tier_grant_revoke(server_id, team_id, subject);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       LOG_WARN("kb.grants", "write-tier grant revoke refused for %s on %s (rc=%d)", subject,
                server_id, rc);
       return map_db_failure(rc, out_buf, out_cap);
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return json_error(out_buf, out_cap, 503,
                         "the revocation may not have been committed; re-run to confirm");
    LOG_INFO("kb.grants", "write-tier grant revoked for %s on %s team %lld (existed=%d, by %s)",
@@ -477,21 +477,21 @@ static int get_list(const char *query_string, char *out_buf, int out_cap)
        0)
       return scope_status;
 
-   db2_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
+   kb_store_write_tier_grant_row_t rows[GRANTS_LIST_MAX];
    size_t count = 0;
    /* The subject filter goes DOWN to the query, not applied to the rows that come back:
     * filtering after a capped fetch hides a subject sorting beyond the cap, so `show` would
     * answer "no grant" for a subject that has one. */
-   int rc =
-       db2_write_tier_grant_list_ex(server_id, team_id, include_revoked,
-                                    have_subject ? subject : NULL, rows, GRANTS_LIST_MAX, &count);
+   int rc = kb_store_write_tier_grant_list_ex(server_id, team_id, include_revoked,
+                                              have_subject ? subject : NULL, rows, GRANTS_LIST_MAX,
+                                              &count);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return map_db_failure(rc, out_buf, out_cap);
    }
    /* A read, so a failed commit is not ambiguous the way a write's is. */
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return json_error(out_buf, out_cap, 503, "could not read the grants");
 
    cJSON *o = cJSON_CreateObject();

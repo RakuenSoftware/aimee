@@ -7,15 +7,15 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/cross_repo_route.h"
-#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/kb_store.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static void X(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "seed failed: %s\n  sql: %s\n", err, sql);
    assert(rc == 0);
@@ -26,7 +26,7 @@ static int64_t route_count(const char *caller, const char *definer, const char *
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT COUNT(*) FROM cross_repo_route WHERE caller_project = ?1 AND definer_project = ?2 "
        "AND kind = ?3",
        err, sizeof(err));
@@ -127,7 +127,7 @@ static void test_routes(void)
    mk_file("app", "svc/y.go", "go", 0);
    mk_import("app", "svc/y.go", "cratelib");
 
-   int rc = db2_cross_repo_rebuild_routes();
+   int rc = kb_store_cross_repo_rebuild_routes();
    assert(rc >= 3);
 
    assert(route_count("app", "libhdr", "import_header") == 1);   /* header route */
@@ -139,7 +139,7 @@ static void test_routes(void)
    assert(route_count("app", "cratelib", "import_module") == 0); /* go!=crate kind/lang mismatch */
 
    /* idempotent rebuild. */
-   int rc2 = db2_cross_repo_rebuild_routes();
+   int rc2 = kb_store_cross_repo_rebuild_routes();
    assert(rc2 == rc);
    assert(route_count("app", "libhdr", "import_header") == 1);
    printf("ok\n");
@@ -222,7 +222,7 @@ static void test_header_idf(void)
    X("INSERT INTO file_imports (file_id,name) SELECT f.id,'vd.h' FROM files f JOIN projects p ON "
      "p.id=f.project_id WHERE p.name='idfapp' AND f.path='src/m.c'");
 
-   int rc = db2_cross_repo_rebuild_routes();
+   int rc = kb_store_cross_repo_rebuild_routes();
    assert(rc >= 0);
    /* ubiq.h is in 4 repos => no route to any of them. */
    for (int i = 0; i < 4; i++)
@@ -289,7 +289,7 @@ static void test_prefer_local_and_generated(void)
    mk_file("vcapp", "third_party/vlib.h", "c", 1); /* caller's copy is VENDORED */
    mk_import("vcapp", "src/e.c", "vlib.h");
 
-   int rc = db2_cross_repo_rebuild_routes();
+   int rc = kb_store_cross_repo_rebuild_routes();
    assert(rc >= 0);
    assert(route_count("plapp", "pllib", "import_header") == 0);   /* prefer-local: caller owns it */
    assert(route_count("plapp2", "pllib", "import_header") == 1);  /* no local copy: routes */
@@ -323,7 +323,7 @@ static void test_angle_include_recall(void)
    mk_file("qqapp", "include/Lime.h", "c", 0);
    mk_import_sys("qqapp", "src/b.c", "Lime.h", 0);
 
-   int rc = db2_cross_repo_rebuild_routes();
+   int rc = kb_store_cross_repo_rebuild_routes();
    assert(rc >= 0);
    assert(route_count("aqapp", "aqlib", "import_header") == 1); /* angle: routes despite local */
    assert(route_count("qqapp", "aqlib", "import_header") == 0); /* quoted+local: suppressed */
@@ -363,7 +363,7 @@ static void test_vendored_caller_excluded(void)
    mk_file("vcap2", "subprojects/dep/d.go", "go", 1);
    mk_import("vcap2", "subprojects/dep/d.go", "example.com/vcmod/sub");
 
-   int rc = db2_cross_repo_rebuild_routes();
+   int rc = kb_store_cross_repo_rebuild_routes();
    assert(rc >= 0);
    /* vcap routes exist via its NON-vendored files (header + module controls). */
    assert(route_count("vcap", "vchdr", "import_header") == 1);
@@ -376,7 +376,7 @@ static void test_vendored_caller_excluded(void)
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_routes();
    test_header_idf();
    test_prefer_local_and_generated();

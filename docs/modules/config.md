@@ -42,7 +42,7 @@ operations; no caller receives the backing path, file descriptor, or unredacted 
 
 The durable artifact is canonical `aimee.yaml`, written through temporary-file, sync, and rename steps.
 Schema evolution happens through validated defaults and explicit key retirement, not ad hoc rewrites.
-Workflow definitions live under `$AIMEE_HOME/workflows`; DB1 and DB2 remain separate PostgreSQL stores.
+Workflow definitions live under `$AIMEE_HOME/workflows`; DB1 and KB_STORE remain separate PostgreSQL stores.
 
 ## Security and privacy
 

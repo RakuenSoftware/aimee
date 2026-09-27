@@ -13,7 +13,6 @@
 #define CONFIG_SECRET_MAX   4096
 
 static const char *g_secret_names[] = {
-    "AIMEE_DB2_URL",
     "AIMEE_SEARCH_TAVILY_API_KEY",
     "AIMEE_PROXY_TOKEN",
     "AIMEE_INGRESS_PROXY_SECRET",

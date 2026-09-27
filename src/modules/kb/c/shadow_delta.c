@@ -1,7 +1,7 @@
 /* src/modules/kb/c/shadow_delta.c: Phase 7 shadow-mode rank-delta persistence. */
 
 #include "shadow_delta.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -9,11 +9,11 @@
 
 #define SD_ERRBUF 256
 
-int db2_shadow_delta_insert(const db2_shadow_delta_row_t *row)
+int kb_store_shadow_delta_insert(const kb_store_shadow_delta_row_t *row)
 {
    if (!row || !row->query_hash[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "INSERT INTO memory_recall_shadow_deltas"
@@ -33,9 +33,9 @@ int db2_shadow_delta_insert(const db2_shadow_delta_row_t *row)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int64_t db2_shadow_delta_count(const char *project)
+int64_t kb_store_shadow_delta_count(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char sql[256];
@@ -57,9 +57,9 @@ int64_t db2_shadow_delta_count(const char *project)
    return n;
 }
 
-int db2_shadow_delta_cleanup(const char *project, int max_rows, int retention_days)
+int kb_store_shadow_delta_cleanup(const char *project, int max_rows, int retention_days)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    if (max_rows <= 0)

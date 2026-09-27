@@ -6,13 +6,13 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_version.h"
 
 static sqlite3 *open_db(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    return db;
 }
@@ -61,7 +61,7 @@ static void clear_extract_jobs(sqlite3 *db)
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_version"))
+   if (kb_store_test_shim_skip_on_postgres("curator_version"))
       return 0;
 
    /* 1. first observation records baselines, no replay. */
@@ -169,7 +169,7 @@ int main(void)
    assert(r.prompt_bumped == 0 && r.model_bumped == 0); /* NULL == empty, not a change */
    printf("  empty and NULL identities are stable OK\n");
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("curator_version: all tests passed\n");
    return 0;
 }

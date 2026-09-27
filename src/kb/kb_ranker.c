@@ -8,7 +8,7 @@
 #include "modules/kb/c/artifacts.h"
 
 #define KB_RANKER_FEATURE_SET_VERSION KB_FEATURE_SET_VERSION
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
@@ -107,7 +107,7 @@ int kb_ranker_model_write(const char *weights_json, char *id_out, int id_out_len
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* Build payload: model_kind=linear, surface=kb_hybrid, weights blob. */
    char payload[1024];
@@ -117,12 +117,12 @@ int kb_ranker_model_write(const char *weights_json, char *id_out, int id_out_len
             "\"weights\":%s}",
             KB_RANKER_FEATURE_SET_VERSION, weights_json);
 
-   int rc = db2_artifact_write(id, "ranker_model", "proposed", "system", "", "", 1.0, payload);
+   int rc = kb_store_artifact_write(id, "ranker_model", "proposed", "system", "", "", 1.0, payload);
    if (rc != 0)
       return -1;
 
    /* Stamp target_surface and committed_at. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -159,7 +159,7 @@ int kb_ranker_model_write_proposed(const char *weights_json, const char *fit_met
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* Same payload shape kb_ranker_model_load parses, plus a fit_metrics blob for
     * provenance. Lands 'proposed' — the benchmark gate (kb_ranker_fit_run) must
@@ -172,13 +172,13 @@ int kb_ranker_model_write_proposed(const char *weights_json, const char *fit_met
             KB_RANKER_FEATURE_SET_VERSION, weights_json,
             (fit_metrics_json && fit_metrics_json[0]) ? fit_metrics_json : "{}");
 
-   int rc = db2_artifact_write(id, "ranker_model", "proposed", "system", "", "", 1.0, payload);
+   int rc = kb_store_artifact_write(id, "ranker_model", "proposed", "system", "", "", 1.0, payload);
    if (rc != 0)
       return -1;
 
    /* Stamp target_surface so kb_ranker_model_load's WHERE clause can find it once
     * committed — but leave state='proposed' / committed_at empty (gate pending). */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -201,7 +201,7 @@ int kb_ranker_model_commit(const char *id)
 {
    if (!id || !id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -231,7 +231,7 @@ int kb_ranker_model_commit(const char *id)
 
 int kb_ranker_model_load(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

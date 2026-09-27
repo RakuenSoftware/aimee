@@ -1,10 +1,10 @@
--- db2/roadmap.sql: spec-driven roadmap surfaces over the shared artifacts
--- table (DB2, postgres-native). No new base tables: `roadmap` and `plan_unit`
+-- kb_store/roadmap.sql: spec-driven roadmap surfaces over the shared artifacts
+-- table (KB_STORE, postgres-native). No new base tables: `roadmap` and `plan_unit`
 -- are charter artifact kinds carried in artifacts(kind, payload). See
 -- docs/proposals/pending/spec-driven-roadmaps-and-autonomous-delegate-dispatch.md
 -- and docs/proposals/done/architecture-charter.md (promotion targets).
 --
--- Phase-1 scaffold: this file is not yet embedded/applied by db2_init.c. It
+-- Phase-1 scaffold: this file is not yet embedded/applied by kb_store_init.c. It
 -- defines the durable read surfaces the dispatch loop will query once wired.
 
 -- Committed roadmaps (one active per goal; superseded on reassessment).

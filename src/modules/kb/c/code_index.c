@@ -1,12 +1,12 @@
-/* db2/code_index.c: code-index primitives — Postgres via libpq. */
+/* kb_store/code_index.c: code-index primitives — Postgres via libpq. */
 
 #include "code_index.h"
-#include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
-#include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
-#include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/db2_log.h"    /* aimee_log */
-#include "db2.h"
-#include "db2_internal.h"
+#include "../headers/aimee.h"        /* MAX_PATH_LEN, now_utc */
+#include "../headers/code_match.h"   /* code_match_line (P1b span enrichment) */
+#include "cross_repo_resolver.h"     /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
+#include "../support/kb_store_log.h" /* aimee_log */
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "util.h"
 
@@ -57,9 +57,9 @@ static int64_t code_index_resolve_file(void *conn, int64_t project_id, const cha
    return id;
 }
 
-int db2_code_index_project_count(void)
+int kb_store_code_index_project_count(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql = "SELECT COUNT(*) FROM projects WHERE lifecycle_state = 'current'";
@@ -74,13 +74,13 @@ int db2_code_index_project_count(void)
    return n;
 }
 
-int db2_code_index_project_current_generation(const char *name, int64_t *generation_out)
+int kb_store_code_index_project_current_generation(const char *name, int64_t *generation_out)
 {
    if (generation_out)
       *generation_out = 0;
    if (!name || !name[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CIDX_ERRBUF] = "";
@@ -102,12 +102,12 @@ int db2_code_index_project_current_generation(const char *name, int64_t *generat
    return rc;
 }
 
-int db2_code_index_project_last_scan(char *out, size_t cap)
+int kb_store_code_index_project_last_scan(char *out, size_t cap)
 {
    if (!out || cap == 0)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -126,11 +126,11 @@ int db2_code_index_project_last_scan(char *out, size_t cap)
    return 0;
 }
 
-int db2_code_index_project_list(project_info_t *out, int max)
+int kb_store_code_index_project_list(project_info_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -178,11 +178,11 @@ static void cidx_make_like_pattern(const char *id, int leading_pct, int trailing
    buf[j] = '\0';
 }
 
-int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
+int kb_store_code_index_term_find(const char *identifier, term_hit_t *out, int max)
 {
    if (!identifier || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -271,11 +271,12 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
    return count;
 }
 
-int db2_code_index_callers_find(const char *project, const char *symbol, caller_hit_t *out, int max)
+int kb_store_code_index_callers_find(const char *project, const char *symbol, caller_hit_t *out,
+                                     int max)
 {
    if (!symbol || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -337,12 +338,12 @@ int db2_code_index_callers_find(const char *project, const char *symbol, caller_
    return count;
 }
 
-int db2_code_index_file_definitions(const char *project, const char *file_path, definition_t *out,
-                                    int max)
+int kb_store_code_index_file_definitions(const char *project, const char *file_path,
+                                         definition_t *out, int max)
 {
    if (!project || !file_path || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -378,18 +379,19 @@ int db2_code_index_file_definitions(const char *project, const char *file_path, 
    return count;
 }
 
-int db2_code_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
+int kb_store_code_index_blast_radius(const char *project, const char *file_path,
+                                     blast_radius_t *out)
 {
    if (!project || !file_path || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       /* Four different refusals used to return a bare -1, which the route turned
        * into 404 and the client into "blast radius lookup failed". An operator
        * could not tell an unknown project from an unindexed file from a
        * generation the row does not carry -- and the first two are actionable. */
-      aimee_log(LOG_ERROR, "code_index", "blast_radius '%s' '%s': no db2 connection", project,
+      aimee_log(LOG_ERROR, "code_index", "blast_radius '%s' '%s': no kb_store connection", project,
                 file_path);
       return -1;
    }
@@ -410,7 +412,7 @@ int db2_code_index_blast_radius(const char *project, const char *file_path, blas
    }
 
    int64_t generation = 0;
-   if (db2_code_index_project_current_generation(project, &generation) != 0)
+   if (kb_store_code_index_project_current_generation(project, &generation) != 0)
    {
       aimee_log(LOG_ERROR, "code_index", "blast_radius: project '%s' has no current generation",
                 project);
@@ -621,7 +623,7 @@ int db2_code_index_blast_radius(const char *project, const char *file_path, blas
    return 0;
 }
 
-void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t *out)
+void kb_store_code_index_blast_radius_local_first(const char *project, blast_radius_t *out)
 {
    if (!project || !project[0] || !out || out->dependent_count < 2)
       return;
@@ -652,13 +654,13 @@ void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t
    }
 }
 
-int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
-                                        size_t out_cap)
+int kb_store_code_index_unique_file_basename(const char *project, const char *basename, char *out,
+                                             size_t out_cap)
 {
    if (!project || !basename || !out || out_cap == 0)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int64_t project_id = code_index_resolve_project(conn, project);
@@ -693,11 +695,11 @@ int db2_code_index_unique_file_basename(const char *project, const char *basenam
    return matches == 1 ? 1 : 0;
 }
 
-int64_t db2_code_index_project_upsert(const char *name, const char *root)
+int64_t kb_store_code_index_project_upsert(const char *name, const char *root)
 {
    if (!name || !name[0] || !root || !root[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -896,11 +898,12 @@ rollback:
    return -1;
 }
 
-int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, const char *scanned_at)
+int64_t kb_store_code_index_file_upsert(int64_t project_id, const char *rel_path,
+                                        const char *scanned_at)
 {
    if (!rel_path || !scanned_at)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -930,11 +933,11 @@ int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, con
    return id;
 }
 
-int db2_code_index_file_modified_since(int64_t project_id, const char *rel_path, time_t mtime)
+int kb_store_code_index_file_modified_since(int64_t project_id, const char *rel_path, time_t mtime)
 {
    if (!rel_path)
       return 1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 1;
 
@@ -969,11 +972,11 @@ int db2_code_index_file_modified_since(int64_t project_id, const char *rel_path,
    return modified;
 }
 
-int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glob)
+int kb_store_code_index_purge_files_matching(int64_t project_id, const char *path_glob)
 {
    if (!path_glob)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1004,9 +1007,9 @@ int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glo
 #define CIDX_HIDDEN_NOT_MANIFEST                                                                   \
    "(" CIDX_HIDDEN_ANCESTOR " OR (" CIDX_FINAL_HIDDEN " AND NOT " CIDX_FINAL_WANTED "))"
 
-int db2_code_index_purge_hidden_except_manifests(int64_t project_id)
+int kb_store_code_index_purge_hidden_except_manifests(int64_t project_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1025,9 +1028,9 @@ int db2_code_index_purge_hidden_except_manifests(int64_t project_id)
    return affected;
 }
 
-int db2_code_index_purge_hidden_pollution(void)
+int kb_store_code_index_purge_hidden_pollution(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1057,11 +1060,11 @@ int db2_code_index_purge_hidden_pollution(void)
    return total;
 }
 
-int db2_code_index_project_delete(const char *name)
+int kb_store_code_index_project_delete(const char *name)
 {
    if (!name || !name[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1079,11 +1082,11 @@ int db2_code_index_project_delete(const char *name)
    return (rc == AIMEE_PG_DONE) ? changes : -1;
 }
 
-int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data)
+int kb_store_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data)
 {
    if (!data)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1100,13 +1103,13 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
    }
 
    int rc = 0;
-   if (db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id) != 0)
+   if (kb_store_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id) != 0)
       rc = -1;
-   if (db2_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id) != 0)
+   if (kb_store_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id) != 0)
       rc = -1;
-   if (db2_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id) != 0)
+   if (kb_store_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id) != 0)
       rc = -1;
-   if (db2_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id) != 0)
+   if (kb_store_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id) != 0)
       rc = -1;
 
    if (rc == 0)
@@ -1262,7 +1265,7 @@ static int code_search_scoped(const char *query, const char *project, const char
 {
    if (!query || !query[0] || !out || max <= 0)
       return query && !query[0] ? 0 : -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1282,7 +1285,7 @@ static int code_search_scoped(const char *query, const char *project, const char
    const char *join_content =
        (enrich && shim) ? " JOIN file_contents fcs ON fcs.file_id = f.id" : "";
 
-   /* The DB2 shim path exposes snippet/rank, while the primary DB2 path uses
+   /* The KB_STORE shim path exposes snippet/rank, while the primary KB_STORE path uses
     * ts_headline/ts_rank. The same JOIN shape works because `code_fts`
     * presents rowid + fts_tsv columns over file_contents. */
    char sql[1400];
@@ -1411,14 +1414,15 @@ static int code_search_scoped(const char *query, const char *project, const char
    return count;
 }
 
-int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                               int max, int enrich)
+int kb_store_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                    int max, int enrich)
 {
    return code_search_scoped(query, project, NULL, out, max, enrich);
 }
 
-int db2_code_index_code_search_excluding_project(const char *query, const char *excluded_project,
-                                                 code_search_hit_t *out, int max, int enrich)
+int kb_store_code_index_code_search_excluding_project(const char *query,
+                                                      const char *excluded_project,
+                                                      code_search_hit_t *out, int max, int enrich)
 {
    if (!excluded_project || !excluded_project[0])
       return -1;

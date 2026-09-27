@@ -45,7 +45,7 @@ DESCRIPTORS = REPO_ROOT / "src" / "modules"
 #
 # A flat exemption list is a trap: it outlives the reason it was added, and the
 # module most likely to churn becomes the one place the check never looks. This
-# is not hypothetical -- the entry below was written against a tree where db2's
+# is not hypothetical -- the entry below was written against a tree where kb_store's
 # descriptor declared nothing, while in another worktree it already declared 97
 # sources. A list would have gone on skipping it after the reason evaporated.
 #

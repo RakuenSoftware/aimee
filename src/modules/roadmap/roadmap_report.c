@@ -8,7 +8,7 @@
 #include "headers/platform_path.h"
 #include "modules/kb/c/artifacts.h"
 #include "modules/kb/c/db_postgres.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "headers/dstr.h"
 #include "db1_client/roadmap_runtime.h"
 #include "cJSON.h"
@@ -61,9 +61,9 @@ int roadmap_report_write(const char *roadmap_id)
    }
 
    /* 3. Load the roadmap artifact. */
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    memset(&row, 0, sizeof(row));
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, NULL) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, NULL) != 0)
       return -1;
 
    cJSON *rp = cJSON_Parse(row.payload_json);
@@ -82,7 +82,7 @@ int roadmap_report_write(const char *roadmap_id)
    }
 
    /* 4. Load all plan_unit artifacts scoped to roadmap_id. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       cJSON_Delete(rp);

@@ -1,4 +1,4 @@
-/* vector_index_ops.c: DB2-side bookkeeping for pgvector write status.
+/* vector_index_ops.c: KB_STORE-side bookkeeping for pgvector write status.
  *
  * Postgres via libpq. The pgvector transport lives in src/modules/kb/c/pgvec_*;
  * this file only persists shared retry/status metadata for those writes. */
@@ -6,22 +6,22 @@
 #include "vector_index_ops.h"
 
 #include "aimee.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-int db2_vector_index_sync_suppressed(void)
+int kb_store_vector_index_sync_suppressed(void)
 {
-   return db2_is_ephemeral();
+   return kb_store_is_ephemeral();
 }
 
-void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id, int ok,
-                                const char *error_msg)
+void kb_store_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id,
+                                     int ok, const char *error_msg)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -59,9 +59,9 @@ void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_
    aimee_pg_finalize(st);
 }
 
-void db2_vector_index_op_remove(int64_t point_id)
+void kb_store_vector_index_op_remove(int64_t point_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -75,12 +75,12 @@ void db2_vector_index_op_remove(int64_t point_id)
    aimee_pg_finalize(st);
 }
 
-void db2_vector_index_ops_remove_for_memory(int64_t memory_id, int64_t unit_point_offset,
-                                            int include_base)
+void kb_store_vector_index_ops_remove_for_memory(int64_t memory_id, int64_t unit_point_offset,
+                                                 int include_base)
 {
    if (memory_id <= 0)
       return;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -113,11 +113,11 @@ void db2_vector_index_ops_remove_for_memory(int64_t memory_id, int64_t unit_poin
    aimee_pg_finalize(st);
 }
 
-int db2_vector_index_ops_reset_stuck(int max_attempts)
+int kb_store_vector_index_ops_reset_stuck(int max_attempts)
 {
    if (max_attempts <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -135,13 +135,13 @@ int db2_vector_index_ops_reset_stuck(int max_attempts)
    return changes;
 }
 
-int db2_vector_index_ops_summary(int max_attempts, db2_vector_index_ops_summary_t *out)
+int kb_store_vector_index_ops_summary(int max_attempts, kb_store_vector_index_ops_summary_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -212,11 +212,11 @@ int db2_vector_index_ops_summary(int max_attempts, db2_vector_index_ops_summary_
    return 0;
 }
 
-int db2_vector_index_ops_list_failed(db2_vector_index_op_failed_t *rows, int max_rows)
+int kb_store_vector_index_ops_list_failed(kb_store_vector_index_op_failed_t *rows, int max_rows)
 {
    if (!rows || max_rows <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -233,7 +233,7 @@ int db2_vector_index_ops_list_failed(db2_vector_index_op_failed_t *rows, int max
    int count = 0;
    while (count < max_rows && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_vector_index_op_failed_t *row = &rows[count++];
+      kb_store_vector_index_op_failed_t *row = &rows[count++];
       memset(row, 0, sizeof(*row));
       row->point_id = aimee_pg_column_int64(st, 0);
       const char *collection = aimee_pg_column_text(st, 1);
@@ -252,12 +252,12 @@ int db2_vector_index_ops_list_failed(db2_vector_index_op_failed_t *rows, int max
    return count;
 }
 
-int db2_vector_index_ops_list_retryable_memory_ids(int max_attempts, int limit, int64_t *out,
-                                                   int max)
+int kb_store_vector_index_ops_list_retryable_memory_ids(int max_attempts, int limit, int64_t *out,
+                                                        int max)
 {
    if (!out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 

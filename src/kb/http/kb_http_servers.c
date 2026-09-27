@@ -1,6 +1,6 @@
 #include "kb_http_servers.h"
 #include "../../modules/kb/c/server_registry.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_reqctx.h"
 #include "cJSON.h"
@@ -546,23 +546,23 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
       snprintf(out, (size_t)cap, "{\"error\":\"authentication required\"}");
       return 401;
    }
-   int scope_rc = db2_tenant_scope_begin(actor, team);
+   int scope_rc = kb_store_tenant_scope_begin(actor, team);
    if (scope_rc != 0)
    {
       snprintf(out, (size_t)cap,
-               scope_rc == DB2_ERR_TENANT_DENIED ? "{\"error\":\"team access denied\"}"
-                                                 : "{\"error\":\"tenant scope unavailable\"}");
-      return scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
+               scope_rc == KB_STORE_ERR_TENANT_DENIED ? "{\"error\":\"team access denied\"}"
+                                                      : "{\"error\":\"tenant scope unavailable\"}");
+      return scope_rc == KB_STORE_ERR_TENANT_DENIED ? 403 : 503;
    }
-   db2_server_row_t rows[64];
-   int n = db2_server_registry_list(team, rows, 64);
+   kb_store_server_row_t rows[64];
+   int n = kb_store_server_registry_list(team, rows, 64);
    if (n < 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       snprintf(out, cap, "{\"error\":\"registry unavailable\"}");
       return 503;
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
    {
       snprintf(out, cap, "{\"error\":\"registry unavailable\"}");
       return 503;

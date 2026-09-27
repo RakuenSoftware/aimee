@@ -127,7 +127,6 @@ static inline int aimee_resolve_delegate_max_inflight(int configured)
    return configured > 0 ? configured : CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT;
 }
 
-
 #define CONFIG_MCP_MAX_CLIENTS          8
 #define CONFIG_MCP_MAX_COMMAND_ARGS     16
 #define CONFIG_MCP_MAX_CWD              512
@@ -270,9 +269,9 @@ typedef struct
 } cron_job_t;
 
 /* Database connection settings for the explicit two-store architecture:
- * DB1 = local user store (sqlite), DB2 = shared knowledge store (postgres
+ * DB1 = local user store (sqlite), KB_STORE = shared knowledge store (postgres
  * + pgvector). See docs/STORAGE_TIERS.md. (The vector tier was folded
- * into DB2 as pgvector in #1575.) */
+ * into KB_STORE as pgvector in #1575.) */
 #define CONFIG_KB_CLIENT_URL_LEN 512
 
 #define CONFIG_LSP_MAX_SERVERS    8

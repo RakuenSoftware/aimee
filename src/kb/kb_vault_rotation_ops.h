@@ -28,21 +28,22 @@ typedef struct
 
 typedef struct
 {
-   int (*resolve_current)(void *ctx, const char *operation_key, const db2_vault_rotation_row_t *row,
+   int (*resolve_current)(void *ctx, const char *operation_key,
+                          const kb_store_vault_rotation_row_t *row,
                           const kb_vault_rotation_lease_t *lease, char *vendor_ref, size_t ref_cap);
    /* Every successful provision must first reconcile operation_key. Set
     * prior_orphan_reconciled even when reconciliation proves no orphan exists. */
-   int (*provision)(void *ctx, const char *operation_key, const db2_vault_rotation_row_t *row,
+   int (*provision)(void *ctx, const char *operation_key, const kb_store_vault_rotation_row_t *row,
                     const kb_vault_rotation_lease_t *lease, unsigned char *secret,
                     size_t secret_cap, size_t *secret_len, char *vendor_ref, size_t ref_cap,
                     int *prior_orphan_reconciled);
-   int (*probe)(void *ctx, const char *operation_key, const db2_vault_rotation_row_t *row,
+   int (*probe)(void *ctx, const char *operation_key, const kb_store_vault_rotation_row_t *row,
                 const kb_vault_rotation_lease_t *lease, const unsigned char *secret,
                 size_t secret_len);
-   int (*revoke)(void *ctx, const char *operation_key, const db2_vault_rotation_row_t *row,
+   int (*revoke)(void *ctx, const char *operation_key, const kb_store_vault_rotation_row_t *row,
                  const kb_vault_rotation_lease_t *lease, const char *vendor_ref, char *receipt,
                  size_t receipt_cap);
-   int (*reconcile)(void *ctx, const char *operation_key, const db2_vault_rotation_row_t *row,
+   int (*reconcile)(void *ctx, const char *operation_key, const kb_store_vault_rotation_row_t *row,
                     const kb_vault_rotation_lease_t *lease, char *vendor_ref, size_t ref_cap,
                     int *exists, char *evidence, size_t evidence_cap);
 } kb_vault_rotation_provider_t;

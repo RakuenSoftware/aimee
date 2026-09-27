@@ -1,4 +1,4 @@
-/* db2/write_tier_grant.h — per-user /v1 write authorization (proposal
+/* kb_store/write_tier_grant.h — per-user /v1 write authorization (proposal
  * per-user-remote-writes-authz.md §6). Backed by kb_write_tier_grant: the
  * authoritative {subject -> tier} map within a (server, team).
  *
@@ -9,17 +9,17 @@
  * meaning, so the API refuses to conflate them.
  *
  * Tenant-scoped: every entry requires the RLS-enforcing Postgres backend
- * (db2_tenant_require_pg), matching db2/admin_grant.c.
+ * (kb_store_tenant_require_pg), matching kb_store/admin_grant.c.
  *
  * The tier ENUM is shared with the token layer (kb_identity_tier_t), but the
- * tier<->string mapping is deliberately local. db2 objects link into BOTH the
+ * tier<->string mapping is deliberately local. kb_store objects link into BOTH the
  * server and kb, while kb/kb_identity_token.c (the token *builder*) links into
  * kb only. Calling the builder's mapping here would drag the minting path into
  * the server binary, which is exactly the separation the server-side verifier
  * maintains by carrying its own copy. Types are free across that boundary;
  * functions are not. */
-#ifndef DEC_DB2_WRITE_TIER_GRANT_H
-#define DEC_DB2_WRITE_TIER_GRANT_H 1
+#ifndef DEC_KB_STORE_WRITE_TIER_GRANT_H
+#define DEC_KB_STORE_WRITE_TIER_GRANT_H 1
 
 #include "kb_identity_token.h" /* kb_identity_tier_t (type only — see above) */
 
@@ -41,7 +41,7 @@ extern "C"
       /* Empty when the grant is live. Populated only by the revoked-inclusive list —
        * the default list selects `revoked_at IS NULL`, so it is always empty there. */
       char revoked_at[32];
-   } db2_write_tier_grant_row_t;
+   } kb_store_write_tier_grant_row_t;
 
    /* What kb_write_tier_grant_set_reporting observed of the grant it overwrote. */
    typedef struct
@@ -58,35 +58,35 @@ extern "C"
        * memberships and grants are provisioned in either order, so this is a warning
        * for the operator, not a refusal. */
       int is_member;
-   } db2_write_tier_grant_report_t;
+   } kb_store_write_tier_grant_report_t;
 
    enum
    {
       /* A live grant exists; *out holds its tier. */
-      DB2_WRITE_TIER_GRANT_FOUND = 1,
+      KB_STORE_WRITE_TIER_GRANT_FOUND = 1,
       /* No live grant for this (server, team, subject). The caller MUST deny.
        * This is the post-migration default for every subject. */
-      DB2_WRITE_TIER_GRANT_NONE = 0
+      KB_STORE_WRITE_TIER_GRANT_NONE = 0
    };
 
    /* Resolve the live tier granted to `subject` within (server_id, team_id).
     * Writes *out only on FOUND; zeroes it otherwise.
     *
-    * Returns DB2_WRITE_TIER_GRANT_FOUND, DB2_WRITE_TIER_GRANT_NONE, or a
+    * Returns KB_STORE_WRITE_TIER_GRANT_FOUND, KB_STORE_WRITE_TIER_GRANT_NONE, or a
     * NEGATIVE error — a negative tenancy code (so the blanket shim guard in
-    * test_kb_tenancy_shim_guard.c sees the same DB2_ERR_TENANT_REQUIRES_PG as
+    * test_kb_tenancy_shim_guard.c sees the same KB_STORE_ERR_TENANT_REQUIRES_PG as
     * every other tenant-scoped entrypoint), or -1.
     *
     * All three deny. They stay distinguishable so an outage is never recorded
     * as a policy decision, and so "granted off" never reads as "not granted". */
-   int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
-                                   kb_identity_tier_t *out);
+   int kb_store_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                        kb_identity_tier_t *out);
 
    /* Insert or update the grant. Idempotent on (server_id, team_id, subject): a
     * re-grant refreshes tier/granted_by and clears revoked_at. Returns 0, a
     * negative tenancy code, or -1. */
-   int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
-                                kb_identity_tier_t tier, const char *granted_by);
+   int kb_store_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
+                                     kb_identity_tier_t tier, const char *granted_by);
 
    /* Insert or update the grant AND report the state it replaced, observed under the
     * same lock and in the same transaction as the write.
@@ -94,22 +94,24 @@ extern "C"
     * Use this rather than lookup-then-set wherever the prior state is reported to a
     * caller: two concurrent commands interleave between a separate read and write, so a
     * call that succeeds could report a stale previous tier. Authorization, validation and
-    * the audit row are the SAME ones db2_write_tier_grant_set gets — the SQL delegates —
+    * the audit row are the SAME ones kb_store_write_tier_grant_set gets — the SQL delegates —
     * so this is not a second policy path. Returns 0, a negative tenancy code, or -1. */
-   int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id,
-                                          const char *subject, kb_identity_tier_t tier,
-                                          const char *granted_by,
-                                          db2_write_tier_grant_report_t *out);
+   int kb_store_write_tier_grant_set_reporting(const char *server_id, int64_t team_id,
+                                               const char *subject, kb_identity_tier_t tier,
+                                               const char *granted_by,
+                                               kb_store_write_tier_grant_report_t *out);
 
    /* Revoke the live grant. Idempotent — revoking an absent or already-revoked
     * grant succeeds. Returns 0, a negative tenancy code, or -1. */
-   int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject);
+   int kb_store_write_tier_grant_revoke(const char *server_id, int64_t team_id,
+                                        const char *subject);
 
    /* List live grants for (server_id, team_id), ordered by subject. Writes up to
     * `cap` rows and the total written to *count. Returns 0, a negative tenancy
     * code, or -1. Equivalent to _list_ex with include_revoked = 0. */
-   int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
-                                 db2_write_tier_grant_row_t *out, size_t cap, size_t *count);
+   int kb_store_write_tier_grant_list(const char *server_id, int64_t team_id,
+                                      kb_store_write_tier_grant_row_t *out, size_t cap,
+                                      size_t *count);
 
    /* As above, but `include_revoked` WIDENS the listing to contain revoked grants
     * alongside live ones, each with `revoked_at` populated. It is not a revoked-only
@@ -120,12 +122,13 @@ extern "C"
     * That placement is the point: filtering after a capped listing means a subject sorting
     * beyond the cap is invisible, so a caller asking about one subject would be told it has
     * no grant purely because other subjects sort ahead of it. NULL for no filter. */
-   int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                    const char *subject, db2_write_tier_grant_row_t *out,
-                                    size_t cap, size_t *count);
+   int kb_store_write_tier_grant_list_ex(const char *server_id, int64_t team_id,
+                                         int include_revoked, const char *subject,
+                                         kb_store_write_tier_grant_row_t *out, size_t cap,
+                                         size_t *count);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_WRITE_TIER_GRANT_H */
+#endif /* DEC_KB_STORE_WRITE_TIER_GRANT_H */

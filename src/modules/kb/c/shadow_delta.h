@@ -4,8 +4,8 @@
  * Stores compact per-query rank/score deltas so the eval harness can compare
  * fused vs fusion-off ranking without persisting full result payloads. */
 
-#ifndef DEC_DB2_SHADOW_DELTA_H
-#define DEC_DB2_SHADOW_DELTA_H 1
+#ifndef DEC_KB_STORE_SHADOW_DELTA_H
+#define DEC_KB_STORE_SHADOW_DELTA_H 1
 
 #include <stdint.h>
 
@@ -25,22 +25,22 @@ extern "C"
       char mode[32]; /* "shadow" | "on" */
       int64_t result_count;
       const char *delta_json; /* compact: id/key, baseline rank, fused rank, score delta */
-   } db2_shadow_delta_row_t;
+   } kb_store_shadow_delta_row_t;
 
    /* Insert one shadow-delta row.  Returns 0 on success, -1 on error. */
-   int db2_shadow_delta_insert(const db2_shadow_delta_row_t *row);
+   int kb_store_shadow_delta_insert(const kb_store_shadow_delta_row_t *row);
 
    /* Count shadow-delta rows for a project (or all if project NULL/empty). */
-   int64_t db2_shadow_delta_count(const char *project);
+   int64_t kb_store_shadow_delta_count(const char *project);
 
    /* Enforce retention for a project: delete rows older than retention_days,
     * then trim to the newest max_rows.  When project is NULL/empty, applies
     * globally.  Pass 0 for either bound to use the SHADOW_DELTA_DEFAULT_*.
     * Returns the number of rows deleted, or -1 on error. */
-   int db2_shadow_delta_cleanup(const char *project, int max_rows, int retention_days);
+   int kb_store_shadow_delta_cleanup(const char *project, int max_rows, int retention_days);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_SHADOW_DELTA_H */
+#endif /* DEC_KB_STORE_SHADOW_DELTA_H */

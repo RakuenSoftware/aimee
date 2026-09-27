@@ -5,7 +5,7 @@
  * model_version bump re-embeds the evidence layer (without re-running
  * synthesis); a prompt_version bump replays the candidate-generation pass
  * (without re-embedding) — so the queues the embed/synth drains already process
- * pick the work back up. DB2 only; no DB1 access.
+ * pick the work back up. KB_STORE only; no DB1 access.
  *
  * See docs/proposals/pending/cross-source-learning-pipeline.md */
 #ifndef KB_LEARNING_VERSION_H
@@ -27,7 +27,7 @@ extern "C"
    /* Compare the supplied versions against the persisted baseline and replay any
     * that changed. The first call on a fresh DB just records the baseline (no
     * replay). Pass NULL versions to leave that dimension untouched. `out` may be
-    * NULL. Returns 0 on success, -1 on error (DB2 unavailable). */
+    * NULL. Returns 0 on success, -1 on error (KB_STORE unavailable). */
    int learning_version_replay(const char *embed_model_version, const char *synth_prompt_version,
                                learning_version_replay_t *out);
 

@@ -1,4 +1,4 @@
-/* Descriptor-owned DB2 process support for deterministic sketch primitives. */
+/* Descriptor-owned KB_STORE process support for deterministic sketch primitives. */
 #include "sketch.h"
 
 #include <string.h>

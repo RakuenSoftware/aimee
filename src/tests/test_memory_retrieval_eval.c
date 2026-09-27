@@ -5,7 +5,7 @@
 #include "module_commands.h"
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include <sqlite3.h>
 #include "platform_test_util.h"
 #include <math.h>
@@ -15,8 +15,8 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "agent_eval.h"
-#include "modules/kb/c/db2.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"
 #include "../modules/kb/c/lifecycle.h"
 #include "memory.h"
@@ -125,7 +125,7 @@ static char *write_temp_baseline(const char *json)
    return path;
 }
 
-/* The production-corpus loader reads pre-resolved live DB2 ids from
+/* The production-corpus loader reads pre-resolved live KB_STORE ids from
  * `expected_ids` and opens no scratch DB; every well-formed query is loaded,
  * including ones still awaiting labelling (empty expected_ids). */
 static void test_baseline_load_save_roundtrip(void)
@@ -318,7 +318,7 @@ static void test_agent_eval_manifest_comparability(void)
  * these with expected result sets for production-gate validation. */
 static const char *golden_smoke_queries[] = {
     /* code/file relationships */
-    "db2 entity edges schema",
+    "kb_store entity edges schema",
     "memory graph traversal",
     "session key building",
     "delivery router platform",
@@ -373,7 +373,7 @@ int main(void)
    /* The eval scratch store needs a disposable database when the test shim is
     * backed by Postgres; a no-op under the sqlite shim, which makes its own
     * in-memory handle. */
-   assert(db2_test_shim_prepare_eval_store() == 0);
+   assert(kb_store_test_shim_prepare_eval_store() == 0);
 
    printf("test_mrr_hit_first... ");
    test_mrr_hit_first();

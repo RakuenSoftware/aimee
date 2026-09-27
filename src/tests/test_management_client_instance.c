@@ -22,21 +22,21 @@ static struct aimee_pg_stmt mock_stmt;
 static int mock_guard, mock_bind_count, mock_bad_shape;
 static const char *mock_sqlstate;
 
-int db2_tenant_require_pg(void)
+int kb_store_tenant_require_pg(void)
 {
    return mock_guard;
 }
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return &mock_stmt;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *sql, aimee_pg_prepare_error_t *kind,
                                      char *err, size_t len)
@@ -214,30 +214,30 @@ static int all_zero(const void *value, size_t length)
 
 static void test_sqlstate(void)
 {
-   assert(db2_management_client_instance_classify_sqlstate("22023") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
-   assert(db2_management_client_instance_classify_sqlstate("28000") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_DENIED);
-   assert(db2_management_client_instance_classify_sqlstate("42501") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_DENIED);
-   assert(db2_management_client_instance_classify_sqlstate("23505") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_CONFLICT);
-   assert(db2_management_client_instance_classify_sqlstate("40001") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
-   assert(db2_management_client_instance_classify_sqlstate("40P01") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
-   assert(db2_management_client_instance_classify_sqlstate("55000") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
-   assert(db2_management_client_instance_classify_sqlstate("08006") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
-   assert(db2_management_client_instance_classify_sqlstate("25006") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
-   assert(db2_management_client_instance_classify_sqlstate("XX000") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
-   assert(db2_management_client_instance_classify_sqlstate("") ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
-   assert(db2_management_client_instance_classify_sqlstate(NULL) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(kb_store_management_client_instance_classify_sqlstate("22023") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(kb_store_management_client_instance_classify_sqlstate("28000") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_DENIED);
+   assert(kb_store_management_client_instance_classify_sqlstate("42501") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_DENIED);
+   assert(kb_store_management_client_instance_classify_sqlstate("23505") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_CONFLICT);
+   assert(kb_store_management_client_instance_classify_sqlstate("40001") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY);
+   assert(kb_store_management_client_instance_classify_sqlstate("40P01") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY);
+   assert(kb_store_management_client_instance_classify_sqlstate("55000") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
+   assert(kb_store_management_client_instance_classify_sqlstate("08006") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(kb_store_management_client_instance_classify_sqlstate("25006") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(kb_store_management_client_instance_classify_sqlstate("XX000") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(kb_store_management_client_instance_classify_sqlstate("") ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(kb_store_management_client_instance_classify_sqlstate(NULL) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
 }
 
 static void test_digest_vector(void)
@@ -252,15 +252,15 @@ static void test_digest_vector(void)
       proof[i] = (unsigned char)i;
       custody[i] = (unsigned char)(i + 32);
    }
-   assert(db2_management_client_instance_binding_digest(
+   assert(kb_store_management_client_instance_binding_digest(
               "spiffe://example.test", "spiffe://example.test/kb/node-1", proof, custody, digest) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(memcmp(digest, expected, sizeof(expected)) == 0);
 
    proof[0] ^= 1;
-   assert(db2_management_client_instance_binding_digest(
+   assert(kb_store_management_client_instance_binding_digest(
               "spiffe://example.test", "spiffe://example.test/kb/node-1", proof, custody, digest) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(memcmp(digest, expected, sizeof(expected)) != 0);
 }
 
@@ -268,35 +268,38 @@ static void test_bounds_and_clearing(void)
 {
    unsigned char anchor[32] = {1}, digest[32];
    memset(digest, 0xa5, sizeof(digest));
-   assert(db2_management_client_instance_binding_digest("", "subject", anchor, anchor, digest) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(
+       kb_store_management_client_instance_binding_digest("", "subject", anchor, anchor, digest) ==
+       KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
    assert(all_zero(digest, sizeof(digest)));
 
-   char too_long[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 2];
+   char too_long[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 2];
    memset(too_long, 'a', sizeof(too_long));
    too_long[sizeof(too_long) - 1] = 0;
    memset(digest, 0xa5, sizeof(digest));
-   assert(
-       db2_management_client_instance_binding_digest(too_long, "subject", anchor, anchor, digest) ==
-       DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(kb_store_management_client_instance_binding_digest(too_long, "subject", anchor, anchor,
+                                                             digest) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
    assert(all_zero(digest, sizeof(digest)));
 
    memset(digest, 0xa5, sizeof(digest));
-   assert(db2_management_client_instance_binding_digest("issuer", "bad subject", anchor, anchor,
-                                                        digest) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(kb_store_management_client_instance_binding_digest("issuer", "bad subject", anchor,
+                                                             anchor, digest) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
    assert(all_zero(digest, sizeof(digest)));
-   assert(db2_management_client_instance_binding_digest(
-              "issuer", "subject", anchor, anchor, NULL) == DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(kb_store_management_client_instance_binding_digest("issuer", "subject", anchor, anchor,
+                                                             NULL) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
 
-   db2_management_client_instance_binding_t binding;
+   kb_store_management_client_instance_binding_t binding;
    memset(&binding, 0xa5, sizeof(binding));
-   assert(
-       db2_management_client_instance_binding_init("issuer", too_long, anchor, anchor, &binding) ==
-       DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID);
+   assert(kb_store_management_client_instance_binding_init("issuer", too_long, anchor, anchor,
+                                                           &binding) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID);
    assert(all_zero(&binding, sizeof(binding)));
-   assert(db2_management_client_instance_binding_init(
-              "issuer", "subject", anchor, anchor, &binding) == DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(kb_store_management_client_instance_binding_init("issuer", "subject", anchor, anchor,
+                                                           &binding) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(strcmp(binding.issuer, "issuer") == 0);
    assert(strcmp(binding.subject, "subject") == 0);
    assert(memcmp(binding.proof_anchor, anchor, sizeof(anchor)) == 0);
@@ -314,31 +317,33 @@ static void fill_id(char *out, size_t n)
 static void test_runtime_facades(void)
 {
    unsigned char anchor[32] = {1};
-   db2_management_client_instance_binding_t binding;
-   assert(db2_management_client_instance_binding_init(
-              "issuer", "subject", anchor, anchor, &binding) == DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
-   db2_management_client_initial_request_t initial = {0};
+   kb_store_management_client_instance_binding_t binding;
+   assert(kb_store_management_client_instance_binding_init("issuer", "subject", anchor, anchor,
+                                                           &binding) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
+   kb_store_management_client_initial_request_t initial = {0};
    fill_id(initial.operation_id, 64);
    fill_id(initial.authority_id, 32);
    fill_id(initial.installation_id, 32);
    fill_id(initial.expected_lineage_id, 32);
    initial.binding = binding;
-   db2_management_client_grant_preflight_request_t preflight = {0};
+   kb_store_management_client_grant_preflight_request_t preflight = {0};
    memcpy(preflight.installation_id, initial.installation_id, sizeof(preflight.installation_id));
    preflight.binding = binding;
-   db2_management_client_grant_preflight_t grant;
-   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   kb_store_management_client_grant_preflight_t grant;
+   assert(kb_store_management_client_instance_grant_preflight(&preflight, &grant) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(!strcmp(grant.installation_id, preflight.installation_id) &&
           !strcmp(grant.replacement_lineage_id, preflight.installation_id) &&
           grant.expires_at_epoch == 2000000000 && mock_bind_count == 6);
-   db2_management_client_pending_t pending;
-   assert(db2_management_client_instance_begin_initial(&initial, &pending) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
-   assert(pending.generation == 1 && pending.issue_kind == DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL &&
-          !pending.has_previous && mock_bind_count == 11);
+   kb_store_management_client_pending_t pending;
+   assert(kb_store_management_client_instance_begin_initial(&initial, &pending) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(pending.generation == 1 &&
+          pending.issue_kind == KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL && !pending.has_previous &&
+          mock_bind_count == 11);
 
-   db2_management_client_renewal_request_t renewal = {0};
+   kb_store_management_client_renewal_request_t renewal = {0};
    fill_id(renewal.operation_id, 64);
    fill_id(renewal.installation_id, 32);
    renewal.binding = binding;
@@ -346,61 +351,64 @@ static void test_runtime_facades(void)
    renewal.previous_enrollment_id = 9;
    strcpy(renewal.previous_cert_issuer, "issuer");
    strcpy(renewal.previous_cert_serial_norm, "01");
-   assert(db2_management_client_instance_begin_renewal(&renewal, &pending) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(kb_store_management_client_instance_begin_renewal(&renewal, &pending) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(pending.has_previous && pending.generation == 2 && mock_bind_count == 14);
 
-   db2_management_client_activation_request_t activation = {0};
+   kb_store_management_client_activation_request_t activation = {0};
    fill_id(activation.operation_id, 64);
    fill_id(activation.installation_id, 32);
    activation.binding = binding;
-   activation.issue_kind = DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL;
+   activation.issue_kind = KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL;
    activation.generation = 1;
    strcpy(activation.verified_ca_issuer, "issuer");
    strcpy(activation.leaf_issuer, "issuer");
    strcpy(activation.leaf_serial_norm, "01");
    activation.leaf_not_before_epoch = 1000;
    activation.leaf_not_after_epoch = 4600;
-   db2_management_client_active_t active;
-   assert(db2_management_client_instance_activate(&activation, &active) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
-   assert(active.enrollment_id == 1 && active.issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE &&
-          mock_bind_count == 24);
+   kb_store_management_client_active_t active;
+   assert(kb_store_management_client_instance_activate(&activation, &active) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(active.enrollment_id == 1 &&
+          active.issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE && mock_bind_count == 24);
 
-   assert(db2_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(
+       kb_store_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
+       KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(active.generation == 1 && mock_bind_count == 6);
 
-   db2_management_client_maintenance_t maintenance;
-   assert(db2_management_client_instance_expire_quarantine(10, &maintenance) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   kb_store_management_client_maintenance_t maintenance;
+   assert(kb_store_management_client_instance_expire_quarantine(10, &maintenance) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(maintenance.expired_grants == 1 && maintenance.expired_issues == 2 &&
           maintenance.quarantined_issues == 0 && mock_bind_count == 1);
 
    mock_sqlstate = "40001";
    memset(&grant, 0xa5, sizeof(grant));
-   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
+   assert(kb_store_management_client_instance_grant_preflight(&preflight, &grant) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY);
    assert(all_zero(&grant, sizeof(grant)));
    memset(&pending, 0xa5, sizeof(pending));
-   assert(db2_management_client_instance_begin_initial(&initial, &pending) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
+   assert(kb_store_management_client_instance_begin_initial(&initial, &pending) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY);
    assert(all_zero(&pending, sizeof(pending)));
    mock_sqlstate = NULL;
    mock_bad_shape = 1;
    memset(&grant, 0xa5, sizeof(grant));
-   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
+   assert(kb_store_management_client_instance_grant_preflight(&preflight, &grant) ==
+          KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
    assert(all_zero(&grant, sizeof(grant)));
    memset(&active, 0xa5, sizeof(active));
-   assert(db2_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
+   assert(
+       kb_store_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
+       KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
    assert(all_zero(&active, sizeof(active)));
    mock_bad_shape = 0;
    mock_guard = -1;
    memset(&active, 0xa5, sizeof(active));
-   assert(db2_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
-          DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
+   assert(
+       kb_store_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
+       KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE);
    assert(all_zero(&active, sizeof(active)));
    mock_guard = 0;
 }

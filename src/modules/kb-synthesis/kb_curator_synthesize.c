@@ -18,7 +18,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <stdlib.h>
@@ -66,34 +66,34 @@ int kb_curator_restore_fragment_record(int64_t fragment_doc_id, const char *base
    cJSON_Delete(payload);
 
    char restore_id[64];
-   db2_artifact_gen_id(restore_id, sizeof(restore_id));
-   int rc = db2_artifact_write(restore_id, "restoration", "committed", "doc", fragment_id,
-                               "curator", confidence, payload_json ? payload_json : "{}");
+   kb_store_artifact_gen_id(restore_id, sizeof(restore_id));
+   int rc = kb_store_artifact_write(restore_id, "restoration", "committed", "doc", fragment_id,
+                                    "curator", confidence, payload_json ? payload_json : "{}");
    free(payload_json);
    if (rc != 0)
       return -1;
 
-   if (db2_artifact_cite(restore_id, "doc", fragment_id) != 0)
+   if (kb_store_artifact_cite(restore_id, "doc", fragment_id) != 0)
       return -1;
    if (base_artifact_id && base_artifact_id[0])
    {
-      if (db2_artifact_cite(restore_id, "artifact", base_artifact_id) != 0)
+      if (kb_store_artifact_cite(restore_id, "artifact", base_artifact_id) != 0)
          return -1;
-      if (db2_artifact_link(restore_id, base_artifact_id, "restored_from") != 0)
+      if (kb_store_artifact_link(restore_id, base_artifact_id, "restored_from") != 0)
          return -1;
-      if (db2_artifact_link(base_artifact_id, restore_id, "restores") != 0)
+      if (kb_store_artifact_link(base_artifact_id, restore_id, "restores") != 0)
          return -1;
    }
 
    char audit_id[64];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char before_json[128];
    char after_json[256];
    snprintf(before_json, sizeof(before_json), "{\"fragment_doc_id\":\"%s\"}", fragment_id);
    snprintf(after_json, sizeof(after_json),
             "{\"artifact_id\":\"%s\",\"evidence_mode\":\"synthesised\"}", restore_id);
-   if (db2_audit_event_write(audit_id, restore_id, "corpus.restore", fragment_id, "curator", "doc",
-                             fragment_id, confidence, 0, before_json, after_json) != 0)
+   if (kb_store_audit_event_write(audit_id, restore_id, "corpus.restore", fragment_id, "curator",
+                                  "doc", fragment_id, confidence, 0, before_json, after_json) != 0)
       return -1;
 
    if (artifact_id_out && artifact_id_len > 0)
@@ -202,7 +202,7 @@ static char *synth_build_request(void *conn, const char *topic_id, const char *t
 int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    /* Run when enabled AND we have somewhere to send the work: a configured
@@ -246,10 +246,10 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    }
 
    /* The request is self-contained now. A model call can take minutes on the
-    * bundled CPU backend, so retaining this thread's DB2 pool member across it
+    * bundled CPU backend, so retaining this thread's KB_STORE pool member across it
     * starves health/status traffic when other curator workers do the same. All
     * writes below acquire their own lease lazily. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
 
    char serr[256];
    char *response = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT,
@@ -299,9 +299,9 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    cJSON_Delete(resp);
 
    char synth_id[64];
-   db2_artifact_gen_id(synth_id, sizeof(synth_id));
-   int rc = db2_artifact_write(synth_id, "synthesis", "committed", scope_kind, scope_id, "curator",
-                               0.0, payload_json ? payload_json : "{}");
+   kb_store_artifact_gen_id(synth_id, sizeof(synth_id));
+   int rc = kb_store_artifact_write(synth_id, "synthesis", "committed", scope_kind, scope_id,
+                                    "curator", 0.0, payload_json ? payload_json : "{}");
    free(payload_json);
    if (rc != 0)
    {
@@ -312,12 +312,12 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 
    /* Link the synthesis `about` the topic entity (suppresses re-pick) and
     * `cites` each source it drew from. */
-   db2_artifact_link(synth_id, ent_id, "about");
+   kb_store_artifact_link(synth_id, ent_id, "about");
    cJSON *c = NULL;
    cJSON_ArrayForEach(c, cites)
    {
       if (cJSON_IsString(c) && c->valuestring[0])
-         db2_artifact_link(synth_id, c->valuestring, "cites");
+         kb_store_artifact_link(synth_id, c->valuestring, "cites");
    }
    cJSON_Delete(cites);
 

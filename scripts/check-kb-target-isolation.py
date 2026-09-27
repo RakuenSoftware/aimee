@@ -26,8 +26,8 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "kb_service_agent.c",
     "modules/kb/c/agent_hints.c",
     "modules/kb/c/agent_outcomes.c",
-    "kb/db2_adapters/kb_service_backend_agent.c",
-    "kb/db2_adapters/kb_service_backend_runtime.c",
+    "kb/kb_store_adapters/kb_service_backend_agent.c",
+    "kb/kb_store_adapters/kb_service_backend_runtime.c",
     "modules/kb/c/server_registry.c",
 }
 
@@ -139,8 +139,8 @@ def check_makefile(makefile: Path) -> list[str]:
     violations: list[str] = []
 
     source_vars = (
-        "KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_PG_SRCS",
-        "DB2_HOST_ADAPTER_SRCS",
+        "KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "KB_STORE_SRCS", "KB_STORE_PG_SRCS",
+        "KB_STORE_HOST_ADAPTER_SRCS",
     )
     for var in source_vars:
         for src in words(make_var(makefile, var)):
@@ -192,7 +192,7 @@ def check_makefile(makefile: Path) -> list[str]:
 
     ordinary_objects = {
         normalize_object(obj)
-        for var in ("KB_OBJS", "KB_DB2_OBJS")
+        for var in ("KB_OBJS", "KB_KB_STORE_OBJS")
         for obj in words(make_var(makefile, var))
     }
     for src in sorted(STATUS_AUTHORITY_PRIVATE_SOURCES):
@@ -275,8 +275,8 @@ def plant_test() -> int:
             "KB_SRCS = kb_main.c agent_loop.c db1/db.c kb_client.c kb/kb_mgmt_status_custody.c\n"
             "KB_DATA_SRCS = kb.c missing_kb.c\n"
             "KB_CORE_SRCS = util.c\n"
-            "DB2_SRCS = db2/db2_init.c\n"
-            "DB2_PG_SRCS = db2/db_postgres.c\n"
+            "KB_STORE_SRCS = kb_store/kb_store_init.c\n"
+            "KB_STORE_PG_SRCS = kb_store/db_postgres.c\n"
             "KB_PLATFORM_OBJS = build/obj/posix/agent_bridge.o build/obj/delegate_driver.o\n"
             "L_KB = -lsqlite3 -lpq -lm\n",
             encoding="utf-8",
@@ -288,8 +288,8 @@ def plant_test() -> int:
             "kb_client.c",
             "kb.c",
             "util.c",
-            "db2/db2_init.c",
-            "db2/db_postgres.c",
+            "kb_store/kb_store_init.c",
+            "kb_store/db_postgres.c",
             "kb/kb_mgmt_status_custody.c",
         ):
             path = root / src

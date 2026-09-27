@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static db2_vault_rotation_row_t g_row;
+static kb_store_vault_rotation_row_t g_row;
 static uint64_t g_anchor;
 static int g_cas_calls;
 static int g_finalize_calls;
@@ -21,21 +21,21 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
    return 0;
 }
 
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t team)
 {
    assert(p && p->authenticated && team == 7 && !g_scope);
    g_scope = 1;
    return 0;
 }
 
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    assert(g_scope);
    g_scope = 0;
    return 0;
 }
 
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    assert(g_scope);
    g_scope = 0;
@@ -66,9 +66,10 @@ int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t 
    return 0;
 }
 
-int db2_vault_rotation_start(const char *actor, const char *key_id, const char *principal,
-                             int has_team, int64_t team_id, const char *agent, const char *cred,
-                             int64_t from_version, int compromise, int64_t *out_id)
+int kb_store_vault_rotation_start(const char *actor, const char *key_id, const char *principal,
+                                  int has_team, int64_t team_id, const char *agent,
+                                  const char *cred, int64_t from_version, int compromise,
+                                  int64_t *out_id)
 {
    (void)actor;
    assert(g_scope);
@@ -88,9 +89,9 @@ int db2_vault_rotation_start(const char *actor, const char *key_id, const char *
    return 0;
 }
 
-int db2_vault_rotation_stage(const char *actor, int64_t id, const uint8_t *wrapped, size_t wn,
-                             const uint8_t *nonce, size_t nn, const uint8_t *ct, size_t cn,
-                             const uint8_t *tag, size_t tn, int64_t *version)
+int kb_store_vault_rotation_stage(const char *actor, int64_t id, const uint8_t *wrapped, size_t wn,
+                                  const uint8_t *nonce, size_t nn, const uint8_t *ct, size_t cn,
+                                  const uint8_t *tag, size_t tn, int64_t *version)
 {
    (void)actor;
    assert(g_scope);
@@ -101,8 +102,8 @@ int db2_vault_rotation_stage(const char *actor, int64_t id, const uint8_t *wrapp
    return 0;
 }
 
-int db2_vault_rotation_transition(const char *actor, int64_t id, const char *expected,
-                                  const char *next, const char *error)
+int kb_store_vault_rotation_transition(const char *actor, int64_t id, const char *expected,
+                                       const char *next, const char *error)
 {
    (void)actor;
    (void)error;
@@ -113,7 +114,7 @@ int db2_vault_rotation_transition(const char *actor, int64_t id, const char *exp
    return 0;
 }
 
-int db2_vault_rotation_finalize(const char *actor, int64_t id, const uint8_t *att, size_t len)
+int kb_store_vault_rotation_finalize(const char *actor, int64_t id, const uint8_t *att, size_t len)
 {
    (void)actor;
    assert(g_scope);
@@ -124,7 +125,7 @@ int db2_vault_rotation_finalize(const char *actor, int64_t id, const uint8_t *at
    return 0;
 }
 
-int db2_vault_rotation_get(int64_t id, db2_vault_rotation_row_t *out)
+int kb_store_vault_rotation_get(int64_t id, kb_store_vault_rotation_row_t *out)
 {
    assert(g_scope);
    if (id != g_row.id)

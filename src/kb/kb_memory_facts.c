@@ -5,7 +5,7 @@
 #include "kb_module_stage_adapters.h"
 #include "cJSON.h"
 #include "kb_curator_llm.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 
 #include <stdlib.h>
 
@@ -78,7 +78,7 @@ int kb_memory_facts_drain(int batch)
       char *output = NULL;
       if (encoded)
       {
-         db2_lease_release_idle();
+         kb_store_lease_release_idle();
          output = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, prompt->valuestring, encoded,
                                      NULL, "", 8192, error, sizeof(error));
       }

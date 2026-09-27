@@ -1,5 +1,5 @@
-#ifndef DEC_DB2_MEMORY_VECTORS_H
-#define DEC_DB2_MEMORY_VECTORS_H 1
+#ifndef DEC_KB_STORE_MEMORY_VECTORS_H
+#define DEC_KB_STORE_MEMORY_VECTORS_H 1
 
 #include <stdint.h>
 
@@ -30,4 +30,4 @@ int pgvec_memory_vector_near_duplicate_pairs(const int64_t *ids, int n, double m
                                              int64_t *a_out, int64_t *b_out, double *cosine_out,
                                              int max);
 
-#endif /* DEC_DB2_MEMORY_VECTORS_H */
+#endif /* DEC_KB_STORE_MEMORY_VECTORS_H */

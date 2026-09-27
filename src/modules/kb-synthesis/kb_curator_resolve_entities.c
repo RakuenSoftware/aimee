@@ -27,7 +27,7 @@
 #include "log.h"
 #include "memory.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/pgvec_transport.h"
 
@@ -116,7 +116,7 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
       {
          int same = 0;
          char jerr[256];
-         db2_lease_release_idle();
+         kb_store_lease_release_idle();
          int jrc = kb_curator_judge_same_entity(judge_command, name, context, cand_name,
                                                 match_scores[0], &same, jerr, sizeof(jerr));
          if (jrc == 0 && same)
@@ -146,7 +146,7 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
 int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -184,7 +184,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    /* The selected payload is self-contained. Embedding and an ambiguous-match
     * judge can each take minutes, so do not retain the health/status pool member
     * acquired for the SELECT across either remote call. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
 
    char name[256] = "", context[512] = "";
    cJSON *pj = payload ? cJSON_Parse(payload) : NULL;
@@ -202,7 +202,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    {
       /* Nothing embeddable — commit so the mention is not reprocessed. */
       cJSON_Delete(pj);
-      db2_artifact_set_state(id, "committed");
+      kb_store_artifact_set_state(id, "committed");
       free(payload);
       return 1;
    }
@@ -232,7 +232,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
       int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context);
       if (merged == 0)
       {
-         void *conn = db2_conn();
+         void *conn = kb_store_conn();
          char ck[64], cid[128], wk[64], wid[128];
          snprintf(ck, sizeof(ck), "%s", scope_kind);
          snprintf(cid, sizeof(cid), "%s", scope_id);
@@ -263,7 +263,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
       aimee_log(LOG_WARN, "kb.curator.resolve", "embed failed (dim=%d) for entity %s", dim, id);
    }
 
-   db2_artifact_set_state(id, "committed");
+   kb_store_artifact_set_state(id, "committed");
    aimee_log(LOG_INFO, "kb.curator.resolve", "committed entity '%s' (%s)", name, id);
 
    cJSON_Delete(pj);

@@ -58,8 +58,8 @@ void aimee_pg_discard(void *pg_conn);
 
 /* Returns 1 when the linked aimee_pg_* implementation is the test shim, 0 when
  * it is the real libpq implementation. Lets shared code paths opt into a
- * "shim" db2_init only in test builds, without dragging libpq into a
- * production DB2 connect attempt. */
+ * "shim" kb_store_init only in test builds, without dragging libpq into a
+ * production KB_STORE connect attempt. */
 int aimee_pg_is_shim(void);
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen);
 int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char sqlstate[6], char *errbuf,

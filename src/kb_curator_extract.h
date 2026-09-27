@@ -12,7 +12,7 @@ typedef struct
 } kb_curator_extract_opts_t;
 
 /* Claim and process one pending extract_doc job.
- * Invokes the sidecar, writes artifacts to DB2, marks job done or failed.
+ * Invokes the sidecar, writes artifacts to KB_STORE, marks job done or failed.
  * Returns 1 if a job was processed, 0 if queue is empty, -1 on hard error. */
 int kb_curator_extract_one(const kb_curator_extract_opts_t *opts);
 
@@ -29,7 +29,7 @@ void kb_curator_mark_retry_provider_unavailable_code(int64_t job_id, int attempt
 
 /* Claim and process one pending extract_code_unit job from kb_code_unit_jobs.
  * Reads source file from the filesystem, invokes the sidecar with
- * role="extract_code_unit", writes code_unit artifacts to DB2.
+ * role="extract_code_unit", writes code_unit artifacts to KB_STORE.
  * Returns 1 if a job was processed, 0 if queue is empty, -1 on hard error. */
 int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts);
 

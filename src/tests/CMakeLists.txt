@@ -83,7 +83,7 @@ add_executable(test_git_oauth_github test_git_oauth_github.c
 target_include_directories(test_git_oauth_github PRIVATE
   ${AIMEE_PROJECT_INCLUDE_DIRS}
   ${AIMEE_SRC_DIR}/db1
-  ${AIMEE_SRC_DIR}/db2
+  ${AIMEE_SRC_DIR}/kb_store
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 target_link_libraries(test_git_oauth_github PRIVATE Threads::Threads)

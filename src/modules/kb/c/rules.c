@@ -1,8 +1,8 @@
-/* db2/rules.c: agent rules — Postgres via libpq. */
+/* kb_store/rules.c: agent rules — Postgres via libpq. */
 
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "rules.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h" /* now_utc, MAX_SESSION_CHARS, MAX_SESSION_RULES, MAX_RULE_TEXT_LEN */
 #include "cJSON.h"
@@ -21,21 +21,22 @@ static void row_to_rule(aimee_pg_stmt_t *st, rule_t *r)
 {
    memset(r, 0, sizeof(*r));
    r->id = aimee_pg_column_int(st, 0);
-   db2_copy_col_text(r->polarity, sizeof(r->polarity), st, 1);
-   db2_copy_col_text(r->title, sizeof(r->title), st, 2);
-   db2_copy_col_text(r->description, sizeof(r->description), st, 3);
+   kb_store_copy_col_text(r->polarity, sizeof(r->polarity), st, 1);
+   kb_store_copy_col_text(r->title, sizeof(r->title), st, 2);
+   kb_store_copy_col_text(r->description, sizeof(r->description), st, 3);
    r->weight = aimee_pg_column_int(st, 4);
-   db2_copy_col_text(r->domain, sizeof(r->domain), st, 5);
-   db2_copy_col_text(r->created_at, sizeof(r->created_at), st, 6);
-   db2_copy_col_text(r->updated_at, sizeof(r->updated_at), st, 7);
-   db2_copy_col_text(r->directive_type, sizeof(r->directive_type), st, 8);
+   kb_store_copy_col_text(r->domain, sizeof(r->domain), st, 5);
+   kb_store_copy_col_text(r->created_at, sizeof(r->created_at), st, 6);
+   kb_store_copy_col_text(r->updated_at, sizeof(r->updated_at), st, 7);
+   kb_store_copy_col_text(r->directive_type, sizeof(r->directive_type), st, 8);
 }
 
-int db2_rules_insert(const char *polarity, const char *title, const char *description, int weight)
+int kb_store_rules_insert(const char *polarity, const char *title, const char *description,
+                          int weight)
 {
    if (!title || !*title)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -55,11 +56,11 @@ int db2_rules_insert(const char *polarity, const char *title, const char *descri
    return rc;
 }
 
-int db2_rules_export_jsonl(const char *path)
+int kb_store_rules_export_jsonl(const char *path)
 {
    if (!path || !*path)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -109,9 +110,9 @@ int db2_rules_export_jsonl(const char *path)
    return count;
 }
 
-int db2_rules_list(rule_t *out, int max_rules)
+int kb_store_rules_list(rule_t *out, int max_rules)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -129,9 +130,9 @@ int db2_rules_list(rule_t *out, int max_rules)
    return count;
 }
 
-int db2_rules_list_by_tier(int min_weight, rule_t *out, int max_rules)
+int kb_store_rules_list_by_tier(int min_weight, rule_t *out, int max_rules)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -151,9 +152,9 @@ int db2_rules_list_by_tier(int min_weight, rule_t *out, int max_rules)
    return count;
 }
 
-int db2_rules_list_hard(rule_t *out, int max_rules)
+int kb_store_rules_list_hard(rule_t *out, int max_rules)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -173,9 +174,9 @@ int db2_rules_list_hard(rule_t *out, int max_rules)
    return count;
 }
 
-int db2_rules_get(int id, rule_t *out)
+int kb_store_rules_get(int id, rule_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -196,9 +197,9 @@ int db2_rules_get(int id, rule_t *out)
    return rc;
 }
 
-int db2_rules_find_by_title(const char *title, rule_t *out)
+int kb_store_rules_find_by_title(const char *title, rule_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !title || !out)
       return -1;
 
@@ -221,9 +222,9 @@ int db2_rules_find_by_title(const char *title, rule_t *out)
    return rc;
 }
 
-int db2_rules_delete(int id)
+int kb_store_rules_delete(int id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -239,13 +240,13 @@ int db2_rules_delete(int id)
    if (step_rc != AIMEE_PG_DONE)
       return -1;
    if (changes > 0)
-      db2_rules_cache_invalidate();
+      kb_store_rules_cache_invalidate();
    return changes > 0 ? 0 : -1;
 }
 
-int db2_rules_delete_by_directive_type(const char *directive_type)
+int kb_store_rules_delete_by_directive_type(const char *directive_type)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !directive_type)
       return -1;
 
@@ -261,13 +262,13 @@ int db2_rules_delete_by_directive_type(const char *directive_type)
    if (step_rc != AIMEE_PG_DONE)
       return -1;
    if (changes > 0)
-      db2_rules_cache_invalidate();
+      kb_store_rules_cache_invalidate();
    return changes;
 }
 
-int db2_rules_update_weight(int id, int weight)
+int kb_store_rules_update_weight(int id, int weight)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -288,13 +289,13 @@ int db2_rules_update_weight(int id, int weight)
    if (step_rc != AIMEE_PG_DONE)
       return -1;
    if (changes > 0)
-      db2_rules_cache_invalidate();
+      kb_store_rules_cache_invalidate();
    return changes > 0 ? 0 : -1;
 }
 
-int db2_rules_update_directive_type(int id, const char *directive_type)
+int kb_store_rules_update_directive_type(int id, const char *directive_type)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !directive_type)
       return -1;
 
@@ -309,13 +310,13 @@ int db2_rules_update_directive_type(int id, const char *directive_type)
    aimee_pg_finalize(st);
    if (step_rc != AIMEE_PG_DONE)
       return -1;
-   db2_rules_cache_invalidate();
+   kb_store_rules_cache_invalidate();
    return 0;
 }
 
-int db2_rules_reinforce_directive(int id, const char *directive_type, int weight_override)
+int kb_store_rules_reinforce_directive(int id, const char *directive_type, int weight_override)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !directive_type)
       return -1;
 
@@ -344,11 +345,11 @@ int db2_rules_reinforce_directive(int id, const char *directive_type, int weight
    aimee_pg_finalize(st);
    if (step_rc != AIMEE_PG_DONE)
       return -1;
-   db2_rules_cache_invalidate();
+   kb_store_rules_cache_invalidate();
    return 0;
 }
 
-const char *db2_rules_tier(int weight)
+const char *kb_store_rules_tier(int weight)
 {
    if (weight >= 75)
       return "Rule";
@@ -357,7 +358,7 @@ const char *db2_rules_tier(int weight)
    return "Archived";
 }
 
-char db2_rules_polarity_symbol(const char *polarity)
+char kb_store_rules_polarity_symbol(const char *polarity)
 {
    if (!polarity)
       return '~';
@@ -371,17 +372,17 @@ char db2_rules_polarity_symbol(const char *polarity)
 static char g_rules_cache_hash[32];
 static char *g_rules_cache_output;
 
-void db2_rules_cache_invalidate(void)
+void kb_store_rules_cache_invalidate(void)
 {
    g_rules_cache_hash[0] = '\0';
 }
 
-void db2_rules_signature(char *buf, size_t len)
+void kb_store_rules_signature(char *buf, size_t len)
 {
    if (!buf || len == 0)
       return;
    buf[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[RULES_ERRBUF] = "";
@@ -398,22 +399,22 @@ void db2_rules_signature(char *buf, size_t len)
    aimee_pg_finalize(st);
 }
 
-char *db2_rules_generate(void)
+char *kb_store_rules_generate(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 
    if (!config_cache_disabled() && g_rules_cache_hash[0])
    {
       char cur[32];
-      db2_rules_signature(cur, sizeof(cur));
+      kb_store_rules_signature(cur, sizeof(cur));
       if (strcmp(cur, g_rules_cache_hash) == 0 && g_rules_cache_output)
          return strdup(g_rules_cache_output);
    }
 
    rule_t rules[128];
-   int count = db2_rules_list(rules, 128);
+   int count = kb_store_rules_list(rules, 128);
 
    size_t cap = MAX_SESSION_CHARS + 256;
    char *buf = malloc(cap);
@@ -434,7 +435,7 @@ char *db2_rules_generate(void)
          if (w < tiers[t] || w > tier_max[t])
             continue;
 
-         char sym = db2_rules_polarity_symbol(rules[i].polarity);
+         char sym = kb_store_rules_polarity_symbol(rules[i].polarity);
          const char *text = rules[i].description;
          if (strlen(text) == 0)
             text = rules[i].title;
@@ -471,7 +472,7 @@ char *db2_rules_generate(void)
    {
       free(g_rules_cache_output);
       g_rules_cache_output = strdup(buf);
-      db2_rules_signature(g_rules_cache_hash, sizeof(g_rules_cache_hash));
+      kb_store_rules_signature(g_rules_cache_hash, sizeof(g_rules_cache_hash));
    }
 
    return buf;
@@ -501,9 +502,9 @@ static int rules_decay_step(void *conn, const char *sql, int amount, int days_si
    return n;
 }
 
-int db2_rules_decay(void)
+int kb_store_rules_decay(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -533,7 +534,7 @@ int db2_rules_decay(void)
                              ARCHIVE_THRESHOLD, ARCHIVE_GRACE_DAYS);
 
    if (total > 0)
-      db2_rules_cache_invalidate();
+      kb_store_rules_cache_invalidate();
 
    return total;
 }

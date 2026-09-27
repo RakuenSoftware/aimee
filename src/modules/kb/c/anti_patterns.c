@@ -1,7 +1,7 @@
-/* db2/anti_patterns.c: anti-pattern catalog — Postgres via libpq. */
+/* kb_store/anti_patterns.c: anti-pattern catalog — Postgres via libpq. */
 
 #include "anti_patterns.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <ctype.h>
@@ -75,10 +75,10 @@ static int ap_phrase_match(const char *pattern, const char *target)
    return 0;
 }
 
-int db2_anti_pattern_insert(const char *pattern, const char *description, const char *source,
-                            const char *source_ref, double confidence, anti_pattern_t *out)
+int kb_store_anti_pattern_insert(const char *pattern, const char *description, const char *source,
+                                 const char *source_ref, double confidence, anti_pattern_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !pattern)
       return -1;
 
@@ -118,9 +118,9 @@ int db2_anti_pattern_insert(const char *pattern, const char *description, const 
    return 0;
 }
 
-int db2_anti_pattern_list(anti_pattern_t *out, int max)
+int kb_store_anti_pattern_list(anti_pattern_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -137,10 +137,10 @@ int db2_anti_pattern_list(anti_pattern_t *out, int max)
    while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && count < max)
    {
       out[count].id = aimee_pg_column_int64(st, 0);
-      db2_copy_col_text(out[count].pattern, sizeof(out[count].pattern), st, 1);
-      db2_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
-      db2_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
-      db2_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
+      kb_store_copy_col_text(out[count].pattern, sizeof(out[count].pattern), st, 1);
+      kb_store_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
+      kb_store_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
+      kb_store_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
       out[count].hit_count = aimee_pg_column_int(st, 5);
       out[count].confidence = aimee_pg_column_double(st, 6);
       count++;
@@ -149,9 +149,10 @@ int db2_anti_pattern_list(anti_pattern_t *out, int max)
    return count;
 }
 
-int db2_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out, int max)
+int kb_store_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out,
+                                int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return 0;
 
@@ -200,9 +201,9 @@ int db2_anti_pattern_check(const char *file_path, const char *command, anti_patt
 
       out[count].id = aimee_pg_column_int64(st, 0);
       snprintf(out[count].pattern, sizeof(out[count].pattern), "%s", pattern);
-      db2_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
-      db2_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
-      db2_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
+      kb_store_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
+      kb_store_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
+      kb_store_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
       out[count].hit_count = aimee_pg_column_int(st, 5);
       out[count].confidence = aimee_pg_column_double(st, 6);
       count++;
@@ -211,9 +212,9 @@ int db2_anti_pattern_check(const char *file_path, const char *command, anti_patt
    return count;
 }
 
-int db2_anti_pattern_exists_exact(const char *pattern)
+int kb_store_anti_pattern_exists_exact(const char *pattern)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !pattern)
       return 0;
 
@@ -231,9 +232,9 @@ int db2_anti_pattern_exists_exact(const char *pattern)
    return exists;
 }
 
-int db2_anti_pattern_exists_by_source_ref(const char *source_ref)
+int kb_store_anti_pattern_exists_by_source_ref(const char *source_ref)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !source_ref)
       return 0;
 
@@ -251,9 +252,9 @@ int db2_anti_pattern_exists_by_source_ref(const char *source_ref)
    return exists;
 }
 
-int db2_anti_pattern_bump(int64_t id)
+int kb_store_anti_pattern_bump(int64_t id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || id <= 0)
       return -1;
 
@@ -268,9 +269,9 @@ int db2_anti_pattern_bump(int64_t id)
    return rc;
 }
 
-int db2_anti_pattern_delete(int64_t id)
+int kb_store_anti_pattern_delete(int64_t id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -288,9 +289,9 @@ int db2_anti_pattern_delete(int64_t id)
    return changes > 0 ? 0 : -1;
 }
 
-int db2_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max)
+int kb_store_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || threshold <= 0)
       return 0;
 
@@ -308,10 +309,10 @@ int db2_anti_pattern_list_hot(int threshold, anti_pattern_t *out, int max)
    while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && count < max)
    {
       out[count].id = aimee_pg_column_int64(st, 0);
-      db2_copy_col_text(out[count].pattern, sizeof(out[count].pattern), st, 1);
-      db2_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
-      db2_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
-      db2_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
+      kb_store_copy_col_text(out[count].pattern, sizeof(out[count].pattern), st, 1);
+      kb_store_copy_col_text(out[count].description, sizeof(out[count].description), st, 2);
+      kb_store_copy_col_text(out[count].source, sizeof(out[count].source), st, 3);
+      kb_store_copy_col_text(out[count].source_ref, sizeof(out[count].source_ref), st, 4);
       out[count].hit_count = aimee_pg_column_int(st, 5);
       out[count].confidence = aimee_pg_column_double(st, 6);
       count++;

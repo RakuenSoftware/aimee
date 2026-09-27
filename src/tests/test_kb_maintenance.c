@@ -1,11 +1,11 @@
 /* test_kb_maintenance.c: DB-backed tests for KB temporal confidence decay. */
 
 #include "config.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "artifacts.h"
 #include "kb_maintenance.h"
 #include "db_postgres.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "support/test_time.h"
 
 #include <assert.h>
@@ -21,19 +21,19 @@
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 static void exec_sql(const char *sql)
 {
    char err[512] = "";
-   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   if (aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) != 0)
    {
       fprintf(stderr, "exec_sql failed: %s\n  sql: %s\n", err, sql);
       assert(0 && "exec_sql");
@@ -43,7 +43,7 @@ static void exec_sql(const char *sql)
 static double query_double(const char *sql)
 {
    char err[512] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    double out = 0.0;
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
@@ -55,7 +55,7 @@ static double query_double(const char *sql)
 static int query_int(const char *sql)
 {
    char err[512] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    int out = 0;
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
@@ -67,7 +67,7 @@ static int query_int(const char *sql)
 static void query_text(const char *sql, char *out, size_t out_len)
 {
    char err[512] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st != NULL);
    out[0] = '\0';
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
@@ -78,7 +78,8 @@ static void query_text(const char *sql, char *out, size_t out_len)
 
 static void seed_artifact(const char *id, double confidence, int age_days, int cited)
 {
-   assert(db2_artifact_write(id, "claim", "committed", "global", "", "", confidence, "{}") == 0);
+   assert(kb_store_artifact_write(id, "claim", "committed", "global", "", "", confidence, "{}") ==
+          0);
 
    char ts[TEST_TS_MAX], sql[512];
    test_ts_days(ts, sizeof(ts), -age_days);
@@ -93,7 +94,7 @@ static void seed_artifact(const char *id, double confidence, int age_days, int c
    exec_sql(sql);
 
    if (cited)
-      assert(db2_artifact_cite(id, "test", "source") == 0);
+      assert(kb_store_artifact_cite(id, "test", "source") == 0);
 }
 
 static kb_maintenance_config_t test_cfg(void)
@@ -209,7 +210,7 @@ static void test_orphan_pruning_respects_links_and_age(void)
    seed_artifact("artifact-orphan", 0.10, 120, 0);
    seed_artifact("artifact-linked-a", 0.10, 120, 0);
    seed_artifact("artifact-linked-b", 0.10, 120, 0);
-   assert(db2_artifact_link("artifact-linked-b", "artifact-linked-a", "supports") == 0);
+   assert(kb_store_artifact_link("artifact-linked-b", "artifact-linked-a", "supports") == 0);
 
    kb_maintenance_config_t cfg = test_cfg();
    kb_maintenance_result_t result;

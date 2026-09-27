@@ -1,4 +1,4 @@
-/* db2/org_telemetry_fmt.c: pure P9a telemetry helpers. See org_telemetry_fmt.h.
+/* kb_store/org_telemetry_fmt.c: pure P9a telemetry helpers. See org_telemetry_fmt.h.
  *
  * Prometheus text rendering + label escaping, the metric_name PII-structural
  * validator, and the scrape/ingest token SHA-256 + constant-time compare. No

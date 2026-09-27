@@ -2,7 +2,7 @@
 # The two graph surfaces that could not see the typed-fact layer.
 #
 # 1. relations.schema_list answered {"rows":[]} against a store holding a full
-#    ontology, because db2_relation_schema_list read memory_relation_schema and
+#    ontology, because kb_store_relation_schema_list read memory_relation_schema and
 #    NOTHING in the tree writes that table. A reader would conclude the graph has
 #    no relation schema at all.
 #

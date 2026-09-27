@@ -12,9 +12,9 @@ import (
 )
 
 func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -172,7 +172,7 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 }
 
 func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("requires packaged PostgreSQL")
 	}

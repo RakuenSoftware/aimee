@@ -122,12 +122,12 @@ kbpw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 # root. The OWNER role, because kb applies the schema itself on the dev path and the runtime
 # role deliberately has no CREATE on public.
 #
-# embedding_dim is PINNED in the config. Without a pin, db2_init prefers the dim RECORDED in
+# embedding_dim is PINNED in the config. Without a pin, kb_store_init prefers the dim RECORDED in
 # the database and treats a read failure as fatal ("reading recorded embedding dim failed") —
 # pinning skips that read outright. The hardened tier would also skip it, but requires
 # sslmode=verify-full, i.e. full TLS to Postgres, which is more rig than this test needs.
 #
-# Four wrong turns preceded this, all mine, and all resolved by reading db2_init.c instead of
+# Four wrong turns preceded this, all mine, and all resolved by reading kb_store_init.c instead of
 # guessing a fifth time: a socket DSN, the runtime role without hardening, the owner role
 # without a pin, and the hardened tier without TLS.
 export AIMEE_KB_API_BEARER_TOKEN="live-grant-token"
@@ -154,7 +154,7 @@ YAML
 kbpw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 psqlq -c "ALTER ROLE aimee_kb_owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
   || fail "could not give aimee_kb_owner a password"
-export AIMEE_DB2_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
+export AIMEE_STORE_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
 export AIMEE_KB_API_BEARER_TOKEN="live-grant-token"
 ./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
 kb_pid=$!

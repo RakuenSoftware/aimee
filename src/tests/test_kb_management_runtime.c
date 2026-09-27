@@ -42,13 +42,13 @@ static kb_mgmt_token_authority_ipc_result_t token_issue_result = KB_MGMT_TOKEN_A
 static kb_http_servers_read_handler_fn captured_read_handler;
 static unsigned char read_status_private_key[32];
 
-db2_management_read_result_t db2_management_read_publication_generation(int64_t *out)
+kb_store_management_read_result_t kb_store_management_read_publication_generation(int64_t *out)
 {
    if (!read_fixture_enabled)
-      return DB2_MANAGEMENT_READ_UNAVAILABLE;
+      return KB_STORE_MANAGEMENT_READ_UNAVAILABLE;
    assert(out);
    *out = 9;
-   return DB2_MANAGEMENT_READ_OK;
+   return KB_STORE_MANAGEMENT_READ_OK;
 }
 
 int kb_http_servers_health_register(kb_http_servers_health_handler_fn handler, void *ctx)
@@ -98,12 +98,12 @@ int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn handler, voi
    return 0;
 }
 
-db2_management_read_result_t
-db2_management_read_intent_start(const kb_principal_t *actor, int64_t team, const char *server,
-                                 server_mgmt_read_selector_t selector, const char *path,
-                                 const uint8_t nonce[32], const char *digest, const char *issuer,
-                                 const char *installation, int ttl,
-                                 db2_management_read_intent_t *out)
+kb_store_management_read_result_t
+kb_store_management_read_intent_start(const kb_principal_t *actor, int64_t team, const char *server,
+                                      server_mgmt_read_selector_t selector, const char *path,
+                                      const uint8_t nonce[32], const char *digest,
+                                      const char *issuer, const char *installation, int ttl,
+                                      kb_store_management_read_intent_t *out)
 {
    if (read_fixture_enabled)
    {
@@ -133,9 +133,9 @@ db2_management_read_intent_start(const kb_principal_t *actor, int64_t team, cons
       memset(out->target_mgmt_fingerprint, 'b', 64);
       out->revocation_generation = 7;
       out->publication_generation = 9;
-      return DB2_MANAGEMENT_READ_OK;
+      return KB_STORE_MANAGEMENT_READ_OK;
    }
-   return DB2_MANAGEMENT_READ_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_READ_UNAVAILABLE;
 }
 
 int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *input, char out[65])
@@ -208,26 +208,26 @@ kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config
    return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
 }
 
-db2_management_action_result_t db2_management_action_operation_init(
-    int64_t team, const char *server, db2_management_action_capability_t cap,
+kb_store_management_action_result_t kb_store_management_action_operation_init(
+    int64_t team, const char *server, kb_store_management_action_capability_t cap,
     const uint8_t digest[32], const char *issuer, const char *kid, int ttl,
-    const char *installation, db2_management_action_operation_t *out)
+    const char *installation, kb_store_management_action_operation_t *out)
 {
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
-db2_management_action_result_t
-db2_management_action_intent_start(const kb_principal_t *p,
-                                   const db2_management_action_operation_t *op,
-                                   db2_management_action_intent_t *out)
+kb_store_management_action_result_t
+kb_store_management_action_intent_start(const kb_principal_t *p,
+                                        const kb_store_management_action_operation_t *op,
+                                        kb_store_management_action_intent_t *out)
 {
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
-db2_management_action_result_t
-db2_management_action_outcome_append(const kb_principal_t *p,
-                                     const db2_management_action_outcome_operation_t *op,
-                                     db2_management_action_outcome_t *out)
+kb_store_management_action_result_t
+kb_store_management_action_outcome_append(const kb_principal_t *p,
+                                          const kb_store_management_action_outcome_operation_t *op,
+                                          kb_store_management_action_outcome_t *out)
 {
-   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
 }
 kb_management_action_transport_t kb_management_action_server_request_production(
     void *ctx, void *session, const char *method, const char *path, const char *body,
@@ -353,7 +353,7 @@ kb_management_health_exchange(const kb_management_health_request_t *request,
 
 kb_management_health_result_t
 kb_management_health_snapshot_primary(void *ctx, const kb_principal_t *actor, int64_t team,
-                                      const char *server, db2_server_snapshot_t *snapshot)
+                                      const char *server, kb_store_server_snapshot_t *snapshot)
 {
    (void)ctx;
    (void)actor;
@@ -403,7 +403,7 @@ void kb_management_health_bundle_cleanse(void *ctx, kb_management_cert_bundle_t 
 }
 
 kb_management_health_result_t
-kb_management_health_server_open_production(void *ctx, const db2_server_snapshot_t *snapshot,
+kb_management_health_server_open_production(void *ctx, const kb_store_server_snapshot_t *snapshot,
                                             const kb_management_cert_bundle_t *bundle,
                                             uint64_t deadline, void **out)
 {

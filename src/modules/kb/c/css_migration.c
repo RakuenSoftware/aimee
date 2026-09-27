@@ -1,9 +1,9 @@
-/* db2/css_migration.c: CSS migration pipeline driver. See css_migration.h. */
+/* kb_store/css_migration.c: CSS migration pipeline driver. See css_migration.h. */
 #include "css_migration.h"
 
-#include "../support/db2_runtime_config.h"
-#include "db2.h"
-#include "db2_internal.h"
+#include "../support/kb_store_runtime_config.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -27,11 +27,11 @@ css_migration_gate_t css_migration_gate(int resolved_tokens, int total_tokens,
                                         : CSS_MIGRATION_GATE_NEEDS_REVIEW;
 }
 
-int db2_css_migration_enumerate(const char *project)
+int kb_store_css_migration_enumerate(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -113,12 +113,12 @@ int db2_css_migration_enumerate(const char *project)
    return rc == 0 ? nrows : -1;
 }
 
-int db2_css_migration_set_state(const char *project, const char *unit_path, const char *state,
-                                int oracle_equivalent, const char *note, const char *now_iso)
+int kb_store_css_migration_set_state(const char *project, const char *unit_path, const char *state,
+                                     int oracle_equivalent, const char *note, const char *now_iso)
 {
    if (!project || !unit_path || !state)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "UPDATE css_migration_units"
@@ -141,12 +141,12 @@ int db2_css_migration_set_state(const char *project, const char *unit_path, cons
    return rc;
 }
 
-int db2_css_migration_list(const char *project, const char *state_filter, css_migration_unit_t *out,
-                           int max)
+int kb_store_css_migration_list(const char *project, const char *state_filter,
+                                css_migration_unit_t *out, int max)
 {
    if (!project || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (state_filter && state_filter[0]) ? 1 : 0;
@@ -203,11 +203,11 @@ static int cssm_count(void *conn, const char *sql, const char *p1)
    return n;
 }
 
-int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap)
+int kb_store_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap)
 {
    if (!exemplar_project || !buf || cap == 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

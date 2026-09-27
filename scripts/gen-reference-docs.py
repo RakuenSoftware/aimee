@@ -206,7 +206,6 @@ CFG_KEY_DESC = {
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
     "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
     "css_render_command": "Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar).",
-    "db2_url": "Retired credential name retained only for redaction of old installations; configure the PostgreSQL runtime and migration credentials.",
     "dedup_enabled": "Deduplicate near-identical responses.",
     "dedup_window_seconds": "Window (seconds) for response dedup.",
     "dogfood_autolabel_continuation": "Auto-label continuation turns for dogfood capture.",
@@ -220,8 +219,8 @@ CFG_KEY_DESC = {
     "embedder_command": "Command that produces embeddings (overrides the endpoint).",
     "embedder_dims": "Embedding vector width. Leave unset for a bundled embedder - it "
     "declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED "
-    "for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 "
-    "column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and "
+    "for an external endpoint, whose width cannot be derived; valid to 4000, the KB_STORE "
+    "column ceiling. A ONE-WAY DOOR once anything is embedded: KB_STORE records the width and "
     "refuses to start on drift.",
     "embedder_url": "External embedder endpoint. A non-empty value IS the external "
     "embedder; empty means the model baked into this image variant (bekko-a25m at 384, "
@@ -427,7 +426,7 @@ SECTION_DESC = {
     "cost_reward": "Cost-aware reward shaping.",
     "cron_jobs": "Scheduled job definitions (array of objects).",
     "cross_verify": "Cross-model output verification.",
-    "db2": "Legacy knowledge-index settings; connections are owned by PostgreSQL.",
+    "kb_store": "Legacy knowledge-index settings; connections are owned by PostgreSQL.",
     "dedup": "Response deduplication.",
     "dogfood": "Session capture for dogfood data.",
     "economizer": "Context economizer tier (a single string: `off` | `safe` | `aggressive`). off = verbatim passthrough; safe (default) = Anthropic prompt caching + lossless, freeze-guarded reduction; aggressive = adds lossy tool-body compression + live OpenAI-side gateway mutation. Anthropic context is never mutated at any tier. The `{enabled, aggressive}` object form is deprecated. See docs/features/economizer.md.",
@@ -505,6 +504,12 @@ def _config_metadata():
         raise SystemExit(f"gen-reference-docs: cannot read config module metadata: {exc}")
     if _CONFIG_METADATA.get("version") != 1:
         raise SystemExit("gen-reference-docs: unsupported config module metadata version")
+    # Pre-retirement metadata is ignored by the application config client.
+    _CONFIG_METADATA["fields"] = [field for field in _CONFIG_METADATA["fields"]
+                                   if not field["key"].startswith("db2")]
+    _CONFIG_METADATA["sections"] = {key: value for key, value in _CONFIG_METADATA["sections"].items()
+                                     if not key.startswith("db2")}
+    _CONFIG_METADATA["flat"] = [key for key in _CONFIG_METADATA["flat"] if not key.startswith("db2")]
     return _CONFIG_METADATA
 
 
@@ -880,11 +885,11 @@ ENV_DESC = {
     ),
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
-    "AIMEE_TEST_DB2_TEMPLATE_URL": (
+    "AIMEE_TEST_KB_STORE_TEMPLATE_URL": (
         "Database & vectors",
-        "Test-only. Postgres template database the DB2 test shim clones per test process, so unit "
-        "tests run against the real engine instead of the sqlite shim (which translates DB2's SQL "
-        "rather than executing it). Build the template with `make db2-test-template` and the suite "
+        "Test-only. Postgres template database the KB_STORE test shim clones per test process, so unit "
+        "tests run against the real engine instead of the sqlite shim (which translates KB_STORE's SQL "
+        "rather than executing it). Build the template with `make kb-store-test-template` and the suite "
         "with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test "
         "binaries; no production code path consults it.",
     ),
@@ -1002,7 +1007,7 @@ ENV_DESC = {
     "AIMEE_CLIENT_TYPE": ("Client & session", "Calling client type used for integration-specific request shaping."),
     "AIMEE_CODEX_REFRESH_SKEW": ("Delegates & backends", "Seconds before Codex OAuth expiry at which the server refreshes the token."),
     "AIMEE_CODE_INDEX_SOURCE": ("Knowledge base (aimee-kb)", "Source label recorded for code-index ingestion."),
-    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default. The harness applies the DB2 schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server."),
+    "AIMEE_KB_STORE_EVAL_URL": ("Database & vectors", "Separate KB_STORE URL used by evaluation harnesses; never the production default. The harness applies the KB_STORE schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server."),
     "AIMEE_DELEGATE_MAX_INFLIGHT": ("Delegates & backends", "Process-wide maximum number of admitted delegate attempts."),
     "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
     "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),

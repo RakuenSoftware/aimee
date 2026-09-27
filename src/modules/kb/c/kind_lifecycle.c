@@ -1,8 +1,8 @@
-/* db2/kind_lifecycle.c: per-kind lifecycle thresholds — Postgres via libpq. */
+/* kb_store/kind_lifecycle.c: per-kind lifecycle thresholds — Postgres via libpq. */
 
 #include "../headers/aimee.h" /* kind_lifecycle_t + PROMOTE/DEMOTE/EXPIRE constants */
 #include "kind_lifecycle.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
@@ -19,7 +19,7 @@ static const kind_lifecycle_t default_lifecycle = {
     .demotion_resistance = 1.0,
 };
 
-int db2_kind_lifecycle_load(const char *kind, kind_lifecycle_t *out)
+int kb_store_kind_lifecycle_load(const char *kind, kind_lifecycle_t *out)
 {
    if (!out)
       return -1;
@@ -27,7 +27,7 @@ int db2_kind_lifecycle_load(const char *kind, kind_lifecycle_t *out)
    if (!kind)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

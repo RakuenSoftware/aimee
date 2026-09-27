@@ -12,7 +12,7 @@ import (
 
 // Exercise automatic writers under the packaged runtime grants, not the owner.
 func TestMutationMaintenanceAuthority(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("requires packaged PostgreSQL")
 	}

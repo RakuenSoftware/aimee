@@ -1,9 +1,9 @@
 /* canonical_index.c: project/org-level code index, owned by aimee-kb.
  *
- * Storage: DB2 (Postgres). All paths use aimee_pg_* (libpq) directly.
+ * Storage: KB_STORE (Postgres). All paths use aimee_pg_* (libpq) directly.
  * Tables: projects, files, terms, file_imports, file_exports,
- * code_calls, file_contents (declared in db2/schema.sql, applied
- * by db2_init).
+ * code_calls, file_contents (declared in kb_store/schema.sql, applied
+ * by kb_store_init).
  *
  * Scan coordination is the caller's responsibility (kb_service holds a
  * single-slot lock with a 60-second cooldown). This module assumes
@@ -14,19 +14,19 @@
 #include "canonical_index_internal.h"
 #include "code_index.h"
 #include "cross_repo_resolver.h" /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
-#include "db2.h"
-#include "db2_bounded_text.h"
-#include "db2_internal.h"
+#include "kb_store.h"
+#include "kb_store_bounded_text.h"
+#include "kb_store_internal.h"
 #include "entity_edges.h"         /* co_edited backfill: edge upsert / co_targets read */
 #include "index.h"                /* cochange_pairs_for_commit / cochange_is_hex_sha */
-#include "kb_runtime_state.h"     /* db2_kb_purge_fence_active: commit-point fence check */
+#include "kb_runtime_state.h"     /* kb_store_kb_purge_fence_active: commit-point fence check */
 #include "aimee/kb/graph_kinds.h" /* REL_CO_EDITED / NODE_FILE */
 
 #include "aimee.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <ctype.h>
 #include <stdatomic.h>
@@ -36,7 +36,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define CI_LOG_TAG         "db2.canonical_index"
+#define CI_LOG_TAG         "kb_store.canonical_index"
 #define CI_MAX_DEFS        256
 #define CI_EXEC_MAX_OUTPUT (64u * 1024u * 1024u)
 #define CI_CSS_MAX_RULES   200000
@@ -44,15 +44,15 @@
 #define CI_CSS_MAX_TOKENS  512
 
 static canonical_index_exec_capture_fn ci_exec_capture;
-static db2_css_analyze_fn ci_css_analyze_provider;
-static db2_css_stylesheet_free_fn ci_css_stylesheet_free_provider;
-static db2_css_extract_class_tokens_fn ci_css_extract_tokens_provider;
+static kb_store_css_analyze_fn ci_css_analyze_provider;
+static kb_store_css_stylesheet_free_fn ci_css_stylesheet_free_provider;
+static kb_store_css_extract_class_tokens_fn ci_css_extract_tokens_provider;
 
 _Static_assert(CSS_CLASS_TOKEN_MAX == 128, "CSS class-token ABI drift");
 
-void aimee_db2_register_css_analysis_providers(db2_css_analyze_fn analyze,
-                                               db2_css_stylesheet_free_fn release,
-                                               db2_css_extract_class_tokens_fn extract_class_tokens)
+void aimee_kb_store_register_css_analysis_providers(
+    kb_store_css_analyze_fn analyze, kb_store_css_stylesheet_free_fn release,
+    kb_store_css_extract_class_tokens_fn extract_class_tokens)
 {
    ci_css_analyze_provider = analyze;
    ci_css_stylesheet_free_provider = release;
@@ -68,9 +68,10 @@ static int ci_css_stylesheet_valid(const css_stylesheet_t *stylesheet)
    for (int i = 0; i < stylesheet->rule_count; ++i)
    {
       const css_rule_t *rule = &stylesheet->rules[i];
-      if (db2_bounded_len(rule->selector, sizeof(rule->selector)) == 0 ||
-          db2_bounded_len(rule->selector, sizeof(rule->selector)) == sizeof(rule->selector) ||
-          db2_bounded_len(rule->at_context, sizeof(rule->at_context)) == sizeof(rule->at_context) ||
+      if (kb_store_bounded_len(rule->selector, sizeof(rule->selector)) == 0 ||
+          kb_store_bounded_len(rule->selector, sizeof(rule->selector)) == sizeof(rule->selector) ||
+          kb_store_bounded_len(rule->at_context, sizeof(rule->at_context)) ==
+              sizeof(rule->at_context) ||
           rule->spec_a < 0 || rule->spec_b < 0 || rule->spec_c < 0 ||
           (rule->specificity_uncertain != 0 && rule->specificity_uncertain != 1) ||
           rule->line < 1 || rule->decl_count < 0 || rule->decl_count > CI_CSS_MAX_DECLS ||
@@ -79,9 +80,10 @@ static int ci_css_stylesheet_valid(const css_stylesheet_t *stylesheet)
       for (int d = 0; d < rule->decl_count; ++d)
       {
          const css_declaration_t *decl = &rule->decls[d];
-         if (db2_bounded_len(decl->property, sizeof(decl->property)) == 0 ||
-             db2_bounded_len(decl->property, sizeof(decl->property)) == sizeof(decl->property) ||
-             db2_bounded_len(decl->value, sizeof(decl->value)) == sizeof(decl->value) ||
+         if (kb_store_bounded_len(decl->property, sizeof(decl->property)) == 0 ||
+             kb_store_bounded_len(decl->property, sizeof(decl->property)) ==
+                 sizeof(decl->property) ||
+             kb_store_bounded_len(decl->value, sizeof(decl->value)) == sizeof(decl->value) ||
              (decl->important != 0 && decl->important != 1))
             return 0;
       }
@@ -119,7 +121,7 @@ int canonical_index_css_extract_class_tokens(const char *text, size_t len,
       goto invalid;
    for (int i = 0; i < count; ++i)
    {
-      size_t token_len = db2_bounded_len(out[i], CSS_CLASS_TOKEN_MAX);
+      size_t token_len = kb_store_bounded_len(out[i], CSS_CLASS_TOKEN_MAX);
       if (token_len == 0 || token_len == CSS_CLASS_TOKEN_MAX)
          goto invalid;
       for (size_t j = 0; j < token_len; ++j)
@@ -165,7 +167,7 @@ static const char *ci_get_extension(const char *path)
 
 void *ci_conn(void)
 {
-   return db2_conn();
+   return kb_store_conn();
 }
 
 /* ---- Project / file resolution --------------------------------- */
@@ -209,7 +211,7 @@ int64_t ci_resolve_file_id(void *conn, int64_t project_id, const char *rel_path)
 static int64_t ci_upsert_project(void *conn, const char *name, const char *root)
 {
    (void)conn;
-   return db2_code_index_project_upsert(name, root);
+   return kb_store_code_index_project_upsert(name, root);
 }
 
 /* FNV-1a 64-bit hex of file content. Stored on files.hash so the code-embed
@@ -268,10 +270,10 @@ static int ci_replace_file_data_txn(void *conn, int64_t file_id, const char *ext
 
    if (clear_existing)
    {
-      db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
-      db2_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id);
-      db2_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id);
-      db2_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id);
+      kb_store_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
+      kb_store_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id);
+      kb_store_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id);
+      kb_store_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id);
    }
 
    /* Record the content hash so the code-embed pass can skip unchanged files. */
@@ -460,14 +462,14 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
     * index rows for a project being purged. The advisory guard serializes
     * this check+commit against the fence-publish transaction, closing the
     * "checked no-fence, fence lands, stale commit" window. */
-   if (db2_kb_purge_txn_guard(project) != 0)
+   if (kb_store_kb_purge_txn_guard(project) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "purge guard failed for project '%s': aborting index write",
                project ? project : "?");
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
    }
-   if (db2_kb_purge_fence_active(project))
+   if (kb_store_kb_purge_fence_active(project))
    {
       LOG_WARN(CI_LOG_TAG, "purge fence active for project '%s': aborting index write",
                project ? project : "?");
@@ -486,8 +488,8 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
 
 /* CSS migration assistant (WP-C/D): build the style graph for .css files and the
  * component->style join for markup files. Called AFTER ci_replace_file_data
- * (whose transaction has committed) because db2_css_graph_replace /
- * db2_css_component_resolve run their own transactions — never nest them. Gated
+ * (whose transaction has committed) because kb_store_css_graph_replace /
+ * kb_store_css_component_resolve run their own transactions — never nest them. Gated
  * by css_style_graph_enabled (read once per scan). Plain CSS only (.css); SCSS is
  * indexed from compiled output. Thread-safe (heap token buffer — the KB indexer
  * runs in worker threads). */
@@ -501,7 +503,7 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
       css_stylesheet_t *ss = canonical_index_css_analyze(content, len);
       if (ss)
       {
-         (void)db2_css_graph_replace(file_id, ss->rules, ss->rule_count);
+         (void)kb_store_css_graph_replace(file_id, ss->rules, ss->rule_count);
          canonical_index_css_stylesheet_free(ss);
       }
       return;
@@ -515,7 +517,7 @@ static void ci_css_index_file(int64_t file_id, const char *ext, const char *cont
          return;
       int nt = canonical_index_css_extract_class_tokens(content, len, tokens, 512);
       if (nt > 0)
-         (void)db2_css_component_resolve(file_id, tokens, nt);
+         (void)kb_store_css_component_resolve(file_id, tokens, nt);
       free(tokens);
    }
 }
@@ -1150,8 +1152,8 @@ static void ci_cochange_flush(char names[][128], int ncount, cochange_pair_t *pa
    for (int p = 0; p < np; p++)
    {
       int added = 0;
-      db2_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
-                             (int)NODE_FILE, (int)NODE_FILE, &added);
+      kb_store_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
+                                  (int)NODE_FILE, (int)NODE_FILE, &added);
    }
 }
 
@@ -1180,10 +1182,10 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
    char key[192];
    snprintf(key, sizeof(key), "cochange_head:%s", project);
    char marker[128] = "";
-   int have_marker = (db2_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
+   int have_marker = (kb_store_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
    if (have_marker && !cochange_is_hex_sha(marker))
    {
-      db2_kb_runtime_state_set(key, head);
+      kb_store_kb_runtime_state_set(key, head);
       free(head);
       return;
    }
@@ -1202,7 +1204,7 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
       free(anc);
       if (rc != 0)
       {
-         db2_kb_runtime_state_set(key, head);
+         kb_store_kb_runtime_state_set(key, head);
          free(head);
          return;
       }
@@ -1247,7 +1249,7 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
             ci_cochange_flush(names, ncount, pairs, max_pairs);
             if (cochange_is_hex_sha(cur_sha) && ++done >= CI_COCHANGE_CKPT_EVERY)
             {
-               db2_kb_runtime_state_set(key, cur_sha);
+               kb_store_kb_runtime_state_set(key, cur_sha);
                done = 0;
             }
          }
@@ -1271,7 +1273,7 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
    if (in_commit)
       ci_cochange_flush(names, ncount, pairs, max_pairs);
 
-   db2_kb_runtime_state_set(key, head);
+   kb_store_kb_runtime_state_set(key, head);
 
    free(pairs);
    free(log);
@@ -1523,7 +1525,7 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
       return -1;
    /* Purge and scan publication share the project advisory lock. Take it
     * before row locks on both paths to avoid lock-order inversions. */
-   if (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project))
+   if (kb_store_kb_purge_txn_guard(project) != 0 || kb_store_kb_purge_fence_active(project))
       goto storage_fail;
 
    const char *session_sql =
@@ -1978,7 +1980,7 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       /* Every one of these used to return a bare -1, which the HTTP route turned
        * into "canonical index scan failed" with no way to tell them apart. Say
        * which boundary refused: a caller staring at a 503 has nothing else. */
-      aimee_log(LOG_ERROR, "canonical_index", "scan_files '%s': no db2 connection", name);
+      aimee_log(LOG_ERROR, "canonical_index", "scan_files '%s': no kb_store connection", name);
       return -1;
    }
 

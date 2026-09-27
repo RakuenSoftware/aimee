@@ -8,9 +8,9 @@
 #include "cross_repo_deps.h" /* xrepo_parse_module_id */
 
 #include "aimee.h"
-#include "db2.h"
+#include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -166,9 +166,9 @@ int xrepo_extract_identities(const char *basename, const char *content, xrepo_id
 
 #define CRI_MAX_PER_FILE 256
 
-int db2_cross_repo_rebuild_identities(void)
+int kb_store_cross_repo_rebuild_identities(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CRI_ERRBUF] = "";

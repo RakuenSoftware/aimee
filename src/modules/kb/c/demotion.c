@@ -1,10 +1,10 @@
 #include "json_int64.h"
-/* db2/demotion.c: retrieval attribution evidence transport (scoring lives in Go).
+/* kb_store/demotion.c: retrieval attribution evidence transport (scoring lives in Go).
  * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
 
 #include "demotion.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
 
@@ -15,7 +15,7 @@
 
 /* Optional external host transport. The standalone storage module has no
  * command registry; unresolved memory versions retain the documented unknown
- * value. Memory policy is never supplied by DB2. */
+ * value. Memory policy is never supplied by KB_STORE. */
 extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
     __attribute__((weak));
 
@@ -185,12 +185,12 @@ static int cas_update_event_payload(void *conn, const char *ev_id, const char *o
    return changes > 0 ? 1 : 0;
 }
 
-int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
-                                       const int64_t *surfaced_ids, int n_surfaced, char *id_out,
-                                       int id_out_len)
+int kb_store_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
+                                            const int64_t *surfaced_ids, int n_surfaced,
+                                            char *id_out, int id_out_len)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* Build the unified surfaced_refs (all memory at create), then derive the
     * back-compat surfaced_ids/surfaced_items projections from it (D3/P1.5). */
@@ -213,7 +213,8 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    if (!payload)
       return -1;
 
-   int rc = db2_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
+   int rc =
+       kb_store_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
    free(payload);
    if (rc != 0)
       return -1;
@@ -223,13 +224,13 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    return 0;
 }
 
-int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
-                                            const char *role, const int64_t *surfaced_ids,
-                                            int n_surfaced, char *id_out, int id_out_len)
+int kb_store_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
+                                                 const char *role, const int64_t *surfaced_ids,
+                                                 int n_surfaced, char *id_out, int id_out_len)
 {
    char id[64];
-   if (db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced, id,
-                                          sizeof(id)) != 0)
+   if (kb_store_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced,
+                                               id, sizeof(id)) != 0)
       return -1;
 
    /* Stamp the caller-visible turn_id (single follow-up UPDATE, like the
@@ -241,7 +242,7 @@ int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *que
     * this orphan) — the closest P1 gets to the P1.5 idempotent merge. */
    if (turn_id && turn_id[0])
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       if (conn)
       {
          char err[256] = "";
@@ -256,7 +257,8 @@ int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *que
             if (rc != AIMEE_PG_DONE) /* duplicate turn_id (unique conflict) */
             {
                char auth[64];
-               if (db2_demotion_retrieval_event_by_turn(turn_id, auth, sizeof(auth), NULL, 0) == 1)
+               if (kb_store_demotion_retrieval_event_by_turn(turn_id, auth, sizeof(auth), NULL,
+                                                             0) == 1)
                {
                   if (id_out && id_out_len > 0)
                      snprintf(id_out, (size_t)id_out_len, "%s", auth);
@@ -272,8 +274,8 @@ int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *que
    return 0;
 }
 
-int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
-                                         char *payload_out, int payload_out_len)
+int kb_store_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                              char *payload_out, int payload_out_len)
 {
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
@@ -281,7 +283,7 @@ int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int 
       payload_out[0] = '\0';
    if (!turn_id || !turn_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -322,9 +324,9 @@ int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int 
    return found;
 }
 
-int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
-                                            const char *role, const int64_t *surfaced_ids,
-                                            int n_surfaced, char *id_out, int id_out_len)
+int kb_store_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
+                                                 const char *role, const int64_t *surfaced_ids,
+                                                 int n_surfaced, char *id_out, int id_out_len)
 {
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
@@ -333,7 +335,7 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
 
    /* Optional external host transport. The standalone storage module has no
     * command registry; unresolved memory versions retain the documented unknown
-    * value. Memory policy is never supplied by DB2. */
+    * value. Memory policy is never supplied by KB_STORE. */
    extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
        __attribute__((weak));
 
@@ -352,7 +354,7 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
     * un-stamped orphan and returned the winner's id) our refs still land in the
     * canonical event on the next pass. Portable across Postgres and the sqlite shim
     * (no FOR UPDATE / jsonb needed). */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -368,8 +370,8 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
    {
       char ev_id[64] = "";
       payload[0] = '\0';
-      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
-                                                    MERGE_EVENT_PAYLOAD_CAP);
+      int rc = kb_store_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                         MERGE_EVENT_PAYLOAD_CAP);
       if (rc < 0)
       {
          result = -1;
@@ -380,15 +382,15 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
          /* No event yet — create it, then re-read IN THIS iteration so the merge
           * below still runs (even on the last retry) and our refs land even if a
           * concurrent writer won the create race. */
-         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, surfaced_ids,
-                                                     n_surfaced, NULL, 0) != 0)
+         if (kb_store_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role,
+                                                          surfaced_ids, n_surfaced, NULL, 0) != 0)
          {
             result = -1;
             break;
          }
          payload[0] = '\0';
-         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
-                                                   MERGE_EVENT_PAYLOAD_CAP);
+         rc = kb_store_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                        MERGE_EVENT_PAYLOAD_CAP);
          if (rc != 1) /* created but not readable (raced away) — fail this call */
          {
             result = -1;
@@ -494,11 +496,12 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
    return result;
 }
 
-int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char *query_fingerprint,
-                                                 const char *role, const char *const *types,
-                                                 const char *const *refs_in,
-                                                 const char *const *versions, int n_refs,
-                                                 char *id_out, int id_out_len)
+int kb_store_demotion_retrieval_event_merge_refs_turn(const char *turn_id,
+                                                      const char *query_fingerprint,
+                                                      const char *role, const char *const *types,
+                                                      const char *const *refs_in,
+                                                      const char *const *versions, int n_refs,
+                                                      char *id_out, int id_out_len)
 {
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
@@ -507,7 +510,7 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
 
    /* Optional external host transport. The standalone storage module has no
     * command registry; unresolved memory versions retain the documented unknown
-    * value. Memory policy is never supplied by DB2. */
+    * value. Memory policy is never supplied by KB_STORE. */
    extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
        __attribute__((weak));
 
@@ -516,7 +519,7 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
     * surfaced_refs, deduped by (type, ref). Same CAS retry + create-then-merge as
     * the int64 merge; the create path reuses write_turn to make a bare turn event
     * (with dup-race handling), after which the typed refs merge on the next pass. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -529,8 +532,8 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
    {
       char ev_id[64] = "";
       payload[0] = '\0';
-      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
-                                                    MERGE_EVENT_PAYLOAD_CAP);
+      int rc = kb_store_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                         MERGE_EVENT_PAYLOAD_CAP);
       if (rc < 0)
       {
          result = -1;
@@ -541,15 +544,15 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
          /* No event yet — create a bare turn event (reusing write_turn's dup-race
           * handling), then re-read IN THIS iteration so the typed merge below runs
           * even on the last retry. */
-         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, NULL, 0,
-                                                     NULL, 0) != 0)
+         if (kb_store_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, NULL, 0,
+                                                          NULL, 0) != 0)
          {
             result = -1;
             break;
          }
          payload[0] = '\0';
-         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
-                                                   MERGE_EVENT_PAYLOAD_CAP);
+         rc = kb_store_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                        MERGE_EVENT_PAYLOAD_CAP);
          if (rc != 1) /* created but not readable (raced away) — fail this call */
          {
             result = -1;
@@ -661,15 +664,15 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
    return result;
 }
 
-int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
-                                             int64_t surfaced_row_id, const char *verdict,
-                                             double weight)
+int kb_store_demotion_retrieval_attribution_write(const char *retrieval_event_id,
+                                                  int64_t surfaced_row_id, const char *verdict,
+                                                  double weight)
 {
    if (!retrieval_event_id || !verdict)
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* scope_id = string(surfaced_row_id) for fast lookup by row. */
    char scope_id_buf[32];
@@ -686,14 +689,14 @@ int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
    cJSON_Delete(record);
    if (!payload)
       return -1;
-   int rc = db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", scope_id_buf, "",
-                               1.0, payload);
+   int rc = kb_store_artifact_write(id, "retrieval_attribution", "proposed", "memory", scope_id_buf,
+                                    "", 1.0, payload);
    free(payload);
    if (rc != 0)
       return -1;
 
    /* Stamp model_version = retrieval_event_id for FK-style linking queries. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0; /* written, but can't stamp event link — tolerable */
 

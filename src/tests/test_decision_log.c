@@ -1,6 +1,6 @@
 /* test_decision_log.c: the S5 governance decision write path + the
- * one-active-per-scope invariant, exercised against the DB2 sqlite shim. */
-#include "../modules/kb/c/db2_test_shim.h"
+ * one-active-per-scope invariant, exercised against the KB_STORE sqlite shim. */
+#include "../modules/kb/c/kb_store_test_shim.h"
 #include "decision_log.h"
 
 #include <assert.h>
@@ -10,9 +10,9 @@
 /* A recorded decision is active and round-trips its governance fields. */
 static void test_record_is_active(void)
 {
-   db2_decision_log_row_t row;
-   int rc = db2_decision_log_record("deploy-window", "opt-a|opt-b", "opt-a", "lower risk",
-                                    "jbailes", 7, "2999-09-01", 0, &row);
+   kb_store_decision_log_row_t row;
+   int rc = kb_store_decision_log_record("deploy-window", "opt-a|opt-b", "opt-a", "lower risk",
+                                         "jbailes", 7, "2999-09-01", 0, &row);
    assert(rc == 0);
    assert(strcmp(row.status, "active") == 0);
    assert(strcmp(row.subject, "deploy-window") == 0);
@@ -27,14 +27,15 @@ static void test_record_is_active(void)
 /* Superseding flips the prior decision to 'superseded' and the new one is active. */
 static void test_supersede_flips_prior(void)
 {
-   db2_decision_log_row_t a, b, a_after;
-   assert(db2_decision_log_record("retention", "keep|drop", "keep", "v1", "op", 0, "", 0, &a) == 0);
+   kb_store_decision_log_row_t a, b, a_after;
+   assert(kb_store_decision_log_record("retention", "keep|drop", "keep", "v1", "op", 0, "", 0,
+                                       &a) == 0);
    /* b supersedes a — same scope (subject=retention, policy=0) is fine because a
     * is flipped to superseded in the same txn. */
-   assert(db2_decision_log_record("retention", "keep|drop", "drop", "v2", "op", 0, "", a.id, &b) ==
-          0);
+   assert(kb_store_decision_log_record("retention", "keep|drop", "drop", "v2", "op", 0, "", a.id,
+                                       &b) == 0);
    assert(strcmp(b.status, "active") == 0);
-   assert(db2_decision_log_get(a.id, &a_after) == 0);
+   assert(kb_store_decision_log_get(a.id, &a_after) == 0);
    assert(strcmp(a_after.status, "superseded") == 0);
    printf("  PASS: test_supersede_flips_prior\n");
 }
@@ -43,11 +44,11 @@ static void test_supersede_flips_prior(void)
  * by the invariant, and the first stays active (transaction rolled back). */
 static void test_one_active_per_scope(void)
 {
-   db2_decision_log_row_t first, first_after;
-   assert(db2_decision_log_record("budget", "a|b", "a", "r", "op", 42, "", 0, &first) == 0);
-   int rc = db2_decision_log_record("budget", "a|b", "b", "r", "op", 42, "", 0, NULL);
+   kb_store_decision_log_row_t first, first_after;
+   assert(kb_store_decision_log_record("budget", "a|b", "a", "r", "op", 42, "", 0, &first) == 0);
+   int rc = kb_store_decision_log_record("budget", "a|b", "b", "r", "op", 42, "", 0, NULL);
    assert(rc != 0); /* rejected: an active decision already exists for this scope */
-   assert(db2_decision_log_get(first.id, &first_after) == 0);
+   assert(kb_store_decision_log_get(first.id, &first_after) == 0);
    assert(strcmp(first_after.status, "active") == 0); /* first untouched */
    printf("  PASS: test_one_active_per_scope\n");
 }
@@ -55,13 +56,13 @@ static void test_one_active_per_scope(void)
 /* Different scopes may both be active concurrently. */
 static void test_distinct_scopes_coexist(void)
 {
-   db2_decision_log_row_t x, y;
-   assert(db2_decision_log_record("scope-x", "a", "a", "r", "op", 0, "", 0, &x) == 0);
-   assert(db2_decision_log_record("scope-y", "a", "a", "r", "op", 0, "", 0, &y) == 0);
+   kb_store_decision_log_row_t x, y;
+   assert(kb_store_decision_log_record("scope-x", "a", "a", "r", "op", 0, "", 0, &x) == 0);
+   assert(kb_store_decision_log_record("scope-y", "a", "a", "r", "op", 0, "", 0, &y) == 0);
    /* same subject, different linked_policy_id -> different scope, both active */
-   db2_decision_log_row_t p1, p2;
-   assert(db2_decision_log_record("shared", "a", "a", "r", "op", 1, "", 0, &p1) == 0);
-   assert(db2_decision_log_record("shared", "a", "a", "r", "op", 2, "", 0, &p2) == 0);
+   kb_store_decision_log_row_t p1, p2;
+   assert(kb_store_decision_log_record("shared", "a", "a", "r", "op", 1, "", 0, &p1) == 0);
+   assert(kb_store_decision_log_record("shared", "a", "a", "r", "op", 2, "", 0, &p2) == 0);
    printf("  PASS: test_distinct_scopes_coexist\n");
 }
 
@@ -69,22 +70,22 @@ static void test_distinct_scopes_coexist(void)
  * rejected — the record fails and the unrelated decision is untouched. */
 static void test_supersede_wrong_scope_rejected(void)
 {
-   db2_decision_log_row_t a, a_after;
-   assert(db2_decision_log_record("alpha", "a", "a", "r", "op", 0, "", 0, &a) == 0);
+   kb_store_decision_log_row_t a, a_after;
+   assert(kb_store_decision_log_record("alpha", "a", "a", "r", "op", 0, "", 0, &a) == 0);
    /* try to supersede alpha's decision from a record in scope 'beta' */
-   int rc = db2_decision_log_record("beta", "b", "b", "r", "op", 0, "", a.id, NULL);
+   int rc = kb_store_decision_log_record("beta", "b", "b", "r", "op", 0, "", a.id, NULL);
    assert(rc != 0); /* wrong scope: UPDATE matches 0 rows -> rejected */
-   assert(db2_decision_log_get(a.id, &a_after) == 0);
+   assert(kb_store_decision_log_get(a.id, &a_after) == 0);
    assert(strcmp(a_after.status, "active") == 0); /* alpha untouched */
    /* a stale/nonexistent supersedes_id is likewise rejected */
-   assert(db2_decision_log_record("gamma", "g", "g", "r", "op", 0, "", 999999, NULL) != 0);
+   assert(kb_store_decision_log_record("gamma", "g", "g", "r", "op", 0, "", 999999, NULL) != 0);
    printf("  PASS: test_supersede_wrong_scope_rejected\n");
 }
 
 /* An empty subject is rejected (would otherwise be a single global active slot). */
 static void test_empty_subject_rejected(void)
 {
-   assert(db2_decision_log_record("", "a", "a", "r", "op", 0, "", 0, NULL) != 0);
+   assert(kb_store_decision_log_record("", "a", "a", "r", "op", 0, "", 0, NULL) != 0);
    printf("  PASS: test_empty_subject_rejected\n");
 }
 
@@ -92,30 +93,31 @@ static void test_empty_subject_rejected(void)
  * no-revisit decisions stay active; the sweep is idempotent. */
 static void test_revisit_sweep(void)
 {
-   db2_decision_log_row_t due, future, none, after;
-   assert(db2_decision_log_record("rv-due", "a", "a", "r", "op", 0, "2000-01-01", 0, &due) == 0);
-   assert(db2_decision_log_record("rv-future", "a", "a", "r", "op", 0, "2999-01-01", 0, &future) ==
+   kb_store_decision_log_row_t due, future, none, after;
+   assert(kb_store_decision_log_record("rv-due", "a", "a", "r", "op", 0, "2000-01-01", 0, &due) ==
           0);
-   assert(db2_decision_log_record("rv-none", "a", "a", "r", "op", 0, "", 0, &none) == 0);
+   assert(kb_store_decision_log_record("rv-future", "a", "a", "r", "op", 0, "2999-01-01", 0,
+                                       &future) == 0);
+   assert(kb_store_decision_log_record("rv-none", "a", "a", "r", "op", 0, "", 0, &none) == 0);
 
-   int flipped = db2_decision_log_mark_revisit_due();
+   int flipped = kb_store_decision_log_mark_revisit_due();
    assert(flipped == 1); /* only the past-due one */
 
-   assert(db2_decision_log_get(due.id, &after) == 0);
+   assert(kb_store_decision_log_get(due.id, &after) == 0);
    assert(strcmp(after.status, "revisit_due") == 0);
-   assert(db2_decision_log_get(future.id, &after) == 0);
+   assert(kb_store_decision_log_get(future.id, &after) == 0);
    assert(strcmp(after.status, "active") == 0);
-   assert(db2_decision_log_get(none.id, &after) == 0);
+   assert(kb_store_decision_log_get(none.id, &after) == 0);
    assert(strcmp(after.status, "active") == 0);
 
    /* Idempotent: a second sweep flips nothing new. */
-   assert(db2_decision_log_mark_revisit_due() == 0);
+   assert(kb_store_decision_log_mark_revisit_due() == 0);
    printf("  PASS: test_revisit_sweep\n");
 }
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_record_is_active();
    test_supersede_flips_prior();
    test_one_active_per_scope();
@@ -123,7 +125,7 @@ int main(void)
    test_supersede_wrong_scope_rejected();
    test_empty_subject_rejected();
    test_revisit_sweep();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("decision_log: all tests passed\n");
    return 0;
 }

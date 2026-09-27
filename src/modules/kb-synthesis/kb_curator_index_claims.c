@@ -20,7 +20,7 @@
 #include "log.h"
 #include "memory.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/pgvec_transport.h"
 
@@ -49,7 +49,7 @@ static int64_t claim_point_id(const char *artifact_id)
 int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -99,7 +99,7 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
    {
       /* Nothing embeddable — commit so it is not reprocessed. */
       cJSON_Delete(pj);
-      db2_artifact_set_state(id, "committed");
+      kb_store_artifact_set_state(id, "committed");
       free(payload);
       return 1;
    }
@@ -140,7 +140,7 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
                 id);
    }
 
-   db2_artifact_set_state(id, "committed");
+   kb_store_artifact_set_state(id, "committed");
    aimee_log(LOG_INFO, "kb.curator.claims", "indexed claim %s", id);
 
    cJSON_Delete(pj);

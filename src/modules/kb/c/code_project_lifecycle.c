@@ -2,8 +2,8 @@
 #include "code_project_lifecycle.h"
 
 #include "aimee.h"
-#include "db2.h"
-#include "db2_internal.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 
@@ -360,12 +360,13 @@ static int cpl_manifest(void *conn, const char *operation, const char *project, 
 
 static void cpl_json_escape(char *out, size_t cap, const char *in);
 
-int db2_code_project_detach(const char *project, const char *principal, int64_t *generation_out)
+int kb_store_code_project_detach(const char *project, const char *principal,
+                                 int64_t *generation_out)
 {
    if (!project || !project[0] || !principal || !principal[0] || strlen(principal) > 575 ||
        strlen(project) >= sizeof(((code_project_manifest_t *)0)->project))
       return CODE_PROJECT_LIFECYCLE_ERROR;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
@@ -385,8 +386,8 @@ int db2_code_project_detach(const char *project, const char *principal, int64_t 
             "\"stable_project_id\":\"%s\",\"generation\":%lld,"
             "\"timestamp\":\"%s\",\"state\":\"detached\"}",
             actor, subject, (long long)generation, ts);
-   if (db2_kb_audit_append_in_txn(conn, "operator", principal, "code.index.detach", project,
-                                  "allow", detail) != 0)
+   if (kb_store_kb_audit_append_in_txn(conn, "operator", principal, "code.index.detach", project,
+                                       "allow", detail) != 0)
    {
       rc = CODE_PROJECT_LIFECYCLE_AUDIT_FAILED;
       goto rollback;
@@ -437,9 +438,9 @@ rollback:
               : CODE_PROJECT_LIFECYCLE_ERROR;
 }
 
-int db2_code_project_purge_manifest(const char *project, code_project_manifest_t *out)
+int kb_store_code_project_purge_manifest(const char *project, code_project_manifest_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
@@ -533,14 +534,14 @@ static int cpl_delete_targets(void *conn, const char *project, const cpl_target_
    return 0;
 }
 
-int db2_code_project_purge_confirm(const char *project, const char *expected_hash,
-                                   const char *principal, const char *reason,
-                                   code_project_manifest_t *out)
+int kb_store_code_project_purge_confirm(const char *project, const char *expected_hash,
+                                        const char *principal, const char *reason,
+                                        code_project_manifest_t *out)
 {
    if (!expected_hash || !expected_hash[0] || !principal || !principal[0] || !reason ||
        !reason[0] || strlen(principal) > 575 || strlen(reason) > 512 || !out)
       return CODE_PROJECT_LIFECYCLE_ERROR;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
@@ -558,8 +559,8 @@ int db2_code_project_purge_confirm(const char *project, const char *expected_has
    snprintf(out->mode, sizeof(out->mode), "confirmed");
    char detail[CPL_AUDIT_DETAIL_CAP];
    cpl_audit_detail(out, principal, reason, detail, sizeof(detail));
-   if (db2_kb_audit_append_in_txn(conn, "operator", principal, "code.index.purge", project, "allow",
-                                  detail) != 0)
+   if (kb_store_kb_audit_append_in_txn(conn, "operator", principal, "code.index.purge", project,
+                                       "allow", detail) != 0)
    {
       rc = CODE_PROJECT_LIFECYCLE_AUDIT_FAILED;
       goto rollback;
@@ -623,12 +624,12 @@ static int cpl_gc_manifest_conn(void *conn, const char *project, int retention_d
    return cpl_hash_manifest(out) == 0 ? 0 : CODE_PROJECT_LIFECYCLE_ERROR;
 }
 
-int db2_code_project_gc_manifest(const char *project, int retention_days,
-                                 code_project_manifest_t *out)
+int kb_store_code_project_gc_manifest(const char *project, int retention_days,
+                                      code_project_manifest_t *out)
 {
    if (retention_days < 0 || retention_days > 3650)
       return CODE_PROJECT_LIFECYCLE_ERROR;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return CODE_PROJECT_LIFECYCLE_ERROR;
    char err[CPL_ERRBUF] = "";
@@ -641,9 +642,9 @@ int db2_code_project_gc_manifest(const char *project, int retention_days,
    return rc == CODE_PROJECT_LIFECYCLE_NOT_FOUND ? rc : CODE_PROJECT_LIFECYCLE_ERROR;
 }
 
-int db2_code_project_gc_confirm(const char *project, int retention_days, const char *expected_hash,
-                                const char *principal, const char *reason,
-                                code_project_manifest_t *out)
+int kb_store_code_project_gc_confirm(const char *project, int retention_days,
+                                     const char *expected_hash, const char *principal,
+                                     const char *reason, code_project_manifest_t *out)
 {
    if (!expected_hash || !expected_hash[0] || !principal || !principal[0] || !reason ||
        !reason[0] || !out)
@@ -651,7 +652,7 @@ int db2_code_project_gc_confirm(const char *project, int retention_days, const c
    if (retention_days < 0 || retention_days > 3650 || strlen(principal) > 575 ||
        strlen(reason) > 512)
       return CODE_PROJECT_LIFECYCLE_ERROR;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CPL_ERRBUF] = "";
    if (!conn || cpl_begin(conn, err, sizeof(err)) != 0)
       return CODE_PROJECT_LIFECYCLE_ERROR;
@@ -673,8 +674,8 @@ int db2_code_project_gc_confirm(const char *project, int retention_days, const c
    }
    char detail[CPL_AUDIT_DETAIL_CAP];
    cpl_audit_detail(out, principal, reason, detail, sizeof(detail));
-   if (db2_kb_audit_append_in_txn(conn, "operator", principal, "code.index.gc", project, "allow",
-                                  detail) != 0)
+   if (kb_store_kb_audit_append_in_txn(conn, "operator", principal, "code.index.gc", project,
+                                       "allow", detail) != 0)
    {
       rc = CODE_PROJECT_LIFECYCLE_AUDIT_FAILED;
       goto rollback;

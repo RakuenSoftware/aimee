@@ -1,10 +1,10 @@
-/* db2/kb_service_backend_ingest.c: kb_ingest_queue and kb_file_index
+/* kb_store/kb_service_backend_ingest.c: kb_ingest_queue and kb_file_index
  * CRUD helpers — split from kb_service_backend.c to keep that file
  * under the 2000-line limit. */
 
 #include "kb_service_backend.h"
 #include "aimee.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -21,7 +21,7 @@ static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
    return t ? t : "";
 }
 
-static void db2_kb_resolve_project(const char *project, char *out, size_t out_len)
+static void kb_store_kb_resolve_project(const char *project, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
@@ -32,9 +32,9 @@ static void db2_kb_resolve_project(const char *project, char *out, size_t out_le
 
 /* ── kb_ingest_queue ─────────────────────────────────────────────────────── */
 
-int db2_kb_ingest_queue_reset_running(void)
+int kb_store_kb_ingest_queue_reset_running(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -52,15 +52,15 @@ int db2_kb_ingest_queue_reset_running(void)
    return reset;
 }
 
-int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force, int priority)
+int kb_store_kb_ingest_queue_enqueue(const char *project, const char *root_path,
+                                     const char *workspace, int force, int priority)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0] || !root_path)
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
    const char *ws = workspace ? workspace : "";
 
    char err[KBS_ERRBUF] = "";
@@ -90,9 +90,9 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    return inserted; /* 0 = deduped, 1 = queued */
 }
 
-int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
+int kb_store_kb_ingest_queue_claim_next(kb_store_kb_ingest_job_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -133,10 +133,10 @@ int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
    return found;
 }
 
-int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
-                                 int embeddings_added)
+int kb_store_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
+                                      int embeddings_added)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -160,9 +160,9 @@ int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_a
    return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
-int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
+int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -183,9 +183,9 @@ int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
    return 0;
 }
 
-int db2_kb_ingest_queue_stats(db2_kb_ingest_queue_stats_t *out)
+int kb_store_kb_ingest_queue_stats(kb_store_kb_ingest_queue_stats_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -227,9 +227,9 @@ int db2_kb_ingest_queue_stats(db2_kb_ingest_queue_stats_t *out)
    return 0;
 }
 
-int db2_kb_ingest_queue_recent(db2_kb_ingest_recent_t *rows, int max_rows)
+int kb_store_kb_ingest_queue_recent(kb_store_kb_ingest_recent_t *rows, int max_rows)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !rows || max_rows <= 0)
       return 0;
 
@@ -273,15 +273,15 @@ int db2_kb_ingest_queue_recent(db2_kb_ingest_recent_t *rows, int max_rows)
  * hash/timestamp WITHOUT touching a previously stored body: the skip/dedup paths
  * call with NULL and must not erase content captured on a prior full index, so the
  * UPDATE coalesces NULL to the existing value rather than blanking it. */
-int db2_kb_file_index_upsert(const char *project, const char *file_path, const char *file_hash,
-                             const char *content)
+int kb_store_kb_file_index_upsert(const char *project, const char *file_path, const char *file_hash,
+                                  const char *content)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0] || !file_path || !file_hash)
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =
@@ -313,14 +313,14 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
    return 0;
 }
 
-char *db2_kb_file_index_get_content(const char *project, const char *file_path)
+char *kb_store_kb_file_index_get_content(const char *project, const char *file_path)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0] || !file_path)
       return NULL;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
@@ -347,15 +347,15 @@ char *db2_kb_file_index_get_content(const char *project, const char *file_path)
    return result;
 }
 
-int db2_kb_file_index_get(const char *project, const char *file_path, char *hash_out,
-                          size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap)
+int kb_store_kb_file_index_get(const char *project, const char *file_path, char *hash_out,
+                               size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0] || !file_path)
       return 0;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
@@ -384,14 +384,14 @@ int db2_kb_file_index_get(const char *project, const char *file_path, char *hash
    return found;
 }
 
-int db2_kb_file_index_delete_project(const char *project)
+int kb_store_kb_file_index_delete_project(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =
@@ -406,14 +406,14 @@ int db2_kb_file_index_delete_project(const char *project)
    return deleted;
 }
 
-int db2_kb_file_index_delete_current_project(const char *project)
+int kb_store_kb_file_index_delete_current_project(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(conn,
                                          "DELETE FROM kb_file_index WHERE project=?1"
@@ -429,14 +429,14 @@ int db2_kb_file_index_delete_current_project(const char *project)
    return rc == AIMEE_PG_DONE ? deleted : -1;
 }
 
-cJSON *db2_kb_file_index_snapshot_json(const char *project)
+cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return cJSON_CreateArray();
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *s =

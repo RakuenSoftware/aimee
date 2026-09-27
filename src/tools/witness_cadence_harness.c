@@ -34,7 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "modules/kb/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "modules/kb/c/db_postgres.h"
 #include "kb/kb_witness_cadence.h"
 #include "log.h"
@@ -60,9 +60,9 @@ int main(void)
    signal(SIGTERM, on_term);
    signal(SIGINT, on_term);
 
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "harness: db2_init failed\n");
+      fprintf(stderr, "harness: kb_store_init failed\n");
       return 1;
    }
 
@@ -70,16 +70,16 @@ int main(void)
     * schema apply, so the boot check and cadence execute exactly as they do on the
     * hardened tier (the kb connects as aimee_kb_runtime there). This is the live
     * check that the runtime-role grants are sufficient — schema was applied as the
-    * owner (db2_init), but the cadence/boot/gate must run as the restricted role. */
+    * owner (kb_store_init), but the cadence/boot/gate must run as the restricted role. */
    const char *role = getenv("AIMEE_WITNESS_HARNESS_ROLE");
    if (role && role[0])
    {
       char setrole[128], serr[256];
       snprintf(setrole, sizeof setrole, "SET ROLE %s", role);
-      if (aimee_pg_exec(db2_conn(), setrole, serr, sizeof serr) != 0)
+      if (aimee_pg_exec(kb_store_conn(), setrole, serr, sizeof serr) != 0)
       {
          fprintf(stderr, "harness: SET ROLE %s failed: %s\n", role, serr);
-         db2_shutdown();
+         kb_store_shutdown();
          return 1;
       }
       fprintf(stderr, "harness: acting as role %s for boot check + cadence\n", role);
@@ -92,7 +92,7 @@ int main(void)
    if (kb_witness_boot_check(boot_err, sizeof boot_err) != 0)
    {
       fprintf(stderr, "harness: boot check refused: %s\n", boot_err);
-      db2_shutdown();
+      kb_store_shutdown();
       return 3;
    }
 
@@ -123,7 +123,7 @@ int main(void)
       nanosleep(&ts, NULL);
    }
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("HARNESS STOPPED\n");
    fflush(stdout);
    return 0;

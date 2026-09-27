@@ -41,7 +41,7 @@ struct kb_management_cert_lifecycle
 typedef struct
 {
    kb_workload_identity_t identity;
-   db2_management_client_instance_binding_t db;
+   kb_store_management_client_instance_binding_t db;
 } live_binding_t;
 
 typedef struct
@@ -221,22 +221,22 @@ static kb_management_cert_result_t workload_result(kb_workload_result_t result)
 
 static int random_bytes(uint8_t *, size_t);
 
-static kb_management_cert_result_t db_result(db2_management_client_instance_result_t result)
+static kb_management_cert_result_t db_result(kb_store_management_client_instance_result_t result)
 {
    switch (result)
    {
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_OK:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK:
       return KB_MANAGEMENT_CERT_OK;
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID:
       return KB_MANAGEMENT_CERT_INVALID;
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_DENIED:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_DENIED:
       return KB_MANAGEMENT_CERT_DENIED;
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_CONFLICT:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_CONFLICT:
       return KB_MANAGEMENT_CERT_CONFLICT;
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY:
       return KB_MANAGEMENT_CERT_INTEGRITY;
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY:
-   case DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY:
+   case KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE:
       return DB_RETRY_RESULT;
    default:
       return KB_MANAGEMENT_CERT_UNAVAILABLE;
@@ -341,7 +341,7 @@ static kb_management_cert_result_t attest(kb_management_cert_lifecycle_t *lifecy
    kb_management_cert_result_t rc = workload_result(wr);
    if (rc != KB_MANAGEMENT_CERT_OK)
       return rc;
-   rc = db_result(db2_management_client_instance_binding_init(
+   rc = db_result(kb_store_management_client_instance_binding_init(
        out->identity.issuer, out->identity.subject, out->identity.proof_anchor_id,
        out->identity.custody_anchor_id, &out->db));
    if (rc != KB_MANAGEMENT_CERT_OK)
@@ -354,7 +354,7 @@ static int binding_matches(const live_binding_t *binding, const uint8_t digest[3
    return CRYPTO_memcmp(binding->db.binding_digest, digest, 32) == 0;
 }
 
-static void active_public(const db2_management_client_active_t *active,
+static void active_public(const kb_store_management_client_active_t *active,
                           kb_management_cert_active_t *out)
 {
    memset(out, 0, sizeof(*out));
@@ -372,8 +372,8 @@ static void active_public(const db2_management_client_active_t *active,
    memcpy(out->public_bundle_digest, active->public_bundle_digest, 32);
 }
 
-static int active_equal(const db2_management_client_active_t *a,
-                        const db2_management_client_active_t *b)
+static int active_equal(const kb_store_management_client_active_t *a,
+                        const kb_store_management_client_active_t *b)
 {
    return !strcmp(a->installation_id, b->installation_id) &&
           !strcmp(a->replacement_lineage_id, b->replacement_lineage_id) &&
@@ -415,7 +415,7 @@ static int identity_component_append(char *out, size_t cap, size_t *used, const 
    return 0;
 }
 
-static int active_identity_valid(const db2_management_client_active_t *active)
+static int active_identity_valid(const kb_store_management_client_active_t *active)
 {
    char expected[sizeof(active->cert_identity)];
    size_t used = sizeof("cert:") - 1;
@@ -435,11 +435,11 @@ int kb_management_cert_identity_matches_for_test(const char *issuer, const char 
                                                  const char *identity)
 {
    if (!issuer || !serial || !identity ||
-       strlen(issuer) > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
-       strlen(serial) > DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX ||
-       strlen(identity) > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX)
+       strlen(issuer) > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
+       strlen(serial) > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX ||
+       strlen(identity) > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX)
       return 0;
-   db2_management_client_active_t active = {0};
+   kb_store_management_client_active_t active = {0};
    memcpy(active.cert_issuer, issuer, strlen(issuer) + 1);
    memcpy(active.cert_serial_norm, serial, strlen(serial) + 1);
    memcpy(active.cert_identity, identity, strlen(identity) + 1);
@@ -448,11 +448,11 @@ int kb_management_cert_identity_matches_for_test(const char *issuer, const char 
 #endif
 
 static int candidate_matches_active(const kb_management_cert_candidate_view_t *c,
-                                    const db2_management_client_active_t *a)
+                                    const kb_store_management_client_active_t *a)
 {
-   return a->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE &&
-          a->issue_kind == (a->generation == 1 ? DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL
-                                               : DB2_MANAGEMENT_CLIENT_ISSUE_RENEW) &&
+   return a->issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE &&
+          a->issue_kind == (a->generation == 1 ? KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL
+                                               : KB_STORE_MANAGEMENT_CLIENT_ISSUE_RENEW) &&
           active_identity_valid(a) && !strcmp(c->installation_id, a->installation_id) &&
           !strcmp(c->lineage_id, a->replacement_lineage_id) &&
           !strcmp(c->operation_id, a->operation_id) && !strcmp(c->authority_id, a->authority_id) &&
@@ -699,10 +699,10 @@ recover_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding_
    return rc;
 }
 
-static kb_management_cert_result_t promote_candidate(kb_management_cert_lifecycle_t *lifecycle,
-                                                     const recovered_candidate_t *candidate,
-                                                     const db2_management_client_active_t *active,
-                                                     const pending_record_t *pending)
+static kb_management_cert_result_t
+promote_candidate(kb_management_cert_lifecycle_t *lifecycle, const recovered_candidate_t *candidate,
+                  const kb_store_management_client_active_t *active,
+                  const pending_record_t *pending)
 {
    if (!candidate_matches_active(&candidate->view, active))
       return KB_MANAGEMENT_CERT_INTEGRITY;
@@ -734,7 +734,7 @@ static kb_management_cert_result_t promote_candidate(kb_management_cert_lifecycl
        pending->pending.generation != active->generation ||
        CRYPTO_memcmp(pending->pending.binding_digest, active->binding_digest, 32) ||
        ((pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL) !=
-        (active->issue_kind == DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL)))
+        (active->issue_kind == KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL)))
       return KB_MANAGEMENT_CERT_INTEGRITY;
    rc = storage_result(kb_management_cert_storage_pending_clear_exact(
        &lifecycle->storage, pending->encoded, pending->encoded_len));
@@ -746,12 +746,13 @@ static kb_management_cert_result_t promote_candidate(kb_management_cert_lifecycl
 static kb_management_cert_result_t
 begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *live,
               const pending_record_t *pending, const recovered_intent_t *intent,
-              const db2_management_client_active_t *previous, db2_management_client_pending_t *out)
+              const kb_store_management_client_active_t *previous,
+              kb_store_management_client_pending_t *out)
 {
-   db2_management_client_instance_result_t dr;
+   kb_store_management_client_instance_result_t dr;
    if (pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL)
    {
-      db2_management_client_initial_request_t request = {0};
+      kb_store_management_client_initial_request_t request = {0};
       memcpy(request.operation_id, pending->pending.operation_id, sizeof(request.operation_id));
       memcpy(request.authority_id, pending->pending.authority_id, sizeof(request.authority_id));
       memcpy(request.installation_id, pending->pending.installation_id,
@@ -763,14 +764,14 @@ begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *l
       memcpy(request.csr_spki_digest, intent->key.csr_spki_digest, 32);
       dr = lifecycle->test_ops
                ? lifecycle->test_ops->begin_initial(lifecycle->test_context, &request, out)
-               : db2_management_client_instance_begin_initial(&request, out);
+               : kb_store_management_client_instance_begin_initial(&request, out);
       OPENSSL_cleanse(&request, sizeof(request));
    }
    else
    {
       if (!previous)
          return KB_MANAGEMENT_CERT_INTEGRITY;
-      db2_management_client_renewal_request_t request = {0};
+      kb_store_management_client_renewal_request_t request = {0};
       memcpy(request.operation_id, pending->pending.operation_id, sizeof(request.operation_id));
       memcpy(request.installation_id, pending->pending.installation_id,
              sizeof(request.installation_id));
@@ -786,7 +787,7 @@ begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *l
       memcpy(request.csr_spki_digest, intent->key.csr_spki_digest, 32);
       dr = lifecycle->test_ops
                ? lifecycle->test_ops->begin_renewal(lifecycle->test_context, &request, out)
-               : db2_management_client_instance_begin_renewal(&request, out);
+               : kb_store_management_client_instance_begin_renewal(&request, out);
       OPENSSL_cleanse(&request, sizeof(request));
    }
    kb_management_cert_result_t rc = db_result(dr);
@@ -800,7 +801,7 @@ begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *l
        CRYPTO_memcmp(out->binding_digest, pending->pending.binding_digest, 32) ||
        CRYPTO_memcmp(out->csr_digest, intent->key.csr_digest, 32) ||
        CRYPTO_memcmp(out->csr_spki_digest, intent->key.csr_spki_digest, 32) ||
-       ((out->issue_kind == DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL) !=
+       ((out->issue_kind == KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL) !=
         (pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL)))
       return KB_MANAGEMENT_CERT_INTEGRITY;
    if (out->has_previous != (pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_RENEWAL))
@@ -811,12 +812,12 @@ begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *l
         strcmp(out->previous_cert_serial_norm, previous->cert_serial_norm) ||
         CRYPTO_memcmp(out->previous_cert_fingerprint, previous->cert_fingerprint, 32)))
       return KB_MANAGEMENT_CERT_INTEGRITY;
-   if (out->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE)
+   if (out->issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE)
       return DB_ACTIVE_RESULT;
-   if (out->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_EXPIRED ||
-       out->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_QUARANTINED)
+   if (out->issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_EXPIRED ||
+       out->issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_QUARANTINED)
       return KB_MANAGEMENT_CERT_DENIED;
-   if (out->issue_state != DB2_MANAGEMENT_CLIENT_ISSUE_PENDING)
+   if (out->issue_state != KB_STORE_MANAGEMENT_CLIENT_ISSUE_PENDING)
       return KB_MANAGEMENT_CERT_INTEGRITY;
    return KB_MANAGEMENT_CERT_OK;
 }
@@ -824,7 +825,7 @@ begin_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *l
 static kb_management_cert_result_t
 issue_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *live,
                 const pending_record_t *pending, const recovered_intent_t *intent,
-                const db2_management_client_pending_t *begun, recovered_candidate_t *out,
+                const kb_store_management_client_pending_t *begun, recovered_candidate_t *out,
                 secret_arena_t *arena, int64_t deadline_epoch)
 {
    memset(out, 0, sizeof(*out));
@@ -980,17 +981,18 @@ issue_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t 
 
 static kb_management_cert_result_t
 activate_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *live,
-                   const pending_record_t *pending, const db2_management_client_pending_t *begun,
-                   const recovered_candidate_t *candidate, db2_management_client_active_t *out)
+                   const pending_record_t *pending,
+                   const kb_store_management_client_pending_t *begun,
+                   const recovered_candidate_t *candidate, kb_store_management_client_active_t *out)
 {
-   db2_management_client_activation_request_t request = {0};
+   kb_store_management_client_activation_request_t request = {0};
    memcpy(request.operation_id, candidate->view.operation_id, sizeof(request.operation_id));
    memcpy(request.installation_id, candidate->view.installation_id,
           sizeof(request.installation_id));
    request.binding = live->db;
    request.issue_kind = pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL
-                            ? DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL
-                            : DB2_MANAGEMENT_CLIENT_ISSUE_RENEW;
+                            ? KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL
+                            : KB_STORE_MANAGEMENT_CLIENT_ISSUE_RENEW;
    request.generation = candidate->view.generation;
    request.has_previous = begun->has_previous;
    request.previous_enrollment_id = begun->previous_enrollment_id;
@@ -1012,9 +1014,9 @@ activate_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding
    memcpy(request.leaf_spki_digest, candidate->view.spki_digest, 32);
    request.leaf_not_before_epoch = candidate->view.not_before_epoch;
    request.leaf_not_after_epoch = candidate->view.not_after_epoch;
-   db2_management_client_instance_result_t dr =
+   kb_store_management_client_instance_result_t dr =
        lifecycle->test_ops ? lifecycle->test_ops->activate(lifecycle->test_context, &request, out)
-                           : db2_management_client_instance_activate(&request, out);
+                           : kb_store_management_client_instance_activate(&request, out);
    kb_management_cert_result_t rc = db_result(dr);
    OPENSSL_cleanse(&request, sizeof(request));
    if (rc == KB_MANAGEMENT_CERT_OK && !candidate_matches_active(&candidate->view, out))
@@ -1024,13 +1026,13 @@ activate_candidate(kb_management_cert_lifecycle_t *lifecycle, const live_binding
 
 static kb_management_cert_result_t
 create_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *live,
-               kb_management_cert_issue_kind_t kind, const db2_management_client_active_t *active,
-               pending_record_t *pending, recovered_intent_t *intent, secret_arena_t *arena,
-               int64_t deadline_epoch)
+               kb_management_cert_issue_kind_t kind,
+               const kb_store_management_client_active_t *active, pending_record_t *pending,
+               recovered_intent_t *intent, secret_arena_t *arena, int64_t deadline_epoch)
 {
    memset(pending, 0, sizeof(*pending));
    memset(intent, 0, sizeof(*intent));
-   db2_management_client_grant_preflight_t preflight = {0};
+   kb_store_management_client_grant_preflight_t preflight = {0};
    kb_management_cert_intent_view_t view = {0};
    kb_management_cert_intent_binding_t transcript = {0};
    uint8_t custody[32] = {0}, challenge[32] = {0};
@@ -1045,13 +1047,13 @@ create_pending(kb_management_cert_lifecycle_t *lifecycle, const live_binding_t *
       goto cleanup;
    if (kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL)
    {
-      db2_management_client_grant_preflight_request_t request = {0};
+      kb_store_management_client_grant_preflight_request_t request = {0};
       memcpy(request.installation_id, lifecycle->installation_id, sizeof(request.installation_id));
       request.binding = live->db;
-      db2_management_client_instance_result_t dr =
+      kb_store_management_client_instance_result_t dr =
           lifecycle->test_ops
               ? lifecycle->test_ops->preflight(lifecycle->test_context, &request, &preflight)
-              : db2_management_client_instance_grant_preflight(&request, &preflight);
+              : kb_store_management_client_instance_grant_preflight(&request, &preflight);
       rc = db_result(dr);
       OPENSSL_cleanse(&request, sizeof(request));
       if (rc != KB_MANAGEMENT_CERT_OK)
@@ -1214,7 +1216,7 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
          goto done;
       }
    }
-   db2_management_client_active_t active = {0};
+   kb_store_management_client_active_t active = {0};
    intent = secret_arena_alloc(arena, sizeof(*intent));
    candidate = secret_arena_alloc(arena, sizeof(*candidate));
    if (!intent || !candidate)
@@ -1222,11 +1224,12 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
       goto done;
    }
-   db2_management_client_instance_result_t snapshot_dr =
+   kb_store_management_client_instance_result_t snapshot_dr =
        lifecycle->test_ops
            ? lifecycle->test_ops->snapshot(lifecycle->test_context, lifecycle->installation_id,
                                            &live.db, &active)
-           : db2_management_client_instance_snapshot(lifecycle->installation_id, &live.db, &active);
+           : kb_store_management_client_instance_snapshot(lifecycle->installation_id, &live.db,
+                                                          &active);
    kb_management_cert_result_t snapshot_rc = db_result(snapshot_dr);
    if (snapshot_rc != KB_MANAGEMENT_CERT_OK && snapshot_rc != KB_MANAGEMENT_CERT_DENIED)
    {
@@ -1313,7 +1316,8 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       goto done_intent;
    }
 
-   db2_management_client_active_t *previous = snapshot_rc == KB_MANAGEMENT_CERT_OK ? &active : NULL;
+   kb_store_management_client_active_t *previous =
+       snapshot_rc == KB_MANAGEMENT_CERT_OK ? &active : NULL;
    if (pending.pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL && previous)
    {
       rc = KB_MANAGEMENT_CERT_CONFLICT;
@@ -1328,7 +1332,7 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       rc = previous ? KB_MANAGEMENT_CERT_INTEGRITY : KB_MANAGEMENT_CERT_DENIED;
       goto done_intent;
    }
-   db2_management_client_pending_t begun = {0};
+   kb_store_management_client_pending_t begun = {0};
    if (lifecycle_now(lifecycle) >= deadline_epoch)
    {
       rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
@@ -1337,11 +1341,11 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
    rc = begin_pending(lifecycle, &live, &pending, intent, previous, &begun);
    if (rc == DB_ACTIVE_RESULT)
    {
-      db2_management_client_active_t activated = {0};
+      kb_store_management_client_active_t activated = {0};
       snapshot_dr = lifecycle->test_ops ? lifecycle->test_ops->snapshot(lifecycle->test_context,
                                                                         lifecycle->installation_id,
                                                                         &live.db, &activated)
-                                        : db2_management_client_instance_snapshot(
+                                        : kb_store_management_client_instance_snapshot(
                                               lifecycle->installation_id, &live.db, &activated);
       rc = db_result(snapshot_dr);
       if (rc == KB_MANAGEMENT_CERT_OK &&
@@ -1359,16 +1363,16 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       goto done_intent;
    }
    if (rc == KB_MANAGEMENT_CERT_DENIED &&
-       (begun.issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_EXPIRED ||
-        begun.issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_QUARANTINED))
+       (begun.issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_EXPIRED ||
+        begun.issue_state == KB_STORE_MANAGEMENT_CLIENT_ISSUE_QUARANTINED))
    {
-      db2_management_client_active_t terminal_snapshot = {0};
+      kb_store_management_client_active_t terminal_snapshot = {0};
       snapshot_dr =
           lifecycle->test_ops
               ? lifecycle->test_ops->snapshot(lifecycle->test_context, lifecycle->installation_id,
                                               &live.db, &terminal_snapshot)
-              : db2_management_client_instance_snapshot(lifecycle->installation_id, &live.db,
-                                                        &terminal_snapshot);
+              : kb_store_management_client_instance_snapshot(lifecycle->installation_id, &live.db,
+                                                             &terminal_snapshot);
       kb_management_cert_result_t terminal_rc = db_result(snapshot_dr);
       int proven =
           pending.pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL
@@ -1427,7 +1431,7 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       rc = storage_result(candidate_sr);
    if (rc == KB_MANAGEMENT_CERT_OK)
    {
-      db2_management_client_active_t activated = {0};
+      kb_store_management_client_active_t activated = {0};
       if (lifecycle_now(lifecycle) >= deadline_epoch)
          rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
       if (rc != KB_MANAGEMENT_CERT_OK)
@@ -1575,7 +1579,7 @@ kb_management_cert_result_t kb_management_cert_reconcile(kb_management_cert_life
       pthread_setcancelstate(old_cancel, NULL);
       return KB_MANAGEMENT_CERT_UNAVAILABLE;
    }
-   db2_lease_begin();
+   kb_store_lease_begin();
    kb_management_cert_result_t rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    for (unsigned attempt = 0; attempt < 3; ++attempt)
    {
@@ -1609,7 +1613,7 @@ kb_management_cert_result_t kb_management_cert_reconcile(kb_management_cert_life
       rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    if (rc != KB_MANAGEMENT_CERT_OK)
       memset(out, 0, sizeof(*out));
-   db2_lease_end();
+   kb_store_lease_end();
    pthread_mutex_unlock(&lifecycle->mutex);
    pthread_setcancelstate(old_cancel, NULL);
    return rc;
@@ -1625,12 +1629,13 @@ static kb_management_cert_result_t load_once(kb_management_cert_lifecycle_t *lif
    kb_management_cert_result_t rc = attest(lifecycle, &live);
    if (rc != KB_MANAGEMENT_CERT_OK)
       return rc;
-   db2_management_client_active_t before = {0}, after = {0};
-   db2_management_client_instance_result_t snapshot_dr =
+   kb_store_management_client_active_t before = {0}, after = {0};
+   kb_store_management_client_instance_result_t snapshot_dr =
        lifecycle->test_ops
            ? lifecycle->test_ops->snapshot(lifecycle->test_context, lifecycle->installation_id,
                                            &live.db, &before)
-           : db2_management_client_instance_snapshot(lifecycle->installation_id, &live.db, &before);
+           : kb_store_management_client_instance_snapshot(lifecycle->installation_id, &live.db,
+                                                          &before);
    rc = db_result(snapshot_dr);
    if (rc != KB_MANAGEMENT_CERT_OK)
       goto done;
@@ -1660,8 +1665,8 @@ static kb_management_cert_result_t load_once(kb_management_cert_lifecycle_t *lif
       snapshot_dr = lifecycle->test_ops
                         ? lifecycle->test_ops->snapshot(
                               lifecycle->test_context, lifecycle->installation_id, &live.db, &after)
-                        : db2_management_client_instance_snapshot(lifecycle->installation_id,
-                                                                  &live.db, &after);
+                        : kb_store_management_client_instance_snapshot(lifecycle->installation_id,
+                                                                       &live.db, &after);
       rc = db_result(snapshot_dr);
    }
    if (rc == KB_MANAGEMENT_CERT_OK && !active_equal(&before, &after))
@@ -1708,7 +1713,7 @@ kb_management_cert_load_active(kb_management_cert_lifecycle_t *lifecycle,
       pthread_setcancelstate(old_cancel, NULL);
       return KB_MANAGEMENT_CERT_UNAVAILABLE;
    }
-   db2_lease_begin();
+   kb_store_lease_begin();
    kb_management_cert_result_t rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    cancel_output_t cancel_output = {.bundle = bundle, .active = out};
    pthread_cleanup_push(cancel_output_clear, &cancel_output);
@@ -1747,7 +1752,7 @@ kb_management_cert_load_active(kb_management_cert_lifecycle_t *lifecycle,
       struct timespec delay = {.tv_sec = 0, .tv_nsec = 25000000L};
       nanosleep(&delay, NULL);
    }
-   db2_lease_end();
+   kb_store_lease_end();
    pthread_mutex_unlock(&lifecycle->mutex);
    pthread_setcancelstate(old_cancel, NULL);
    pthread_cleanup_pop(0);

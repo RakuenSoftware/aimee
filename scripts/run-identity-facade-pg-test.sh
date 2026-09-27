@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# run-identity-facade-pg-test.sh: exercise the identity-token db2 facade against a
+# run-identity-facade-pg-test.sh: exercise the identity-token kb_store facade against a
 # REAL Postgres, connected as the REAL aimee_kb_token_authority_runtime role.
 #
-# The SQLite shim cannot stand in here: db2_management_token_authority_open runs
+# The SQLite shim cannot stand in here: kb_store_management_token_authority_open runs
 # role_assert, which demands a LOGIN NOINHERIT NOBYPASSRLS non-superuser role with
 # a pinned search_path and row_security on. That check either passes against a
 # properly provisioned database or it does not, and only real Postgres can say.
@@ -36,7 +36,7 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -c "ALTER ROLE aimee_kb_token_authority_runtim
 
 echo "== identity facade gate: building =="
 ${CC:-cc} -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wno-unused-parameter \
-  -I"$SRC" -I"$SRC/db2" -I"$SRC/headers" -I"$SRC/kb" -I"$SRC/modules/vault" \
+  -I"$SRC" -I"$SRC/kb_store" -I"$SRC/headers" -I"$SRC/kb" -I"$SRC/modules/vault" \
   -I"$SRC/modules/audit/include" -I"$SRC/vendor" -I"$SRC/vendor/headers" \
   -I/usr/include/postgresql \
   "$SRC/modules/kb/c/management_token_authority.c" \

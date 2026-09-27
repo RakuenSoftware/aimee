@@ -6,7 +6,7 @@ Run install.ps1 to install aimee-kb as a Windows service automatically.
 <service>
   <id>aimee-kb</id>
   <name>aimee Knowledge Base</name>
-  <description>aimee knowledge base (DB2/DB3) server</description>
+  <description>aimee knowledge base (KB_STORE/DB3) server</description>
   <executable>%BASE%\aimee-kb.exe</executable>
   <arguments></arguments>
   <startmode>Automatic</startmode>

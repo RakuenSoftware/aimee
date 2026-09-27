@@ -5,7 +5,7 @@
 #include "cJSON.h"
 #include "modules/kb/c/enrollments.h"
 #include "modules/kb/c/org_egress.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "../kb_bedrock_egress.h"
 #include "../kb_vault_key_use.h"
 #include "../kb_vault_policy.h"
@@ -285,34 +285,34 @@ static int settle(const kb_principal_t *transport, int64_t team, int64_t id, con
                   int64_t generation, const char *state, int http, const aimee_response_t *response,
                   const char *outcome, const char *basis)
 {
-   if (db2_tenant_scope_begin(transport, team) != 0)
+   if (kb_store_tenant_scope_begin(transport, team) != 0)
       return -1;
    int ok = 0;
-   int rc = db2_org_egress_settle(
+   int rc = kb_store_org_egress_settle(
        id, owner, generation, state, http, response ? response->usage_in : 0,
        response ? response->usage_out : 0, response ? response->usage_cache_read : 0,
        response ? response->usage_cache_write : 0, outcome, basis, &ok);
    if (rc || !ok)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit() == 0 ? 0 : -1;
+   return kb_store_tenant_scope_commit() == 0 ? 0 : -1;
 }
 
 static int renew_dispatch_lease(const kb_principal_t *transport, int64_t team, int64_t id,
                                 const char *owner, int64_t generation)
 {
-   if (db2_tenant_scope_begin(transport, team) != 0)
+   if (kb_store_tenant_scope_begin(transport, team) != 0)
       return -1;
    int ok = 0;
-   int rc = db2_org_egress_heartbeat(id, owner, generation, P2B_LEASE_SECONDS, &ok);
+   int rc = kb_store_org_egress_heartbeat(id, owner, generation, P2B_LEASE_SECONDS, &ok);
    if (rc != 0 || !ok)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit() == 0 ? 0 : -1;
+   return kb_store_tenant_scope_commit() == 0 ? 0 : -1;
 }
 
 static int render_success(const aimee_response_t *response, const char *model,
@@ -401,8 +401,8 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    }
    cJSON_Delete(root);
    char authority[33], origin[576];
-   int enrollment_rc = db2_enrollment_authority_resolve(fingerprint, transport->issuer,
-                                                        transport->subject, authority);
+   int enrollment_rc = kb_store_enrollment_authority_resolve(fingerprint, transport->issuer,
+                                                             transport->subject, authority);
    if (enrollment_rc == 1)
    {
       aimee_request_free(&ir);
@@ -434,22 +434,22 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
       return 400;
    }
    kb_bedrock_authorized_target_t *target = NULL;
-   db2_org_egress_admission_t admission;
+   kb_store_org_egress_admission_t admission;
    int ar = -1;
-   int scope_rc = db2_tenant_scope_begin(transport, team);
+   int scope_rc = kb_store_tenant_scope_begin(transport, team);
    if (scope_rc != 0)
    {
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
       snprintf(out, (size_t)out_cap, "{\"error\":\"%s\"}",
-               scope_rc == DB2_ERR_TENANT_DENIED ? "not authorized" : "admission unavailable");
-      return scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
+               scope_rc == KB_STORE_ERR_TENANT_DENIED ? "not authorized" : "admission unavailable");
+      return scope_rc == KB_STORE_ERR_TENANT_DENIED ? 403 : 503;
    }
    kb_bedrock_result_t target_rc = kb_bedrock_authorized_target_resolve(team, model_id, &target);
    if (target_rc != KB_BEDROCK_OK)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
@@ -457,31 +457,33 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
                target_rc == KB_BEDROCK_INVALID_TARGET ? "not authorized" : "admission unavailable");
       return target_rc == KB_BEDROCK_INVALID_TARGET ? 403 : 503;
    }
-   if ((ar = db2_org_egress_admit(authority, fingerprint, transport->issuer, transport->subject,
-                                  origin, request_id, team, has_project, project, model_id, digest,
-                                  P2B_LEASE_SECONDS, &admission)) != 0)
+   if ((ar = kb_store_org_egress_admit(
+            authority, fingerprint, transport->issuer, transport->subject, origin, request_id, team,
+            has_project, project, model_id, digest, P2B_LEASE_SECONDS, &admission)) != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
       snprintf(out, (size_t)out_cap, "{\"error\":\"%s\"}",
-               ar == DB2_EGRESS_ERR_DENIED ? "not authorized" : "admission unavailable");
-      return ar == DB2_EGRESS_ERR_CONFLICT ? 409 : ar == DB2_EGRESS_ERR_DENIED ? 403 : 503;
+               ar == KB_STORE_EGRESS_ERR_DENIED ? "not authorized" : "admission unavailable");
+      return ar == KB_STORE_EGRESS_ERR_CONFLICT ? 409
+             : ar == KB_STORE_EGRESS_ERR_DENIED ? 403
+                                                : 503;
    }
-   if (admission.outcome == DB2_EGRESS_RATE_REFUSED ||
-       admission.outcome == DB2_EGRESS_BUDGET_REFUSED)
+   if (admission.outcome == KB_STORE_EGRESS_RATE_REFUSED ||
+       admission.outcome == KB_STORE_EGRESS_BUDGET_REFUSED)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
       snprintf(out, (size_t)out_cap, "{\"error\":\"admission refused\"}");
       return 429;
    }
-   if (admission.outcome == DB2_EGRESS_REPLAY)
+   if (admission.outcome == KB_STORE_EGRESS_REPLAY)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
@@ -491,14 +493,14 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    }
    if (ir.max_tokens > admission.max_output_tokens)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
       aimee_request_free(&ir);
       snprintf(out, (size_t)out_cap, "{\"error\":\"admission failed\"}");
       return 400;
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
    {
       kb_bedrock_authorized_target_clear(&target);
       free(canonical);
@@ -509,15 +511,16 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    char owner[33];
    int64_t dispatch_id = 0, generation = 0;
    int claim_failed = hex_random(owner);
-   if (!claim_failed && db2_tenant_scope_begin(transport, team) != 0)
+   if (!claim_failed && kb_store_tenant_scope_begin(transport, team) != 0)
       claim_failed = 1;
-   if (!claim_failed && db2_org_egress_begin(authority, request_id, owner, "aimee-kb",
-                                             P2B_LEASE_SECONDS, &dispatch_id, &generation) != 0)
+   if (!claim_failed &&
+       kb_store_org_egress_begin(authority, request_id, owner, "aimee-kb", P2B_LEASE_SECONDS,
+                                 &dispatch_id, &generation) != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       claim_failed = 1;
    }
-   else if (!claim_failed && db2_tenant_scope_commit() != 0)
+   else if (!claim_failed && kb_store_tenant_scope_commit() != 0)
       claim_failed = 1;
    if (claim_failed)
    {
@@ -565,16 +568,16 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    else
    {
       int guarded = 0;
-      int guard_scope_rc = db2_tenant_scope_begin(transport, team);
+      int guard_scope_rc = kb_store_tenant_scope_begin(transport, team);
       if (guard_scope_rc != 0)
       {
          snprintf(out, (size_t)out_cap, "{\"error\":\"dispatch ownership lost\"}");
          status = 504;
       }
-      else if (db2_org_egress_owner_guard(dispatch_id, owner, generation, &guarded) != 0 ||
+      else if (kb_store_org_egress_owner_guard(dispatch_id, owner, generation, &guarded) != 0 ||
                !guarded)
       {
-         db2_tenant_scope_rollback();
+         kb_store_tenant_scope_rollback();
          snprintf(out, (size_t)out_cap, "{\"error\":\"dispatch ownership lost\"}");
          status = 504;
       }
@@ -597,18 +600,18 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
          const char *basis = complete_ok ? "actual" : definite_prewrite ? "zero" : "reservation";
          int durable_http = complete_ok ? 200 : complete_denial ? http : 0;
          int settled = 0;
-         int settle_rc = db2_org_egress_settle(
+         int settle_rc = kb_store_org_egress_settle(
              dispatch_id, owner, generation, terminal, durable_http,
              complete_ok ? response.usage_in : 0, complete_ok ? response.usage_out : 0,
              complete_ok ? response.usage_cache_read : 0,
              complete_ok ? response.usage_cache_write : 0, klass, basis, &settled);
          if (settle_rc != 0 || !settled)
          {
-            db2_tenant_scope_rollback();
+            kb_store_tenant_scope_rollback();
             snprintf(out, (size_t)out_cap, "{\"error\":\"ambiguous settlement\"}");
             status = 504;
          }
-         else if (db2_tenant_scope_commit() != 0)
+         else if (kb_store_tenant_scope_commit() != 0)
          {
             snprintf(out, (size_t)out_cap, "{\"error\":\"ambiguous settlement\"}");
             status = 504;

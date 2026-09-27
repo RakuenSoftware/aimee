@@ -1,7 +1,7 @@
-/* db2/lessons.c: see lessons.h. The only writer of the append-only, memory-graph-
+/* kb_store/lessons.c: see lessons.h. The only writer of the append-only, memory-graph-
  * isolated retrieval-outcome ledger (graph-feedback §3). Postgres via libpq. */
 #include "lessons.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -9,13 +9,13 @@
 
 #define LES_ERR 256
 
-int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
-                                   const char *project_id, int64_t generation_id,
-                                   const char *answer_outcome, const char *correction_text,
-                                   const char *finding_id, const char *actor_id,
-                                   const char *actor_source, int confirmed)
+int64_t kb_store_lessons_record_outcome(const char *session_id, const char *turn_id,
+                                        const char *project_id, int64_t generation_id,
+                                        const char *answer_outcome, const char *correction_text,
+                                        const char *finding_id, const char *actor_id,
+                                        const char *actor_source, int confirmed)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !answer_outcome || !answer_outcome[0])
       return -1;
    /* Defend the CHECK constraints in the C layer so a bad caller gets -1, not a
@@ -54,9 +54,10 @@ int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
    return id;
 }
 
-int db2_lessons_record_citation(int64_t outcome_id, const char *node_id, const char *disposition)
+int kb_store_lessons_record_citation(int64_t outcome_id, const char *node_id,
+                                     const char *disposition)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || outcome_id <= 0 || !node_id || !node_id[0])
       return -1;
    const char *disp = (disposition && disposition[0]) ? disposition : "unused";
@@ -79,9 +80,9 @@ int db2_lessons_record_citation(int64_t outcome_id, const char *node_id, const c
    return rc;
 }
 
-int db2_lessons_node_citation_count(const char *session_id, const char *node_id)
+int kb_store_lessons_node_citation_count(const char *session_id, const char *node_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !node_id || !node_id[0])
       return -1;
    char err[LES_ERR] = "";
@@ -102,10 +103,10 @@ int db2_lessons_node_citation_count(const char *session_id, const char *node_id)
    return n;
 }
 
-int64_t db2_lessons_record_finding_verdict(const char *finding_id, const char *project_id,
-                                           const char *node_id, const char *verdict,
-                                           const char *actor_source, const char *actor_id,
-                                           int confirmed)
+int64_t kb_store_lessons_record_finding_verdict(const char *finding_id, const char *project_id,
+                                                const char *node_id, const char *verdict,
+                                                const char *actor_source, const char *actor_id,
+                                                int confirmed)
 {
    if (!finding_id || !finding_id[0] || !verdict || !verdict[0])
       return -1;
@@ -118,17 +119,17 @@ int64_t db2_lessons_record_finding_verdict(const char *finding_id, const char *p
       outcome = "dead_end";
    else
       return -1;
-   int64_t oid = db2_lessons_record_outcome("", "", project_id, 0, outcome, "", finding_id,
-                                            actor_id, actor_source, confirmed ? 1 : 0);
+   int64_t oid = kb_store_lessons_record_outcome("", "", project_id, 0, outcome, "", finding_id,
+                                                 actor_id, actor_source, confirmed ? 1 : 0);
    if (oid > 0 && node_id && node_id[0])
-      db2_lessons_record_citation(oid, node_id, "useful");
+      kb_store_lessons_record_citation(oid, node_id, "useful");
    return oid;
 }
 
-int db2_lessons_list_outcomes(const char *project_id, int64_t community_gen,
-                              db2_lessons_outcome_row_t *out, int max)
+int kb_store_lessons_list_outcomes(const char *project_id, int64_t community_gen,
+                                   kb_store_lessons_outcome_row_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return -1;
    char err[LES_ERR] = "";
@@ -174,9 +175,9 @@ int db2_lessons_list_outcomes(const char *project_id, int64_t community_gen,
    return n;
 }
 
-int db2_lessons_confirm_outcome(int64_t outcome_id, const char *confirmed_by)
+int kb_store_lessons_confirm_outcome(int64_t outcome_id, const char *confirmed_by)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || outcome_id <= 0)
       return -1;
    char err[LES_ERR] = "";

@@ -1,4 +1,4 @@
-/* Descriptor-owned ABI for DB2's deterministic sketch support subset. */
+/* Descriptor-owned ABI for KB_STORE's deterministic sketch support subset. */
 #pragma once
 
 #include <stddef.h>

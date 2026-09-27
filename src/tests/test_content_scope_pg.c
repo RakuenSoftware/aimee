@@ -35,10 +35,10 @@
  *     each sees only their own project in every covered table, and a caller-less
  *     search sees neither.
  */
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/project.h"
 #include "cJSON.h"
 #include "kb.h"
@@ -80,7 +80,7 @@ static int search_project_count(const char *json, const char *project)
 static int exec_sql(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "exec failed: %s\n  sql: %s\n", err, sql);
    return rc;
@@ -133,7 +133,7 @@ static void expect_project_content_counts(const char *project, const char *want)
 static int scalar(const char *sql, char *out, size_t cap)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
    {
       fprintf(stderr, "prepare failed: %s\n  sql: %s\n", err, sql);
@@ -162,15 +162,15 @@ int main(void)
       printf("content_scope_pg: SKIP (AIMEE_TEST_PG_URL unset; real Postgres required)\n");
       return 0;
    }
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "content_scope_pg: db2_init failed for %s\n", url);
+      fprintf(stderr, "content_scope_pg: kb_store_init failed for %s\n", url);
       return 1;
    }
    /* The production KB host registers this adapter during module assembly.
     * This standalone binary must do the same or every authenticated tenant
     * scope fails before PostgreSQL can exercise the RLS policy. */
-   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
+   aimee_kb_store_register_identity_key_provider(kb_identity_key_from_fields);
 
    /* The fixture's already-open connection remains the disposable schema
     * owner, while every lazily opened pool connection starts as the production
@@ -204,7 +204,7 @@ int main(void)
        strcmp(vector_relations, "2") != 0)
    {
       printf("content_scope_pg: SKIP (pgvector relations unavailable)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 0;
    }
 
@@ -314,7 +314,7 @@ int main(void)
     *    connection would run as the previous user. Under RLS that is not a
     *    degraded answer, it is one tenant reading another's rows.
     *
-    *    db2_tenant.c resets both GUCs deliberately (tenant_reset_gucs). Nothing
+    *    kb_store_tenant.c resets both GUCs deliberately (tenant_reset_gucs). Nothing
     *    pinned it, so this does: open a scope, close it, and look. */
    {
       /* A principal needs a team it is actually a member of, or set_tenant_context
@@ -346,7 +346,7 @@ int main(void)
       char row[64] = "";
       assert(scalar(sql, row, sizeof(row)) == 0);
 
-      if (db2_tenant_scope_begin(&p, (int64_t)atoll(team_id)) == 0)
+      if (kb_store_tenant_scope_begin(&p, (int64_t)atoll(team_id)) == 0)
       {
          char inside[640] = "";
          assert(scalar("SELECT coalesce(current_setting('aimee.principal', true),'<unset>')",
@@ -355,7 +355,7 @@ int main(void)
             fprintf(stderr, "inside the scope the principal was \"%s\", expected \"%s\"\n", inside,
                     key);
          assert(strcmp(inside, key) == 0);
-         assert(db2_tenant_scope_commit() == 0);
+         assert(kb_store_tenant_scope_commit() == 0);
 
          /* And now, on the same pooled connection, it must be gone.
           *
@@ -425,10 +425,12 @@ int main(void)
       assert(scalar(sql, ignored, sizeof(ignored)) == 0);
 
       kb_principal_t owner = {.kind = KB_PRIN_OWNER, .authenticated = 1};
-      assert(db2_tenant_scope_begin(&owner, 0) == 0);
-      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_a)) == 0);
-      assert(db2_project_attribute_code("scope-maintenance-b", (int64_t)atoll(project_b)) == 0);
-      assert(db2_tenant_scope_commit() == 0);
+      assert(kb_store_tenant_scope_begin(&owner, 0) == 0);
+      assert(kb_store_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_a)) ==
+             0);
+      assert(kb_store_project_attribute_code("scope-maintenance-b", (int64_t)atoll(project_b)) ==
+             0);
+      assert(kb_store_tenant_scope_commit() == 0);
       snprintf(sql, sizeof(sql),
                "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
                " FROM projects WHERE name='scope-maintenance-a'",
@@ -446,9 +448,10 @@ int main(void)
                " DO UPDATE SET is_default=EXCLUDED.is_default RETURNING id",
                member_key, team_id);
       assert(scalar(sql, ignored, sizeof(ignored)) == 0);
-      assert(db2_tenant_scope_begin(&member, (int64_t)atoll(team_id)) == 0);
-      assert(db2_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_b)) != 0);
-      db2_tenant_scope_rollback();
+      assert(kb_store_tenant_scope_begin(&member, (int64_t)atoll(team_id)) == 0);
+      assert(kb_store_project_attribute_code("scope-maintenance-a", (int64_t)atoll(project_b)) !=
+             0);
+      kb_store_tenant_scope_rollback();
       snprintf(sql, sizeof(sql),
                "SELECT CASE WHEN kb_project=%s THEN 'bound' ELSE 'wrong' END"
                " FROM projects WHERE name='scope-maintenance-a'",
@@ -456,7 +459,8 @@ int main(void)
       expect(sql, "bound");
       printf("  PASS: attribution is explicit by id and denied to a non-admin member\n");
 
-      assert(db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
+      assert(kb_store_maintenance_scope_begin(KB_STORE_MAINTENANCE_CURATOR,
+                                              "scope-maintenance-a") == 0);
       expect("SELECT current_setting('aimee.maintenance_worker',true)", "curator");
       expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
       snprintf(sql, sizeof(sql),
@@ -465,23 +469,25 @@ int main(void)
       snprintf(sql, sizeof(sql),
                "SELECT CASE WHEN kb_project_visible(%s) THEN 'allow' ELSE 'deny' END", project_b);
       expect(sql, "deny");
-      assert(db2_maintenance_scope_commit() == 0);
+      assert(kb_store_maintenance_scope_commit() == 0);
 
       expect("SELECT coalesce(current_setting('aimee.maintenance_worker',true),'')", "");
       expect("SELECT coalesce(current_setting('aimee.maintenance_project',true),'')", "");
       expect("SELECT coalesce(current_setting('aimee.maintenance_kb_project',true),'')", "");
-      assert(db2_maintenance_scope_begin((db2_maintenance_worker_t)999, "scope-maintenance-a") ==
-             DB2_ERR_MAINTENANCE_INVALID);
-      assert(
-          db2_maintenance_scope_begin(DB2_MAINTENANCE_CURATOR, "scope-maintenance-unattributed") ==
-          DB2_ERR_MAINTENANCE_INVALID);
+      assert(kb_store_maintenance_scope_begin((kb_store_maintenance_worker_t)999,
+                                              "scope-maintenance-a") ==
+             KB_STORE_ERR_MAINTENANCE_INVALID);
+      assert(kb_store_maintenance_scope_begin(KB_STORE_MAINTENANCE_CURATOR,
+                                              "scope-maintenance-unattributed") ==
+             KB_STORE_ERR_MAINTENANCE_INVALID);
 
       /* Worker wiring is inert before the operator enables content RLS, then
        * begins a fresh short transaction for every content phase. This lets the
        * wiring land without changing behavior before the final slice. */
-      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
-      assert(db2_maintenance_scope_begin_current() == 0);
-      db2_maintenance_job_leave();
+      assert(kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CURATOR, "scope-maintenance-a") ==
+             0);
+      assert(kb_store_maintenance_scope_begin_current() == 0);
+      kb_store_maintenance_job_leave();
 
       /* Seed selected and sibling unembedded chunks while the policies are inert. The
        * backfill discovers it under one maintenance transaction, drops the DB
@@ -542,18 +548,20 @@ int main(void)
        * role for every assertion below; otherwise PostgreSQL would bypass even
        * FORCE RLS and these maintenance-policy checks would be vacuous. */
       assert(exec_sql("SET ROLE aimee_kb_runtime") == 0);
-      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CURATOR, "scope-maintenance-a") ==
+             0);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
-      assert(db2_maintenance_scope_commit() == 0);
-      db2_maintenance_job_leave();
+      assert(kb_store_maintenance_scope_commit() == 0);
+      kb_store_maintenance_job_leave();
 
-      assert(db2_maintenance_job_enter(DB2_MAINTENANCE_REEMBED, "scope-maintenance-a") == 0);
+      assert(kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_REEMBED, "scope-maintenance-a") ==
+             0);
       int backfilled = kb_doc_embed_backfill("scope-maintenance-a", embedding_command, 1);
       if (backfilled != 1)
          fprintf(stderr, "re-embed backfill returned %d, expected 1\n", backfilled);
       assert(backfilled == 1);
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
                "SELECT CASE WHEN e.project='scope-maintenance-a' AND p.kb_project=%s"
                " THEN 'bound' ELSE 'wrong' END"
@@ -561,7 +569,7 @@ int main(void)
                " JOIN projects p ON p.name=d.project WHERE e.point_id=%s",
                project_a, reembed_doc);
       expect(sql, "bound");
-      assert(db2_maintenance_scope_commit() == 0);
+      assert(kb_store_maintenance_scope_commit() == 0);
       snprintf(sql, sizeof(sql), "SELECT count(*) FROM kb_embeddings WHERE point_id=%s",
                sibling_doc);
       expect(sql, "0");
@@ -571,40 +579,40 @@ int main(void)
        * selected project is rejected even though the cached project alone would
        * satisfy the maintenance scope. Each expected policy error aborts its
        * transaction, so start a fresh short scope for the next proof. */
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
                "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
                " VALUES (%s,'scope-maintenance-a','{}')",
                reembed_doc);
       assert(exec_sql(sql) == 0);
-      assert(db2_maintenance_scope_commit() == 0);
+      assert(kb_store_maintenance_scope_commit() == 0);
 
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
                "INSERT INTO kb_embeddings(point_id,project,payload_json)"
                " VALUES (%s,'scope-maintenance-a','{}')",
                sibling_doc);
       assert(exec_sql(sql) != 0);
-      db2_maintenance_scope_rollback();
+      kb_store_maintenance_scope_rollback();
 
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
                "INSERT INTO kb_pdf_embeddings(point_id,project,payload_json)"
                " VALUES (%s,'scope-maintenance-a','{}')",
                sibling_doc);
       assert(exec_sql(sql) != 0);
-      db2_maintenance_scope_rollback();
+      kb_store_maintenance_scope_rollback();
 
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       assert(exec_sql("INSERT INTO kb_doc_assets"
                       " (project,generation,document_key,page_no,kind,caption,content_type,"
                       "  blob_ref,sensitivity_class)"
                       " SELECT name,current_generation,'scope-maintenance-reembed.md',1,'page',"
                       " 'maintenance asset','image/png','maintenance-asset-blob','internal'"
                       " FROM projects WHERE name='scope-maintenance-a'") == 0);
-      assert(db2_maintenance_scope_commit() == 0);
+      assert(kb_store_maintenance_scope_commit() == 0);
 
-      assert(db2_maintenance_scope_begin_current() == 1);
+      assert(kb_store_maintenance_scope_begin_current() == 1);
       assert(exec_sql("INSERT INTO kb_doc_assets"
                       " (project,generation,document_key,page_no,kind,caption,content_type,"
                       "  blob_ref,sensitivity_class)"
@@ -612,8 +620,8 @@ int main(void)
                       " 'scope-maintenance-sibling.md',1,'page','relabelled asset','image/png',"
                       " 'relabelled-asset-blob','internal'"
                       " FROM projects WHERE name='scope-maintenance-a'") != 0);
-      db2_maintenance_scope_rollback();
-      db2_maintenance_job_leave();
+      kb_store_maintenance_scope_rollback();
+      kb_store_maintenance_job_leave();
       assert(exec_sql("RESET ROLE") == 0);
       printf("  PASS: re-embed reapplies exact-project scope after the embedder round-trip\n");
       printf("  PASS: re-embed cannot cross into an unselected sibling chunk\n");
@@ -827,7 +835,7 @@ int main(void)
       assert(exec_sql(sql) == 0);
       char err[512] = "";
       aimee_pg_stmt_t *st =
-          aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
+          aimee_pg_prepare(kb_store_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
       int refused = 0;
       if (st)
       {
@@ -856,7 +864,7 @@ int main(void)
                       " WHERE project='scope-reader-b'"
                       " AND blob_ref='reader-beta-blob'") == 0);
       memset(err, 0, sizeof(err));
-      st = aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
+      st = aimee_pg_prepare(kb_store_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
       refused = 0;
       if (st)
       {
@@ -888,7 +896,7 @@ int main(void)
       /* As above, the disposable-database owner must shed BYPASSRLS before the
        * ordinary reader and caller-less search assertions are meaningful. */
       assert(exec_sql("SET ROLE aimee_kb_runtime") == 0);
-      assert(db2_tenant_scope_begin(&reader_a, (int64_t)atoll(team_a)) == 0);
+      assert(kb_store_tenant_scope_begin(&reader_a, (int64_t)atoll(team_a)) == 0);
       expect_project_content_counts("scope-reader-a", "1");
       expect_project_content_counts("scope-reader-b", "0");
       char *result_a =
@@ -901,7 +909,7 @@ int main(void)
       assert(result_a_own == 1);
       assert(result_a_other == 0);
       free(result_a);
-      assert(db2_tenant_scope_commit() == 0);
+      assert(kb_store_tenant_scope_commit() == 0);
 
       char *anonymous =
           kb_search_json_ex(NULL, "readinessisolationtoken", embedding_command, 10, "rrf");
@@ -916,7 +924,7 @@ int main(void)
       expect_project_content_counts("scope-reader-a", "0");
       expect_project_content_counts("scope-reader-b", "0");
 
-      assert(db2_tenant_scope_begin(&reader_b, (int64_t)atoll(team_b)) == 0);
+      assert(kb_store_tenant_scope_begin(&reader_b, (int64_t)atoll(team_b)) == 0);
       expect_project_content_counts("scope-reader-a", "0");
       expect_project_content_counts("scope-reader-b", "1");
       char *result_b =
@@ -929,7 +937,7 @@ int main(void)
       assert(result_b_own == 1);
       assert(result_b_other == 0);
       free(result_b);
-      assert(db2_tenant_scope_commit() == 0);
+      assert(kb_store_tenant_scope_commit() == 0);
 
       assert(exec_sql("RESET ROLE") == 0);
       expect("SELECT kb_content_scope_disable()", "content scope disabled");
@@ -965,7 +973,7 @@ int main(void)
                     reset_pool_role, sizeof(reset_pool_role)) == 0);
       assert(exec_sql(reset_pool_role) == 0);
    }
-   db2_shutdown();
+   kb_store_shutdown();
    printf("All tests passed.\n");
    return 0;
 }

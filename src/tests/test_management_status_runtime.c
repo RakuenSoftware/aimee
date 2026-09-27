@@ -239,110 +239,110 @@ static void reset_connection_counts(void)
 int main(void)
 {
    char error[128] = "";
-   db2_management_status_runtime_t runtime;
-   assert(db2_management_status_runtime_open(&runtime, "", error, sizeof(error)) < 0);
+   kb_store_management_status_runtime_t runtime;
+   assert(kb_store_management_status_runtime_open(&runtime, "", error, sizeof(error)) < 0);
 
    reset_connection_counts();
    g_guc_failure = 1;
-   assert(db2_management_status_runtime_open(&runtime, "postgres://status", error, sizeof(error)) <
-          0);
+   assert(kb_store_management_status_runtime_open(&runtime, "postgres://status", error,
+                                                  sizeof(error)) < 0);
    assert(g_closed == 1 && g_search_path == 1 && g_row_security == 0 && g_set_role == 0 &&
           !runtime.connection);
 
    reset_connection_counts();
    g_guc_failure = 2;
-   assert(db2_management_status_runtime_open(&runtime, "postgres://status", error, sizeof(error)) <
-          0);
+   assert(kb_store_management_status_runtime_open(&runtime, "postgres://status", error,
+                                                  sizeof(error)) < 0);
    assert(g_closed == 1 && g_search_path == 1 && g_row_security == 1 && g_set_role == 0 &&
           !runtime.connection);
 
    reset_connection_counts();
    g_pre_ok = 0;
-   assert(db2_management_status_runtime_open(&runtime, "postgres://status", error, sizeof(error)) <
-          0);
+   assert(kb_store_management_status_runtime_open(&runtime, "postgres://status", error,
+                                                  sizeof(error)) < 0);
    assert(g_closed == 1 && g_search_path == 1 && g_row_security == 1 && g_set_role == 0 &&
           !runtime.connection);
 
    reset_connection_counts();
    g_post_ok = 0;
-   assert(db2_management_status_runtime_open(&runtime, "postgres://status", error, sizeof(error)) <
-          0);
+   assert(kb_store_management_status_runtime_open(&runtime, "postgres://status", error,
+                                                  sizeof(error)) < 0);
    assert(g_closed == 1 && g_search_path == 1 && g_row_security == 1 && g_set_role == 1 &&
           !runtime.connection);
 
    reset_connection_counts();
-   assert(db2_management_status_runtime_open(&runtime, "postgres://status", error, sizeof(error)) ==
-          0);
+   assert(kb_store_management_status_runtime_open(&runtime, "postgres://status", error,
+                                                  sizeof(error)) == 0);
    assert(g_search_path == 1 && g_row_security == 1 && g_set_role == 1 && runtime.connection);
 
    char caller_fp[65], target_fp[65] = "";
    memset(caller_fp, 'b', 64);
    caller_fp[64] = '\0';
    int64_t generation = 0;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_OK);
    assert(g_bind_mask == 0x1fu && generation == 9 && strlen(target_fp) == 64);
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.action.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_OK);
 
    g_lookup_denied = 1;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_DENIED);
    assert(generation == 0 && !target_fp[0]);
    g_lookup_denied = 0;
    g_lookup_error = 1;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_ERROR);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_ERROR);
    g_lookup_error = 0;
    g_lookup_policy_denied = 1;
    g_lookup_error = 1;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_DENIED);
    assert(generation == 0 && !target_fp[0]);
    g_lookup_error = 0;
    g_lookup_policy_denied = 0;
    g_lookup_malformed = 1;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
    g_lookup_malformed = 0;
    g_lookup_extra = 1;
-   assert(db2_management_status_runtime_lookup(
+   assert(kb_store_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
-              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
+              target_fp, sizeof(target_fp)) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
    g_lookup_extra = 0;
-   assert(db2_management_status_runtime_lookup(&runtime, "issuer", "01", "bad", "server-1",
-                                               "management.health.v1", &generation, target_fp,
-                                               sizeof(target_fp)) < 0);
+   assert(kb_store_management_status_runtime_lookup(&runtime, "issuer", "01", "bad", "server-1",
+                                                    "management.health.v1", &generation, target_fp,
+                                                    sizeof(target_fp)) < 0);
 
    int revoked = 0;
-   assert(db2_management_status_runtime_action_checkpoint(
+   assert(kb_store_management_status_runtime_action_checkpoint(
               &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
-              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
+              caller_fp, 9, &revoked, &generation) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_OK);
    assert(g_bind_mask == 0xffu && revoked == 1 && generation == 12);
    g_lookup_policy_denied = 1;
    g_lookup_error = 1;
-   assert(db2_management_status_runtime_action_checkpoint(
+   assert(kb_store_management_status_runtime_action_checkpoint(
               &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
-              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED);
+              caller_fp, 9, &revoked, &generation) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_DENIED);
    assert(!revoked && !generation);
    g_lookup_policy_denied = 0;
    g_lookup_error = 0;
    g_lookup_conflict = 1;
    g_lookup_error = 1;
-   assert(db2_management_status_runtime_action_checkpoint(
+   assert(kb_store_management_status_runtime_action_checkpoint(
               &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
-              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT);
+              caller_fp, 9, &revoked, &generation) == KB_STORE_MANAGEMENT_STATUS_RUNTIME_CONFLICT);
    g_lookup_conflict = 0;
    g_lookup_error = 0;
 
-   db2_management_status_runtime_startup_t startup;
-   assert(db2_management_status_runtime_startup_begin(&runtime, &startup) == 0);
+   kb_store_management_status_runtime_startup_t startup;
+   assert(kb_store_management_status_runtime_startup_begin(&runtime, &startup) == 0);
    assert(runtime.transaction_active && startup.seal_epoch == 7 && !startup.sealed &&
           startup.enabled && startup.version == 2 && startup.hwm_attestation_len == 64 &&
           !strcmp(startup.custody_key_id, "kms:status") &&
@@ -351,17 +351,17 @@ int main(void)
       assert(startup.public_key[i] == 1);
    for (size_t i = 0; i < startup.hwm_attestation_len; ++i)
       assert(startup.hwm_attestation[i] == 2);
-   assert(db2_management_status_runtime_startup_begin(&runtime, &startup) < 0);
-   assert(db2_management_status_runtime_startup_end(&runtime, 1) == 0 && g_commits == 1);
+   assert(kb_store_management_status_runtime_startup_begin(&runtime, &startup) < 0);
+   assert(kb_store_management_status_runtime_startup_end(&runtime, 1) == 0 && g_commits == 1);
 
    g_startup_malformed = 1;
-   assert(db2_management_status_runtime_startup_begin(&runtime, &startup) ==
-          DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
+   assert(kb_store_management_status_runtime_startup_begin(&runtime, &startup) ==
+          KB_STORE_MANAGEMENT_STATUS_RUNTIME_INTEGRITY);
    assert(!runtime.transaction_active && g_rollbacks == 1);
    g_startup_malformed = 0;
 
-   assert(db2_management_status_runtime_startup_begin(&runtime, &startup) == 0);
-   db2_management_status_runtime_close(&runtime);
+   assert(kb_store_management_status_runtime_startup_begin(&runtime, &startup) == 0);
+   kb_store_management_status_runtime_close(&runtime);
    assert(g_closed == 1 && g_rollbacks == 2 && !g_in_tx && !runtime.connection);
    puts("management_status_runtime: all tests passed");
    return 0;

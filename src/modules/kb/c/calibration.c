@@ -1,9 +1,9 @@
-/* db2/calibration.c: Bayesian promotion-threshold calibration profiles.
+/* kb_store/calibration.c: Bayesian promotion-threshold calibration profiles.
  * See docs/proposals/done/bayesian-promotion-threshold-calibration.md */
 
 #include "calibration.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
 #include "cJSON.h"
@@ -20,8 +20,8 @@ static double calibration_clamp01(double v)
    return v;
 }
 
-int db2_calibration_threshold_from_profile_json(const char *payload_json, double static_threshold,
-                                                double *threshold_out)
+int kb_store_calibration_threshold_from_profile_json(const char *payload_json,
+                                                     double static_threshold, double *threshold_out)
 {
    if (!payload_json || !threshold_out)
       return -1;
@@ -80,16 +80,16 @@ int db2_calibration_threshold_from_profile_json(const char *payload_json, double
    return 0;
 }
 
-int db2_calibration_profile_write(const char *target_surface, const char *kind,
-                                  const char *scope_kind, const char *scope_id,
-                                  const char *feature_set_version, const char *payload_json,
-                                  char *id_out, int id_out_len)
+int kb_store_calibration_profile_write(const char *target_surface, const char *kind,
+                                       const char *scope_kind, const char *scope_id,
+                                       const char *feature_set_version, const char *payload_json,
+                                       char *id_out, int id_out_len)
 {
    if (!target_surface || !kind || !payload_json)
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    /* Build a descriptor we can store in scope_id to allow retrieval by surface+kind */
    char ext_scope_id[256];
@@ -98,15 +98,15 @@ int db2_calibration_profile_write(const char *target_surface, const char *kind,
    else
       ext_scope_id[0] = '\0';
 
-   int rc =
-       db2_artifact_write(id, "calibration_profile", "committed",
-                          scope_kind ? scope_kind : "global", ext_scope_id, "", 1.0, payload_json);
+   int rc = kb_store_artifact_write(id, "calibration_profile", "committed",
+                                    scope_kind ? scope_kind : "global", ext_scope_id, "", 1.0,
+                                    payload_json);
    if (rc != 0)
       return -1;
 
    /* Stamp target_surface, kind, and feature_set_version via UPDATE so the
     * fixed-column write above stays clean. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -178,15 +178,15 @@ static int try_read(void *conn, const char *target_surface, const char *kind,
    }
    aimee_pg_finalize(st);
    if (found && found_id[0])
-      db2_artifact_touch(found_id);
+      kb_store_artifact_touch(found_id);
    return found ? 0 : -1;
 }
 
-int db2_calibration_profile_read(const char *target_surface, const char *kind,
-                                 const char *scope_kind, const char *scope_id, char *buf,
-                                 size_t len)
+int kb_store_calibration_profile_read(const char *target_surface, const char *kind,
+                                      const char *scope_kind, const char *scope_id, char *buf,
+                                      size_t len)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !target_surface || !kind || !buf || len == 0)
       return -1;
 
@@ -207,14 +207,14 @@ int db2_calibration_profile_read(const char *target_surface, const char *kind,
    return -1;
 }
 
-int db2_calibration_audit_stats(const char *target_surface, const char *kind,
-                                const char *scope_kind, const char *scope_id, int window_rows,
-                                db2_calibration_bucket_t *buckets, int max_buckets)
+int kb_store_calibration_audit_stats(const char *target_surface, const char *kind,
+                                     const char *scope_kind, const char *scope_id, int window_rows,
+                                     kb_store_calibration_bucket_t *buckets, int max_buckets)
 {
    if (!target_surface || !kind || !buckets || max_buckets < 1)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -229,8 +229,8 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
     * real engine. Postgres therefore gets an explicit FLOOR; sqlite keeps the bare
     * CAST, which already floors for the non-negative values this expression sees, and
     * does not depend on sqlite having been built with its optional math functions. */
-   if (max_buckets > DB2_CALIBRATION_BUCKETS)
-      max_buckets = DB2_CALIBRATION_BUCKETS;
+   if (max_buckets > KB_STORE_CALIBRATION_BUCKETS)
+      max_buckets = KB_STORE_CALIBRATION_BUCKETS;
 
    /* Initialize buckets */
    for (int i = 0; i < max_buckets; i++)
@@ -349,19 +349,20 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
    return filled;
 }
 
-int db2_calibration_conformal_window(const char *target_surface, const char *kind,
-                                     const char *scope_kind, const char *scope_id, int window_rows,
-                                     db2_calibration_conformal_row_t *rows, int max_rows)
+int kb_store_calibration_conformal_window(const char *target_surface, const char *kind,
+                                          const char *scope_kind, const char *scope_id,
+                                          int window_rows,
+                                          kb_store_calibration_conformal_row_t *rows, int max_rows)
 {
    if (!target_surface || !kind || !rows || max_rows < 1)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
-   if (max_rows > DB2_CALIBRATION_CONFORMAL_MAX)
-      max_rows = DB2_CALIBRATION_CONFORMAL_MAX;
+   if (max_rows > KB_STORE_CALIBRATION_CONFORMAL_MAX)
+      max_rows = KB_STORE_CALIBRATION_CONFORMAL_MAX;
    int limit = window_rows > 0 ? window_rows : max_rows;
    if (limit > max_rows)
       limit = max_rows;
@@ -410,9 +411,9 @@ int db2_calibration_conformal_window(const char *target_surface, const char *kin
    return n;
 }
 
-int db2_calibration_surfaces_with_data(int min_rows)
+int kb_store_calibration_surfaces_with_data(int min_rows)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -441,9 +442,10 @@ int db2_calibration_surfaces_with_data(int min_rows)
    return count;
 }
 
-int db2_calibration_surface_list(int min_rows, db2_calibration_surface_t *out, int max_out)
+int kb_store_calibration_surface_list(int min_rows, kb_store_calibration_surface_t *out,
+                                      int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
 

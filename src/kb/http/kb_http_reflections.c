@@ -173,14 +173,14 @@ int handle_post_reflections(const char *body, int body_len, char *out_buf, int o
          continue;
 
       char id[37];
-      db2_artifact_gen_id(id, sizeof(id));
+      kb_store_artifact_gen_id(id, sizeof(id));
 
       const char *scope_kind = scope_user[0] ? "user" : (scope_project[0] ? "project" : "global");
       const char *scope_id = scope_user[0] ? scope_user : scope_project;
       const char *payload_json = payload[0] ? payload : "{}";
 
-      if (db2_artifact_write(id, kind, "proposed", scope_kind, scope_id, NULL, confidence,
-                             payload_json) == 0)
+      if (kb_store_artifact_write(id, kind, "proposed", scope_kind, scope_id, NULL, confidence,
+                                  payload_json) == 0)
          created++;
    }
 
@@ -208,8 +208,8 @@ int handle_get_reflections(const char *query_string, char *out_buf, int out_cap)
    if (limit <= 0 || limit > 100)
       limit = 20;
 
-   db2_artifact_proposed_t rows[100];
-   int n = db2_artifact_list_proposed(NULL, limit, rows, limit < 100 ? limit : 100);
+   kb_store_artifact_proposed_t rows[100];
+   int n = kb_store_artifact_list_proposed(NULL, limit, rows, limit < 100 ? limit : 100);
    if (n < 0)
       n = 0;
 
@@ -243,7 +243,7 @@ int handle_post_reflection_accept(const char *artifact_id, const char *body, int
    if (!artifact_id || !artifact_id[0])
       return 400;
 
-   if (db2_artifact_set_state(artifact_id, "committed") != 0)
+   if (kb_store_artifact_set_state(artifact_id, "committed") != 0)
       return 404;
 
    char notes[256] = {0};
@@ -251,8 +251,9 @@ int handle_post_reflection_accept(const char *artifact_id, const char *body, int
       json_str(body, "notes", notes, sizeof(notes));
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
-   db2_audit_event_write(audit_id, artifact_id, NULL, NULL, NULL, NULL, NULL, 1.0, 0, NULL, NULL);
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_audit_event_write(audit_id, artifact_id, NULL, NULL, NULL, NULL, NULL, 1.0, 0, NULL,
+                              NULL);
 
    snprintf(out_buf, out_cap, "{\"id\":\"%s\",\"state\":\"committed\"}", artifact_id);
    return 200;
@@ -278,9 +279,9 @@ int handle_post_reflection_reject(const char *artifact_id, const char *body, int
       json_str(body, "counter_example", counter_example, sizeof(counter_example));
    }
 
-   if (db2_artifact_reject(artifact_id, verdict_tag[0] ? verdict_tag : NULL,
-                           verdict_scope[0] ? verdict_scope : NULL,
-                           counter_example[0] ? counter_example : NULL, NULL) != 0)
+   if (kb_store_artifact_reject(artifact_id, verdict_tag[0] ? verdict_tag : NULL,
+                                verdict_scope[0] ? verdict_scope : NULL,
+                                counter_example[0] ? counter_example : NULL, NULL) != 0)
       return 404;
 
    snprintf(out_buf, out_cap, "{\"id\":\"%s\",\"state\":\"rejected\"}", artifact_id);
@@ -317,14 +318,14 @@ int handle_post_feedback_in_session(const char *body, int body_len, char *out_bu
             content);
 
    char id[37];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
-   if (db2_artifact_write(id, kind, "committed", scope_user[0] ? "user" : "global",
-                          scope_user[0] ? scope_user : "anon", NULL, 1.0, payload) != 0)
+   if (kb_store_artifact_write(id, kind, "committed", scope_user[0] ? "user" : "global",
+                               scope_user[0] ? scope_user : "anon", NULL, 1.0, payload) != 0)
       return 500;
 
    if (session_id[0])
-      db2_artifact_cite(id, "session", session_id);
+      kb_store_artifact_cite(id, "session", session_id);
 
    snprintf(out_buf, out_cap, "{\"id\":\"%s\",\"kind\":\"%s\",\"state\":\"committed\"}", id, kind);
    return 201;

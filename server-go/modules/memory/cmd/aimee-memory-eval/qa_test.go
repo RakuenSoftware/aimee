@@ -20,7 +20,7 @@ func moduleEvaluationFixture(t *testing.T) (string, string) {
 		}
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	script := filepath.Join(t.TempDir(), "embed.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf '[1,0,0]\\n'\n"), 0700); err != nil {
 		t.Fatal(err)

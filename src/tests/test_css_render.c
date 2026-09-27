@@ -5,14 +5,14 @@
 #include "config.h"
 #include "css_analyze.h"
 #include "css_render_oracle.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "../modules/kb/c/code_index.h"
 #include "../modules/kb/c/css_graph.h"
 #include "../modules/kb/c/css_migration.h"
 #include "../modules/kb/c/css_render.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"
 
 #include <assert.h>
@@ -77,29 +77,29 @@ static int compare_provider(const char *before_json, const char *after_json, int
 static void test_injected_compare_provider(void)
 {
    int before_valid = 7, after_valid = 7, available = 7, equivalent = 7, diff_count = 7;
-   aimee_db2_register_css_render_compare_provider(NULL);
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == -1);
+   aimee_kb_store_register_css_render_compare_provider(NULL);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == -1);
    assert(before_valid == 0 && after_valid == 0 && available == 0 && equivalent == 0 &&
           diff_count == 0);
 
-   aimee_db2_register_css_render_compare_provider(compare_provider);
+   aimee_kb_store_register_css_render_compare_provider(compare_provider);
    compare_result = 1;
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == -1);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == -1);
    compare_result = 0;
    compare_invalid = 1;
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == -1);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == -1);
    compare_invalid = 2;
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == -1);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == -1);
    compare_invalid = 3;
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == -1);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == -1);
    compare_invalid = 0;
-   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
-                                 &equivalent, &diff_count) == 0);
+   assert(kb_store_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                      &equivalent, &diff_count) == 0);
    assert(before_valid == 1 && after_valid == 1 && available == 1 && equivalent == 1 &&
           diff_count == 0);
 }
@@ -108,61 +108,63 @@ int main(void)
 {
    test_injected_compare_provider();
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    set_config(1);
 
    /* Build one migration unit (Button.tsx) via the enumerate path. */
-   int64_t pid = db2_code_index_project_upsert("rend", "/rend");
-   int64_t css_fid = db2_code_index_file_upsert(pid, "styles.css", "2026-01-01T00:00:00Z");
+   int64_t pid = kb_store_code_index_project_upsert("rend", "/rend");
+   int64_t css_fid = kb_store_code_index_file_upsert(pid, "styles.css", "2026-01-01T00:00:00Z");
    css_stylesheet_t *ss = css_analyze(".btn { color: black; }", 22);
-   assert(ss && db2_css_graph_replace(css_fid, ss->rules, ss->rule_count) == 0);
+   assert(ss && kb_store_css_graph_replace(css_fid, ss->rules, ss->rule_count) == 0);
    css_stylesheet_free(ss);
-   int64_t comp = db2_code_index_file_upsert(pid, "Button.tsx", "2026-01-01T00:00:00Z");
+   int64_t comp = kb_store_code_index_file_upsert(pid, "Button.tsx", "2026-01-01T00:00:00Z");
    const char *tsx = "<button className=\"btn\" />";
    char toks[16][CSS_CLASS_TOKEN_MAX];
    int nt = css_extract_class_tokens(tsx, strlen(tsx), toks, 16);
-   assert(db2_css_component_resolve(comp, toks, nt) == 0);
-   assert(db2_css_migration_enumerate("rend") == 1);
+   assert(kb_store_css_component_resolve(comp, toks, nt) == 0);
+   assert(kb_store_css_migration_enumerate("rend") == 1);
 
    /* phase validation: only before/after are accepted. */
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "sideways", SNAP_A, "t") == -1);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "sideways", SNAP_A, "t") == -1);
 
    /* store + round-trip get. */
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_A, "t1") == 1);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_A, "t1") == 1);
    char *got = NULL;
-   assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
+   assert(kb_store_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
    assert(got && strcmp(got, SNAP_A) == 0);
    free(got);
 
    /* equivalent before/after -> verdict equivalent, unit oracle_equivalent=1. */
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "after", SNAP_A, "t2") == 1);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "after", SNAP_A, "t2") == 1);
    css_render_verdict_t v;
-   assert(db2_css_render_oracle_evaluate("rend", "Button.tsx", "t3", &v) == 0);
+   assert(kb_store_css_render_oracle_evaluate("rend", "Button.tsx", "t3", &v) == 0);
    assert(v.available == 1 && v.equivalent == 1 && v.diff_count == 0);
    css_migration_unit_t units[8];
-   assert(db2_css_migration_list("rend", NULL, units, 8) == 1);
+   assert(kb_store_css_migration_list("rend", NULL, units, 8) == 1);
    assert(units[0].oracle_equivalent == 1);
 
    /* upsert after with a changed value -> not equivalent, oracle_equivalent=0. */
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "after", SNAP_B, "t4") == 1);
-   assert(db2_css_render_oracle_evaluate("rend", "Button.tsx", "t5", &v) == 0);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "after", SNAP_B, "t4") == 1);
+   assert(kb_store_css_render_oracle_evaluate("rend", "Button.tsx", "t5", &v) == 0);
    assert(v.available == 1 && v.equivalent == 0 && v.diff_count == 1);
-   assert(db2_css_migration_list("rend", NULL, units, 8) == 1 && units[0].oracle_equivalent == 0);
+   assert(kb_store_css_migration_list("rend", NULL, units, 8) == 1 &&
+          units[0].oracle_equivalent == 0);
 
    /* A re-added checkout cannot read the old generation's rendered evidence;
     * the next capture creates a generation-2 row while retaining history. */
    char gen_err[256] = "";
-   assert(aimee_pg_exec(db2_conn(), "UPDATE projects SET current_generation=2 WHERE name='rend'",
-                        gen_err, sizeof(gen_err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(),
+                        "UPDATE projects SET current_generation=2 WHERE name='rend'", gen_err,
+                        sizeof(gen_err)) == 0);
    got = NULL;
-   assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 0);
+   assert(kb_store_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 0);
    assert(got == NULL);
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_B, "t5b") == 1);
-   assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_B, "t5b") == 1);
+   assert(kb_store_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
    assert(got && strcmp(got, SNAP_B) == 0);
    free(got);
    aimee_pg_stmt_t *count =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT COUNT(*) FROM css_render_snapshots"
                         " WHERE project='rend' AND unit_path='Button.tsx' AND phase='before'",
                         gen_err, sizeof(gen_err));
@@ -172,16 +174,16 @@ int main(void)
    aimee_pg_finalize(count);
 
    /* a unit with no snapshots -> conservative unknown (available=0). */
-   assert(db2_css_render_oracle_evaluate("rend", "Ghost.tsx", "t6", &v) == 0);
+   assert(kb_store_css_render_oracle_evaluate("rend", "Ghost.tsx", "t6", &v) == 0);
    assert(v.available == 0 && v.equivalent == 0 && strstr(v.summary, "unknown"));
 
    /* gate off: store + evaluate become no-ops. */
    set_config(0);
-   assert(db2_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_A, "t7") == 0);
-   assert(db2_css_render_oracle_evaluate("rend", "Button.tsx", "t8", &v) == 0);
+   assert(kb_store_css_render_snapshot_store("rend", "Button.tsx", "before", SNAP_A, "t7") == 0);
+   assert(kb_store_css_render_oracle_evaluate("rend", "Button.tsx", "t8", &v) == 0);
    assert(strstr(v.summary, "disabled"));
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("css_render: all tests passed\n");
    return 0;
 }

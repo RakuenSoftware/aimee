@@ -7,12 +7,12 @@
 #include "cross_repo_deps.h"
 
 #include "aimee.h"
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "cross_repo_review.h"
 #include "cross_repo_stats.h"
-#include "db2.h"
+#include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -561,8 +561,8 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
             amb_push(ctx->amb, sym, ctx->project, defs[rep].repo, ev, score);
       }
       else
-         db2_cross_repo_review_upsert(ctx->repo_set_hash, sym, ctx->project, defs[rep].repo, ev,
-                                      score, "ambiguous", 0, ctx->queue_max);
+         kb_store_cross_repo_review_upsert(ctx->repo_set_hash, sym, ctx->project, defs[rep].repo,
+                                           ev, score, "ambiguous", 0, ctx->queue_max);
    }
 
    /* H1 structural-edge gate (precision-hardening §1): a non-LOW edge REQUIRES a
@@ -626,7 +626,7 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
       *out_n = 0;
    if (truncated)
       *truncated = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !opts || !out_edges || !out_n)
       return -1;
    if (!config_kb_curator_cross_repo_graph_enabled())
@@ -651,9 +651,9 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
    int a_idx = desc_index(&descs, project);
 
    char repo_set_hash[24] = "";
-   db2_cross_repo_repo_set_hash(repo_set_hash, sizeof(repo_set_hash));
+   kb_store_cross_repo_repo_set_hash(repo_set_hash, sizeof(repo_set_hash));
    int64_t bsv = 0;
-   db2_cross_repo_meta_read(NULL, &bsv, NULL, 0);
+   kb_store_cross_repo_meta_read(NULL, &bsv, NULL, 0);
 
    /* repos A imports (resolved to a single repo) — the import-route set. */
    char imp_seen[CRD_MAX_REPOS];
@@ -708,7 +708,7 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
    /* H1 structural-edge gate: repos A has a precomputed cross_repo_route to (H0d).
     * Read the inter-repo route adjacency once (off the per-candidate path) so the
     * flush can require a structural route in-memory without an N+1 query.
-    * Concurrency: db2_cross_repo_rebuild_routes rebuilds the table inside a single
+    * Concurrency: kb_store_cross_repo_rebuild_routes rebuilds the table inside a single
     * BEGIN/DELETE/INSERT/COMMIT txn, so under Postgres MVCC this one SELECT sees a
     * complete pre- or post-rebuild snapshot — never a half-rebuilt table. A rebuild
     * committing between this load and the later candidate queries can at worst use
@@ -1058,7 +1058,7 @@ static int agg_push(edge_acc_t *a, const xrepo_dep_edge_t *src)
 static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edge_acc_t *agg,
                           int *trunc)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !target || !opts || !agg || !trunc)
       return -1;
 

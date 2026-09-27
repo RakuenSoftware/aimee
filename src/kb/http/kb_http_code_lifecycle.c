@@ -15,9 +15,9 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "modules/kb/c/code_project_lifecycle.h"
-#include "modules/kb/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
+#include "modules/kb/c/cross_repo_stats.h" /* kb_store_cross_repo_set_trust, recompute_blocked_symbols */
 #include "modules/kb/c/cross_repo_classify.h"
-#include "modules/kb/c/lifecycle.h" /* db2_is_initialized */
+#include "modules/kb/c/lifecycle.h" /* kb_store_is_initialized */
 #include "kb_reqctx.h"
 
 #include <stdio.h>
@@ -117,7 +117,7 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
    if (strcmp(operation, "detach") == 0)
    {
       int64_t generation = 0;
-      rc = db2_code_project_detach(project, principal, &generation);
+      rc = kb_store_code_project_detach(project, principal, &generation);
       if (rc == 0)
       {
          cJSON *resp = cJSON_CreateObject();
@@ -146,8 +146,9 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
          cJSON_Delete(root);
          return code_scan_write_error(out_buf, out_cap, "confirmed purge requires reason");
       }
-      rc = hash[0] ? db2_code_project_purge_confirm(project, hash, principal, reason, &manifest)
-                   : db2_code_project_purge_manifest(project, &manifest);
+      rc = hash[0]
+               ? kb_store_code_project_purge_confirm(project, hash, principal, reason, &manifest)
+               : kb_store_code_project_purge_manifest(project, &manifest);
       if (rc == 0)
       {
          cJSON_Delete(root);
@@ -161,9 +162,9 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
          cJSON_Delete(root);
          return code_scan_write_error(out_buf, out_cap, "confirmed gc requires reason");
       }
-      rc = hash[0] ? db2_code_project_gc_confirm(project, retention_days, hash, principal, reason,
-                                                 &manifest)
-                   : db2_code_project_gc_manifest(project, retention_days, &manifest);
+      rc = hash[0] ? kb_store_code_project_gc_confirm(project, retention_days, hash, principal,
+                                                      reason, &manifest)
+                   : kb_store_code_project_gc_manifest(project, retention_days, &manifest);
       if (rc == 0)
       {
          cJSON_Delete(root);
@@ -200,7 +201,7 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
 
 /* S7: POST /v1/code/repo-trust {project, trust:"trusted"|"untrusted", actor?,
  * request_id?}. `owner` (caller holds the unscoped owner credential) is required:
- * a scoped token must not be able to flip trust. Applies the audited db2 trust
+ * a scoped token must not be able to flip trust. Applies the audited kb_store trust
  * write and, on a real transition, recomputes the blocked_symbols frequency model
  * (best-effort — the trust write has already committed and bumped trust_epoch,
  * which invalidates cached results either way). */
@@ -238,7 +239,7 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"trust must be 'trusted' or 'untrusted'\"}");
       return 400;
    }
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"failed to open knowledge service store\"}");
       return 503;
@@ -246,8 +247,8 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
 
    char prior[16] = "";
    int changed = 0;
-   int rc =
-       db2_cross_repo_set_trust(project, trust, actor, request_id, prior, sizeof(prior), &changed);
+   int rc = kb_store_cross_repo_set_trust(project, trust, actor, request_id, prior, sizeof(prior),
+                                          &changed);
    if (rc == 1)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"no such project\"}");
@@ -263,7 +264,7 @@ int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, in
    if (changed)
    {
       if (config_present())
-         recomputed = db2_cross_repo_recompute_blocked_symbols(
+         recomputed = kb_store_cross_repo_recompute_blocked_symbols(
              config_kb_curator_cross_repo_k(), config_kb_curator_cross_repo_m(),
              config_kb_curator_cross_repo_len_min());
    }

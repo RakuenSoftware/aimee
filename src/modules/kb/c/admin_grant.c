@@ -1,17 +1,17 @@
-/* db2/admin_grant.c: P1 tenancy org-admin grants (kb_admin_grant) — Postgres via
- * libpq. See admin_grant.h. Mirrors the db2/enrollments.c access pattern.
+/* kb_store/admin_grant.c: P1 tenancy org-admin grants (kb_admin_grant) — Postgres via
+ * libpq. See admin_grant.h. Mirrors the kb_store/enrollments.c access pattern.
  * Tenant-scoped: every entry requires the RLS-enforcing Postgres backend. */
 
 #include "admin_grant.h"
-#include "db2_tenant.h"
-#include "db2_internal.h"
+#include "kb_store_tenant.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_admin_grant_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_admin_grant_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -30,15 +30,15 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_admin_grant_row_t *row)
 
 #define ADMIN_GRANT_COLS "id, identity_key, source, granted_at, granted_by, revoked_at"
 
-int db2_admin_grant_add(const char *identity_key, const char *source, const char *granted_by,
-                        int64_t *out_id)
+int kb_store_admin_grant_add(const char *identity_key, const char *source, const char *granted_by,
+                             int64_t *out_id)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !identity_key[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    const char *sql = "INSERT INTO kb_admin_grant (identity_key, source, granted_by) "
@@ -63,14 +63,14 @@ int db2_admin_grant_add(const char *identity_key, const char *source, const char
    return 0;
 }
 
-int db2_admin_grant_revoke(const char *identity_key)
+int kb_store_admin_grant_revoke(const char *identity_key)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !identity_key[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -86,14 +86,14 @@ int db2_admin_grant_revoke(const char *identity_key)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_admin_grant_is_active(const char *identity_key)
+int kb_store_admin_grant_is_active(const char *identity_key)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!identity_key || !identity_key[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char err[256] = "";
@@ -108,7 +108,7 @@ int db2_admin_grant_is_active(const char *identity_key)
    int active = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_admin_grant_row_t row;
+      kb_store_admin_grant_row_t row;
       row_from_stmt(st, &row);
       active = (row.revoked_at[0] == '\0') ? 1 : 0; /* WHERE already filters, belt-and-suspenders */
    }

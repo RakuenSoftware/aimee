@@ -257,109 +257,109 @@
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_cert_serial_support.c"
+      "test": "src/tests/test_kb_store_cert_serial_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_cjson_support.c"
+      "test": "src/tests/test_kb_store_cjson_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_cochange_support.c"
+      "test": "src/tests/test_kb_store_cochange_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_code_audit_graph_support.c"
+      "test": "src/tests/test_kb_store_code_audit_graph_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_code_import_support.c"
+      "test": "src/tests/test_kb_store_code_import_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_code_match_support.c"
+      "test": "src/tests/test_kb_store_code_match_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_dstr_support.c"
+      "test": "src/tests/test_kb_store_dstr_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_extractor_support.c"
+      "test": "src/tests/test_kb_store_extractor_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_log_support.c"
+      "test": "src/tests/test_kb_store_log_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_management_read_support.c"
+      "test": "src/tests/test_kb_store_management_read_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_model_validation_support.c"
+      "test": "src/tests/test_kb_store_model_validation_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_random_support.c"
+      "test": "src/tests/test_kb_store_random_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_rel_seed_support.c"
+      "test": "src/tests/test_kb_store_rel_seed_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_rel_type_support.c"
+      "test": "src/tests/test_kb_store_rel_type_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_runtime_config_support.c"
+      "test": "src/tests/test_kb_store_runtime_config_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_sketch_support.c"
+      "test": "src/tests/test_kb_store_sketch_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_text_support.c"
+      "test": "src/tests/test_kb_store_text_support.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "kb",
-      "test": "src/tests/test_db2_time_support.c"
+      "test": "src/tests/test_kb_store_time_support.c"
     },
     {
       "ctest": false,

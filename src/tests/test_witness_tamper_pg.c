@@ -29,10 +29,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
-#include "modules/kb/c/db2_witness_checkpoint.h"
-#include "modules/kb/c/db2_witness_emit.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
+#include "modules/kb/c/kb_store_witness_emit.h"
 #include "modules/kb/c/db_postgres.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_cadence.h"
@@ -148,12 +148,12 @@ int main(void)
       return 1;
    }
    setenv("AIMEE_HOME", home, 1);
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "db2_init failed for %s\n", url);
+      fprintf(stderr, "kb_store_init failed for %s\n", url);
       return 1;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    MUST(conn != NULL, "no database connection");
 
    for (int i = 0; i < 5; i++)
@@ -172,13 +172,13 @@ int main(void)
       return 1;
    }
    int64_t cp_seq = -1;
-   if (db2_witness_checkpoint_produce(&cp_seq) != DB2_WITNESS_CP_OK)
+   if (kb_store_witness_checkpoint_produce(&cp_seq) != KB_STORE_WITNESS_CP_OK)
    {
       fprintf(stderr, "baseline checkpoint production failed\n");
       return 1;
    }
-   db2_witness_emit_stats_t s;
-   if (db2_witness_emit_run(capture_sink, NULL, 256, &s) != DB2_WITNESS_EMIT_OK)
+   kb_store_witness_emit_stats_t s;
+   if (kb_store_witness_emit_run(capture_sink, NULL, 256, &s) != KB_STORE_WITNESS_EMIT_OK)
    {
       fprintf(stderr, "baseline emission failed\n");
       return 1;
@@ -203,7 +203,7 @@ int main(void)
    }
    /* The checkpoint producer must refuse rather than sign over a divergent shard. */
    int64_t ignored = -1;
-   if (db2_witness_checkpoint_produce(&ignored) != DB2_WITNESS_CP_HEAD_MISMATCH)
+   if (kb_store_witness_checkpoint_produce(&ignored) != KB_STORE_WITNESS_CP_HEAD_MISMATCH)
    {
       fprintf(stderr, "SCENARIO 1 FAILED: producer did not refuse on head_log_mismatch\n");
       return 1;
@@ -249,8 +249,8 @@ int main(void)
     * attacker's rewrite, and compare the two copies together. */
    MUST(exec_sql(conn, "DELETE FROM kb_vault_witness_emit_cursor") == 0,
         "emission cursor reset did not run");
-   db2_witness_emit_stats_t s2;
-   if (db2_witness_emit_run(capture_sink, NULL, 256, &s2) != DB2_WITNESS_EMIT_OK)
+   kb_store_witness_emit_stats_t s2;
+   if (kb_store_witness_emit_run(capture_sink, NULL, 256, &s2) != KB_STORE_WITNESS_EMIT_OK)
    {
       fprintf(stderr, "post-tamper emission failed\n");
       return 1;
@@ -322,8 +322,8 @@ int main(void)
       MUST(vault_witness_signer_identity(cur_pub, cur_id) == 0, "identity derivation failed");
       int64_t unknown = -1;
       char sample[64] = "";
-      int cov = db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
-                                                       sizeof sample);
+      int cov = kb_store_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
+                                                            sizeof sample);
       if (cov != 0)
       {
          fprintf(stderr,
@@ -344,8 +344,8 @@ int main(void)
       MUST(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
                           "SET signer_key_id = decode(repeat('be',16),'hex')") == 0,
            "signer_key_id substitution did not run");
-      if (db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
-                                                 sizeof sample) != 0 ||
+      if (kb_store_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
+                                                      sizeof sample) != 0 ||
           unknown < 1)
       {
          fprintf(stderr, "SCENARIO 3 FAILED: foreign signer_key_id not reported (unknown=%lld)\n",
@@ -382,12 +382,12 @@ int main(void)
     * The foreign signer_key_id planted above is restored first so this measures the
     * signature check, not the leftover from scenario 3. */
    {
-      db2_witness_verify_report_t vr;
+      kb_store_witness_verify_report_t vr;
       uint8_t cur_pub[32], cur_id[16];
       MUST(vault_witness_signer_identity(cur_pub, cur_id) == 0, "identity derivation failed");
 
       /* Unknown key is detected. */
-      if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
+      if (kb_store_witness_checkpoint_verify_run(256, &vr) != 0)
       {
          fprintf(stderr, "SCENARIO 4 FAILED: verify run could not execute\n");
          return 1;
@@ -416,7 +416,7 @@ int main(void)
          MUST(exec_sql(conn, sql) == 0, "signer_key_id restore did not run");
          /* Sanity: with the body restored the run must be clean again, otherwise the
           * bad-signature result below would not be attributable to the corruption. */
-         if (db2_witness_checkpoint_verify_run(256, &vr) != 0 || vr.bad_signature != 0 ||
+         if (kb_store_witness_checkpoint_verify_run(256, &vr) != 0 || vr.bad_signature != 0 ||
              vr.unknown_key != 0)
          {
             fprintf(stderr,
@@ -429,7 +429,7 @@ int main(void)
                              "SET signature = decode(repeat('7f',64),'hex')") == 0,
               "signature corruption did not run");
       }
-      if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
+      if (kb_store_witness_checkpoint_verify_run(256, &vr) != 0)
       {
          fprintf(stderr, "SCENARIO 4 FAILED: verify run could not execute after restore\n");
          return 1;
@@ -447,7 +447,7 @@ int main(void)
              (long long)vr.checked, (long long)vr.bad_signature);
    }
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_tamper_pg: PASSED\n");
    return 0;
 }

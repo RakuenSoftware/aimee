@@ -10,7 +10,7 @@
 #include <string.h>
 
 static int claims, completions, providers, fail_provider, fail_commit, stale, malformed;
-void db2_lease_release_idle(void)
+void kb_store_lease_release_idle(void)
 {
 }
 cJSON *kb_module_memory_data(const cJSON *request)

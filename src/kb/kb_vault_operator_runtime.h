@@ -11,25 +11,26 @@
 
 typedef struct kb_vault_operator_runtime_platform
 {
-   int (*read_status)(db2_vault_operator_runtime_t *, kb_vault_operator_status_t *);
+   int (*read_status)(kb_store_vault_operator_runtime_t *, kb_vault_operator_status_t *);
    int (*singleton_revalidate)(kb_vault_tpm_runtime_lock_t *);
    int (*random)(uint8_t *, size_t);
    vault_custody_auth_result_t (*authorization_preflight)(const void *, size_t, uint64_t);
    vault_custody_auth_result_t (*authorization_preflight_current)(const void *, size_t, uint64_t *);
 
-   int (*dispatch)(const uint8_t[16], db2_vault_operator_rewrap_binding_t *, int *);
+   int (*dispatch)(const uint8_t[16], kb_store_vault_operator_rewrap_binding_t *, int *);
    int (*reserve)(const uint8_t[16], const uint8_t[16], int64_t, int64_t,
-                  db2_vault_operator_rewrap_binding_t *, int *);
-   int (*active)(db2_vault_operator_rewrap_binding_t *, int *);
-   int (*completed)(const uint8_t[16], const uint8_t[16], db2_vault_operator_completed_t *);
-   int (*completed_active)(const uint8_t[16], db2_vault_operator_completed_t *);
-   int (*current_check_page)(const db2_vault_rewrap_cursor_t *, int, db2_vault_rewrap_check_t *,
-                             size_t, size_t *, db2_vault_rewrap_cursor_t *, int64_t *);
-   int (*open_completed)(const db2_vault_operator_completed_t *,
-                         db2_vault_operator_open_result_t *);
+                  kb_store_vault_operator_rewrap_binding_t *, int *);
+   int (*active)(kb_store_vault_operator_rewrap_binding_t *, int *);
+   int (*completed)(const uint8_t[16], const uint8_t[16], kb_store_vault_operator_completed_t *);
+   int (*completed_active)(const uint8_t[16], kb_store_vault_operator_completed_t *);
+   int (*current_check_page)(const kb_store_vault_rewrap_cursor_t *, int,
+                             kb_store_vault_rewrap_check_t *, size_t, size_t *,
+                             kb_store_vault_rewrap_cursor_t *, int64_t *);
+   int (*open_completed)(const kb_store_vault_operator_completed_t *,
+                         kb_store_vault_operator_open_result_t *);
    int (*open_idle)(const uint8_t[16], int64_t, int64_t, int64_t,
-                    db2_vault_operator_open_result_t *);
-   int (*open_event)(const uint8_t[32], db2_vault_operator_open_event_t *);
+                    kb_store_vault_operator_open_result_t *);
+   int (*open_event)(const uint8_t[32], kb_store_vault_operator_open_event_t *);
    int (*recover_uncertain)(void);
 
    vault_reseal_orchestrator_result_t (*orchestrator_run)(
@@ -54,14 +55,14 @@ typedef struct kb_vault_operator_runtime_platform
 
 typedef struct
 {
-   db2_vault_operator_runtime_t *database;
+   kb_store_vault_operator_runtime_t *database;
    kb_vault_tpm_runtime_lock_t *singleton;
    kb_vault_activation_latch_t *activation;
    const kb_vault_operator_runtime_platform_t *platform;
    vault_reseal_orchestrator_deps_t orchestrator_deps;
    pthread_mutex_t mutex;
-   db2_vault_operator_open_result_t activation_open;
-   db2_vault_operator_open_event_t activation_event;
+   kb_store_vault_operator_open_result_t activation_open;
+   kb_store_vault_operator_open_event_t activation_event;
    kb_vault_operator_status_t activation_status;
    int activation_proof_valid;
    int activation_has_event;
@@ -73,13 +74,14 @@ typedef struct
 /* Production binding. The database runtime and TPM singleton remain owned by
  * kb_main and must outlive this object. The activation latch is likewise
  * caller-owned. */
-int kb_vault_operator_runtime_init(kb_vault_operator_runtime_t *, db2_vault_operator_runtime_t *,
+int kb_vault_operator_runtime_init(kb_vault_operator_runtime_t *,
+                                   kb_store_vault_operator_runtime_t *,
                                    kb_vault_tpm_runtime_lock_t *, kb_vault_activation_latch_t *);
 
 /* Injected seam for the focused choreography suite. Passing NULL deps selects
  * the dedicated production DB adapter and the ordinary TPM2 D2 custody seam. */
 int kb_vault_operator_runtime_init_with_platform(kb_vault_operator_runtime_t *,
-                                                 db2_vault_operator_runtime_t *,
+                                                 kb_store_vault_operator_runtime_t *,
                                                  kb_vault_tpm_runtime_lock_t *,
                                                  kb_vault_activation_latch_t *,
                                                  const kb_vault_operator_runtime_platform_t *,

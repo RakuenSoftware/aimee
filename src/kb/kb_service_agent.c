@@ -35,14 +35,14 @@ int kb_handle_rules_list(int fd, cJSON *req)
    if (limit > 1024)
       limit = 1024;
 
-   cJSON *resp = db2_kb_service_rules_list_json(limit);
+   cJSON *resp = kb_store_kb_service_rules_list_json(limit);
    return kb_reply_or_error(fd, resp, "failed to list rules");
 }
 
 int kb_handle_rules_generate(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_rules_generate_json();
+   cJSON *resp = kb_store_kb_service_rules_generate_json();
    return kb_reply_or_error(fd, resp, "failed to generate rules");
 }
 
@@ -51,14 +51,14 @@ int kb_handle_rules_export_jsonl(int fd, cJSON *req)
    cJSON *path_j = cJSON_GetObjectItemCaseSensitive(req, "path");
    if (!cJSON_IsString(path_j) || !path_j->valuestring[0])
       return kb_send_error(fd, "missing path");
-   cJSON *resp = db2_kb_service_rules_export_jsonl_json(path_j->valuestring);
+   cJSON *resp = kb_store_kb_service_rules_export_jsonl_json(path_j->valuestring);
    return kb_reply_or_error(fd, resp, "rules export failed");
 }
 
 int kb_handle_tool_registry_snapshot(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_tool_registry_snapshot_json();
+   cJSON *resp = kb_store_kb_service_tool_registry_snapshot_json();
    if (resp)
    {
       /* Federate the tool DEFS of MCP plugins THIS kb hosts (config install: kb)
@@ -79,7 +79,7 @@ int kb_handle_tool_registry_lookup(int fd, cJSON *req)
    cJSON *name = cJSON_GetObjectItemCaseSensitive(req, "name");
    if (!cJSON_IsString(name))
       return kb_send_error(fd, "missing name");
-   cJSON *resp = db2_kb_service_tool_registry_lookup_json(name->valuestring);
+   cJSON *resp = kb_store_kb_service_tool_registry_lookup_json(name->valuestring);
    return kb_reply_or_error(fd, resp, "tool_registry lookup failed");
 }
 
@@ -142,7 +142,7 @@ int kb_handle_rules_insert(int fd, cJSON *req)
    const char *pol_s = cJSON_IsString(pol) ? pol->valuestring : "positive";
    const char *desc_s = cJSON_IsString(desc) ? desc->valuestring : "";
    int weight = cJSON_IsNumber(wt) ? (int)wt->valuedouble : 5;
-   cJSON *resp = db2_kb_service_rules_insert_json(pol_s, title->valuestring, desc_s, weight);
+   cJSON *resp = kb_store_kb_service_rules_insert_json(pol_s, title->valuestring, desc_s, weight);
    return kb_reply_or_error(fd, resp, "rule insert failed");
 }
 
@@ -156,21 +156,21 @@ int kb_handle_collab_rules_propose(int fd, cJSON *req)
    const char *reason = cJSON_IsString(reason_j) ? reason_j->valuestring : "";
    const char *by = cJSON_IsString(by_j) ? by_j->valuestring : "agent";
 
-   cJSON *resp = db2_kb_service_collab_rules_propose_json(text_j->valuestring, reason, by);
+   cJSON *resp = kb_store_kb_service_collab_rules_propose_json(text_j->valuestring, reason, by);
    return kb_reply_or_error(fd, resp, "failed to propose collab rule");
 }
 
 int kb_handle_collab_rules_list(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_collab_rules_list_json();
+   cJSON *resp = kb_store_kb_service_collab_rules_list_json();
    return kb_reply_or_error(fd, resp, "failed to list collab rules");
 }
 
 int kb_handle_collab_rules_list_active(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_collab_rules_list_active_json();
+   cJSON *resp = kb_store_kb_service_collab_rules_list_active_json();
    return kb_reply_or_error(fd, resp, "failed to list active collab rules");
 }
 
@@ -190,19 +190,19 @@ static int kb_handle_collab_rules_action(int fd, cJSON *req, cJSON *(*action)(in
 
 int kb_handle_collab_rules_approve(int fd, cJSON *req)
 {
-   return kb_handle_collab_rules_action(fd, req, db2_kb_service_collab_rules_approve_json,
+   return kb_handle_collab_rules_action(fd, req, kb_store_kb_service_collab_rules_approve_json,
                                         "failed to approve collab rule");
 }
 
 int kb_handle_collab_rules_reject(int fd, cJSON *req)
 {
-   return kb_handle_collab_rules_action(fd, req, db2_kb_service_collab_rules_reject_json,
+   return kb_handle_collab_rules_action(fd, req, kb_store_kb_service_collab_rules_reject_json,
                                         "failed to reject collab rule");
 }
 
 int kb_handle_collab_rules_retire(int fd, cJSON *req)
 {
-   return kb_handle_collab_rules_action(fd, req, db2_kb_service_collab_rules_retire_json,
+   return kb_handle_collab_rules_action(fd, req, kb_store_kb_service_collab_rules_retire_json,
                                         "failed to retire collab rule");
 }
 
@@ -210,19 +210,19 @@ int kb_handle_collab_rules_inject(int fd, cJSON *req)
 {
    cJSON *epoch_j = cJSON_GetObjectItemCaseSensitive(req, "agent_last_epoch");
    int epoch = cJSON_IsNumber(epoch_j) ? (int)epoch_j->valuedouble : -1;
-   cJSON *resp = db2_kb_service_collab_rules_inject_json(epoch);
+   cJSON *resp = kb_store_kb_service_collab_rules_inject_json(epoch);
    return kb_reply_or_error(fd, resp, "failed to render collab rules");
 }
 
 int kb_handle_learning_propose_signal(int fd, cJSON *req)
 {
-   cJSON *resp = db2_kb_service_learning_propose_signal_json(req);
+   cJSON *resp = kb_store_kb_service_learning_propose_signal_json(req);
    return kb_reply_or_error(fd, resp, "failed to record learning signal");
 }
 
 int kb_handle_learning_record_application(int fd, cJSON *req)
 {
-   cJSON *resp = db2_kb_service_learning_record_application_json(req);
+   cJSON *resp = kb_store_kb_service_learning_record_application_json(req);
    return kb_reply_or_error(fd, resp, "failed to record learning application");
 }
 
@@ -246,8 +246,8 @@ int kb_handle_agent_outcome_record(int fd, cJSON *req)
    int64_t tokens = cJSON_IsNumber(tokens_j) ? (int64_t)tokens_j->valuedouble : 0;
    const char *tep = cJSON_IsString(tep_j) ? tep_j->valuestring : "";
 
-   cJSON *resp = db2_kb_service_agent_outcome_record_json(agent, role, kind, reason, turns, tools,
-                                                          tokens, tep);
+   cJSON *resp = kb_store_kb_service_agent_outcome_record_json(agent, role, kind, reason, turns,
+                                                               tools, tokens, tep);
    return kb_reply_or_error(fd, resp, "failed to record agent outcome");
 }
 
@@ -258,14 +258,14 @@ int kb_handle_agent_hint_consume(int fd, cJSON *req)
    const char *role = cJSON_IsString(role_j) ? role_j->valuestring : "";
    const char *prompt = cJSON_IsString(prompt_j) ? prompt_j->valuestring : "";
 
-   cJSON *resp = db2_kb_service_agent_hint_consume_json(role, prompt);
+   cJSON *resp = kb_store_kb_service_agent_hint_consume_json(role, prompt);
    return kb_reply_or_error(fd, resp, "failed to consume agent hint");
 }
 
 int kb_handle_rules_decay(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_rules_decay_json();
+   cJSON *resp = kb_store_kb_service_rules_decay_json();
    return kb_reply_or_error(fd, resp, "failed to decay rules");
 }
 
@@ -283,8 +283,8 @@ int kb_handle_decision_log_insert(int fd, cJSON *req)
    const char *rationale = cJSON_IsString(rat_j) ? rat_j->valuestring : "";
    const char *assumptions = cJSON_IsString(as_j) ? as_j->valuestring : "";
 
-   cJSON *resp = db2_kb_service_decision_log_insert_json(task_id, options, chosen_j->valuestring,
-                                                         rationale, assumptions);
+   cJSON *resp = kb_store_kb_service_decision_log_insert_json(
+       task_id, options, chosen_j->valuestring, rationale, assumptions);
    return kb_reply_or_error(fd, resp, "failed to log decision");
 }
 
@@ -295,7 +295,7 @@ int kb_handle_decision_log_list(int fd, cJSON *req)
    const char *outcome = cJSON_IsString(out_j) ? out_j->valuestring : "";
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
 
-   cJSON *resp = db2_kb_service_decision_log_list_json(outcome, limit);
+   cJSON *resp = kb_store_kb_service_decision_log_list_json(outcome, limit);
    return kb_reply_or_error(fd, resp, "failed to list decisions");
 }
 
@@ -304,7 +304,7 @@ int kb_handle_anti_pattern_list(int fd, cJSON *req)
    cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 64;
 
-   cJSON *resp = db2_kb_service_anti_pattern_list_json(max);
+   cJSON *resp = kb_store_kb_service_anti_pattern_list_json(max);
    return kb_reply_or_error(fd, resp, "failed to list anti-patterns");
 }
 
@@ -322,7 +322,8 @@ int kb_handle_anti_pattern_insert(int fd, cJSON *req)
    const char *ref = cJSON_IsString(ref_j) ? ref_j->valuestring : "";
    double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
 
-   cJSON *resp = db2_kb_service_anti_pattern_insert_json(pat_j->valuestring, desc, src, ref, conf);
+   cJSON *resp =
+       kb_store_kb_service_anti_pattern_insert_json(pat_j->valuestring, desc, src, ref, conf);
    return kb_reply_or_error(fd, resp, "failed to insert anti-pattern");
 }
 
@@ -332,7 +333,7 @@ int kb_handle_anti_pattern_delete(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "anti_pattern.delete requires id");
 
-   cJSON *resp = db2_kb_service_anti_pattern_delete_json((int64_t)id_j->valuedouble);
+   cJSON *resp = kb_store_kb_service_anti_pattern_delete_json((int64_t)id_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to delete anti-pattern");
 }
 
@@ -342,7 +343,7 @@ int kb_handle_rules_delete(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "rules.delete requires id");
 
-   cJSON *resp = db2_kb_service_rules_delete_json((int)id_j->valuedouble);
+   cJSON *resp = kb_store_kb_service_rules_delete_json((int)id_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to delete rule");
 }
 
@@ -353,8 +354,8 @@ int kb_handle_rules_update_directive_type(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(dt_j))
       return kb_send_error(fd, "rules.update_directive_type requires id and directive_type");
 
-   cJSON *resp =
-       db2_kb_service_rules_update_directive_type_json((int)id_j->valuedouble, dt_j->valuestring);
+   cJSON *resp = kb_store_kb_service_rules_update_directive_type_json((int)id_j->valuedouble,
+                                                                      dt_j->valuestring);
    return kb_reply_or_error(fd, resp, "failed to update directive type");
 }
 
@@ -369,15 +370,15 @@ int kb_handle_feedback_record(int fd, cJSON *req)
    const char *desc = cJSON_IsString(desc_j) ? desc_j->valuestring : "";
    int weight = cJSON_IsNumber(weight_j) ? (int)weight_j->valuedouble : -1;
 
-   cJSON *resp =
-       db2_kb_service_feedback_record_json(pol_j->valuestring, title_j->valuestring, desc, weight);
+   cJSON *resp = kb_store_kb_service_feedback_record_json(pol_j->valuestring, title_j->valuestring,
+                                                          desc, weight);
    if (!resp)
       return kb_send_error(fd, "failed to record feedback");
 
    /* Emit a charter evidence artifact for this feedback signal.
     * Advisory: failure is logged but does not fail the feedback RPC. */
    {
-      const char *canon_pol = db2_feedback_parse_polarity(pol_j->valuestring);
+      const char *canon_pol = kb_store_feedback_parse_polarity(pol_j->valuestring);
       if (canon_pol && (strcmp(canon_pol, "positive") == 0 || strcmp(canon_pol, "negative") == 0))
       {
          learning_evidence_write_feedback(canon_pol, title_j->valuestring, desc, NULL, NULL, 0);
@@ -392,7 +393,7 @@ int kb_handle_feedback_record(int fd, cJSON *req)
 int kb_handle_directive_expire_session(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_directive_expire_session_json();
+   cJSON *resp = kb_store_kb_service_directive_expire_session_json();
    return kb_reply_or_error(fd, resp, "failed to expire session directives");
 }
 
@@ -404,7 +405,7 @@ int kb_handle_anti_pattern_check(int fd, cJSON *req)
    const char *fp = (cJSON_IsString(fp_j) && fp_j->valuestring[0]) ? fp_j->valuestring : NULL;
    const char *cmd = (cJSON_IsString(cmd_j) && cmd_j->valuestring[0]) ? cmd_j->valuestring : NULL;
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 4;
-   cJSON *resp = db2_kb_service_anti_pattern_check_json(fp, cmd, max);
+   cJSON *resp = kb_store_kb_service_anti_pattern_check_json(fp, cmd, max);
    return kb_reply_or_error(fd, resp, "failed to check anti-patterns");
 }
 
@@ -413,35 +414,35 @@ int kb_handle_anti_pattern_bump(int fd, cJSON *req)
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "anti_pattern.bump requires id");
-   cJSON *resp = db2_kb_service_anti_pattern_bump_json((int64_t)id_j->valuedouble);
+   cJSON *resp = kb_store_kb_service_anti_pattern_bump_json((int64_t)id_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to bump anti-pattern");
 }
 
 int kb_handle_dashboard_logs(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_dashboard_logs_json();
+   cJSON *resp = kb_store_kb_service_dashboard_logs_json();
    return kb_reply_or_error(fd, resp, "failed to fetch dashboard logs");
 }
 
 int kb_handle_dashboard_reminders(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_dashboard_reminders_json();
+   cJSON *resp = kb_store_kb_service_dashboard_reminders_json();
    return kb_reply_or_error(fd, resp, "failed to fetch dashboard reminders");
 }
 
 int kb_handle_dashboard_recall(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_dashboard_recall_json();
+   cJSON *resp = kb_store_kb_service_dashboard_recall_json();
    return kb_reply_or_error(fd, resp, "failed to fetch dashboard recall");
 }
 
 int kb_handle_dashboard_directives(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_dashboard_directives_json();
+   cJSON *resp = kb_store_kb_service_dashboard_directives_json();
    return kb_reply_or_error(fd, resp, "failed to fetch dashboard directives");
 }
 

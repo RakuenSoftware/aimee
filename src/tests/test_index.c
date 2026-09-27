@@ -6,11 +6,11 @@
 #include <utime.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "modules/kb/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "canonical_index.h"
 #include "entity_edges.h"
-#include "modules/kb/c/db2_test_shim.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
 #include "util.h"
@@ -66,11 +66,11 @@ static void test_css_analysis_contract(void)
    const char *markup = "<div className=\"one two\" />";
    char tokens[4][CSS_CLASS_TOKEN_MAX];
 
-   aimee_db2_register_css_analysis_providers(NULL, NULL, NULL);
+   aimee_kb_store_register_css_analysis_providers(NULL, NULL, NULL);
    assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
    assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
 
-   aimee_db2_register_css_analysis_providers(
+   aimee_kb_store_register_css_analysis_providers(
        test_css_analyze_provider, test_css_stylesheet_free_provider, test_css_token_provider);
    css_analysis_mode = 1;
    assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
@@ -310,7 +310,7 @@ static void seed_stale_hidden_project_row(const char *root)
             "INSERT INTO terms(file_id, name, kind, line) "
             "VALUES(7002, 'stale_hidden_project_symbol', 'definition', 7);",
             root);
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
 }
 
 /* Count of files rows for (project, path). Used to assert ingest of a file
@@ -321,7 +321,7 @@ static int file_row_count(const char *project, const char *path)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id "
                         "WHERE p.name = ?1 AND f.path = ?2",
                         err, sizeof(err));
@@ -340,7 +340,7 @@ static void file_content(const char *project, const char *path, char *out, size_
    out[0] = '\0';
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT fc.content FROM file_contents fc JOIN files f ON f.id = fc.file_id "
                         "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND f.path = ?2",
                         err, sizeof(err));
@@ -361,7 +361,7 @@ static int cochange_pair_weight(const char *a, const char *b)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT COALESCE(SUM(weight),0) FROM entity_edges WHERE relation = 'co_edited'"
        " AND ((source = ?1 AND target = ?2) OR (source = ?2 AND target = ?1))",
        err, sizeof(err));
@@ -379,7 +379,7 @@ static int cochange_bulk_edge_count(void)
 {
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT count(*) FROM entity_edges WHERE relation = 'co_edited'"
                         " AND (source LIKE 'z%.c' OR target LIKE 'z%.c')",
                         err, sizeof(err));
@@ -430,7 +430,7 @@ int main(void)
    assert(missing_host_inspected == 0);
    canonical_index_set_exec_capture(safe_exec_capture);
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    char *project_dir = create_test_project();
 
@@ -757,12 +757,12 @@ int main(void)
 
       const char invalid_adapter[] = "adapter \x92"
                                      "body \xed\xa0\x80";
-      int64_t pid = db2_code_index_project_upsert("utf8adapter", "/remote");
+      int64_t pid = kb_store_code_index_project_upsert("utf8adapter", "/remote");
       assert(pid > 0);
-      int64_t fid = db2_code_index_file_upsert(pid, "adapter.c", "2026-07-28T00:00:00Z");
+      int64_t fid = kb_store_code_index_file_upsert(pid, "adapter.c", "2026-07-28T00:00:00Z");
       assert(fid > 0);
       code_index_file_data_t data = {.content = invalid_adapter};
-      assert(db2_code_index_file_replace(fid, &data) == 0);
+      assert(kb_store_code_index_file_replace(fid, &data) == 0);
       file_content("utf8adapter", "adapter.c", stored, sizeof(stored));
       assert(strcmp(stored, "adapter ?body ???") == 0);
       assert((unsigned char)invalid_adapter[8] == 0x92);
@@ -822,8 +822,8 @@ int main(void)
       for (int bump = 0; bump < 4; bump++)
       {
          int added = 0;
-         assert(db2_entity_edge_upsert("dates.py", "co_edited", "forecast.py", 0, 0, 0, 0,
-                                       &added) == 0);
+         assert(kb_store_entity_edge_upsert("dates.py", "co_edited", "forecast.py", 0, 0, 0, 0,
+                                            &added) == 0);
       }
 
       canonical_index_file_input_t routed[] = {
@@ -836,7 +836,7 @@ int main(void)
                                         &inspected) >= 0);
       char sql_err[256] = "";
       assert(aimee_pg_exec(
-                 db2_conn(),
+                 kb_store_conn(),
                  "INSERT INTO cross_repo_route(caller_project,definer_project,kind,confidence,"
                  "evidence) VALUES('python-consumer','python-blast','import_module','high',"
                  "'app.dates')",
@@ -1002,7 +1002,7 @@ int main(void)
    snprintf(cmd, sizeof(cmd), "rm -rf %s", project_dir);
    (void)system(cmd);
    free(project_dir);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 
    printf("all tests passed\n");
    return 0;

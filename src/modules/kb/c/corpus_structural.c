@@ -1,4 +1,4 @@
-/* db2/corpus_structural.c: deterministic corpus structural analysis. */
+/* kb_store/corpus_structural.c: deterministic corpus structural analysis. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -6,7 +6,7 @@
 #include "corpus_structural.h"
 #include "util.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
 #include "cJSON.h"
@@ -52,7 +52,7 @@ static void hash_span(const char *text, int64_t start, int64_t end, char *out, s
 {
    if (!text || start < 0 || end < start)
    {
-      db2_copy_text(out, cap, "");
+      kb_store_copy_text(out, cap, "");
       return;
    }
    uint64_t h = fnv1a_bytes(text + start, (size_t)(end - start));
@@ -61,7 +61,7 @@ static void hash_span(const char *text, int64_t start, int64_t end, char *out, s
 
 static int corpus_doc_load(int64_t doc_id, corpus_doc_text_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || doc_id <= 0)
       return -1;
 
@@ -81,15 +81,16 @@ static int corpus_doc_load(int64_t doc_id, corpus_doc_text_t *out)
 
    memset(out, 0, sizeof(*out));
    out->id = aimee_pg_column_int64(st, 0);
-   db2_copy_text(out->filename, sizeof(out->filename), aimee_pg_column_text(st, 1));
-   db2_copy_text(out->content_hash, sizeof(out->content_hash), aimee_pg_column_text(st, 2));
-   db2_copy_text(out->normalized_text, sizeof(out->normalized_text), aimee_pg_column_text(st, 3));
+   kb_store_copy_text(out->filename, sizeof(out->filename), aimee_pg_column_text(st, 1));
+   kb_store_copy_text(out->content_hash, sizeof(out->content_hash), aimee_pg_column_text(st, 2));
+   kb_store_copy_text(out->normalized_text, sizeof(out->normalized_text),
+                      aimee_pg_column_text(st, 3));
    aimee_pg_finalize(st);
    return 0;
 }
 
-const char *db2_corpus_classify_type(const char *filename, const char *normalized_text,
-                                     double *confidence_out)
+const char *kb_store_corpus_classify_type(const char *filename, const char *normalized_text,
+                                          double *confidence_out)
 {
    const char *fn = filename ? filename : "";
    const char *txt = normalized_text ? normalized_text : "";
@@ -145,16 +146,16 @@ static char *json_print_take(cJSON *root)
    return s;
 }
 
-int db2_corpus_classify_doc(int64_t doc_id, const char *operator_id)
+int kb_store_corpus_classify_doc(int64_t doc_id, const char *operator_id)
 {
    corpus_doc_text_t doc;
    if (corpus_doc_load(doc_id, &doc) != 0)
       return -1;
 
    double conf = 0.0;
-   const char *kind = db2_corpus_classify_type(doc.filename, doc.normalized_text, &conf);
+   const char *kind = kb_store_corpus_classify_type(doc.filename, doc.normalized_text, &conf);
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -178,8 +179,8 @@ int db2_corpus_classify_doc(int64_t doc_id, const char *operator_id)
       return -1;
 
    char artifact_id[37], audit_id[37];
-   db2_artifact_gen_id(artifact_id, sizeof(artifact_id));
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(artifact_id, sizeof(artifact_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
 
    cJSON *payload = cJSON_CreateObject();
    cJSON_AddNumberToObject(payload, "doc_id", (double)doc_id);
@@ -188,8 +189,8 @@ int db2_corpus_classify_doc(int64_t doc_id, const char *operator_id)
    cJSON_AddNumberToObject(payload, "confidence", conf);
    char *payload_json = json_print_take(payload);
 
-   int arc = db2_artifact_write(artifact_id, "doc_classification", "committed", "global", "",
-                                operator_id ? operator_id : "", conf, payload_json);
+   int arc = kb_store_artifact_write(artifact_id, "doc_classification", "committed", "global", "",
+                                     operator_id ? operator_id : "", conf, payload_json);
    free(payload_json);
    if (arc != 0)
       return -1;
@@ -200,16 +201,16 @@ int db2_corpus_classify_doc(int64_t doc_id, const char *operator_id)
    cJSON_AddStringToObject(after, "doc_type", kind);
    cJSON_AddNumberToObject(after, "doc_type_confidence", conf);
    char *after_json = json_print_take(after);
-   int aud =
-       db2_audit_event_write(audit_id, artifact_id, "docs", target, operator_id ? operator_id : "",
-                             "global", "", conf, 0, NULL, after_json);
+   int aud = kb_store_audit_event_write(audit_id, artifact_id, "docs", target,
+                                        operator_id ? operator_id : "", "global", "", conf, 0, NULL,
+                                        after_json);
    free(after_json);
    return aud;
 }
 
 static int delete_sections_for_doc(int64_t doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn, "DELETE FROM document_sections WHERE doc_id = ?1", err, sizeof(err));
@@ -228,7 +229,7 @@ static int update_section_end(int64_t section_id, int64_t span_start, int64_t sp
       return 0;
    char h[65];
    hash_span(text, span_start, span_end, h, sizeof(h));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn, "UPDATE document_sections SET span_end = ?1, content_hash = ?2 WHERE id = ?3", err,
@@ -247,7 +248,7 @@ static int64_t insert_section(int64_t doc_id, int64_t parent_id, int64_t ordinal
                               const char *heading, const char *heading_path, int64_t span_start,
                               int64_t span_end, const char *hash)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
@@ -316,7 +317,7 @@ static void build_heading_path(char headings[7][CORPUS_SECTION_HEADING], int dep
    }
 }
 
-int db2_corpus_sections_rebuild(int64_t doc_id)
+int kb_store_corpus_sections_rebuild(int64_t doc_id)
 {
    corpus_doc_text_t doc;
    if (corpus_doc_load(doc_id, &doc) != 0)
@@ -358,7 +359,7 @@ int db2_corpus_sections_rebuild(int64_t doc_id)
             ordinals[d] = 0;
             headings[d][0] = '\0';
          }
-         db2_copy_text(headings[depth], sizeof(headings[depth]), heading);
+         kb_store_copy_text(headings[depth], sizeof(headings[depth]), heading);
          for (int d = depth + 1; d <= 6; d++)
             headings[d][0] = '\0';
 
@@ -395,9 +396,9 @@ int db2_corpus_sections_rebuild(int64_t doc_id)
    return count;
 }
 
-int db2_corpus_sections_list(int64_t doc_id, db2_corpus_section_t *out, int max_out)
+int kb_store_corpus_sections_list(int64_t doc_id, kb_store_corpus_section_t *out, int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
    char err[CS_ERRBUF] = "";
@@ -413,18 +414,18 @@ int db2_corpus_sections_list(int64_t doc_id, db2_corpus_section_t *out, int max_
    int n = 0;
    while (n < max_out && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_corpus_section_t *r = &out[n++];
+      kb_store_corpus_section_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->id = aimee_pg_column_int64(st, 0);
       r->doc_id = aimee_pg_column_int64(st, 1);
       r->parent_id = aimee_pg_column_int64(st, 2);
       r->ordinal = aimee_pg_column_int64(st, 3);
       r->depth = aimee_pg_column_int(st, 4);
-      db2_copy_text(r->heading, sizeof(r->heading), aimee_pg_column_text(st, 5));
-      db2_copy_text(r->heading_path, sizeof(r->heading_path), aimee_pg_column_text(st, 6));
+      kb_store_copy_text(r->heading, sizeof(r->heading), aimee_pg_column_text(st, 5));
+      kb_store_copy_text(r->heading_path, sizeof(r->heading_path), aimee_pg_column_text(st, 6));
       r->span_start = aimee_pg_column_int64(st, 7);
       r->span_end = aimee_pg_column_int64(st, 8);
-      db2_copy_text(r->content_hash, sizeof(r->content_hash), aimee_pg_column_text(st, 9));
+      kb_store_copy_text(r->content_hash, sizeof(r->content_hash), aimee_pg_column_text(st, 9));
    }
    aimee_pg_finalize(st);
    return n;
@@ -432,7 +433,7 @@ int db2_corpus_sections_list(int64_t doc_id, db2_corpus_section_t *out, int max_
 
 static int64_t find_section_for_offset(int64_t doc_id, int64_t offset)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
@@ -453,7 +454,7 @@ static int64_t find_section_for_offset(int64_t doc_id, int64_t offset)
 
 static int64_t resolve_target_doc(const char *raw_target, int64_t self_doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !raw_target || !raw_target[0])
       return 0;
 
@@ -487,7 +488,7 @@ static int64_t insert_reference(int64_t from_doc_id, int64_t from_section_id, co
                                 const char *raw_target, int64_t to_doc_id, const char *resolution,
                                 double confidence)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
@@ -525,7 +526,7 @@ static int64_t insert_reference(int64_t from_doc_id, int64_t from_section_id, co
 
 static int delete_references_from_doc(int64_t doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[CS_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn, "DELETE FROM document_references WHERE from_doc_id = ?1", err, sizeof(err));
@@ -549,7 +550,7 @@ static int maybe_add_reference(int64_t doc_id, int64_t offset, const char *raw, 
                                double confidence)
 {
    char target[CORPUS_REF_TARGET_LEN];
-   db2_copy_text(target, sizeof(target), raw);
+   kb_store_copy_text(target, sizeof(target), raw);
    clean_ref_target(target);
    if (!target[0])
       return 0;
@@ -560,7 +561,7 @@ static int maybe_add_reference(int64_t doc_id, int64_t offset, const char *raw, 
    return insert_reference(doc_id, section_id, type, target, to_doc_id, resolution, confidence) > 0;
 }
 
-int db2_corpus_extract_references(int64_t doc_id)
+int kb_store_corpus_extract_references(int64_t doc_id)
 {
    corpus_doc_text_t doc;
    if (corpus_doc_load(doc_id, &doc) != 0)
@@ -608,9 +609,10 @@ int db2_corpus_extract_references(int64_t doc_id)
    return count;
 }
 
-int db2_corpus_references_list(int64_t from_doc_id, db2_corpus_reference_t *out, int max_out)
+int kb_store_corpus_references_list(int64_t from_doc_id, kb_store_corpus_reference_t *out,
+                                    int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
    char err[CS_ERRBUF] = "";
@@ -626,24 +628,24 @@ int db2_corpus_references_list(int64_t from_doc_id, db2_corpus_reference_t *out,
    int n = 0;
    while (n < max_out && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_corpus_reference_t *r = &out[n++];
+      kb_store_corpus_reference_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->id = aimee_pg_column_int64(st, 0);
       r->from_doc_id = aimee_pg_column_int64(st, 1);
       r->from_section_id = aimee_pg_column_int64(st, 2);
-      db2_copy_text(r->ref_type, sizeof(r->ref_type), aimee_pg_column_text(st, 3));
-      db2_copy_text(r->raw_target, sizeof(r->raw_target), aimee_pg_column_text(st, 4));
+      kb_store_copy_text(r->ref_type, sizeof(r->ref_type), aimee_pg_column_text(st, 3));
+      kb_store_copy_text(r->raw_target, sizeof(r->raw_target), aimee_pg_column_text(st, 4));
       r->to_doc_id = aimee_pg_column_int64(st, 5);
-      db2_copy_text(r->resolution, sizeof(r->resolution), aimee_pg_column_text(st, 6));
+      kb_store_copy_text(r->resolution, sizeof(r->resolution), aimee_pg_column_text(st, 6));
       r->confidence = aimee_pg_column_double(st, 7);
    }
    aimee_pg_finalize(st);
    return n;
 }
 
-int db2_corpus_mark_references_stale_for_doc(int64_t to_doc_id)
+int kb_store_corpus_mark_references_stale_for_doc(int64_t to_doc_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || to_doc_id <= 0)
       return -1;
    char err[CS_ERRBUF] = "";

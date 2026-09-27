@@ -12,8 +12,8 @@
 #include <string.h>
 
 #include "db1.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
 #include "approach_store.h"
@@ -222,7 +222,7 @@ int main(void)
 
    if (store_module_fixture_available())
       store_module_fixture_start();
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    test_registry_shape();
    test_no_sampler_means_no_change();

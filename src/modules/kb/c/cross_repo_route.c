@@ -6,9 +6,9 @@
 #include "cross_repo_route.h"
 
 #include "aimee.h"
-#include "db2.h"
+#include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -155,9 +155,9 @@ static int crr_count(void *conn)
    return n;
 }
 
-int db2_cross_repo_rebuild_routes(void)
+int kb_store_cross_repo_rebuild_routes(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CRR_ERRBUF] = "";

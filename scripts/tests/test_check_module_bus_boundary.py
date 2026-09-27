@@ -235,7 +235,7 @@ class ModuleBusBoundaryTests(unittest.TestCase):
 
     def test_lower_layers_are_not_peers(self) -> None:
         """Lower storage layers and bare filenames do not name peer modules."""
-        for include in ('"db1/user_memory.h"', '"db2/artifacts.h"',
+        for include in ('"db1/user_memory.h"', '"kb_store/artifacts.h"',
                         '"local_helper.h"', '<stdio.h>',
                         '"headers/util.h"'):
             with self.subTest(include=include):

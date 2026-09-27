@@ -33,8 +33,8 @@
 static int version_changed(const char *key, const char *current)
 {
    char prev[256] = "";
-   int have = (db2_kb_runtime_state_get(key, prev, sizeof(prev)) == 0 && prev[0]);
-   db2_kb_runtime_state_set(key, current);
+   int have = (kb_store_kb_runtime_state_get(key, prev, sizeof(prev)) == 0 && prev[0]);
+   kb_store_kb_runtime_state_set(key, current);
    if (!have)
       return 0;
    return strcmp(prev, current) != 0;
@@ -86,7 +86,7 @@ int kb_curator_version_replay(const char *extract_prompt_version, const char *em
    if (version_changed(CV_EXTRACT_KEY, extract_identity))
    {
       r.prompt_bumped = 1;
-      r.docs_reextracted = db2_curator_reenqueue_extract_all();
+      r.docs_reextracted = kb_store_curator_reenqueue_extract_all();
       aimee_log(LOG_INFO, "kb.curator.version",
                 "extraction identity -> %s; re-extracting %d document(s)", extract_identity,
                 r.docs_reextracted);
@@ -97,7 +97,7 @@ int kb_curator_version_replay(const char *extract_prompt_version, const char *em
     *
     * The serving identity, not the embedder's NAME or its width: pooling and prefix
     * changes keep both and still produce a different space. This is the same identity
-    * db2's drift guard records against the corpus, so the two agree on what a change is
+    * kb_store's drift guard records against the corpus, so the two agree on what a change is
     * rather than each deciding for itself.
     *
     * NOT keyed on the synthesis model: a different summariser produces different text,
@@ -110,7 +110,7 @@ int kb_curator_version_replay(const char *extract_prompt_version, const char *em
    if (version_changed(CV_EMBED_KEY, embed_identity))
    {
       r.model_bumped = 1;
-      r.artifacts_reembedded = db2_curator_reembed_all();
+      r.artifacts_reembedded = kb_store_curator_reembed_all();
       aimee_log(LOG_INFO, "kb.curator.version",
                 "embedding identity -> %s; re-embedding %d curator artifact(s)", embed_identity,
                 r.artifacts_reembedded);

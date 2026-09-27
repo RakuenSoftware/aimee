@@ -1,6 +1,6 @@
-/* db2/sketch.c: DB2 persistence for approximate sketch state (Bloom, Count-Min, HLL). */
+/* kb_store/sketch.c: KB_STORE persistence for approximate sketch state (Bloom, Count-Min, HLL). */
 #include "sketch.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -14,7 +14,7 @@ static int sketch_save_bytes(const char *sketch_kind, const char *scope_kind, co
                              const char *feature_family, const void *bytes, int byte_len,
                              uint64_t item_count, const char *params_json)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -54,7 +54,7 @@ static int sketch_load_bytes(const char *sketch_kind, const char *scope_kind, co
                              const char *feature_family, void *out_bytes, int byte_len,
                              uint64_t *out_count)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -96,16 +96,16 @@ static int sketch_load_bytes(const char *sketch_kind, const char *scope_kind, co
 
 /* ── Bloom ──────────────────────────────────────────────────────────────── */
 
-int db2_sketch_bloom_load(sketch_bloom_t *out, const char *scope_kind, const char *scope_id,
-                          const char *feature_family)
+int kb_store_sketch_bloom_load(sketch_bloom_t *out, const char *scope_kind, const char *scope_id,
+                               const char *feature_family)
 {
    sketch_bloom_init(out);
    return sketch_load_bytes("bloom", scope_kind, scope_id, feature_family, out->bits,
                             SKETCH_BLOOM_BYTES, &out->item_count);
 }
 
-int db2_sketch_bloom_save(const sketch_bloom_t *b, const char *scope_kind, const char *scope_id,
-                          const char *feature_family)
+int kb_store_sketch_bloom_save(const sketch_bloom_t *b, const char *scope_kind,
+                               const char *scope_id, const char *feature_family)
 {
    char params[128];
    snprintf(params, sizeof(params), "{\"m\":%u,\"k\":%d,\"rotation\":{\"bloom_rotate\":\"30d\"}}",
@@ -116,8 +116,8 @@ int db2_sketch_bloom_save(const sketch_bloom_t *b, const char *scope_kind, const
 
 /* ── MinHash ────────────────────────────────────────────────────────────── */
 
-int db2_sketch_minhash_save(const sketch_minhash_t *sig, const char *scope_kind,
-                            const char *scope_id, const char *feature_family)
+int kb_store_sketch_minhash_save(const sketch_minhash_t *sig, const char *scope_kind,
+                                 const char *scope_id, const char *feature_family)
 {
    char params[128];
    snprintf(params, sizeof(params),
@@ -183,12 +183,12 @@ static int lsh_bucket_refresh(void *conn, const char *project, const char *file_
    return 0;
 }
 
-int db2_sketch_minhash_signature_upsert(const char *project, const char *file_path,
-                                        const char *file_hash, const sketch_minhash_t *sig)
+int kb_store_sketch_minhash_signature_upsert(const char *project, const char *file_path,
+                                             const char *file_hash, const sketch_minhash_t *sig)
 {
    if (!project || !*project || !file_path || !*file_path || !sig)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "INSERT INTO kb_minhash_signatures"
@@ -214,7 +214,7 @@ int db2_sketch_minhash_signature_upsert(const char *project, const char *file_pa
    return lsh_bucket_refresh(conn, project, file_path, sig);
 }
 
-static void minhash_load_row(aimee_pg_stmt_t *st, db2_sketch_minhash_row_t *out)
+static void minhash_load_row(aimee_pg_stmt_t *st, kb_store_sketch_minhash_row_t *out)
 {
    memset(out, 0, sizeof(*out));
    const char *fp = aimee_pg_column_text(st, 0), *fh = aimee_pg_column_text(st, 1);
@@ -232,12 +232,12 @@ static void minhash_load_row(aimee_pg_stmt_t *st, db2_sketch_minhash_row_t *out)
    }
 }
 
-int db2_sketch_minhash_signature_get(const char *project, const char *file_path,
-                                     db2_sketch_minhash_row_t *out)
+int kb_store_sketch_minhash_signature_get(const char *project, const char *file_path,
+                                          kb_store_sketch_minhash_row_t *out)
 {
    if (!project || !*project || !file_path || !*file_path || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql =
@@ -257,11 +257,11 @@ int db2_sketch_minhash_signature_get(const char *project, const char *file_path,
    return (rc == AIMEE_PG_ROW) ? 1 : 0;
 }
 
-int db2_sketch_minhash_signature_delete(const char *project, const char *file_path)
+int kb_store_sketch_minhash_signature_delete(const char *project, const char *file_path)
 {
    if (!project || !*project || !file_path || !*file_path)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "DELETE FROM kb_minhash_signatures WHERE project=?1 AND file_path=?2"
@@ -280,11 +280,11 @@ int db2_sketch_minhash_signature_delete(const char *project, const char *file_pa
    return lsh_bucket_delete_file(conn, project, file_path);
 }
 
-int db2_sketch_minhash_signature_delete_project(const char *project)
+int kb_store_sketch_minhash_signature_delete_project(const char *project)
 {
    if (!project || !*project)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "DELETE FROM kb_minhash_signatures WHERE project=?1"
@@ -312,12 +312,12 @@ int db2_sketch_minhash_signature_delete_project(const char *project)
    return (rc == AIMEE_PG_ERR) ? -1 : 0;
 }
 
-int db2_sketch_minhash_signature_list(const char *project, db2_sketch_minhash_row_t *out,
-                                      int max_rows)
+int kb_store_sketch_minhash_signature_list(const char *project, kb_store_sketch_minhash_row_t *out,
+                                           int max_rows)
 {
    if (!project || !*project || !out || max_rows <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -341,7 +341,7 @@ int db2_sketch_minhash_signature_list(const char *project, db2_sketch_minhash_ro
    return n;
 }
 
-static int minhash_row_seen(const db2_sketch_minhash_row_t *rows, int n, const char *file_path)
+static int minhash_row_seen(const kb_store_sketch_minhash_row_t *rows, int n, const char *file_path)
 {
    for (int i = 0; i < n; i++)
       if (strcmp(rows[i].file_path, file_path ? file_path : "") == 0)
@@ -349,12 +349,12 @@ static int minhash_row_seen(const db2_sketch_minhash_row_t *rows, int n, const c
    return 0;
 }
 
-int db2_sketch_minhash_candidate_list(const char *project, const sketch_minhash_t *sig,
-                                      db2_sketch_minhash_row_t *out, int max_rows)
+int kb_store_sketch_minhash_candidate_list(const char *project, const sketch_minhash_t *sig,
+                                           kb_store_sketch_minhash_row_t *out, int max_rows)
 {
    if (!project || !*project || !sig || !out || max_rows <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql =
@@ -393,16 +393,16 @@ int db2_sketch_minhash_candidate_list(const char *project, const sketch_minhash_
 
 /* ── Count-Min ──────────────────────────────────────────────────────────── */
 
-int db2_sketch_count_min_load(sketch_count_min_t *out, const char *scope_kind, const char *scope_id,
-                              const char *feature_family)
+int kb_store_sketch_count_min_load(sketch_count_min_t *out, const char *scope_kind,
+                                   const char *scope_id, const char *feature_family)
 {
    sketch_count_min_init(out);
    return sketch_load_bytes("count_min", scope_kind, scope_id, feature_family, out->counters,
                             (int)sizeof(out->counters), &out->item_count);
 }
 
-int db2_sketch_count_min_save(const sketch_count_min_t *cm, const char *scope_kind,
-                              const char *scope_id, const char *feature_family)
+int kb_store_sketch_count_min_save(const sketch_count_min_t *cm, const char *scope_kind,
+                                   const char *scope_id, const char *feature_family)
 {
    char params[128];
    snprintf(params, sizeof(params),
@@ -414,16 +414,16 @@ int db2_sketch_count_min_save(const sketch_count_min_t *cm, const char *scope_ki
 
 /* ── HyperLogLog ────────────────────────────────────────────────────────── */
 
-int db2_sketch_hll_load(sketch_hll_t *out, const char *scope_kind, const char *scope_id,
-                        const char *feature_family)
+int kb_store_sketch_hll_load(sketch_hll_t *out, const char *scope_kind, const char *scope_id,
+                             const char *feature_family)
 {
    sketch_hll_init(out);
    return sketch_load_bytes("hll", scope_kind, scope_id, feature_family, out->registers,
                             (int)sizeof(out->registers), &out->item_count);
 }
 
-int db2_sketch_hll_save(const sketch_hll_t *hll, const char *scope_kind, const char *scope_id,
-                        const char *feature_family)
+int kb_store_sketch_hll_save(const sketch_hll_t *hll, const char *scope_kind, const char *scope_id,
+                             const char *feature_family)
 {
    char params[128];
    snprintf(params, sizeof(params), "{\"precision\":%d,\"rotation\":{\"hll_reset\":\"never\"}}",

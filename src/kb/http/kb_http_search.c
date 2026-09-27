@@ -1,7 +1,7 @@
 /* kb_http_search.c: POST /v1/search typed-facet artifact filter (deep-curator).
  *
  * Split out of kb_http.c so the route dispatcher stays under the file-size
- * limit. The precision guarantee lives in db2_artifact_filter_facets; this file
+ * limit. The precision guarantee lives in kb_store_artifact_filter_facets; this file
  * only parses the `filters` object and shapes the response. Response JSON is
  * built with cJSON so escaping is handled for us. */
 
@@ -168,9 +168,9 @@ int kb_http_search_facets(const char *body, const char *project, int all_project
     * body overrides (0 means search across all releases). */
    const cJSON *rel = cJSON_GetObjectItemCaseSensitive(req, "release_id");
    int64_t release_id =
-       cJSON_IsNumber(rel) ? (int64_t)rel->valuedouble : db2_kb_release_get_active();
+       cJSON_IsNumber(rel) ? (int64_t)rel->valuedouble : kb_store_kb_release_get_active();
 
-   db2_artifact_row_t *rows = calloc((size_t)fmax, sizeof(*rows));
+   kb_store_artifact_row_t *rows = calloc((size_t)fmax, sizeof(*rows));
    int rn = -1;
    if (rows)
    {
@@ -180,18 +180,19 @@ int kb_http_search_facets(const char *body, const char *project, int all_project
       const char *component = cJSON_IsString(fc) ? fc->valuestring : NULL;
       if (all_projects && project && project[0])
       {
-         rn = db2_artifact_filter_facets_scoped(release_id, project, NULL, kind, status, priority,
-                                                component, rows, fmax);
+         rn = kb_store_artifact_filter_facets_scoped(release_id, project, NULL, kind, status,
+                                                     priority, component, rows, fmax);
          if (rn >= 0 && rn < fmax)
          {
-            int tail = db2_artifact_filter_facets_scoped(release_id, NULL, project, kind, status,
-                                                         priority, component, rows + rn, fmax - rn);
+            int tail = kb_store_artifact_filter_facets_scoped(
+                release_id, NULL, project, kind, status, priority, component, rows + rn, fmax - rn);
             rn = tail < 0 ? -1 : rn + tail;
          }
       }
       else
-         rn = db2_artifact_filter_facets_scoped(release_id, all_projects ? NULL : project, NULL,
-                                                kind, status, priority, component, rows, fmax);
+         rn =
+             kb_store_artifact_filter_facets_scoped(release_id, all_projects ? NULL : project, NULL,
+                                                    kind, status, priority, component, rows, fmax);
    }
 
    cJSON *resp = cJSON_CreateObject();

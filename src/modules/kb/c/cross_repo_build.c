@@ -6,9 +6,9 @@
 #include "cross_repo_build.h"
 
 #include "aimee.h"
-#include "db2.h"
+#include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -321,9 +321,9 @@ static const char *crb_map_ref(const char *ref, const crb_project_t *projs, int 
    return hit;
 }
 
-int db2_cross_repo_rebuild_build_deps(void)
+int kb_store_cross_repo_rebuild_build_deps(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[CRB_ERRBUF] = "";

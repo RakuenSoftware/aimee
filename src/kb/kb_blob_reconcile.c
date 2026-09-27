@@ -1,7 +1,7 @@
 /* kb_blob_reconcile.c: orphan-blob reconciliation sweep. See kb_blob_reconcile.h. */
 #include "kb_blob_reconcile.h"
 
-#include "modules/kb/c/kb_payload.h" /* db2_kb_blob_ref_referenced */
+#include "modules/kb/c/kb_payload.h" /* kb_store_kb_blob_ref_referenced */
 #include "kb_blob_store.h"
 #include "log.h"
 
@@ -24,7 +24,7 @@ static int recon_visit(const char *sha, long long bytes, long long mtime, void *
    ctx->stats->blobs_scanned++;
    if (ctx->grace_secs > 0 && mtime > 0 && ctx->now > 0 && (ctx->now - mtime) < ctx->grace_secs)
       return 0; /* too fresh — may be mid-insert; let a later sweep reclaim it if truly orphaned */
-   int ref = db2_kb_blob_ref_referenced(sha);
+   int ref = kb_store_kb_blob_ref_referenced(sha);
    if (ref < 0)
    {
       ctx->error = 1;

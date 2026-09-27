@@ -1,5 +1,5 @@
-#ifndef DEC_DB2_PGVEC_KB_SERVICE_H
-#define DEC_DB2_PGVEC_KB_SERVICE_H 1
+#ifndef DEC_KB_STORE_PGVEC_KB_SERVICE_H
+#define DEC_KB_STORE_PGVEC_KB_SERVICE_H 1
 
 #include <stdint.h>
 
@@ -42,4 +42,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_DB2_PGVEC_KB_SERVICE_H */
+#endif /* DEC_KB_STORE_PGVEC_KB_SERVICE_H */

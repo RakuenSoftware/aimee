@@ -1,20 +1,20 @@
 /* canonical_index.h: project/org-level code index, owned by aimee-kb.
  *
- * Storage: DB2 (Postgres). Schema is applied by db2_init via
- * db2/schema.sql. Tables: projects, files, terms, file_imports,
+ * Storage: KB_STORE (Postgres). Schema is applied by kb_store_init via
+ * kb_store/schema.sql. Tables: projects, files, terms, file_imports,
  * file_exports, code_calls, file_contents.
  *
  * Coordination: only aimee-kb writes these tables. Reads outside kb go
  * through the /v1 code-index API. Branch-local deltas for the current
  * worktree live in DB1 (see src/db1/branch_overlay.h).
  *
- * All functions return -1 if DB2 is not initialized (db2_init has not
+ * All functions return -1 if KB_STORE is not initialized (kb_store_init has not
  * been called or the Postgres connection is unavailable). Scan
  * functions are not internally serialized — call sites must hold the
  * scan coordinator slot in kb_service.
  */
-#ifndef DEC_DB2_CANONICAL_INDEX_H
-#define DEC_DB2_CANONICAL_INDEX_H 1
+#ifndef DEC_KB_STORE_CANONICAL_INDEX_H
+#define DEC_KB_STORE_CANONICAL_INDEX_H 1
 
 #include "css_analyze.h"
 #include "index.h"
@@ -25,7 +25,7 @@ extern "C"
 #endif
 
    /* Host-owned process capability used only by scan_project's local filesystem
-    * and git discovery. DB2 constructs a fixed, NULL-terminated argv for each
+    * and git discovery. KB_STORE constructs a fixed, NULL-terminated argv for each
     * operation. The callback must execute argv[0] directly without a shell, put
     * at most max_out captured stdout/stderr bytes in one malloc-owned *out_buf,
     * and return the child exit code (negative for host failure). Environment
@@ -37,17 +37,16 @@ extern "C"
                                                   size_t max_out);
    void canonical_index_set_exec_capture(canonical_index_exec_capture_fn capture);
 
-   typedef css_stylesheet_t *(*db2_css_analyze_fn)(const char *text, size_t len);
-   typedef void (*db2_css_stylesheet_free_fn)(css_stylesheet_t *stylesheet);
-   typedef int (*db2_css_extract_class_tokens_fn)(const char *text, size_t len,
-                                                  char (*out)[CSS_CLASS_TOKEN_MAX], int max);
+   typedef css_stylesheet_t *(*kb_store_css_analyze_fn)(const char *text, size_t len);
+   typedef void (*kb_store_css_stylesheet_free_fn)(css_stylesheet_t *stylesheet);
+   typedef int (*kb_store_css_extract_class_tokens_fn)(const char *text, size_t len,
+                                                       char (*out)[CSS_CLASS_TOKEN_MAX], int max);
 
    /* Internal declaration of the CSS host contract exported publicly through
     * <aimee/kb/host_contracts.h>. */
-   void
-   aimee_db2_register_css_analysis_providers(db2_css_analyze_fn analyze,
-                                             db2_css_stylesheet_free_fn release,
-                                             db2_css_extract_class_tokens_fn extract_class_tokens);
+   void aimee_kb_store_register_css_analysis_providers(
+       kb_store_css_analyze_fn analyze, kb_store_css_stylesheet_free_fn release,
+       kb_store_css_extract_class_tokens_fn extract_class_tokens);
 
    /* Validate provider-owned output before the indexer uses it. Exposed for
     * focused boundary tests; scan paths use these same helpers. */
@@ -88,9 +87,8 @@ extern "C"
     * session and -1 for storage failure. */
    int canonical_index_scan_begin(const char *name, const char *root_label, const char *scan_id,
                                   long long *baseline_revision_out);
-   int canonical_index_scan_stage(const char *scan_id,
-                                  const canonical_index_file_input_t *files, int file_count,
-                                  int *accepted_out);
+   int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_input_t *files,
+                                  int file_count, int *accepted_out);
    int canonical_index_scan_seal(const char *scan_id, int expected_files,
                                  canonical_index_seal_result_t *out);
    int canonical_index_scan_abort(const char *scan_id);
@@ -165,16 +163,16 @@ extern "C"
    /* Count indexed files and definition-kind terms for the project
     * named |project|. Either out pointer may be NULL. Both counts
     * default to 0 when the project has no rows. Returns 0 on success,
-    * -1 if DB2 is unavailable. */
+    * -1 if KB_STORE is unavailable. */
    int canonical_index_project_stats(const char *project, int *files_out, int *defs_out);
 
    /* Language breakdown for one project: JSON array of {lang, count} sorted
     * by count descending (up to 8 entries). Writes at most bufsz-1 bytes into
-    * buf and NUL-terminates. Returns 0 on success, -1 if DB2 is unavailable. */
+    * buf and NUL-terminates. Returns 0 on success, -1 if KB_STORE is unavailable. */
    int canonical_index_project_lang_breakdown(const char *project, char *buf, size_t bufsz);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CANONICAL_INDEX_H */
+#endif /* DEC_KB_STORE_CANONICAL_INDEX_H */

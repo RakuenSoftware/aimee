@@ -6,11 +6,11 @@
  * erasure reporting, and the atomic WORM audit append.
  *
  * HTTP callers never pass an authority rank.  They call
- * db2_fact_actor_from_request(), which resolves the verified kb request context.
- * Background ingestion uses db2_fact_actor_internal() with a compile-time enum.
+ * kb_store_fact_actor_from_request(), which resolves the verified kb request context.
+ * Background ingestion uses kb_store_fact_actor_internal() with a compile-time enum.
  */
-#ifndef DEC_DB2_FACT_MUTATION_H
-#define DEC_DB2_FACT_MUTATION_H 1
+#ifndef DEC_KB_STORE_FACT_MUTATION_H
+#define DEC_KB_STORE_FACT_MUTATION_H 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -42,11 +42,11 @@ extern "C"
    /* Resolve the actor from the verifier-populated request context.  When
     * require_operator is true, a verified actor or verified console-admin scope
     * is elevated to operator for this already-operator-authorized route. */
-   int db2_fact_actor_from_request(int require_operator, fact_actor_t *out);
+   int kb_store_fact_actor_from_request(int require_operator, fact_actor_t *out);
 
    /* Trusted background actor.  principal is fixed by rank and cannot be
     * nominated by an ingest payload.  OPERATOR is intentionally refused. */
-   int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out);
+   int kb_store_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out);
 
 #define FACT_KIND_WORLD_FACT   "world_fact"
 #define FACT_KIND_EPISODE      "episode"
@@ -111,12 +111,12 @@ extern "C"
    /* Assert/corroborate one canonical proposition.  Functional contradictions
     * are superseded only when the authenticated/trusted actor rank is at least
     * the incumbent rank; otherwise the new assertion is quarantined candidate. */
-   int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *input,
-                                fact_mutation_result_t *out);
+   int kb_store_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *input,
+                                     fact_mutation_result_t *out);
 
    /* Episode/experience correction annotates the original assertion. */
-   int db2_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
-                                  const char *annotation, fact_mutation_result_t *out);
+   int kb_store_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
+                                       const char *annotation, fact_mutation_result_t *out);
 
    typedef enum
    {
@@ -127,8 +127,8 @@ extern "C"
 
    /* Operator review. approve -> promoted, reject -> invalidated, undo restores
     * the latest non-undone review's prior lifecycle. */
-   int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
-                                fact_review_action_t action, fact_mutation_result_t *out);
+   int kb_store_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
+                                     fact_review_action_t action, fact_mutation_result_t *out);
 
    typedef struct
    {
@@ -146,18 +146,19 @@ extern "C"
    } fact_commit_change_t;
 
    /* Preview an applied commit's structured diff. */
-   int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max);
+   int kb_store_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max);
 
    /* Operator-only batch rollback.  Insertions are reversibly invalidated;
     * updates restore their before envelope; evidence remains but is invalidated. */
-   int db2_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
-                                char rollback_commit_id[FACT_COMMIT_ID_MAX]);
+   int kb_store_fact_commit_rollback(const fact_actor_t *actor, const char *commit_id,
+                                     char rollback_commit_id[FACT_COMMIT_ID_MAX]);
 
    /* Preview/rollback every commit produced by one ingest run as one atomic
     * operator action.  The returned preview is globally ordered. */
-   int db2_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max);
-   int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
-                                    char rollback_commit_id[FACT_COMMIT_ID_MAX]);
+   int kb_store_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out,
+                                        int max);
+   int kb_store_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
+                                         char rollback_commit_id[FACT_COMMIT_ID_MAX]);
 
    typedef struct
    {
@@ -168,23 +169,24 @@ extern "C"
 
    /* Preview and execute the permanent-removal contract.  Erasure is
     * operator-only, non-reversible, and emits a residual-data report. */
-   int db2_fact_erasure_preview(const char *source, const char *relation, const char *target,
-                                fact_erasure_impact_t *out);
-   int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, const char *relation,
-                                const char *target, fact_erasure_impact_t *out,
-                                char commit_id[FACT_COMMIT_ID_MAX]);
+   int kb_store_fact_erasure_preview(const char *source, const char *relation, const char *target,
+                                     fact_erasure_impact_t *out);
+   int kb_store_fact_erasure_execute(const fact_actor_t *actor, const char *source,
+                                     const char *relation, const char *target,
+                                     fact_erasure_impact_t *out,
+                                     char commit_id[FACT_COMMIT_ID_MAX]);
 
    /* Register a non-assertion graph mutation (ontology decision/entity merge)
     * inside the caller's already-open DB transaction.  This keeps its commit id,
     * diff and WORM row atomic with the owning mutation. */
-   int db2_fact_graph_record_external_in_txn(const fact_actor_t *actor, const char *operation,
-                                             const char *object_kind, const char *object_key,
-                                             const char *action, const char *before_state,
-                                             const char *after_state, int reversible,
-                                             char commit_id[FACT_COMMIT_ID_MAX]);
+   int kb_store_fact_graph_record_external_in_txn(const fact_actor_t *actor, const char *operation,
+                                                  const char *object_kind, const char *object_key,
+                                                  const char *action, const char *before_state,
+                                                  const char *after_state, int reversible,
+                                                  char commit_id[FACT_COMMIT_ID_MAX]);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_FACT_MUTATION_H */
+#endif /* DEC_KB_STORE_FACT_MUTATION_H */

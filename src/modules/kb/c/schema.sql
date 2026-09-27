@@ -31,7 +31,7 @@ SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('aimee:db:schema'));
 -- Rows written before this change keep the old separator. They are wrong only
 -- against a threshold landing on their own date, and thresholds move forward, so
 -- the window closes on its own; every reader in the tree already accepts both
--- spellings (parse_utc_ts, and db2_memory_valid_at normalises in SQL).
+-- spellings (parse_utc_ts, and kb_store_memory_valid_at normalises in SQL).
 CREATE OR REPLACE FUNCTION pg_now_text() RETURNS TEXT AS $$
   SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
 $$ LANGUAGE SQL STABLE;
@@ -323,13 +323,21 @@ ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS owner_principal TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (
   request_id TEXT PRIMARY KEY,
   subject_digest TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','db2_done','completed')),
+  state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','knowledge_done','completed')),
   memory_count BIGINT NOT NULL DEFAULT 0,
   document_count BIGINT NOT NULL DEFAULT 0,
   db1_count BIGINT NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   completed_at TEXT NOT NULL DEFAULT ''
 );
+-- Version 45: preserve in-flight erasure work while retiring the old tier name.
+-- The old literal is accepted only as migration input, never emitted by runtime.
+ALTER TABLE kb_subject_erasure_request
+  DROP CONSTRAINT IF EXISTS kb_subject_erasure_request_state_check;
+UPDATE kb_subject_erasure_request SET state='knowledge_done' WHERE state='db2_done';
+ALTER TABLE kb_subject_erasure_request
+  ADD CONSTRAINT kb_subject_erasure_request_state_check
+  CHECK(state IN ('pending','knowledge_done','completed'));
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -625,11 +633,11 @@ INSERT INTO kind_lifecycle VALUES('task',3,0.900000000000000022,14,0.69999999999
 INSERT INTO kind_lifecycle VALUES('scratch',5,0.949999999999999955,7,0.699999999999999955,3,0.25) ON CONFLICT DO NOTHING;
 INSERT INTO kind_lifecycle VALUES('procedure',2,0.800000000000000044,180,0.5,90,3.0) ON CONFLICT DO NOTHING;
 INSERT INTO kind_lifecycle VALUES('policy',1,0.699999999999999955,365,0.299999999999999988,180,5.0) ON CONFLICT DO NOTHING;
--- DB2 text-search projections. Views expose (rowid, source cols, fts_tsv) so
--- the DB2 rewriter can translate MATCH / bm25. memories_code_fts uses pg_trgm
+-- KB_STORE text-search projections. Views expose (rowid, source cols, fts_tsv) so
+-- the KB_STORE rewriter can translate MATCH / bm25. memories_code_fts uses pg_trgm
 -- (match_text + gin_trgm_ops) because trigram has no tsvector analogue. The
 -- extension create is wrapped in a DO block that tolerates
--- insufficient_privilege so managed DB2 deployments without the extension
+-- insufficient_privilege so managed KB_STORE deployments without the extension
 -- pre-enabled degrade to seq-scan rather than failing schema apply.
 DO $trgm_ext$ BEGIN
    BEGIN
@@ -770,7 +778,7 @@ ALTER TABLE kb_documents
 -- (structured-PDF Phase B). Cells are stored ONLY here — deliberately NOT in the shared
 -- typed_facts table: typed_facts has no document_key / quarantine column, so a cell row
 -- there would leak a withheld document's data through general fact readers
--- (db2_typed_fact_recall / _by_relation apply no source/quarantine filter). Keeping cells
+-- (kb_store_typed_fact_recall / _by_relation apply no source/quarantine filter). Keeping cells
 -- in their own access-gated relation makes the isolation STRUCTURAL (RT-Perf: table-cell
 -- facts cannot bloat the general fact indexes) and makes region re-extraction a clean
 -- cascade with no orphaned parent row. document_key + sensitivity_class are denormalised
@@ -1513,7 +1521,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
          WHERE attrelid = 'memory_embeddings'::regclass
            AND attname = 'embedding' AND NOT attisdropped;
         IF cur_type IS NOT NULL AND cur_type <> 'vector(__EMBED_DIM__)' THEN
-            RAISE NOTICE 'aimee: embedding columns are "%" but expected vector(__EMBED_DIM__). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed at the configured embedding_dim. Vector ops degraded until then — back up DB2 first.', cur_type;
+            RAISE NOTICE 'aimee: embedding columns are "%" but expected vector(__EMBED_DIM__). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed at the configured embedding_dim. Vector ops degraded until then — back up KB_STORE first.', cur_type;
         END IF;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
@@ -2258,7 +2266,7 @@ CREATE INDEX IF NOT EXISTS idx_cpc_gen_community
 -- ── graph-feedback S3: retrieval-outcome ledger ─────────────────────────────
 -- Records which of the graph's own answers earned trust (proposal §3). ISOLATED
 -- from the memory-fact graph on purpose: the lessons_ prefix is skipped by
--- db2_memory_find_facts_like and the fact decay/prune sweep — enforced by
+-- kb_store_memory_find_facts_like and the fact decay/prune sweep — enforced by
 -- scripts/check-lessons-isolation.py — so outcomes never leak into normal recall
 -- or get pruned out from under the learning loop. Immutable + append-only: the
 -- trigger forbids DELETE/TRUNCATE and forbids UPDATE of everything except the
@@ -2345,7 +2353,7 @@ CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projecti
 -- Cross-repo dependency graph (proposal docs/proposals/pending/cross-repo-dependency-graph.md).
 -- S1 foundation: per-repo trust, a global version/epoch store, the corpus-derived blocked-symbol
 -- set, the AMBIGUOUS review queue, and the trust-change audit log. Resolver/stats/orchestration
--- land in later slices. Dialect parity with src/modules/db2/c/schema_sqlite.sql is at the table-set level
+-- land in later slices. Dialect parity with src/modules/kb/c/schema_sqlite.sql is at the table-set level
 -- (schema-sync-check); intentional per-dialect deltas: timestamp exprs (to_char vs datetime('now')),
 -- JSONB (Postgres) vs TEXT (sqlite) for `evidence`, identity vs AUTOINCREMENT primary keys.
 --
@@ -3332,7 +3340,7 @@ DROP POLICY IF EXISTS p_admingrant_admin_mod ON kb_admin_grant;
 CREATE POLICY p_admingrant_admin_mod ON kb_admin_grant FOR UPDATE USING (kb_principal_is_admin());
 
 -- The context setter is never exposed to PUBLIC. This is role-free and safe on
--- every db2_init (dev + hardened). Runtime-role grants (which reference roles that
+-- every kb_store_init (dev + hardened). Runtime-role grants (which reference roles that
 -- exist only on a hardened tier) live in schema_grants.sql, applied out of band
 -- AFTER this schema by the migration path — so schema.sql itself references no role
 -- and applies unchanged in dev/single-owner mode.
@@ -7867,9 +7875,9 @@ BEGIN
 
   v_memory_count:=v_memory_count+v_row.memory_count;
   v_document_count:=v_document_count+v_row.document_count;
-  UPDATE kb_subject_erasure_request SET state='db2_done',memory_count=v_memory_count,
+  UPDATE kb_subject_erasure_request SET state='knowledge_done',memory_count=v_memory_count,
     document_count=v_document_count WHERE request_id=p_request_id;
-  RETURN QUERY SELECT v_memory_count,v_document_count,(v_row.state='db2_done');
+  RETURN QUERY SELECT v_memory_count,v_document_count,(v_row.state='knowledge_done');
 END; $$;
 
 CREATE OR REPLACE FUNCTION kb_subject_erasure_complete(
@@ -8108,13 +8116,13 @@ END; $$;
 --
 -- endpoint is bounded (<=500 chars) so it round-trips through the fixed C buffers
 -- (org_model_catalog.h: endpoint[512]) with NO silent truncation between the HTTP read,
--- the struct field, and the read-back. The C access layer (db2_model_catalog_upsert)
+-- the struct field, and the read-back. The C access layer (kb_store_model_catalog_upsert)
 -- additionally rejects control chars and requires a non-empty endpoint to begin with
 -- http:// or https://, so both the HTTP route AND the CLI enforce the same shape.
 --
 -- Trust boundary (P1 substrate, NOT re-litigated here): every catalog read/write is
 -- actor-bound to current_setting('aimee.principal'), which the trusted C choke point
--- (set_tenant_context / db2_tenant_scope_begin) sets from a verifier-produced identity.
+-- (set_tenant_context / kb_store_tenant_scope_begin) sets from a verifier-produced identity.
 -- The GUC is trusted because the runtime DB connection itself is the trusted service:
 -- forging aimee.principal requires an already-compromised runtime credential, which is
 -- outside the RLS / ciphertext-at-rest threat model (same posture as P1/P3a/P10). P2a
@@ -8213,7 +8221,7 @@ CREATE POLICY p_entitlement_admin_read ON org_model_entitlement FOR SELECT
 
 -- org_catalog_entitled(): the ONLY read surface the server/runtime touches. Takes NO
 -- principal argument — it reads current_setting('aimee.principal', true) (the actor set
--- by set_tenant_context / db2_tenant_scope_begin), so a caller can NEVER nominate
+-- by set_tenant_context / kb_store_tenant_scope_begin), so a caller can NEVER nominate
 -- another principal's memberships (no confused-deputy on the owner-bypassing definer).
 -- Joins catalog x entitlement x the actor's memberships; EXCLUDES enabled=false rows;
 -- returns ONLY the authoritative catalog columns — NEVER a credential/slot field.
@@ -9951,8 +9959,8 @@ REVOKE ALL ON FUNCTION kb_write_tier_grant_revoke(TEXT,BIGINT,TEXT) FROM PUBLIC;
 
 -- Registry reads are tenant-scoped even when the HTTP caller supplies a team
 -- selector.  The selector narrows the result; it never grants membership.  The
--- authenticated principal is installed by db2_tenant_scope_begin and the
--- policies therefore protect both this route and any future DB2 entrypoint.
+-- authenticated principal is installed by kb_store_tenant_scope_begin and the
+-- policies therefore protect both this route and any future KB_STORE entrypoint.
 DROP POLICY IF EXISTS p_server_registry_team_read ON kb_server_registry;
 CREATE POLICY p_server_registry_team_read ON kb_server_registry FOR SELECT
   USING (kb_principal_is_admin() OR team_id IN
@@ -16034,10 +16042,10 @@ DO $$ BEGIN
     -- 'semantic facts must be changed through fact_mutation'. An unscoped
     -- UPDATE rewrites the value every row already has, and on any database
     -- holding semantic facts every one of them trips that guard. The apply is
-    -- one transaction, so the whole schema then rolls back and db2_init reports
-    --   aimee: db2_init: schema apply failed: ERROR: semantic facts must be
+    -- one transaction, so the whole schema then rolls back and kb_store_init reports
+    --   aimee: kb_store_init: schema apply failed: ERROR: semantic facts must be
     --   changed through fact_mutation
-    -- leaving aimee-kb permanently "DB2 not ready". It surfaces three layers
+    -- leaving aimee-kb permanently "KB_STORE not ready". It surfaces three layers
     -- away as "failed to store memory" from the server, because the kb never
     -- finishes starting.
     --
@@ -16336,7 +16344,7 @@ CREATE INDEX IF NOT EXISTS idx_recall_trace_subject
 -- SQL and future writers.  The trigger owns both the changeset item and its P1
 -- event, so the mutation and evidence cannot commit independently.  Request
 -- identity is read from transaction-local settings installed by the verified
--- DB2 request context; body fields are never consulted.
+-- KB_STORE request context; body fields are never consulted.
 CREATE OR REPLACE FUNCTION evidence_envelope(j JSONB) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
  SELECT concat_ws('|',
@@ -19368,7 +19376,7 @@ END $memory_recovery_grants$;
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
 -- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
--- verify (read-only, db2_verify_pre_provisioned) that the schema it is serving
+-- verify (read-only, kb_store_verify_pre_provisioned) that the schema it is serving
 -- against was fully migrated at a compatible embedding dimension and is not stale,
 -- and fails closed otherwise. Recorded here (not in C) so a plain
 -- `psql -f schema.sql` migrate records them too.
@@ -19384,10 +19392,10 @@ INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__'
 -- still refuses until every content row has an exact projects.kb_project.
 INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
--- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
+-- schema_version: BUMP in lockstep with AIMEE_KB_STORE_SCHEMA_VERSION in kb_store/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '44')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '45')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Utility horizon anchors are protected change events. Exact per-record probes

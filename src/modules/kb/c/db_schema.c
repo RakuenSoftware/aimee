@@ -1,4 +1,4 @@
-/* DB2 (Postgres) idempotent schema bootstrap.
+/* KB_STORE (Postgres) idempotent schema bootstrap.
  * See docs/STORAGE_TIERS.md. */
 
 #include "db_schema.h"
@@ -6,7 +6,7 @@
 #include "aimee.h" /* EMBED_MAX_DIM */
 #include "schema_data.h"
 
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
 typedef struct sqlite3 sqlite3;
 #else
 #include <sqlite3.h>
@@ -15,7 +15,7 @@ typedef struct sqlite3 sqlite3;
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(AIMEE_DISABLE_DB2_SQLITE_SHIM) && (defined(__GNUC__) || defined(__clang__))
+#if !defined(AIMEE_DISABLE_KB_STORE_SQLITE_SHIM) && (defined(__GNUC__) || defined(__clang__))
 #pragma weak sqlite3_errmsg
 #pragma weak sqlite3_exec
 #pragma weak sqlite3_free
@@ -28,12 +28,12 @@ static void copy_sqlite_err(char *errbuf, size_t errlen, const char *src)
    snprintf(errbuf, errlen, "%s", src ? src : "");
 }
 
-/* The DB2 SQLite shim is test/support infrastructure for DB2's Postgres
- * domain APIs. The SQLite-flavoured DB2 schema lives in
- * src/modules/kb/c/schema_sqlite.sql and is embedded as AIMEE_DB2_SCHEMA_SQLITE_SQL. */
+/* The KB_STORE SQLite shim is test/support infrastructure for KB_STORE's Postgres
+ * domain APIs. The SQLite-flavoured KB_STORE schema lives in
+ * src/modules/kb/c/schema_sqlite.sql and is embedded as AIMEE_KB_STORE_SCHEMA_SQLITE_SQL. */
 
-#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
-static int db2_sqlite_name_seen(void *ctx, int argc, char **argv, char **columns)
+#ifndef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
+static int kb_store_sqlite_name_seen(void *ctx, int argc, char **argv, char **columns)
 {
    (void)columns;
    if (ctx && argc > 0 && argv[0])
@@ -41,7 +41,7 @@ static int db2_sqlite_name_seen(void *ctx, int argc, char **argv, char **columns
    return 0;
 }
 
-static int db2_sqlite_column_seen(void *ctx, int argc, char **argv, char **columns)
+static int kb_store_sqlite_column_seen(void *ctx, int argc, char **argv, char **columns)
 {
    (void)columns;
    if (ctx && argc > 1 && argv[1] && strcmp(argv[1], "generation") == 0)
@@ -53,15 +53,15 @@ static int db2_sqlite_column_seen(void *ctx, int argc, char **argv, char **colum
  * Rebuild the shim table once so retained generations can contain the same path.
  * legacy_alter_table keeps child FKs aimed at the replacement `files` table;
  * copying ids preserves every file_id relationship. */
-static int db2_sqlite_migrate_file_generations(sqlite3 *db)
+static int kb_store_sqlite_migrate_file_generations(sqlite3 *db)
 {
    int files_exists = 0;
    int has_generation = 0;
    sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='files'",
-                db2_sqlite_name_seen, &files_exists, NULL);
+                kb_store_sqlite_name_seen, &files_exists, NULL);
    if (!files_exists)
       return 0;
-   sqlite3_exec(db, "PRAGMA table_info(files)", db2_sqlite_column_seen, &has_generation, NULL);
+   sqlite3_exec(db, "PRAGMA table_info(files)", kb_store_sqlite_column_seen, &has_generation, NULL);
    if (has_generation)
       return 0;
 
@@ -97,17 +97,17 @@ static int db2_sqlite_migrate_file_generations(sqlite3 *db)
    return 0;
 }
 
-static int db2_sqlite_migrate_code_embedding_generations(sqlite3 *db)
+static int kb_store_sqlite_migrate_code_embedding_generations(sqlite3 *db)
 {
    int table_exists = 0;
    int projects_exists = 0;
    int has_generation = 0;
    sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='code_embeddings'",
-                db2_sqlite_name_seen, &table_exists, NULL);
+                kb_store_sqlite_name_seen, &table_exists, NULL);
    if (!table_exists)
       return 0;
-   sqlite3_exec(db, "PRAGMA table_info(code_embeddings)", db2_sqlite_column_seen, &has_generation,
-                NULL);
+   sqlite3_exec(db, "PRAGMA table_info(code_embeddings)", kb_store_sqlite_column_seen,
+                &has_generation, NULL);
    if (has_generation)
       return 0;
 
@@ -124,7 +124,7 @@ static int db2_sqlite_migrate_code_embedding_generations(sqlite3 *db)
       return -1;
    }
    sqlite3_exec(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'",
-                db2_sqlite_name_seen, &projects_exists, NULL);
+                kb_store_sqlite_name_seen, &projects_exists, NULL);
    if (projects_exists)
       sqlite3_exec(db,
                    "UPDATE code_embeddings SET generation=COALESCE((SELECT current_generation"
@@ -136,18 +136,18 @@ static int db2_sqlite_migrate_code_embedding_generations(sqlite3 *db)
 /* Derived KB rows are retained across detach/re-add just like source index rows.
  * Stamp a legacy table exactly once; unconditional backfills would relabel an
  * intentionally retained generation on every later schema apply. */
-static int db2_sqlite_migrate_named_generation(sqlite3 *db, const char *table)
+static int kb_store_sqlite_migrate_named_generation(sqlite3 *db, const char *table)
 {
    int table_exists = 0;
    int has_generation = 0;
    char sql[512];
    snprintf(sql, sizeof(sql), "SELECT name FROM sqlite_master WHERE type='table' AND name='%s'",
             table);
-   sqlite3_exec(db, sql, db2_sqlite_name_seen, &table_exists, NULL);
+   sqlite3_exec(db, sql, kb_store_sqlite_name_seen, &table_exists, NULL);
    if (!table_exists)
       return 0;
    snprintf(sql, sizeof(sql), "PRAGMA table_info(%s)", table);
-   sqlite3_exec(db, sql, db2_sqlite_column_seen, &has_generation, NULL);
+   sqlite3_exec(db, sql, kb_store_sqlite_column_seen, &has_generation, NULL);
    if (has_generation)
       return 0;
 
@@ -171,7 +171,7 @@ static int db2_sqlite_migrate_named_generation(sqlite3 *db, const char *table)
  * table definitions. Adding a generation column is insufficient: a re-added
  * checkout would still update the detached row. Rebuild once so generation is
  * part of the key and preserve ids/state while backfilling the active generation. */
-static int db2_sqlite_migrate_generation_keys(sqlite3 *db)
+static int kb_store_sqlite_migrate_generation_keys(sqlite3 *db)
 {
    static const struct
    {
@@ -297,11 +297,11 @@ static int db2_sqlite_migrate_generation_keys(sqlite3 *db)
       snprintf(probe, sizeof(probe),
                "SELECT name FROM sqlite_master WHERE type='table' AND name='%s'",
                migrations[i].table);
-      sqlite3_exec(db, probe, db2_sqlite_name_seen, &table_exists, NULL);
+      sqlite3_exec(db, probe, kb_store_sqlite_name_seen, &table_exists, NULL);
       if (!table_exists)
          continue;
       snprintf(probe, sizeof(probe), "PRAGMA table_info(%s)", migrations[i].table);
-      sqlite3_exec(db, probe, db2_sqlite_column_seen, &has_generation, NULL);
+      sqlite3_exec(db, probe, kb_store_sqlite_column_seen, &has_generation, NULL);
       if (has_generation)
          continue;
       char *err = NULL;
@@ -316,7 +316,7 @@ static int db2_sqlite_migrate_generation_keys(sqlite3 *db)
    return 0;
 }
 
-static int db2_run_sqlite_migrations(sqlite3 *db)
+static int kb_store_run_sqlite_migrations(sqlite3 *db)
 {
    /* Each statement is independent; duplicate-column / missing-table errors are
     * ignored so legacy and fresh DBs both continue to the canonical schema. */
@@ -364,15 +364,15 @@ static int db2_run_sqlite_migrations(sqlite3 *db)
    };
    for (int i = 0; migrations[i]; i++)
       sqlite3_exec(db, migrations[i], NULL, NULL, NULL);
-   if (db2_sqlite_migrate_file_generations(db) != 0)
+   if (kb_store_sqlite_migrate_file_generations(db) != 0)
       return -1;
-   if (db2_sqlite_migrate_code_embedding_generations(db) != 0)
+   if (kb_store_sqlite_migrate_code_embedding_generations(db) != 0)
       return -1;
-   if (db2_sqlite_migrate_generation_keys(db) != 0)
+   if (kb_store_sqlite_migrate_generation_keys(db) != 0)
       return -1;
-   if (db2_sqlite_migrate_named_generation(db, "kb_documents") != 0)
+   if (kb_store_sqlite_migrate_named_generation(db, "kb_documents") != 0)
       return -1;
-   if (db2_sqlite_migrate_named_generation(db, "kb_doc_assets") != 0)
+   if (kb_store_sqlite_migrate_named_generation(db, "kb_doc_assets") != 0)
       return -1;
    return 0;
 }
@@ -423,7 +423,7 @@ static char *schema_subst(const char *src, const char *token, const char *repl)
  * another (search returns nothing). Refuse instead, with a remediation message.
  * Returns 0 (recorded or matches), -1 (mismatch / DB error -> errbuf set).
  * Uses aimee_pg_* so it works against both Postgres and the sqlite test shim. */
-int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, size_t errlen)
+int kb_store_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!conn)
       return -1;
@@ -506,7 +506,7 @@ int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, s
  * only when it parses cleanly into 1..EMBED_MAX_DIM; any other state (no row,
  * empty, non-numeric, trailing junk, non-positive, or out of range) returns 0 so
  * the caller falls through to its configured default. Never sets an error. */
-int db2_embedding_dim_get(void *conn)
+int kb_store_embedding_dim_get(void *conn)
 {
    if (!conn)
       return 0;
@@ -529,12 +529,12 @@ int db2_embedding_dim_get(void *conn)
    return dim;
 }
 
-db2_dim_read_t db2_embedding_dim_read(void *conn, int *out)
+kb_store_dim_read_t kb_store_embedding_dim_read(void *conn, int *out)
 {
    if (out)
       *out = 0;
    if (!conn)
-      return DB2_DIM_ERROR;
+      return KB_STORE_DIM_ERROR;
    char err[256] = "";
    /* A FRESH DB has no kb_meta yet — it is created by db_apply_schema_postgres,
     * which runs AFTER this read. On real Postgres a SELECT against a missing table
@@ -549,7 +549,7 @@ db2_dim_read_t db2_embedding_dim_read(void *conn, int *out)
       aimee_pg_stmt_t *chk = aimee_pg_prepare(
           conn, "SELECT (to_regclass('kb_meta') IS NOT NULL)::int", err, sizeof(err));
       if (!chk)
-         return DB2_DIM_ERROR;
+         return KB_STORE_DIM_ERROR;
       int exists = 0, ok = 0;
       if (aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW)
       {
@@ -558,16 +558,16 @@ db2_dim_read_t db2_embedding_dim_read(void *conn, int *out)
       }
       aimee_pg_finalize(chk);
       if (!ok)
-         return DB2_DIM_ERROR; /* a real query/connection error */
+         return KB_STORE_DIM_ERROR; /* a real query/connection error */
       if (!exists)
-         return DB2_DIM_ABSENT; /* fresh DB: kb_meta not created yet */
+         return KB_STORE_DIM_ABSENT; /* fresh DB: kb_meta not created yet */
    }
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn, "SELECT value FROM kb_meta WHERE key = 'schema_embedding_dim'", err, sizeof(err));
    if (!st)
-      return DB2_DIM_ERROR; /* kb_meta exists (or shim): a prepare failure is real */
+      return KB_STORE_DIM_ERROR; /* kb_meta exists (or shim): a prepare failure is real */
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
-   db2_dim_read_t rc;
+   kb_store_dim_read_t rc;
    if (step == AIMEE_PG_ROW)
    {
       const char *valtxt = aimee_pg_column_text(st, 0);
@@ -577,18 +577,18 @@ db2_dim_read_t db2_embedding_dim_read(void *conn, int *out)
       {
          if (out)
             *out = (int)v;
-         rc = DB2_DIM_FOUND;
+         rc = KB_STORE_DIM_FOUND;
       }
       else
-         rc = DB2_DIM_ABSENT; /* garbage / out-of-range row: quiet, as §2a */
+         rc = KB_STORE_DIM_ABSENT; /* garbage / out-of-range row: quiet, as §2a */
    }
    else if (step == AIMEE_PG_DONE)
    {
-      rc = DB2_DIM_ABSENT; /* no row: the expected fresh-DB signal */
+      rc = KB_STORE_DIM_ABSENT; /* no row: the expected fresh-DB signal */
    }
    else
    {
-      rc = DB2_DIM_ERROR; /* step error (lost conn etc.): do not misread as absent */
+      rc = KB_STORE_DIM_ERROR; /* step error (lost conn etc.): do not misread as absent */
    }
    aimee_pg_finalize(st);
    return rc;
@@ -692,8 +692,8 @@ static int kb_meta_set(void *conn, const char *key, const char *value)
  *   - recorded != model_id, transition admitted by compat_csv -> update + 0.
  *   - recorded != model_id, not admitted -> refuse (-1, remediation set).
  * Keyed re-embed triggers on a model_id change (the migration, §Migration). */
-int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
-                                        char *errbuf, size_t errlen)
+int kb_store_embedding_model_record_or_check(void *conn, const char *model_id,
+                                             const char *compat_csv, char *errbuf, size_t errlen)
 {
    if (!conn)
       return -1;
@@ -748,23 +748,23 @@ int db2_embedding_model_record_or_check(void *conn, const char *model_id, const 
 #define RETIRED_LEXICAL_SERVING_ID "builtin/lexical-v1"
 
 /* The tables that hold derived vectors. Every one is rebuildable from source kept
- * elsewhere, which is why db2_reembed.c may drop them; here the same set answers a
+ * elsewhere, which is why kb_store_reembed.c may drop them; here the same set answers a
  * different question — has anything actually been embedded yet.
  *
  * Keep in sync with schema.sql's vector(__EMBED_DIM__) tables (and their
  * schema_sqlite.sql counterparts). A table missing from this list would answer the
  * emptiness question wrongly in the unsafe direction, so adding one is not optional. */
-const char *const DB2_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
-                                                 "kb_pdf_embeddings",
-                                                 "memory_embeddings",
-                                                 "curator_entity_vectors",
-                                                 "curator_narrative_vectors",
-                                                 "curator_claim_vectors",
-                                                 "curator_code_unit_vectors",
-                                                 "exemplar_vectors",
-                                                 "evidence_vectors",
-                                                 "code_embeddings",
-                                                 NULL};
+const char *const KB_STORE_DERIVED_VECTOR_TABLES[] = {"kb_embeddings",
+                                                      "kb_pdf_embeddings",
+                                                      "memory_embeddings",
+                                                      "curator_entity_vectors",
+                                                      "curator_narrative_vectors",
+                                                      "curator_claim_vectors",
+                                                      "curator_code_unit_vectors",
+                                                      "exemplar_vectors",
+                                                      "evidence_vectors",
+                                                      "code_embeddings",
+                                                      NULL};
 
 /* Does any vector table hold a row?
  *
@@ -807,9 +807,9 @@ static int corpus_table_exists(void *conn, const char *table)
 
 static int corpus_has_vectors(void *conn)
 {
-   for (int i = 0; DB2_DERIVED_VECTOR_TABLES[i]; i++)
+   for (int i = 0; KB_STORE_DERIVED_VECTOR_TABLES[i]; i++)
    {
-      int exists = corpus_table_exists(conn, DB2_DERIVED_VECTOR_TABLES[i]);
+      int exists = corpus_table_exists(conn, KB_STORE_DERIVED_VECTOR_TABLES[i]);
       if (exists < 0)
          return -1; /* could not even ask whether it is there */
       if (!exists)
@@ -817,7 +817,7 @@ static int corpus_has_vectors(void *conn)
 
       char err[256] = "";
       char sql[160];
-      snprintf(sql, sizeof(sql), "SELECT 1 FROM %s LIMIT 1", DB2_DERIVED_VECTOR_TABLES[i]);
+      snprintf(sql, sizeof(sql), "SELECT 1 FROM %s LIMIT 1", KB_STORE_DERIVED_VECTOR_TABLES[i]);
       aimee_pg_stmt_t *q = aimee_pg_prepare(conn, sql, err, sizeof(err));
       if (!q)
          return -1; /* it exists and we cannot read it: never call that empty */
@@ -862,8 +862,8 @@ static int corpus_has_vectors(void *conn)
  *     refused: the builtin was 384-dim and so is the bundled model, so the dim guard
  *     cannot see that transition and this is the only thing that can.
  */
-int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
-                                         size_t errlen)
+int kb_store_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                              size_t errlen)
 {
    if (!conn)
       return -1;
@@ -917,29 +917,29 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    if (!pg_conn)
       return -1;
 
-   /* The DB2 schema declares its vector embedding columns with the
+   /* The KB_STORE schema declares its vector embedding columns with the
     * __EMBED_DIM__ placeholder so a deployment can run an embedder of any
     * supported width. Substitute the configured dimension here — the one place
     * the schema is applied to Postgres.
     *
     * An unusable width is an ERROR, not something to paper over: this layer holds
-    * no default (the width is declared once, in config, and reaches db2 via
-    * db2_set_embedding_dim_default). Silently substituting one here is how a
+    * no default (the width is declared once, in config, and reaches kb_store via
+    * kb_store_set_embedding_dim_default). Silently substituting one here is how a
     * corpus gets columns sized for an embedder that is not the one running. */
    if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
    {
       if (errbuf && errlen)
          snprintf(errbuf, errlen,
                   "embedding dimension %d is unusable (expected 1..%d); the deployment's "
-                  "width was never supplied to the DB2 layer — check that startup calls "
-                  "db2_set_embedding_dim_default(config_embedder_dims_default())",
+                  "width was never supplied to the KB_STORE layer — check that startup calls "
+                  "kb_store_set_embedding_dim_default(config_embedder_dims_default())",
                   embed_dim, EMBED_MAX_DIM);
       return -1;
    }
    char dimbuf[16];
    snprintf(dimbuf, sizeof(dimbuf), "%d", embed_dim);
 
-   char *sql = schema_subst(AIMEE_DB2_SCHEMA_SQL, "__EMBED_DIM__", dimbuf);
+   char *sql = schema_subst(AIMEE_KB_STORE_SCHEMA_SQL, "__EMBED_DIM__", dimbuf);
    if (!sql)
    {
       if (errbuf && errlen)
@@ -952,19 +952,19 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
       return rc;
    /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists).
     * The unified-llm-container §2 model-identity guard (the embedder) runs
-    * in db2_init right after this, where the configured identity globals live —
+    * in kb_store_init right after this, where the configured identity globals live —
     * keeping this lower schema layer free of an upward dependency on them. */
    /* schema_version + schema_embedding_dim are recorded by schema.sql itself (so any
     * applier — the C path here, or a plain `psql -f schema.sql` migrate — records
     * them), which is what a hardened runtime kb reads to verify a complete, current
     * migration. This C layer keeps the authoritative dim record-or-check (drift
     * guard) above. */
-   return db2_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
+   return kb_store_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
 }
 
-int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)
+int kb_store_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)
 {
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
    (void)db;
    copy_sqlite_err(errbuf, errlen, "sqlite shim unavailable");
    return -1;
@@ -976,13 +976,13 @@ int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)
       copy_sqlite_err(errbuf, errlen, "sqlite shim unavailable");
       return -1;
    }
-   if (db2_run_sqlite_migrations(db) != 0)
+   if (kb_store_run_sqlite_migrations(db) != 0)
    {
       copy_sqlite_err(errbuf, errlen, sqlite3_errmsg(db));
       return -1;
    }
    char *err = NULL;
-   int rc = sqlite3_exec(db, AIMEE_DB2_SCHEMA_SQLITE_SQL, NULL, NULL, &err);
+   int rc = sqlite3_exec(db, AIMEE_KB_STORE_SCHEMA_SQLITE_SQL, NULL, NULL, &err);
    if (rc != SQLITE_OK)
    {
       copy_sqlite_err(errbuf, errlen, err ? err : sqlite3_errmsg(db));

@@ -1,8 +1,8 @@
-/* db2/feedback.c: feedback recording — Postgres via libpq. */
+/* kb_store/feedback.c: feedback recording — Postgres via libpq. */
 
 #include "feedback.h"
 #include "rules.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h" /* now_utc */
 
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-const char *db2_feedback_parse_polarity(const char *input)
+const char *kb_store_feedback_parse_polarity(const char *input)
 {
    if (!input || !*input)
       return NULL;
@@ -27,10 +27,10 @@ const char *db2_feedback_parse_polarity(const char *input)
    return NULL;
 }
 
-int db2_feedback_record(const char *polarity, const char *title, const char *description,
-                        int weight_override, int *reinforced)
+int kb_store_feedback_record(const char *polarity, const char *title, const char *description,
+                             int weight_override, int *reinforced)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !polarity || !title)
       return -1;
 
@@ -38,7 +38,7 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
 
    rule_t existing;
    char err[256] = "";
-   if (db2_rules_find_by_title(title, &existing) == 0)
+   if (kb_store_rules_find_by_title(title, &existing) == 0)
    {
       int new_weight = existing.weight + 50;
       if (new_weight > 100)
@@ -63,7 +63,7 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
       aimee_pg_finalize(st);
 
       *reinforced = 1;
-      db2_rules_cache_invalidate();
+      kb_store_rules_cache_invalidate();
       return existing.id;
    }
 
@@ -97,6 +97,6 @@ int db2_feedback_record(const char *polarity, const char *title, const char *des
 
    if (id < 0)
       return -1;
-   db2_rules_cache_invalidate();
+   kb_store_rules_cache_invalidate();
    return id;
 }

@@ -1,7 +1,7 @@
 /* test_kb_http_grants.c — the kb write-tier grant routes.
  *
  * These routes administer who may write to a remote server, so what they REFUSE matters
- * more than what they return. The db2 seam is stubbed: it needs Postgres, and its own
+ * more than what they return. The kb_store seam is stubbed: it needs Postgres, and its own
  * behaviour is covered by the P1 RLS gate. What is tested here is the routing and
  * validation layer — the part that decides whether a request reaches the seam at all, and
  * with what arguments.
@@ -21,7 +21,7 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
-#include "modules/kb/c/db2_tenant.h" /* the real tenancy codes this maps from */
+#include "modules/kb/c/kb_store_tenant.h" /* the real tenancy codes this maps from */
 #include "modules/kb/c/write_tier_grant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
@@ -30,7 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* ── The db2 seam, stubbed ─────────────────────────────────────────────────── */
+/* ── The kb_store seam, stubbed ─────────────────────────────────────────────────── */
 
 static int stub_rc; /* what the seam returns */
 static int stub_set_calls;
@@ -45,13 +45,14 @@ static char stub_last_subject[600];
 static char stub_last_server[200];
 static char stub_last_granted_by[600];
 static kb_identity_tier_t stub_last_tier;
-static db2_write_tier_grant_report_t stub_report;
+static kb_store_write_tier_grant_report_t stub_report;
 static size_t stub_row_count;
-static db2_write_tier_grant_row_t stub_rows[4];
+static kb_store_write_tier_grant_row_t stub_rows[4];
 
-int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, const char *subject,
-                                       kb_identity_tier_t tier, const char *granted_by,
-                                       db2_write_tier_grant_report_t *out)
+int kb_store_write_tier_grant_set_reporting(const char *server_id, int64_t team_id,
+                                            const char *subject, kb_identity_tier_t tier,
+                                            const char *granted_by,
+                                            kb_store_write_tier_grant_report_t *out)
 {
    stub_set_calls++;
    assert(server_id && subject && granted_by && out);
@@ -67,7 +68,7 @@ int db2_write_tier_grant_set_reporting(const char *server_id, int64_t team_id, c
    return 0;
 }
 
-int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
+int kb_store_write_tier_grant_revoke(const char *server_id, int64_t team_id, const char *subject)
 {
    stub_revoke_calls++;
    snprintf(stub_last_server, sizeof(stub_last_server), "%s", server_id ? server_id : "");
@@ -76,9 +77,9 @@ int db2_write_tier_grant_revoke(const char *server_id, int64_t team_id, const ch
    return stub_rc;
 }
 
-int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
-                                 const char *subject, db2_write_tier_grant_row_t *out, size_t cap,
-                                 size_t *count)
+int kb_store_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int include_revoked,
+                                      const char *subject, kb_store_write_tier_grant_row_t *out,
+                                      size_t cap, size_t *count)
 {
    stub_list_calls++;
    stub_last_include_revoked = include_revoked;
@@ -103,8 +104,8 @@ int db2_write_tier_grant_list_ex(const char *server_id, int64_t team_id, int inc
 }
 
 /* Linked but unused by these routes; present so the object set resolves. */
-int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
-                             kb_identity_tier_t tier, const char *granted_by)
+int kb_store_write_tier_grant_set(const char *server_id, int64_t team_id, const char *subject,
+                                  kb_identity_tier_t tier, const char *granted_by)
 {
    (void)server_id;
    (void)team_id;
@@ -114,14 +115,14 @@ int db2_write_tier_grant_set(const char *server_id, int64_t team_id, const char 
    return -1;
 }
 
-int db2_write_tier_grant_list(const char *server_id, int64_t team_id,
-                              db2_write_tier_grant_row_t *out, size_t cap, size_t *count)
+int kb_store_write_tier_grant_list(const char *server_id, int64_t team_id,
+                                   kb_store_write_tier_grant_row_t *out, size_t cap, size_t *count)
 {
-   return db2_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
+   return kb_store_write_tier_grant_list_ex(server_id, team_id, 0, NULL, out, cap, count);
 }
 
-int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
-                                kb_identity_tier_t *out)
+int kb_store_write_tier_grant_lookup(const char *server_id, int64_t team_id, const char *subject,
+                                     kb_identity_tier_t *out)
 {
    stub_lookup_calls++;
    (void)server_id;
@@ -148,7 +149,7 @@ const kb_principal_t *kb_reqctx_actor(void)
    return stub_have_actor ? &stub_actor : NULL;
 }
 
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t team)
 {
    stub_scope_begins++;
    (void)p;
@@ -156,13 +157,13 @@ int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
    return stub_scope_rc;
 }
 
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    stub_scope_commits++;
    return 0;
 }
 
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    stub_scope_rollbacks++;
 }
@@ -176,7 +177,7 @@ static void reset(void)
    stub_last_include_revoked = -1;
    stub_last_had_subject = -1;
    stub_lookup_calls = 0;
-   stub_lookup_rc = DB2_WRITE_TIER_GRANT_NONE;
+   stub_lookup_rc = KB_STORE_WRITE_TIER_GRANT_NONE;
    stub_scope_begins = stub_scope_commits = stub_scope_rollbacks = 0;
    stub_scope_rc = 0;
    /* An owner principal, which is what kb's verifier produces for the server's bearer. */
@@ -437,7 +438,7 @@ static void test_db_failures(void)
     * authorization one. Collapsing the two would send an operator to debug credentials
     * when the answer is that RLS cannot be enforced at all on this backend. */
    reset();
-   stub_rc = DB2_ERR_TENANT_REQUIRES_PG;
+   stub_rc = KB_STORE_ERR_TENANT_REQUIRES_PG;
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 503);
    assert(strstr(out, "postgres backend"));
 
@@ -449,22 +450,22 @@ static void test_db_failures(void)
     * tenancy layer can return, so the test agreed with the collapse instead of catching
     * it. The real codes are used now. */
    reset();
-   stub_rc = DB2_ERR_TENANT_DENIED;
+   stub_rc = KB_STORE_ERR_TENANT_DENIED;
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 403);
    assert(strstr(out, "not a member of that team"));
    assert(!strstr(out, "postgres backend"));
 
    /* Unauthenticated and scope-open failures are likewise their own answers. */
    reset();
-   stub_rc = DB2_ERR_TENANT_UNAUTHENTICATED;
+   stub_rc = KB_STORE_ERR_TENANT_UNAUTHENTICATED;
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 401);
    reset();
-   stub_rc = DB2_ERR_TENANT_NO_CONN;
+   stub_rc = KB_STORE_ERR_TENANT_NO_CONN;
    assert(route("POST", "/v1/write-tier-grants/set", NULL, good, out, sizeof(out)) == 503);
    assert(!strstr(out, "postgres backend"));
 
    reset();
-   stub_rc = DB2_ERR_TENANT_REQUIRES_PG;
+   stub_rc = KB_STORE_ERR_TENANT_REQUIRES_PG;
    assert(route("GET", "/v1/write-tier-grants", "server_id=s&team_id=1", NULL, out, sizeof(out)) ==
           503);
    reset();
@@ -485,7 +486,7 @@ static void test_revoke(void)
     * nothing was there when something was. A review caught it. The assertions below are that
     * the lookup is consulted and the listing is NOT. */
    reset();
-   stub_lookup_rc = DB2_WRITE_TIER_GRANT_FOUND;
+   stub_lookup_rc = KB_STORE_WRITE_TIER_GRANT_FOUND;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 200);
    assert(strstr(out, "\"found\":true"));
    assert(stub_revoke_calls == 1);
@@ -496,7 +497,7 @@ static void test_revoke(void)
     * subject that was never granted is usually a typo, and silently succeeding would let an
     * operator believe they closed access they never held. */
    reset();
-   stub_lookup_rc = DB2_WRITE_TIER_GRANT_NONE;
+   stub_lookup_rc = KB_STORE_WRITE_TIER_GRANT_NONE;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 200);
    assert(strstr(out, "\"found\":false"));
    /* The revoke still ran: it is idempotent, and refusing here would make a retry after a
@@ -511,12 +512,12 @@ static void test_revoke(void)
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 403);
    assert(stub_revoke_calls == 0); /* and nothing was revoked on a broken read */
    reset();
-   stub_lookup_rc = DB2_ERR_TENANT_REQUIRES_PG;
+   stub_lookup_rc = KB_STORE_ERR_TENANT_REQUIRES_PG;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 503);
    assert(stub_revoke_calls == 0);
    /* A membership refusal on the read is a 403 here too, and still revokes nothing. */
    reset();
-   stub_lookup_rc = DB2_ERR_TENANT_DENIED;
+   stub_lookup_rc = KB_STORE_ERR_TENANT_DENIED;
    assert(route("POST", "/v1/write-tier-grants/revoke", NULL, good, out, sizeof(out)) == 403);
    assert(stub_revoke_calls == 0);
 

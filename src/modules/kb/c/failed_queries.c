@@ -1,16 +1,16 @@
-/* db2/failed_queries.c: failed-query counter — Postgres via libpq. */
+/* kb_store/failed_queries.c: failed-query counter — Postgres via libpq. */
 
 #include "failed_queries.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 
-int db2_failed_query_bump(const char *query_norm)
+int kb_store_failed_query_bump(const char *query_norm)
 {
    if (!query_norm || !*query_norm)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 

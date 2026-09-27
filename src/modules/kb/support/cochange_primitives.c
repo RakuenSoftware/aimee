@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 process support for deterministic co-change policy. */
-#include "db2_cochange.h"
+/* Descriptor-owned KB_STORE process support for deterministic co-change policy. */
+#include "kb_store_cochange.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,8 +24,8 @@ int cochange_is_hex_sha(const char *s)
    return n >= 4 && n <= 64;
 }
 
-int cochange_pairs_for_commit(char names[][128], int n, int max_files, db2_cochange_pair_t *out,
-                              int out_cap)
+int cochange_pairs_for_commit(char names[][128], int n, int max_files,
+                              kb_store_cochange_pair_t *out, int out_cap)
 {
    if (n < 0)
       n = 0;

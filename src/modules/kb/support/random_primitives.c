@@ -1,22 +1,22 @@
-#include "db2_random.h"
+#include "kb_store_random.h"
 
 #ifdef _WIN32
 #include <bcrypt.h>
-#elif defined(__linux__) && !defined(AIMEE_TEST_DB2_RANDOM_IO_SEAM_H)
+#elif defined(__linux__) && !defined(AIMEE_TEST_KB_STORE_RANDOM_IO_SEAM_H)
 #include <errno.h>
 #include <sys/random.h>
 #endif
 #include <stdio.h>
 #include <string.h>
 
-#ifndef DB2_RANDOM_FOPEN
-#define DB2_RANDOM_FOPEN fopen
+#ifndef KB_STORE_RANDOM_FOPEN
+#define KB_STORE_RANDOM_FOPEN fopen
 #endif
-#ifndef DB2_RANDOM_FREAD
-#define DB2_RANDOM_FREAD fread
+#ifndef KB_STORE_RANDOM_FREAD
+#define KB_STORE_RANDOM_FREAD fread
 #endif
-#ifndef DB2_RANDOM_FCLOSE
-#define DB2_RANDOM_FCLOSE fclose
+#ifndef KB_STORE_RANDOM_FCLOSE
+#define KB_STORE_RANDOM_FCLOSE fclose
 #endif
 
 int platform_random_bytes(void *buf, size_t len)
@@ -26,7 +26,7 @@ int platform_random_bytes(void *buf, size_t len)
        BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
    return (status >= 0) ? 0 : -1;
 #else
-#if defined(__linux__) && !defined(AIMEE_TEST_DB2_RANDOM_IO_SEAM_H)
+#if defined(__linux__) && !defined(AIMEE_TEST_KB_STORE_RANDOM_IO_SEAM_H)
    size_t offset = 0;
    while (offset < len)
    {
@@ -45,11 +45,11 @@ int platform_random_bytes(void *buf, size_t len)
    if (offset == len)
       return 0;
 #endif
-   FILE *f = DB2_RANDOM_FOPEN("/dev/urandom", "r");
+   FILE *f = KB_STORE_RANDOM_FOPEN("/dev/urandom", "r");
    if (!f)
       return -1;
-   size_t n = DB2_RANDOM_FREAD(buf, 1, len, f);
-   DB2_RANDOM_FCLOSE(f);
+   size_t n = KB_STORE_RANDOM_FREAD(buf, 1, len, f);
+   KB_STORE_RANDOM_FCLOSE(f);
    return (n == len) ? 0 : -1;
 #endif
 }

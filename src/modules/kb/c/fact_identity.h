@@ -1,4 +1,4 @@
-/* db2/fact_identity.h: normalized identity for typed-fact assertions.
+/* kb_store/fact_identity.h: normalized identity for typed-fact assertions.
  *
  * An assertion's *identity* and its *presentation* are different things. The
  * literal source/relation/target text is what a person reads and what the audit
@@ -13,8 +13,8 @@
  * with a different surface form on the next pass, which is the ordinary case,
  * not the edge case.
  */
-#ifndef DEC_DB2_FACT_IDENTITY_H
-#define DEC_DB2_FACT_IDENTITY_H 1
+#ifndef DEC_KB_STORE_FACT_IDENTITY_H
+#define DEC_KB_STORE_FACT_IDENTITY_H 1
 
 #include <stddef.h>
 
@@ -80,4 +80,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_DB2_FACT_IDENTITY_H */
+#endif /* DEC_KB_STORE_FACT_IDENTITY_H */

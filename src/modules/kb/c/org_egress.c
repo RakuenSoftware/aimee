@@ -1,8 +1,8 @@
-/* db2/org_egress.c: typed libpq access to P2b-a SECURITY DEFINER operations. */
+/* kb_store/org_egress.c: typed libpq access to P2b-a SECURITY DEFINER operations. */
 #include "org_egress.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <string.h>
@@ -11,21 +11,22 @@ static int egress_error(const aimee_pg_stmt_t *st)
 {
    const char *state = aimee_pg_sqlstate(st);
    if (state && strcmp(state, "42501") == 0)
-      return DB2_EGRESS_ERR_DENIED;
+      return KB_STORE_EGRESS_ERR_DENIED;
    if (state && strcmp(state, "23505") == 0)
-      return DB2_EGRESS_ERR_CONFLICT;
+      return KB_STORE_EGRESS_ERR_CONFLICT;
    return -1;
 }
 
 static int bind_common_guard(void)
 {
-   return db2_tenant_require_pg();
+   return kb_store_tenant_require_pg();
 }
 
-int db2_org_egress_admit(const char *authority_id, const char *fingerprint, const char *issuer,
-                         const char *serial, const char *origin, const char *request_id,
-                         int64_t team, int has_project, int64_t project, const char *model_id,
-                         const char *digest, int64_t lease_secs, db2_org_egress_admission_t *out)
+int kb_store_org_egress_admit(const char *authority_id, const char *fingerprint, const char *issuer,
+                              const char *serial, const char *origin, const char *request_id,
+                              int64_t team, int has_project, int64_t project, const char *model_id,
+                              const char *digest, int64_t lease_secs,
+                              kb_store_org_egress_admission_t *out)
 {
    int g = bind_common_guard();
    if (g)
@@ -35,7 +36,7 @@ int db2_org_egress_admit(const char *authority_id, const char *fingerprint, cons
        strlen(request_id) != 36 || team < 1 || !model_id || !model_id[0] || !digest ||
        strlen(digest) != 64 || lease_secs < 1 || lease_secs > 300 || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -71,13 +72,13 @@ int db2_org_egress_admit(const char *authority_id, const char *fingerprint, cons
    memset(out, 0, sizeof(*out));
    const char *verdict = aimee_pg_column_text(st, 0);
    if (verdict && strcmp(verdict, "admitted") == 0)
-      out->outcome = DB2_EGRESS_ADMITTED;
+      out->outcome = KB_STORE_EGRESS_ADMITTED;
    else if (verdict && strcmp(verdict, "replay") == 0)
-      out->outcome = DB2_EGRESS_REPLAY;
+      out->outcome = KB_STORE_EGRESS_REPLAY;
    else if (verdict && strcmp(verdict, "rate_refused") == 0)
-      out->outcome = DB2_EGRESS_RATE_REFUSED;
+      out->outcome = KB_STORE_EGRESS_RATE_REFUSED;
    else if (verdict && strcmp(verdict, "budget_refused") == 0)
-      out->outcome = DB2_EGRESS_BUDGET_REFUSED;
+      out->outcome = KB_STORE_EGRESS_BUDGET_REFUSED;
    else
    {
       aimee_pg_finalize(st);
@@ -85,23 +86,23 @@ int db2_org_egress_admit(const char *authority_id, const char *fingerprint, cons
    }
    if (!aimee_pg_column_is_null(st, 1))
       out->dispatch_id = aimee_pg_column_int64(st, 1);
-   db2_copy_col_text(out->state, sizeof(out->state), st, 2);
-   db2_copy_col_text(out->reserved_max_usd, sizeof(out->reserved_max_usd), st, 3);
-   db2_copy_col_text(out->billable_model, sizeof(out->billable_model), st, 4);
+   kb_store_copy_col_text(out->state, sizeof(out->state), st, 2);
+   kb_store_copy_col_text(out->reserved_max_usd, sizeof(out->reserved_max_usd), st, 3);
+   kb_store_copy_col_text(out->billable_model, sizeof(out->billable_model), st, 4);
    out->pricing_version = aimee_pg_column_int64(st, 5);
-   db2_copy_col_text(out->key_id, sizeof(out->key_id), st, 6);
-   db2_copy_col_text(out->vault_principal, sizeof(out->vault_principal), st, 7);
-   db2_copy_col_text(out->vault_agent, sizeof(out->vault_agent), st, 8);
-   db2_copy_col_text(out->vault_cred, sizeof(out->vault_cred), st, 9);
+   kb_store_copy_col_text(out->key_id, sizeof(out->key_id), st, 6);
+   kb_store_copy_col_text(out->vault_principal, sizeof(out->vault_principal), st, 7);
+   kb_store_copy_col_text(out->vault_agent, sizeof(out->vault_agent), st, 8);
+   kb_store_copy_col_text(out->vault_cred, sizeof(out->vault_cred), st, 9);
    out->max_input_tokens = aimee_pg_column_int64(st, 10);
    out->max_output_tokens = aimee_pg_column_int64(st, 11);
    aimee_pg_finalize(st);
    return 0;
 }
 
-int db2_org_egress_begin(const char *authority_id, const char *request_id, const char *owner_token,
-                         const char *instance_id, int64_t ttl_secs, int64_t *out_id,
-                         int64_t *out_generation)
+int kb_store_org_egress_begin(const char *authority_id, const char *request_id,
+                              const char *owner_token, const char *instance_id, int64_t ttl_secs,
+                              int64_t *out_id, int64_t *out_generation)
 {
    int g = bind_common_guard();
    if (g)
@@ -110,7 +111,7 @@ int db2_org_egress_begin(const char *authority_id, const char *request_id, const
        !owner_token || strlen(owner_token) != 32 || !instance_id || !instance_id[0] ||
        ttl_secs < 1 || ttl_secs > 300)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(conn,
                                                  "SELECT dispatch_id,owner_generation FROM "
@@ -140,7 +141,7 @@ int db2_org_egress_begin(const char *authority_id, const char *request_id, const
 static int bool_call_4(const char *sql, int64_t id, const char *token, int64_t generation,
                        int64_t arg4, int *out_ok)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st = conn ? aimee_pg_prepare(conn, sql, err, sizeof(err)) : NULL;
    if (!st)
@@ -161,8 +162,8 @@ static int bool_call_4(const char *sql, int64_t id, const char *token, int64_t g
    return 0;
 }
 
-int db2_org_egress_heartbeat(int64_t id, const char *owner_token, int64_t generation,
-                             int64_t ttl_secs, int *out_ok)
+int kb_store_org_egress_heartbeat(int64_t id, const char *owner_token, int64_t generation,
+                                  int64_t ttl_secs, int *out_ok)
 {
    int g = bind_common_guard();
    if (g)
@@ -174,14 +175,15 @@ int db2_org_egress_heartbeat(int64_t id, const char *owner_token, int64_t genera
                       generation, ttl_secs, out_ok);
 }
 
-int db2_org_egress_owner_guard(int64_t id, const char *owner_token, int64_t generation, int *out_ok)
+int kb_store_org_egress_owner_guard(int64_t id, const char *owner_token, int64_t generation,
+                                    int *out_ok)
 {
    int g = bind_common_guard();
    if (g)
       return g;
    if (id < 1 || !owner_token || strlen(owner_token) != 32 || generation < 1)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_egress_dispatch_owner_guard(?1,?2,?3)", err,
@@ -204,11 +206,11 @@ int db2_org_egress_owner_guard(int64_t id, const char *owner_token, int64_t gene
    return 0;
 }
 
-int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generation,
-                          const char *state, int http_status, int64_t prompt_tokens,
-                          int64_t completion_tokens, int64_t cache_read_tokens,
-                          int64_t cache_write_tokens, const char *outcome_class,
-                          const char *settlement_basis, int *out_ok)
+int kb_store_org_egress_settle(int64_t id, const char *owner_token, int64_t generation,
+                               const char *state, int http_status, int64_t prompt_tokens,
+                               int64_t completion_tokens, int64_t cache_read_tokens,
+                               int64_t cache_write_tokens, const char *outcome_class,
+                               const char *settlement_basis, int *out_ok)
 {
    int g = bind_common_guard();
    if (g)
@@ -219,7 +221,7 @@ int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generatio
        (strcmp(settlement_basis, "actual") != 0 && strcmp(settlement_basis, "zero") != 0 &&
         strcmp(settlement_basis, "reservation") != 0))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(
@@ -251,14 +253,14 @@ int db2_org_egress_settle(int64_t id, const char *owner_token, int64_t generatio
    return 0;
 }
 
-int db2_org_egress_recover(int limit, int64_t *out_count)
+int kb_store_org_egress_recover(int limit, int64_t *out_count)
 {
    int g = bind_common_guard();
    if (g)
       return g;
    if (limit < 1 || limit > 100)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st =
        conn ? aimee_pg_prepare(conn, "SELECT org_egress_recover(?1)", err, sizeof(err)) : NULL;

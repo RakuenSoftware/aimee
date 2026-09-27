@@ -44,13 +44,13 @@ int handle_post_review_accept(const char *doc_id, const char *body, int body_len
    int64_t id = (int64_t)atoll(doc_id);
    if (id <= 0)
       return 400;
-   if (db2_kb_doc_set_state(id, "accepted", 1, NULL) == -1)
+   if (kb_store_kb_doc_set_state(id, "accepted", 1, NULL) == -1)
       return 404;
    if (body)
    {
       int64_t rid = json_int64_field(body, "release_id", 0);
       if (rid > 0)
-         db2_kb_release_add_doc(rid, id);
+         kb_store_kb_release_add_doc(rid, id);
    }
    snprintf(out_buf, out_cap, "{\"doc_id\":%lld,\"state\":\"accepted\"}", (long long)id);
    return 200;
@@ -65,7 +65,7 @@ int handle_post_review_reject(const char *doc_id, const char *body, int body_len
       return 400;
    char reason[256] = {0};
    json_str_field(body, "reason", reason, sizeof(reason));
-   if (db2_kb_doc_set_state(id, "rejected", 0, reason[0] ? reason : NULL) == -1)
+   if (kb_store_kb_doc_set_state(id, "rejected", 0, reason[0] ? reason : NULL) == -1)
       return 404;
    snprintf(out_buf, out_cap, "{\"doc_id\":%lld,\"state\":\"rejected\"}", (long long)id);
    return 200;
@@ -78,7 +78,7 @@ int handle_post_releases(const char *body, int body_len, char *out_buf, int out_
    json_str_field(body, "name", name, sizeof(name));
    if (!name[0])
       return 400;
-   int64_t release_id = db2_kb_release_create(name);
+   int64_t release_id = kb_store_kb_release_create(name);
    if (release_id == -1)
       return 409;
    snprintf(out_buf, out_cap, "{\"release_id\":%lld,\"state\":\"pending\"}", (long long)release_id);
@@ -90,7 +90,7 @@ int handle_post_promote(const char *release_id, char *out_buf, int out_cap)
    int64_t rid = (int64_t)atoll(release_id);
    if (rid <= 0)
       return 400;
-   if (db2_kb_release_promote(rid) == -1)
+   if (kb_store_kb_release_promote(rid) == -1)
    {
       snprintf(out_buf, out_cap, "{\"error\":\"promote failed\"}");
       return 409;
@@ -109,7 +109,7 @@ int handle_post_rollback(const char *release_id, const char *body, int body_len,
    if (rid <= 0)
       return 400;
    int64_t target = json_int64_field(body, "target_release_id", 0);
-   if (db2_kb_release_rollback(target) == -1)
+   if (kb_store_kb_release_rollback(target) == -1)
    {
       snprintf(out_buf, out_cap, "{\"error\":\"no prior release to rollback to\"}");
       return 409;
@@ -121,14 +121,14 @@ int handle_post_rollback(const char *release_id, const char *body, int body_len,
 
 int handle_get_active_release(char *out_buf, int out_cap)
 {
-   int64_t id = db2_kb_release_get_active();
+   int64_t id = kb_store_kb_release_get_active();
    if (id <= 0)
    {
       snprintf(out_buf, out_cap, "{\"active_release_id\":null}");
       return 200;
    }
-   db2_kb_release_t rel;
-   if (db2_kb_release_read(id, &rel) == -1)
+   kb_store_kb_release_t rel;
+   if (kb_store_kb_release_read(id, &rel) == -1)
    {
       snprintf(out_buf, out_cap, "{\"active_release_id\":null}");
       return 200;

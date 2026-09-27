@@ -5,15 +5,15 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/cross_repo_build.h"
-#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/kb_store.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static void X(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "seed failed: %s\n  sql: %s\n", err, sql);
    assert(rc == 0);
@@ -23,7 +23,7 @@ static int64_t bd_count(const char *caller, const char *definer, const char *kin
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT COUNT(*) FROM cross_repo_build_dep WHERE caller_project=?1 AND definer_project=?2 "
        "AND build_kind=?3",
        err, sizeof(err));
@@ -146,7 +146,7 @@ static void test_rebuild(void)
      "FROM files WHERE path='third_party/x/CMakeLists.txt' AND project_id=(SELECT id FROM projects "
      "WHERE name='bapp')");
 
-   int rc = db2_cross_repo_rebuild_build_deps();
+   int rc = kb_store_cross_repo_rebuild_build_deps();
    assert(rc >= 2);
    assert(bd_count("bapp", "inputtino", "fetchcontent") == 1); /* FetchContent -> corpus repo */
    assert(bd_count("bapp", "moonlight-common-c", "submodule") == 1); /* submodule -> corpus repo */
@@ -154,8 +154,8 @@ static void test_rebuild(void)
     * fetchcontent). */
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM cross_repo_build_dep WHERE caller_project='bapp'", err,
-       sizeof(err));
+       kb_store_conn(), "SELECT COUNT(*) FROM cross_repo_build_dep WHERE caller_project='bapp'",
+       err, sizeof(err));
    assert(st);
    int64_t total = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -163,7 +163,7 @@ static void test_rebuild(void)
    aimee_pg_finalize(st);
    assert(total == 2); /* exactly inputtino + moonlight-common-c; fmt + vendored excluded */
    /* idempotent */
-   int rc2 = db2_cross_repo_rebuild_build_deps();
+   int rc2 = kb_store_cross_repo_rebuild_build_deps();
    assert(rc2 == rc);
    printf("ok\n");
 }
@@ -172,7 +172,7 @@ int main(void)
 {
    test_ref_repo();
    test_extract();
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_rebuild();
    printf("cross_repo_build: all tests passed\n");
    return 0;

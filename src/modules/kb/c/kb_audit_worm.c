@@ -8,20 +8,20 @@
 #include <string.h>
 
 #include <aimee/audit/audit_worm_chain.h>
-#include "../support/db2_runtime_config.h"
-#include "db2_internal.h"
+#include "../support/kb_store_runtime_config.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_time.h" /* now_utc: portable enqueued_at for the shim path */
+#include "../support/kb_store_time.h" /* now_utc: portable enqueued_at for the shim path */
 #include "kb_audit_worm.h"
 
 /* Retained as a no-op ABI during the module transition. Canonical hashing is
- * now owned directly by the shared SQLite WORM worker, not injected into DB2. */
-void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider)
+ * now owned directly by the shared SQLite WORM worker, not injected into KB_STORE. */
+void aimee_kb_store_register_audit_hash_provider(kb_store_audit_hash_fn provider)
 {
    (void)provider;
 }
 
-void aimee_db2_register_audit_hash_v2_provider(db2_audit_hash_v2_fn provider)
+void aimee_kb_store_register_audit_hash_v2_provider(kb_store_audit_hash_v2_fn provider)
 {
    (void)provider;
 }
@@ -29,20 +29,20 @@ void aimee_db2_register_audit_hash_v2_provider(db2_audit_hash_v2_fn provider)
 /* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
  * and cached, so the hot kb-audit seam costs one branch after the first call. */
 static int g_kb_worm_enabled = -1;
-void db2_kb_audit_worm_set_enabled(int enabled)
+void kb_store_kb_audit_worm_set_enabled(int enabled)
 {
    g_kb_worm_enabled = enabled ? 1 : 0;
 }
-int db2_kb_audit_worm_enabled(void)
+int kb_store_kb_audit_worm_enabled(void)
 {
    if (g_kb_worm_enabled < 0)
       g_kb_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
    return g_kb_worm_enabled;
 }
 
-int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
-                               const char *action, const char *subject, const char *verdict,
-                               const char *detail)
+int kb_store_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
+                                    const char *action, const char *subject, const char *verdict,
+                                    const char *detail)
 {
    if (!conn || !aimee_pg_in_transaction(conn) || !action || !action[0])
       return -1;
@@ -62,11 +62,11 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    }
 
    char err[256] = "";
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
    aimee_pg_stmt_t *submit =
        aimee_pg_prepare(conn, "SELECT kb_audit_worm_submit(?1,?2,?3,?4,?5,?6)", err, sizeof(err));
 #else
-   /* The DB2 SQLite shim cannot execute PL/pgSQL SECURITY DEFINER functions;
+   /* The KB_STORE SQLite shim cannot execute PL/pgSQL SECURITY DEFINER functions;
     * mirror the producer contract by inserting the intent directly.
     *
     * The timestamp is computed in C and bound rather than written as a SQL
@@ -91,7 +91,7 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    aimee_pg_bind_text(submit, "?4", subject);
    aimee_pg_bind_text(submit, "?5", verdict);
    aimee_pg_bind_text(submit, "?6", detail);
-#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifndef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
    aimee_pg_bind_text(submit, "?7", enqueued_at);
 #endif
    aimee_pg_step_t submitted = aimee_pg_step(submit, err, sizeof(err));
@@ -99,17 +99,18 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    return submitted == AIMEE_PG_ROW ? 0 : -1;
 }
 
-int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
-                        const char *subject, const char *verdict, const char *detail)
+int kb_store_kb_audit_append(const char *actor_role, const char *actor_principal,
+                             const char *action, const char *subject, const char *verdict,
+                             const char *detail)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256];
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return -1;
-   if (db2_kb_audit_append_in_txn(conn, actor_role, actor_principal, action, subject, verdict,
-                                  detail) != 0 ||
+   if (kb_store_kb_audit_append_in_txn(conn, actor_role, actor_principal, action, subject, verdict,
+                                       detail) != 0 ||
        aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -118,17 +119,17 @@ int db2_kb_audit_append(const char *actor_role, const char *actor_principal, con
    return 0;
 }
 
-int db2_kb_audit_pending(long long *count, long long *oldest_age_seconds)
+int kb_store_kb_audit_pending(long long *count, long long *oldest_age_seconds)
 {
    if (count)
       *count = 0;
    if (oldest_age_seconds)
       *oldest_age_seconds = 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[128];
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
    const char *sql = "SELECT pending_count,oldest_age_seconds FROM kb_audit_worm_pending()";
 #else
    const char *sql = "SELECT COUNT(*),0 FROM kb_audit_outbox o LEFT JOIN kb_audit_delivery d"

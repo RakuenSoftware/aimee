@@ -9,7 +9,7 @@ name: Module inventory
 # is `main`.
 #
 # Everything in this workflow governs the module boundary: the canonical
-# inventory, source ownership, and the frozen DB2 consumer surface. Those are
+# inventory, source ownership, and the frozen KB_STORE consumer surface. Those are
 # promote-time questions, decided when work is promoted to `main`. `testing` is
 # the shared integration branch, so running them there blocks ordinary feature
 # work on a module-structure decision that is not being made at that point.

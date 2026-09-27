@@ -236,11 +236,11 @@ for role in server kb; do
     done
 done
 
-echo "11. KB retires Db2 identity without expanding PostgreSQL policy"
+echo "11. KB retires KbStore identity without expanding PostgreSQL policy"
 setup
 mkdir -p "$AIMEE_HOME/modules.d/kb"
-old="$AIMEE_HOME/modules.d/kb/db2.grant"
-write_module_grant "$old" 29 /retired/aimee-module-db2 11521
+old="$AIMEE_HOME/modules.d/kb/kb_store.grant"
+write_module_grant "$old" 29 /retired/aimee-module-kb_store 11521
 cp "$old" "$tmp/retired-policy"
 write_module_grant "$AIMEE_MODULE_GRANT_SRC/postgres.grant" 28 "$real_exe" 11265,11266,11267
 sh "$tmp/kb-seeding.sh" 2>"$tmp/grant-warning"

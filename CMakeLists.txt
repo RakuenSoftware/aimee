@@ -436,10 +436,10 @@ set(DB1_SRCS
 
 # The preserved C implementation now lives under module ownership. It remains
 # in-process until the staged aimee-kb process-contract cutover; the later Go
-# port replaces this private tree without moving PostgreSQL/pgvector out of DB2.
-set(DB2_SRCS
-    ${AIMEE_SRC_DIR}/modules/kb/c/db2_init.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/db2_reembed.c
+# port replaces this private tree without moving PostgreSQL/pgvector out of KB_STORE.
+set(KB_STORE_SRCS
+    ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_init.c
+    ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_reembed.c
     ${AIMEE_SRC_DIR}/modules/kb/c/agent_hints.c
     ${AIMEE_SRC_DIR}/modules/kb/c/agent_outcomes.c
     ${AIMEE_SRC_DIR}/modules/kb/c/canonical_index.c
@@ -449,8 +449,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/kb/c/curiosity.c
     ${AIMEE_SRC_DIR}/modules/kb/c/decision_log.c
     ${AIMEE_SRC_DIR}/modules/kb/c/enrollments.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/db2_tenant.c
-    ${AIMEE_SRC_DIR}/modules/kb/c/db2_hardening.c
+    ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_tenant.c
+    ${AIMEE_SRC_DIR}/modules/kb/c/kb_store_hardening.c
     ${AIMEE_SRC_DIR}/modules/kb/c/team.c
     ${AIMEE_SRC_DIR}/modules/kb/c/project.c
     ${AIMEE_SRC_DIR}/modules/kb/c/membership.c
@@ -513,12 +513,12 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/kb/c/pgvec_kb_service.c
 )
 
-set(DB2_HOST_ADAPTER_SRCS
-    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_agent.c
-    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_context.c
-    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_export.c
-    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_memory.c
-    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_runtime.c
+set(KB_STORE_HOST_ADAPTER_SRCS
+    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_agent.c
+    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_context.c
+    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_export.c
+    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_memory.c
+    ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_runtime.c
 )
 
 set(CORE_SRCS
@@ -1206,8 +1206,8 @@ set_property(SOURCE
 add_library(aimee-core STATIC
     ${CORE_SRCS}
     ${DB1_SRCS}
-    ${DB2_SRCS}
-    ${DB2_HOST_ADAPTER_SRCS}
+    ${KB_STORE_SRCS}
+    ${KB_STORE_HOST_ADAPTER_SRCS}
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_PROJECT_INCLUDE_DIRS}
@@ -1568,7 +1568,7 @@ add_dependencies(aimee-agent tool_prompts_header)
 
 # Generate schema_data.h from tier schema SQL. modules/db1/db_schema.c and
 # modules/kb/c/db_schema.c includes this header to embed its tier schemas as C
-# string constants for DB1 and DB2. Without this rule, fresh CMake checkouts
+# string constants for DB1 and KB_STORE. Without this rule, fresh CMake checkouts
 # fail to build with "schema_data.h: No such file or directory" because the
 # generator only ran from the Makefile.
 set(SCHEMA_DATA_HEADER "${AIMEE_SRC_DIR}/schema_data.h")

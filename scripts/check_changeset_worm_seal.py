@@ -2,7 +2,7 @@
 """Every SQL path that closes its own fact-graph changeset must seal it.
 
 A memory mutation is a changeset: opened, applied, closed. The C mutation API
-seals its own closes -- fm_commit_finish() in db2/c/fact_mutation.c appends to
+seals its own closes -- fm_commit_finish() in kb_store/c/fact_mutation.c appends to
 the WORM chain on every close, including revert and ingest-rollback. The
 SQL-side closes in schema.sql each had to grow the same call, and a close added
 later will not have one unless something checks.

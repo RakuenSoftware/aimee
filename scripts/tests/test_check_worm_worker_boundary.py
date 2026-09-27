@@ -59,8 +59,8 @@ class WormWorkerBoundaryTest(unittest.TestCase):
     def test_foreground_chain_builder_is_rejected(self) -> None:
         data = sources()
         data["c_appender"] = data["c_appender"].replace(
-            "#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM",
-            '#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM\n'
+            "#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM",
+            '#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM\n'
             '   const char *bad = "INSERT INTO kb_audit_event";\n'
             "   (void)bad;",
             1,
@@ -90,7 +90,7 @@ class WormWorkerBoundaryTest(unittest.TestCase):
         data = sources()
         data["makefile"] = data["makefile"].replace(
             "$(KB_WORM): $(KB_WORM_OBJS)",
-            "$(KB_WORM): $(KB_WORM_OBJS) $(KB_DB2_OBJS)",
+            "$(KB_WORM): $(KB_WORM_OBJS) $(KB_KB_STORE_OBJS)",
             1,
         )
         self.assertIn(

@@ -1,17 +1,17 @@
-#ifndef DEC_DB2_DB_SCHEMA_H
-#define DEC_DB2_DB_SCHEMA_H 1
+#ifndef DEC_KB_STORE_DB_SCHEMA_H
+#define DEC_KB_STORE_DB_SCHEMA_H 1
 
-/* DB2 (Postgres) idempotent schema bootstrap. The DB1 (SQLite) half
+/* KB_STORE (Postgres) idempotent schema bootstrap. The DB1 (SQLite) half
  * of the split lives in db1/db_schema.h. See docs/STORAGE_TIERS.md. */
 
 #include <stddef.h>
 
-/* DB2 schema version. Recorded in kb_meta.schema_version at apply (migrate) time,
+/* KB_STORE schema version. Recorded in kb_meta.schema_version at apply (migrate) time,
  * and checked by a hardened-tier runtime kb (which cannot apply DDL) to refuse a
  * stale / un-migrated schema. BUMP this whenever schema.sql adds or changes objects
  * that a runtime kb depends on, so a runtime kb started against an old schema fails
  * closed rather than running degraded. */
-#define AIMEE_DB2_SCHEMA_VERSION 44
+#define AIMEE_KB_STORE_SCHEMA_VERSION 45
 
 struct sqlite3;
 
@@ -39,32 +39,33 @@ extern "C"
     * errbuf set). aimee_pg_*-based so it runs on Postgres and the sqlite shim.
     * |conn| is the aimee_pg connection handle. Called by db_apply_schema_postgres
     * after the schema applies; exposed for direct testing. */
-   int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, size_t errlen);
+   int kb_store_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf,
+                                              size_t errlen);
 
    /* embedder-runtime-fetch-autodim §2a: read the recorded kb_meta
     * .schema_embedding_dim as the *source* of the runtime dim (the companion read
     * to record_or_check's write/guard). Returns the recorded dim when in range
-    * (1..EMBED_MAX_DIM), else 0 — the "absent" signal db2_effective_dim() treats
+    * (1..EMBED_MAX_DIM), else 0 — the "absent" signal kb_store_effective_dim() treats
     * as not-present: no row, empty/non-numeric/non-positive, or out of range
     * (guards strtol against an operator typo). Read-only; never writes; never
     * errors loudly (a missing/garbage row must not crash a read). |conn| is the
     * aimee_pg connection handle; aimee_pg_*-based so it runs on Postgres and the
     * sqlite shim. */
-   int db2_embedding_dim_get(void *conn);
+   int kb_store_embedding_dim_get(void *conn);
 
    /* §2b: tri-state read distinguishing a genuinely-absent recorded dim (expected
     * on a fresh DB) from a DB query ERROR — the §2b probe path must NOT treat a
     * lost connection / missing table as "absent" and bootstrap over it. *out is
     * set only on FOUND (an in-range 1..EMBED_MAX_DIM value); a no-row or
     * garbage/out-of-range row → ABSENT (quiet, as §2a); a prepare/step failure →
-    * ERROR. (db2_embedding_dim_get stays as the value-or-0 wrapper for §2a.) */
+    * ERROR. (kb_store_embedding_dim_get stays as the value-or-0 wrapper for §2a.) */
    typedef enum
    {
-      DB2_DIM_FOUND = 0,
-      DB2_DIM_ABSENT = 1,
-      DB2_DIM_ERROR = -1
-   } db2_dim_read_t;
-   db2_dim_read_t db2_embedding_dim_read(void *conn, int *out);
+      KB_STORE_DIM_FOUND = 0,
+      KB_STORE_DIM_ABSENT = 1,
+      KB_STORE_DIM_ERROR = -1
+   } kb_store_dim_read_t;
+   kb_store_dim_read_t kb_store_embedding_dim_read(void *conn, int *out);
 
    /* unified-llm-container §2: record/check the EMBEDDER model identity
     * (repo@sha) in kb_meta.schema_embedder_model_id alongside the dim. A dim-only
@@ -76,8 +77,9 @@ extern "C"
     * criterion for adding an entry). Returns 0 (recorded/match/admitted), -1
     * (unadmitted mismatch / DB error, errbuf set). Called by
     * db_apply_schema_postgres; exposed for direct testing. */
-   int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
-                                           char *errbuf, size_t errlen);
+   int kb_store_embedding_model_record_or_check(void *conn, const char *model_id,
+                                                const char *compat_csv, char *errbuf,
+                                                size_t errlen);
 
    /* Record/check the embedder's vector-space identity (the gateway's /health
     * serving_id: model + pooling + prefix pair) in kb_meta.schema_embedder_serving_id.
@@ -93,20 +95,20 @@ extern "C"
     * ever embedded. It is gone — a kb with no embedder now refuses to start — but the
     * kb_meta rows it left behind are not, and without this every such deployment would
     * refuse to start once given the embedder it now requires. Emptiness must be proven. */
-   int db2_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
-                                            size_t errlen);
+   int kb_store_embedder_serving_record_or_check(void *conn, const char *serving_id, char *errbuf,
+                                                 size_t errlen);
 
    /* The derived vector tables — rebuildable from source held elsewhere. NULL-terminated.
-    * db2_reembed drops them on a dimension change; the serving-identity guard reads them
+    * kb_store_reembed drops them on a dimension change; the serving-identity guard reads them
     * to decide whether anything has been embedded yet. */
-   extern const char *const DB2_DERIVED_VECTOR_TABLES[];
+   extern const char *const KB_STORE_DERIVED_VECTOR_TABLES[];
 
-   /* Apply the consolidated SQLite schema for DB2's libpq shim/test
-    * compatibility path. Production DB2 remains Postgres-only. */
-   int db2_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);
+   /* Apply the consolidated SQLite schema for KB_STORE's libpq shim/test
+    * compatibility path. Production KB_STORE remains Postgres-only. */
+   int kb_store_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_DB_SCHEMA_H */
+#endif /* DEC_KB_STORE_DB_SCHEMA_H */

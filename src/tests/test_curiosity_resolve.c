@@ -13,8 +13,8 @@
 #include "curiosity_resolve.h"
 #include "db1.h"
 #include "modules/kb/c/curiosity.h"
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 
 static int g_probe_calls;
 static curiosity_evidence_t g_probe_answer;
@@ -44,20 +44,20 @@ static curiosity_evidence_t selective_probe(const char *gap_type, const char *su
 
 static void seed(const char *gap_type, const char *topic)
 {
-   assert(db2_curiosity_create(gap_type, "", topic, "seeded by test", 0.5, 0.5, "s-test", NULL) ==
-          0);
+   assert(kb_store_curiosity_create(gap_type, "", topic, "seeded by test", 0.5, 0.5, "s-test",
+                                    NULL) == 0);
 }
 
 static int open_count(void)
 {
    curiosity_item_t items[64];
-   int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, items, 64);
+   int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, items, 64);
    return n < 0 ? -1 : n;
 }
 
 static void test_no_probe_closes_nothing(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    seed(CURIOSITY_GAP_WEAK_COVERAGE, "some-topic");
    curiosity_resolve_register_probe(NULL);
 
@@ -74,7 +74,7 @@ static void test_no_probe_closes_nothing(void)
 
 static void test_only_coverage_shaped_gaps_are_touched(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    seed(CURIOSITY_GAP_UNVERIFIED_ASSUMPTION, "assumption-topic");
    seed(CURIOSITY_GAP_WEAK_COVERAGE, "coverage-topic");
    seed(CURIOSITY_GAP_CONTRADICTION, "contradiction-topic");
@@ -97,7 +97,7 @@ static void test_only_coverage_shaped_gaps_are_touched(void)
    assert(open_count() == 2);
 
    curiosity_item_t items[16];
-   int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, items, 16);
+   int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, items, 16);
    for (int i = 0; i < n; i++)
       assert(strcmp(items[i].gap_type, CURIOSITY_GAP_CONTRADICTION) == 0 ||
              strcmp(items[i].gap_type, CURIOSITY_GAP_STALE_FACT) == 0);
@@ -105,7 +105,7 @@ static void test_only_coverage_shaped_gaps_are_touched(void)
 
 static void test_a_gap_that_still_stands_stays_open(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    seed(CURIOSITY_GAP_WEAK_COVERAGE, "answered-topic");
    seed(CURIOSITY_GAP_WEAK_COVERAGE, "unanswered-topic");
 
@@ -119,13 +119,13 @@ static void test_a_gap_that_still_stands_stays_open(void)
    assert(open_count() == 1);
 
    curiosity_item_t items[8];
-   assert(db2_curiosity_list(CURIOSITY_STATE_OPEN, items, 8) == 1);
+   assert(kb_store_curiosity_list(CURIOSITY_STATE_OPEN, items, 8) == 1);
    assert(strcmp(items[0].target_topic, "unanswered-topic") == 0);
 }
 
 static void test_undecided_is_not_resolved(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    seed(CURIOSITY_GAP_WEAK_COVERAGE, "murky-topic");
 
    g_probe_answer = CURIOSITY_EVIDENCE_UNKNOWN;
@@ -142,7 +142,7 @@ static void test_undecided_is_not_resolved(void)
 
 static void test_the_budget_bounds_the_pass(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    for (int i = 0; i < 10; i++)
    {
       char topic[32];
@@ -169,11 +169,11 @@ static void test_the_budget_bounds_the_pass(void)
 
 static void test_an_item_with_nothing_to_look_up(void)
 {
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    /* No entity and no topic: there is no question to ask, so it must not be
     * closed for the absence of one. */
-   assert(db2_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "", "", "no subject", 0.5, 0.5,
-                               "s-test", NULL) == 0);
+   assert(kb_store_curiosity_create(CURIOSITY_GAP_WEAK_COVERAGE, "", "", "no subject", 0.5, 0.5,
+                                    "s-test", NULL) == 0);
    g_probe_calls = 0;
    g_probe_answer = CURIOSITY_EVIDENCE_FOUND;
    curiosity_resolve_register_probe(fake_probe);
@@ -190,7 +190,7 @@ int main(void)
    printf("curiosity_resolve: ");
 
    assert(db1_init(":memory:") == 0);
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    test_no_probe_closes_nothing();
    test_only_coverage_shaped_gaps_are_touched();
@@ -200,7 +200,7 @@ int main(void)
    test_an_item_with_nothing_to_look_up();
 
    /* An empty backlog is a no-op, not an error. */
-   assert(db2_curiosity_reset() == 0);
+   assert(kb_store_curiosity_reset() == 0);
    {
       curiosity_resolve_stats_t st;
       assert(curiosity_resolve_pass(0, &st) == 0);

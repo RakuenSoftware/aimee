@@ -1,10 +1,10 @@
 #include "pgvec_transport.h"
 
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "lifecycle.h" /* db2_embedding_dim */
+#include "lifecycle.h" /* kb_store_embedding_dim */
 #include "cJSON.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -23,12 +23,12 @@ static int64_t latency_max_us = 0;
 static _Atomic long long g_dim_refused = 0;
 static _Atomic int g_dim_last_offered = 0;
 
-long long db2_embedding_dim_refused_count(void)
+long long kb_store_embedding_dim_refused_count(void)
 {
    return atomic_load_explicit(&g_dim_refused, memory_order_relaxed);
 }
 
-int db2_embedding_dim_last_offered(void)
+int kb_store_embedding_dim_last_offered(void)
 {
    return atomic_load_explicit(&g_dim_last_offered, memory_order_relaxed);
 }
@@ -115,7 +115,7 @@ int pgvec_table_ready(const char *table)
 {
    if (!table || !table[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -148,7 +148,7 @@ int64_t pgvec_point_count(const char *table)
 {
    if (!table || !table[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -169,7 +169,7 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
 {
    if (!table || !table[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -236,7 +236,7 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
 
 int pgvec_vectorscale_available(void)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return 0;
    char errbuf[256];
@@ -253,7 +253,7 @@ int pgvec_vectorscale_available(void)
  * a database that does not have the extension.
  *
  * This function used to say the opposite: an unset setting meant HNSW, and
- * "auto" reached DiskANN only above db2_vector_corpus_diskann_threshold, whose
+ * "auto" reached DiskANN only above kb_store_vector_corpus_diskann_threshold, whose
  * shipped default is a million rows. schema.sql has always disagreed with it --
  * it creates `USING diskann` whenever the extension is present and only falls
  * back to HNSW when CREATE EXTENSION vectorscale fails. So the tree carried two
@@ -285,7 +285,7 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
 {
    if (!table || !table[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -337,12 +337,12 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
    if (!vec || dim <= 0)
       return 0;
    /* Dimension guard: the embedding column is vector(N) where N is the active
-    * configured dim (db2_embedding_dim). A vector of a different dim (e.g. the
+    * configured dim (kb_store_embedding_dim). A vector of a different dim (e.g. the
     * 384-dim builtin fallback against a 1024/2560 column) is rejected by
     * Postgres with "expected N dimensions, not M" — but that error was being
     * counted as a successful embed, silently leaving memory_embeddings empty.
     * Fail loudly here instead of shipping a mismatched vector. */
-   int expect = db2_embedding_dim();
+   int expect = kb_store_embedding_dim();
    if (expect > 0 && dim != expect)
    {
       /* Record it as well as logging it: a per-row WARN in the kb log is invisible
@@ -355,7 +355,7 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
           dim, expect, (long long)point_id);
       return -1;
    }
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -425,7 +425,7 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
 
 int pgvec_memory_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM memory_embeddings WHERE point_id = :point_id";
@@ -449,7 +449,7 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
       return 0;
    /* Same dim guard as pgvec_memory_upsert: never ship a vector whose dim does
     * not match the configured vector(N) column. */
-   int expect = db2_embedding_dim();
+   int expect = kb_store_embedding_dim();
    if (expect > 0 && dim != expect)
    {
       aimee_log(LOG_WARN, "pgvec",
@@ -457,7 +457,7 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
                 dim, expect, (long long)point_id);
       return -1;
    }
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -528,7 +528,7 @@ int pgvec_kb_upsert_batch(const int64_t *ids, const float *vecs, int dim,
 
 int pgvec_kb_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM kb_embeddings WHERE point_id = :point_id";
@@ -546,7 +546,7 @@ int pgvec_kb_delete_project(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM kb_embeddings WHERE project = :project";
@@ -564,7 +564,7 @@ int pgvec_kb_delete_current_project(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM kb_embeddings WHERE project=:project AND point_id IN ("
@@ -590,7 +590,7 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
 {
    if (!table || !ids_out || max <= 0 || !next_offset_out || !done_out)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -644,7 +644,7 @@ int pgvec_kb_search_scoped(const char *project, const char *exclude_project, con
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -730,7 +730,7 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
 {
    if (!vec || dim <= 0)
       return 0;
-   int expect = db2_embedding_dim();
+   int expect = kb_store_embedding_dim();
    if (expect > 0 && dim != expect)
    {
       aimee_log(LOG_WARN, "pgvec",
@@ -739,7 +739,7 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
                 dim, expect, (long long)point_id);
       return -1;
    }
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -792,7 +792,7 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
 
 int pgvec_kbpdf_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM kb_pdf_embeddings WHERE point_id = :point_id";
@@ -810,7 +810,7 @@ int pgvec_kbpdf_delete_project(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM kb_pdf_embeddings WHERE project = :project";
@@ -832,7 +832,7 @@ int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -890,7 +890,7 @@ int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, con
 {
    if (!vec || dim <= 0)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -940,7 +940,7 @@ int pgvec_curator_entity_lookup(int64_t point_id, char *artifact_id_out, int aid
       artifact_id_out[0] = '\0';
    if (name_out && name_len > 0)
       name_out[0] = '\0';
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -970,7 +970,7 @@ int pgvec_curator_entity_lookup(int64_t point_id, char *artifact_id_out, int aid
 
 int pgvec_curator_entity_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM curator_entity_vectors WHERE point_id = :point_id";
@@ -989,7 +989,7 @@ int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, co
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1076,7 +1076,7 @@ int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
 {
    if (!vec || dim <= 0)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1123,7 +1123,7 @@ int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
 
 int pgvec_curator_narrative_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM curator_narrative_vectors WHERE point_id = :point_id";
@@ -1143,7 +1143,7 @@ int pgvec_curator_narrative_search(const char *kind, const char *status, const c
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1239,7 +1239,7 @@ int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, con
 {
    if (!subj_attr_vec || !value_vec || dim <= 0)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1296,7 +1296,7 @@ int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, con
 
 int pgvec_curator_claim_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM curator_claim_vectors WHERE point_id = :point_id";
@@ -1315,7 +1315,7 @@ int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, co
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1390,7 +1390,7 @@ int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
 {
    if (!intent_vec || !signature_vec || !body_vec || dim <= 0)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1458,7 +1458,7 @@ int pgvec_curator_code_unit_delete_project(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    /* curator_code_unit_vectors has no project column: the writer records the
@@ -1483,7 +1483,7 @@ int pgvec_curator_code_unit_delete_project(const char *project)
 
 int pgvec_curator_code_unit_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM curator_code_unit_vectors WHERE point_id = :point_id";
@@ -1502,7 +1502,7 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1580,7 +1580,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
 {
    if (!vec || dim <= 0)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1642,7 +1642,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
 
 int pgvec_code_delete(int64_t point_id)
 {
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM code_embeddings WHERE point_id = :pid";
@@ -1660,7 +1660,7 @@ int pgvec_code_delete_project(const char *project)
 {
    if (!project || !*project)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    static const char *sql = "DELETE FROM code_embeddings WHERE project = :proj";
@@ -1680,7 +1680,7 @@ int pgvec_code_search(const char *project, const float *vec, int dim, int limit,
 {
    if (!vec || dim <= 0 || !ids || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1748,7 +1748,7 @@ int pgvec_code_search_paths(const char *project, const float *vec, int dim, int 
 {
    if (!vec || dim <= 0 || !paths || path_cap <= 0 || !scores || max <= 0)
       return -1;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1828,7 +1828,7 @@ int pgvec_code_similar_pairs(const char *project, int k, double min_cosine, int 
       k = 5;
    if (anchor_cap <= 0)
       anchor_cap = 5000;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
 
@@ -1915,7 +1915,7 @@ int pgvec_code_node_path(const char *project, const char *node_key, char *out, i
    if (!project || !*project || !node_key || !*node_key || !out || out_cap <= 0)
       return -1;
    out[0] = '\0';
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return -1;
    const char *sql = "SELECT ce.file_path FROM code_embeddings ce"
@@ -1949,7 +1949,7 @@ int pgvec_code_exists_by_hash(const char *project, const char *node_key, const c
 {
    if (!project || !node_key || !content_hash || !*content_hash)
       return 0;
-   void *pg = db2_conn();
+   void *pg = kb_store_conn();
    if (!pg)
       return 0;
    static const char *sql = "SELECT 1 FROM code_embeddings ce"

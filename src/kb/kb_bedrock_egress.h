@@ -80,7 +80,7 @@ typedef struct
 /* Owned and non-copyable. Initialize before first use and clear exactly once. */
 void kb_bedrock_wire_request_init(kb_bedrock_wire_request_t *request);
 void kb_bedrock_wire_request_clear(kb_bedrock_wire_request_t *request);
-kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *target,
+kb_bedrock_result_t kb_bedrock_wire_request_build(const kb_store_bedrock_target_t *target,
                                                   const aimee_request_t *ir, int streaming,
                                                   const kb_bedrock_credentials_t *credentials,
                                                   kb_bedrock_wire_request_t *request);
@@ -112,7 +112,7 @@ kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
  * The returned target has one owner, is non-copyable, and must be cleared exactly once.  The
  * owner must externally synchronize clear and call it only after every dispatch using the target
  * has returned.  Its catalog contents and lifecycle are deliberately opaque so a network caller
- * cannot substitute a raw db2 target. */
+ * cannot substitute a raw kb_store target. */
 kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
                                                          kb_bedrock_authorized_target_t **target);
 void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);

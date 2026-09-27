@@ -34,7 +34,7 @@ the response-governance stage alone: `gw_stage_governance.c`, its private header
 `gw_stage_governance.h`, and the process wire-parity adapter, tested by
 `src/tests/test_response_governance_stage.c` plus cross-language conformance. That is narrower than
 the governance plane this document describes. The OIDC, identity, policy-distribution, and console
-surfaces remain distributed across the KB, DB2, management, and console layers and are not yet
+surfaces remain distributed across the KB, KB_STORE, management, and console layers and are not yet
 module-local. The descriptor declares its sources, private header, test, and this document and sets
 `ownership_complete: true`. The latch asserts that those declarations exhaustively cover the module
 root as it stands (one source and one private header), not that the broader governance plane has been
@@ -65,7 +65,7 @@ points.
 ## Providers and readiness
 
 Current code is distributed across `src/kb/auth_oidc.c`, KB identity/JWKS/enrollment/account routes and
-DB2 tables, management-token code, console Accounts/Governance pages, and
+KB_STORE tables, management-token code, console Accounts/Governance pages, and
 `src/modules/governance/gw_stage_governance.c`. Readiness must separate module selection, issuer-profile
 validity/discovery, vault secret availability, JWKS freshness/rotation, claim mapping, tenant binding,
 policy distribution, audit appendability, and downstream enforcement. A stored issuer URL is not ready
@@ -77,7 +77,7 @@ OIDC.
 
 The `modules.governance` response-stage gate follows the descriptor's default-off selection. The legacy
 `AIMEE_STAGE_GOVERNANCE` fallback is also opt-in and controls only response tool-policing, while OIDC has
-separate environment/file/DB2 routes. The target module selection must gate all organizational governance
+separate environment/file/KB_STORE routes. The target module selection must gate all organizational governance
 surfaces and leave core fail-closed enforcement intact. Issuer profiles are configurable from Control Plane
 UI and equivalent CLI, environment/config-file, and non-web API surfaces; secrets are vault references.
 With governance absent, OIDC and organizational settings are absent from advertised catalogs.

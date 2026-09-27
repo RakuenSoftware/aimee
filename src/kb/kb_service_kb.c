@@ -14,7 +14,7 @@
 #include "modules/kb/c/kb_maintenance.h"
 #include "modules/kb/c/kb_payload.h"
 #include "modules/kb/c/kb_service_backend.h"
-#include "kb/db2_adapters/kb_service_backend_export.h"
+#include "kb/kb_store_adapters/kb_service_backend_export.h"
 #include "modules/kb/c/kb_runtime_state.h"
 #include "modules/kb/c/lifecycle.h"
 #include "modules/kb/c/vector_index_ops.h"
@@ -61,7 +61,7 @@ static void kb_status_add_typed_facts_warning(cJSON *warnings)
 {
    if (!warnings)
       return;
-   int facts_pending = db2_kb_async_count_kind_pending("memory_facts");
+   int facts_pending = kb_store_kb_async_count_kind_pending("memory_facts");
    char synth_endpoint[512];
    if (facts_pending <= 0 ||
        config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
@@ -78,8 +78,8 @@ static void kb_status_add_typed_facts_warning(cJSON *warnings)
 
 char *kb_service_status_json(const char *project)
 {
-   db2_kb_service_project_status_t stats;
-   if (db2_kb_service_collect_project_status(project, &stats) != 0)
+   kb_store_kb_service_project_status_t stats;
+   if (kb_store_kb_service_collect_project_status(project, &stats) != 0)
       return strdup("{\"status\":\"error\",\"summary_status\":\"unavailable\","
                     "\"owner\":\"knowledge-service\",\"available\":0,"
                     "\"message\":\"failed to query knowledge status\"}");
@@ -131,7 +131,7 @@ char *kb_service_status_json(const char *project)
    {
       int rtarget = 0;
       long rstarted = 0;
-      if (db2_reembed_in_progress_get(&rtarget, &rstarted) == 1)
+      if (kb_store_reembed_in_progress_get(&rtarget, &rstarted) == 1)
       {
          const long ttl = 24 * 3600;
          int stuck = (rstarted > 0 && (long)time(NULL) - rstarted > ttl);
@@ -144,9 +144,9 @@ char *kb_service_status_json(const char *project)
       }
    }
 
-   db2_kb_ingest_queue_stats_t iqstats;
+   kb_store_kb_ingest_queue_stats_t iqstats;
    memset(&iqstats, 0, sizeof(iqstats));
-   if (db2_kb_ingest_queue_stats(&iqstats) == 0)
+   if (kb_store_kb_ingest_queue_stats(&iqstats) == 0)
    {
       cJSON *iq = cJSON_AddObjectToObject(obj, "ingest_queue");
       cJSON_AddNumberToObject(iq, "pending", iqstats.pending);
@@ -166,7 +166,7 @@ int kb_handle_ingest(int fd, cJSON *req)
    cJSON *force_j = cJSON_GetObjectItemCaseSensitive(req, "force");
    int force = cJSON_IsTrue(force_j) ? 1 : 0;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
    int use_all =
        !cJSON_IsString(ws_j) || !ws_j->valuestring[0] || strcmp(ws_j->valuestring, "all") == 0;
@@ -194,11 +194,11 @@ int kb_handle_ingest(int fd, cJSON *req)
          if (force)
          {
             pgvec_kb_vector_delete_current_project(pname);
-            db2_kb_service_clear_current_project(pname);
-            db2_kb_file_index_delete_current_project(pname);
+            kb_store_kb_service_clear_current_project(pname);
+            kb_store_kb_file_index_delete_current_project(pname);
          }
-         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
-                                     DB2_KB_INGEST_PRIO_INTERACTIVE);
+         kb_store_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                          KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
          total_queued++;
       }
    }
@@ -222,11 +222,11 @@ int kb_handle_ingest(int fd, cJSON *req)
             if (force)
             {
                pgvec_kb_vector_delete_current_project(pname);
-               db2_kb_service_clear_current_project(pname);
-               db2_kb_file_index_delete_current_project(pname);
+               kb_store_kb_service_clear_current_project(pname);
+               kb_store_kb_file_index_delete_current_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
-                                        DB2_KB_INGEST_PRIO_INTERACTIVE);
+            kb_store_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                             KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
             total_queued++;
          }
       }
@@ -255,16 +255,16 @@ int kb_handle_ingest(int fd, cJSON *req)
 
 char *kb_service_ingest_status_json(void)
 {
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return NULL;
 
-   db2_kb_ingest_queue_stats_t qs;
-   if (db2_kb_ingest_queue_stats(&qs) != 0)
+   kb_store_kb_ingest_queue_stats_t qs;
+   if (kb_store_kb_ingest_queue_stats(&qs) != 0)
       return NULL;
 
 #define INGEST_RECENT_MAX 200
-   db2_kb_ingest_recent_t recent[INGEST_RECENT_MAX];
-   int n_recent = db2_kb_ingest_queue_recent(recent, INGEST_RECENT_MAX);
+   kb_store_kb_ingest_recent_t recent[INGEST_RECENT_MAX];
+   int n_recent = kb_store_kb_ingest_queue_recent(recent, INGEST_RECENT_MAX);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -355,7 +355,7 @@ static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_co
  * point of this function existing.
  *
  * `status` used to be the literal string "ok", written as the first statement of
- * kb_service_health_object and never revised. Every finding below it -- db2_ok,
+ * kb_service_health_object and never revised. Every finding below it -- postgres_ok,
  * pgvec_ok, embed_ok, the dimension-refusal counter -- was published as a SIBLING
  * field that nothing aggregated, so the response could say "ok" while carrying the
  * proof it was not. That is not a bug in any one check; it is the absence of a
@@ -387,18 +387,19 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
    cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
 
-   /* DB2: generic schema + KB-specific tables */
+   /* KB_STORE: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-   /* DB2 still runs in-process in the KB owner. The generic PostgreSQL process
-    * module reads AIMEE_STORE_URL (the server-store DSN), while the staged DB2
+   /* KB_STORE still runs in-process in the KB owner. The generic PostgreSQL process
+    * module reads AIMEE_STORE_URL (the server-store DSN), while the staged KB_STORE
     * bus adapter is not attached until that ownership migration completes.
     * Probing either one here returns capability_absent on a healthy managed KB.
-    * Use the same thread-safe DB2 probes as startup readiness. */
-   int db2_ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
-   if (db2_kb_health_probe(&kb_tables_ok) != 0)
+    * Use the same thread-safe KB_STORE probes as startup readiness. */
+   int postgres_ok =
+       (kb_store_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
+   if (kb_store_kb_health_probe(&kb_tables_ok) != 0)
       kb_tables_ok = 0;
-   cJSON_AddBoolToObject(resp, "db2_ok", db2_ok);
-   cJSON_AddBoolToObject(resp, "db2_kb_tables_ok", kb_tables_ok);
+   cJSON_AddBoolToObject(resp, "postgres_ok", postgres_ok);
+   cJSON_AddBoolToObject(resp, "knowledge_tables_ok", kb_tables_ok);
 
    /* pgvector: delegate to the existing vector-status helper */
    int pgvec_ok = 0, pgvec_collection_ok = 0;
@@ -442,12 +443,12 @@ static cJSON *kb_service_health_object(void)
     * and produces the wrong width stores nothing, so publish the refusal count
     * too: non-zero means every vector since startup was dropped and dense
     * retrieval is dead, however healthy the rest of this response looks. */
-   long long dim_refused = db2_embedding_dim_refused_count();
+   long long dim_refused = kb_store_embedding_dim_refused_count();
    cJSON_AddNumberToObject(resp, "embedding_dim_refused", (double)dim_refused);
    if (dim_refused > 0)
    {
-      cJSON_AddNumberToObject(resp, "embedding_dim_expected", db2_embedding_dim());
-      cJSON_AddNumberToObject(resp, "embedding_dim_offered", db2_embedding_dim_last_offered());
+      cJSON_AddNumberToObject(resp, "embedding_dim_expected", kb_store_embedding_dim());
+      cJSON_AddNumberToObject(resp, "embedding_dim_offered", kb_store_embedding_dim_last_offered());
    }
 
    /* Curator (§4 observability): per-tier provider config + queue depth. The
@@ -462,7 +463,8 @@ static cJSON *kb_service_health_object(void)
    /* Freshness: read last_ingest_at from kb_runtime_state */
    char last_ingest_at[64] = "";
    int freshness_days = -1;
-   if (db2_kb_runtime_state_get("last_ingest_at", last_ingest_at, sizeof(last_ingest_at)) == 0 &&
+   if (kb_store_kb_runtime_state_get("last_ingest_at", last_ingest_at, sizeof(last_ingest_at)) ==
+           0 &&
        last_ingest_at[0])
    {
       /* Days elapsed. Shared parser: this read only the space form, and mktime()
@@ -481,9 +483,9 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "freshness_days", freshness_days);
 
    /* Stats: aggregate chunk/embedding counts */
-   db2_kb_service_project_status_t stats;
+   kb_store_kb_service_project_status_t stats;
    memset(&stats, 0, sizeof(stats));
-   db2_kb_service_collect_project_status(NULL, &stats);
+   kb_store_kb_service_collect_project_status(NULL, &stats);
    cJSON_AddNumberToObject(resp, "chunk_count", stats.chunks);
    cJSON_AddNumberToObject(resp, "embedding_count", stats.embeddings);
 
@@ -497,16 +499,17 @@ static cJSON *kb_service_health_object(void)
     * search that follows. */
    cJSON *warnings = cJSON_AddArrayToObject(resp, "warnings");
    cJSON *blockers = cJSON_AddArrayToObject(resp, "blockers");
-   if (!db2_ok)
+   if (!postgres_ok)
    {
-      cJSON_AddItemToArray(warnings, cJSON_CreateString("DB2 schema not ready"));
+      cJSON_AddItemToArray(warnings, cJSON_CreateString("KB_STORE schema not ready"));
       cJSON_AddItemToArray(blockers,
                            cJSON_CreateString("store unavailable: the KB database schema is not "
                                               "ready, so nothing can be stored or retrieved"));
    }
    if (!pgvec_ok)
    {
-      cJSON_AddItemToArray(warnings, cJSON_CreateString("pgvector extension not loaded in DB2"));
+      cJSON_AddItemToArray(warnings,
+                           cJSON_CreateString("pgvector extension not loaded in KB_STORE"));
       cJSON_AddItemToArray(blockers,
                            cJSON_CreateString("vector store unavailable: the pgvector extension is "
                                               "not loaded, so dense retrieval cannot run"));
@@ -523,7 +526,7 @@ static cJSON *kb_service_health_object(void)
     * older than one minute means the observer has stopped keeping up and is a
     * blocker, even though application writes remain durable in the outbox. */
    long long worm_pending = 0, worm_oldest_age = 0;
-   int worm_status = db2_ok ? db2_kb_audit_pending(&worm_pending, &worm_oldest_age) : -1;
+   int worm_status = postgres_ok ? kb_store_kb_audit_pending(&worm_pending, &worm_oldest_age) : -1;
    cJSON *worm = cJSON_AddObjectToObject(resp, "worm_audit");
    if (worm)
    {
@@ -531,7 +534,7 @@ static cJSON *kb_service_health_object(void)
       cJSON_AddNumberToObject(worm, "pending", (double)worm_pending);
       cJSON_AddNumberToObject(worm, "oldest_age_seconds", (double)worm_oldest_age);
    }
-   if (db2_ok && worm_status != 0)
+   if (postgres_ok && worm_status != 0)
    {
       cJSON_AddItemToArray(warnings,
                            cJSON_CreateString("WORM audit backlog status is unavailable"));
@@ -635,7 +638,7 @@ static cJSON *kb_service_health_object(void)
     * at the new width, and `aimee kb reembed` is the command that does it. */
    /* NO PROACTIVE WIDTH CHECK HERE, having written one and deleted it.
     *
-    * The obvious version compares db2_embedding_dim() against kb_meta's
+    * The obvious version compares kb_store_embedding_dim() against kb_meta's
     * schema_embedding_dim. It cannot fire: both resolve to the RECORDED width, so it
     * agrees with itself. Booting the nomic image (768) over a 384 store leaves both
     * reading 384 while the embedder reports dim 768 on its own /health -- I shipped
@@ -651,7 +654,7 @@ static cJSON *kb_service_health_object(void)
     * (docs/proposals/pending/embedder-image-split-and-rebuild.md).
     *
     * So the refusal counter is the signal until then. It is reactive, and it is true. */
-   int active_dim = db2_embedding_dim();
+   int active_dim = kb_store_embedding_dim();
    if (dim_refused > 0)
    {
       char msg[320];
@@ -659,7 +662,7 @@ static cJSON *kb_service_health_object(void)
                "embedder width mismatch: %lld vector(s) refused (offered %d, store is %d). "
                "Dense retrieval is dead until the corpus is re-embedded at the new width "
                "(`aimee kb reembed`).",
-               dim_refused, db2_embedding_dim_last_offered(), active_dim);
+               dim_refused, kb_store_embedding_dim_last_offered(), active_dim);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
       /* The comment above says this state means "dense retrieval is dead". It said
        * so while the response reported status ok, because saying it in a warning
@@ -672,17 +675,18 @@ static cJSON *kb_service_health_object(void)
 
    /* Maintenance stats */
    char last_maintenance_at[64] = "";
-   db2_kb_runtime_state_get("last_maintenance_at", last_maintenance_at,
-                            sizeof(last_maintenance_at));
+   kb_store_kb_runtime_state_get("last_maintenance_at", last_maintenance_at,
+                                 sizeof(last_maintenance_at));
    cJSON_AddStringToObject(resp, "last_maintenance_at", last_maintenance_at);
 
    char maint_decayed_buf[32] = "0";
-   db2_kb_runtime_state_get("last_maintenance_decayed", maint_decayed_buf,
-                            sizeof(maint_decayed_buf));
+   kb_store_kb_runtime_state_get("last_maintenance_decayed", maint_decayed_buf,
+                                 sizeof(maint_decayed_buf));
    cJSON_AddNumberToObject(resp, "last_maintenance_rows_decayed", atoi(maint_decayed_buf));
 
    char maint_pruned_buf[32] = "0";
-   db2_kb_runtime_state_get("last_maintenance_pruned", maint_pruned_buf, sizeof(maint_pruned_buf));
+   kb_store_kb_runtime_state_get("last_maintenance_pruned", maint_pruned_buf,
+                                 sizeof(maint_pruned_buf));
    cJSON_AddNumberToObject(resp, "last_maintenance_orphans_pruned", atoi(maint_pruned_buf));
 
    cJSON_AddBoolToObject(resp, "maintenance_enabled", config_kb_maintenance_enabled());
@@ -714,7 +718,7 @@ int kb_handle_file_get(int fd, cJSON *req)
    if (!project || !project[0] || !path || !path[0])
       return kb_send_error(fd, "missing project or path");
 
-   char *content = db2_kb_file_index_get_content(project, path);
+   char *content = kb_store_kb_file_index_get_content(project, path);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "project", project);
@@ -783,12 +787,12 @@ int kb_handle_maintenance_run(int fd, cJSON *req)
       if (!mcfg.dry_run)
       {
          /* Persist last live run time so health can report it. */
-         db2_kb_runtime_state_set_now("last_maintenance_at");
+         kb_store_kb_runtime_state_set_now("last_maintenance_at");
          char countbuf[32];
          snprintf(countbuf, sizeof(countbuf), "%d", result.rows_decayed);
-         db2_kb_runtime_state_set("last_maintenance_decayed", countbuf);
+         kb_store_kb_runtime_state_set("last_maintenance_decayed", countbuf);
          snprintf(countbuf, sizeof(countbuf), "%d", result.orphans_pruned);
-         db2_kb_runtime_state_set("last_maintenance_pruned", countbuf);
+         kb_store_kb_runtime_state_set("last_maintenance_pruned", countbuf);
       }
    }
    else
@@ -823,7 +827,7 @@ int kb_handle_kb_export(int fd, cJSON *req)
    int include_archived = cJSON_IsTrue(archived_j) ? 1 : 0;
 
    cJSON *resp =
-       db2_kb_service_memory_export_filtered_json(workspace, kind, since, include_archived);
+       kb_store_kb_service_memory_export_filtered_json(workspace, kind, since, include_archived);
    if (!resp)
       return kb_send_error(fd, "kb.export: export failed");
 
@@ -851,7 +855,8 @@ int kb_handle_kb_import(int fd, cJSON *req)
    int dry_run = cJSON_IsTrue(dry_run_j) ? 1 : 0;
 
    int imported = 0;
-   int rc = db2_kb_service_memory_import_json(memories_j, workspace_override, dry_run, &imported);
+   int rc =
+       kb_store_kb_service_memory_import_json(memories_j, workspace_override, dry_run, &imported);
 
    cJSON *resp = cJSON_CreateObject();
    if (rc == 0)

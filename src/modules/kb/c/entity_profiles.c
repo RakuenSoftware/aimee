@@ -1,7 +1,7 @@
-/* db2/entity_profiles.c: entity-profile cards — Postgres via libpq. */
+/* kb_store/entity_profiles.c: entity-profile cards — Postgres via libpq. */
 
 #include "entity_profiles.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
@@ -18,12 +18,12 @@ static void now_utc_iso(char *buf, size_t len)
    strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &gmt);
 }
 
-int db2_entity_profile_upsert(const char *entity_id, const char *canonical_name,
-                              int observation_count, const char *card_json)
+int kb_store_entity_profile_upsert(const char *entity_id, const char *canonical_name,
+                                   int observation_count, const char *card_json)
 {
    if (!entity_id || !*entity_id || !card_json)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -53,11 +53,11 @@ int db2_entity_profile_upsert(const char *entity_id, const char *canonical_name,
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_entity_profile_is_fresh(const char *entity_id, const char *cutoff_modifier)
+int kb_store_entity_profile_is_fresh(const char *entity_id, const char *cutoff_modifier)
 {
    if (!entity_id || !cutoff_modifier)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT 1 FROM entity_profiles"
@@ -73,11 +73,11 @@ int db2_entity_profile_is_fresh(const char *entity_id, const char *cutoff_modifi
    return fresh;
 }
 
-int db2_entity_profile_get_card(const char *entity_id, char *out_json, size_t out_len)
+int kb_store_entity_profile_get_card(const char *entity_id, char *out_json, size_t out_len)
 {
    if (!entity_id || !*entity_id || !out_json || out_len == 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT card_json FROM entity_profiles"
@@ -101,11 +101,11 @@ int db2_entity_profile_get_card(const char *entity_id, char *out_json, size_t ou
    return rc;
 }
 
-int db2_entity_count_observations(const char *entity_id)
+int kb_store_entity_count_observations(const char *entity_id)
 {
    if (!entity_id || !*entity_id)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -123,11 +123,11 @@ int db2_entity_count_observations(const char *entity_id)
    return n;
 }
 
-int db2_entity_list_active(int min_obs, char (*names_out)[128], int *obs_out, int max)
+int kb_store_entity_list_active(int min_obs, char (*names_out)[128], int *obs_out, int max)
 {
    if (!names_out || !obs_out || max <= 0 || min_obs < 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 

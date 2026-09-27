@@ -1,19 +1,19 @@
-/* db2/tool_registry.c: tool registry — Postgres via libpq. */
+/* kb_store/tool_registry.c: tool registry — Postgres via libpq. */
 
 #include "tool_registry.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
 #include <string.h>
 
-int db2_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
+int kb_store_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !name)
       return -1;
 
@@ -39,12 +39,12 @@ int db2_tool_registry_lookup(const char *name, tool_registry_entry_t *out)
    return rc;
 }
 
-const char *db2_tool_registry_side_effect(const char *name)
+const char *kb_store_tool_registry_side_effect(const char *name)
 {
    static __thread char buf[32];
    buf[0] = '\0';
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !name)
       return "read";
 
@@ -64,12 +64,12 @@ const char *db2_tool_registry_side_effect(const char *name)
    return buf[0] ? buf : "read";
 }
 
-int db2_tool_registry_iter_prompts(tool_registry_prompt_cb cb, void *user)
+int kb_store_tool_registry_iter_prompts(tool_registry_prompt_cb cb, void *user)
 {
    if (!cb)
       return 0;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 

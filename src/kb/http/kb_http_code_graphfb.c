@@ -111,7 +111,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
    if (max_f > 200)
       max_f = 200;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -129,7 +129,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
       return 500;
    }
 
-   int ne = db2_code_projection_list_edges(project, edges, AUDIT_MAX_EDGES);
+   int ne = kb_store_code_projection_list_edges(project, edges, AUDIT_MAX_EDGES);
    if (ne < 0)
    {
       free(edges);
@@ -150,7 +150,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
    }
 
    /* Community assignment for the visible generation (for cohesion + grouping). */
-   int64_t vgen = db2_code_projection_visible_id(project);
+   int64_t vgen = kb_store_code_projection_visible_id(project);
    code_projection_community_t *crows = NULL;
    kb_graph_community_t *comm = NULL;
    int ncomm = 0;
@@ -160,7 +160,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
       comm = calloc(AUDIT_MAX_EDGES, sizeof(*comm));
       if (crows && comm)
       {
-         ncomm = db2_code_projection_communities_list(vgen, crows, AUDIT_MAX_EDGES);
+         ncomm = kb_store_code_projection_communities_list(vgen, crows, AUDIT_MAX_EDGES);
          if (ncomm < 0)
             ncomm = 0;
          for (int i = 0; i < ncomm; i++)
@@ -171,7 +171,7 @@ int handle_get_code_graph_audit(const char *query_string, char *out_buf, int out
       }
    }
    char source_hash[128] = "";
-   db2_code_projection_visible_source_hash(project, source_hash, sizeof(source_hash));
+   kb_store_code_projection_visible_source_hash(project, source_hash, sizeof(source_hash));
 
    /* ── run the analytics ──────────────────────────────────────────────────── */
    kb_graph_cycle_t *cycles = calloc((size_t)max_f, sizeof(*cycles));
@@ -445,7 +445,7 @@ static int64_t diff_resolve_gen(const char *project, const char *tok)
    if (!tok || !tok[0])
       return -1;
    if (strcmp(tok, "default_latest") == 0)
-      return db2_code_projection_visible_id(project);
+      return kb_store_code_projection_visible_id(project);
    char *end = NULL;
    long long v = strtoll(tok, &end, 10);
    if (end && *end == '\0' && v > 0)
@@ -457,7 +457,7 @@ static int diff_write_gen_list_409(const char *project, char *out_buf, int out_c
                                    const char *which, int64_t missing)
 {
    code_projection_generation_row_t rows[32];
-   int n = db2_code_projection_generations_list(project, rows, 32);
+   int n = kb_store_code_projection_generations_list(project, rows, 32);
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
    {
@@ -508,7 +508,7 @@ int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_
    int force = code_qparam(query_string, "force", force_s, sizeof(force_s)) &&
                (force_s[0] == '1' || force_s[0] == 't' || force_s[0] == 'T');
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
@@ -525,8 +525,8 @@ int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_
       return diff_write_gen_list_409(project, out_buf, out_cap, "to_gen", 0);
 
    code_projection_generation_meta_t fm, tm;
-   int fr = db2_code_projection_generation_meta(from_gen, &fm);
-   int tr = db2_code_projection_generation_meta(to_gen, &tm);
+   int fr = kb_store_code_projection_generation_meta(from_gen, &fm);
+   int tr = kb_store_code_projection_generation_meta(to_gen, &tm);
    if (fr == 1)
       return diff_write_gen_list_409(project, out_buf, out_cap, "from_gen", from_gen);
    if (tr == 1)
@@ -592,8 +592,8 @@ int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int nfe = db2_code_projection_list_edges_for_gen(from_gen, fe, DIFF_MAX_EDGES);
-   int nte = db2_code_projection_list_edges_for_gen(to_gen, te, DIFF_MAX_EDGES);
+   int nfe = kb_store_code_projection_list_edges_for_gen(from_gen, fe, DIFF_MAX_EDGES);
+   int nte = kb_store_code_projection_list_edges_for_gen(to_gen, te, DIFF_MAX_EDGES);
    if (nfe < 0)
       nfe = 0;
    if (nte < 0)
@@ -610,8 +610,8 @@ int handle_get_code_graph_diff(const char *query_string, char *out_buf, int out_
       snprintf(tre[i].relation, sizeof(tre[i].relation), "%s", te[i].relation);
       snprintf(tre[i].target, sizeof(tre[i].target), "%s", te[i].target);
    }
-   int nfc = db2_code_projection_communities_list(from_gen, fcr, DIFF_MAX_EDGES);
-   int ntc = db2_code_projection_communities_list(to_gen, tcr, DIFF_MAX_EDGES);
+   int nfc = kb_store_code_projection_communities_list(from_gen, fcr, DIFF_MAX_EDGES);
+   int ntc = kb_store_code_projection_communities_list(to_gen, tcr, DIFF_MAX_EDGES);
    if (nfc < 0)
       nfc = 0;
    if (ntc < 0)
@@ -779,14 +779,14 @@ int handle_get_code_lessons(const char *query_string, char *out_buf, int out_cap
        code_request_project(query_string, project, sizeof(project), 0, NULL, out_buf, out_cap);
    if (scope_status)
       return scope_status;
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
       return 503;
    }
 
-   int64_t vgen = db2_code_projection_visible_id(project);
-   db2_lessons_outcome_row_t *rows = calloc(LESSONS_MAX_RECORDS, sizeof(*rows));
+   int64_t vgen = kb_store_code_projection_visible_id(project);
+   kb_store_lessons_outcome_row_t *rows = calloc(LESSONS_MAX_RECORDS, sizeof(*rows));
    lessons_reflect_input_t *inp = calloc(LESSONS_MAX_RECORDS, sizeof(*inp));
    lessons_reflect_entry_t *ent = calloc(LESSONS_MAX_RECORDS, sizeof(*ent));
    cJSON *resp = cJSON_CreateObject();
@@ -800,7 +800,7 @@ int handle_get_code_lessons(const char *query_string, char *out_buf, int out_cap
       return 500;
    }
 
-   int nr = db2_lessons_list_outcomes(project, vgen > 0 ? vgen : 0, rows, LESSONS_MAX_RECORDS);
+   int nr = kb_store_lessons_list_outcomes(project, vgen > 0 ? vgen : 0, rows, LESSONS_MAX_RECORDS);
    if (nr < 0)
       nr = 0;
    for (int i = 0; i < nr; i++)
@@ -919,7 +919,7 @@ int handle_post_code_lessons_observe(const char *body, char *out_buf, int out_ca
       return code_scan_write_error(out_buf, out_cap,
                                    "requires project, session_id, and node_ids[]");
    }
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
    {
       cJSON_Delete(root);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge service not initialized\"}");
@@ -935,7 +935,7 @@ int handle_post_code_lessons_observe(const char *body, char *out_buf, int out_ca
          if (cJSON_IsString(e) && e->valuestring[0])
             nodes[cnt++] = e->valuestring;
       }
-   int64_t gen = db2_code_projection_visible_id(jp->valuestring);
+   int64_t gen = kb_store_code_projection_visible_id(jp->valuestring);
    int recorded =
        lessons_session_observe(jp->valuestring, gen > 0 ? gen : 0, js->valuestring, nodes, cnt);
    free(nodes);

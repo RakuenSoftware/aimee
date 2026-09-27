@@ -49,7 +49,7 @@ VENDOR_ROOT = "src/vendor/"
 # would be linking the daemon back together one file at a time.
 #
 # A copy would be the alternative, and a copy of a growable string is not free:
-# DB2 already promoted its own from src/dstr.c, and a fix to one is silently not
+# KB_STORE already promoted its own from src/dstr.c, and a fix to one is silently not
 # a fix to the others.
 SHARED_SOURCES = ("src/dstr.c",)
 BUILD_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")

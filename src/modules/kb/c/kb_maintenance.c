@@ -1,4 +1,4 @@
-/* db2/kb_maintenance.c: KB temporal confidence decay and orphan pruning.
+/* kb_store/kb_maintenance.c: KB temporal confidence decay and orphan pruning.
  *
  * Two passes run inside a single Postgres transaction:
  *   1. Decay pass  — reduces confidence of committed artifacts using
@@ -18,7 +18,7 @@
 
 #include "kb_maintenance.h"
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
 
@@ -78,15 +78,15 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    int min_age_days = cfg->min_age_days < 0 ? 0 : cfg->min_age_days;
    int orphan_prune_days = cfg->orphan_prune_days < 0 ? 0 : cfg->orphan_prune_days;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
-      snprintf(out->error, sizeof(out->error), "db2_conn() returned NULL");
+      snprintf(out->error, sizeof(out->error), "kb_store_conn() returned NULL");
       return -1;
    }
 
    /* Generate a run-id UUID for kb_maintenance_runs. */
-   db2_artifact_gen_id(out->run_id, sizeof(out->run_id));
+   kb_store_artifact_gen_id(out->run_id, sizeof(out->run_id));
 
    struct timespec t0;
    clock_gettime(CLOCK_MONOTONIC, &t0);

@@ -1,6 +1,6 @@
 /* P7-witness-e2 producer integration test (REAL PG ONLY).
  *
- * Drives db2_witness_checkpoint_produce() against a provisioned Postgres: appends
+ * Drives kb_store_witness_checkpoint_produce() against a provisioned Postgres: appends
  * a couple of witness records, produces a signed checkpoint, and verifies the
  * persisted checkpoint's signature against the vault-derived public key. Reads
  * AIMEE_TEST_PG_URL and SKIPS CLEANLY (exit 0) if unset. AIMEE_HOME is pointed at a
@@ -16,9 +16,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
-#include "modules/kb/c/db2_witness_checkpoint.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_checkpoint.h"
 #include "modules/vault/vault_witness_signer.h"
@@ -75,10 +75,10 @@ static void *run_health_probe(void *arg)
 {
    health_probe_result_t *result = arg;
    int have_pg_trgm = 0;
-   result->rc = db2_health_probe(&result->schema_ok, &have_pg_trgm);
+   result->rc = kb_store_health_probe(&result->schema_ok, &have_pg_trgm);
    if (result->rc == 0 && result->schema_ok && have_pg_trgm)
-      result->rc = db2_kb_health_probe(&result->tables_ok);
-   db2_lease_release_idle();
+      result->rc = kb_store_kb_health_probe(&result->tables_ok);
+   kb_store_lease_release_idle();
    return NULL;
 }
 
@@ -109,32 +109,32 @@ static void assert_health_probe_uses_caller_connection(void *owner_conn)
 
 int main(void)
 {
-   aimee_db2_register_vault_witness_provider(NULL);
+   aimee_kb_store_register_vault_witness_provider(NULL);
    uint8_t missing_digest[32];
    memset(missing_digest, 0xa5, sizeof missing_digest);
-   assert(db2_vault_witness_checkpoint_digest(NULL, missing_digest) == -1);
+   assert(kb_store_vault_witness_checkpoint_digest(NULL, missing_digest) == -1);
    for (size_t i = 0; i < sizeof missing_digest; ++i)
       assert(missing_digest[i] == 0);
 
-   db2_vault_witness_provider_t invalid = {
+   kb_store_vault_witness_provider_t invalid = {
        .checkpoint_digest = invalid_digest,
        .checkpoint_encode = invalid_encode,
        .checkpoint_verify = invalid_verify,
    };
-   aimee_db2_register_vault_witness_provider(&invalid);
+   aimee_kb_store_register_vault_witness_provider(&invalid);
    vault_witness_checkpoint_t invalid_checkpoint = {0};
    memset(missing_digest, 0xa5, sizeof missing_digest);
-   assert(db2_vault_witness_checkpoint_digest(&invalid_checkpoint, missing_digest) == -1);
+   assert(kb_store_vault_witness_checkpoint_digest(&invalid_checkpoint, missing_digest) == -1);
    for (size_t i = 0; i < sizeof missing_digest; ++i)
       assert(missing_digest[i] == 0);
    uint8_t invalid_wire[16];
    size_t invalid_wire_len = 0;
-   assert(db2_vault_witness_checkpoint_encode(&invalid_checkpoint, invalid_wire,
-                                              sizeof invalid_wire, &invalid_wire_len) == -1);
+   assert(kb_store_vault_witness_checkpoint_encode(&invalid_checkpoint, invalid_wire,
+                                                   sizeof invalid_wire, &invalid_wire_len) == -1);
    assert(invalid_wire_len == 0);
    for (size_t i = 0; i < sizeof invalid_wire; ++i)
       assert(invalid_wire[i] == 0);
-   assert(db2_vault_witness_checkpoint_verify(&invalid_checkpoint, NULL, 0) ==
+   assert(kb_store_vault_witness_checkpoint_verify(&invalid_checkpoint, NULL, 0) ==
           VAULT_WITNESS_CP_MALFORMED);
    test_register_vault_witness_provider();
 
@@ -153,12 +153,12 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
 
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "db2_init failed for %s\n", url);
+      fprintf(stderr, "kb_store_init failed for %s\n", url);
       return 1;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
 
    assert_health_probe_uses_caller_connection(conn);
@@ -169,8 +169,8 @@ int main(void)
 
    /* Produce a checkpoint. */
    int64_t seq = -1;
-   db2_witness_checkpoint_result_t r = db2_witness_checkpoint_produce(&seq);
-   if (r != DB2_WITNESS_CP_OK)
+   kb_store_witness_checkpoint_result_t r = kb_store_witness_checkpoint_produce(&seq);
+   if (r != KB_STORE_WITNESS_CP_OK)
    {
       fprintf(stderr, "produce returned %d\n", (int)r);
       return 1;
@@ -221,7 +221,7 @@ int main(void)
       return 1;
    }
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_checkpoint_produce_pg: PASSED (checkpoint signed by the vault key verifies)\n");
    return 0;
 }

@@ -576,7 +576,7 @@ static void test_typed_context_uses_server_defaults(void)
  * id. Every test around it passed anyway, because each end was checked against a
  * payload written by hand to contain the field -- the CLI marshaller was asserted
  * to emit as_of, the printer was fed a synthetic reply that already had valid_at,
- * and the DB2 primitive was called directly. Three green pieces that never
+ * and the KB_STORE primitive was called directly. Three green pieces that never
  * touched each other.
  *
  * So this asserts the SERIALIZED REQUEST BODY, which is the thing that was
@@ -810,7 +810,7 @@ static void test_every_content_wrapper_screens(void)
    char *json = NULL;
    aimee_task_t task;
    anti_pattern_t ap;
-   db2_decision_log_row_t dec;
+   kb_store_decision_log_row_t dec;
    int reinforced = 0;
 
    /* Wrappers returning a response document. */

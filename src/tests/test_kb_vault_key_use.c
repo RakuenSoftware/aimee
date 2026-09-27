@@ -37,7 +37,7 @@ int kb_vault_live_keys_allowed(void)
    return g_live;
 }
 
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t team)
 {
    if (!p || !p->authenticated || team < 1 || g_scope_open)
       return -1;
@@ -45,14 +45,14 @@ int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
    return 0;
 }
 
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    assert(g_scope_open);
    g_scope_open = 0;
    return 0;
 }
 
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    g_scope_open = 0;
 }
@@ -74,9 +74,9 @@ int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, s
               : 0;
 }
 
-int db2_vault_key_use_candidate(const char *actor, int64_t team, const char *key_id,
-                                const char *principal, const char *agent, const char *cred,
-                                int64_t version, db2_vault_key_use_envelope_t *out)
+int kb_store_vault_key_use_candidate(const char *actor, int64_t team, const char *key_id,
+                                     const char *principal, const char *agent, const char *cred,
+                                     int64_t version, kb_store_vault_key_use_envelope_t *out)
 {
    if (g_candidate_fail || !actor || team != 7 || !key_id || !principal || !agent || !cred ||
        version != 2)
@@ -89,11 +89,12 @@ int db2_vault_key_use_candidate(const char *actor, int64_t team, const char *key
    return 0;
 }
 
-int db2_vault_key_use_admit(const char *actor, int64_t team, const char *origin, const char *use_id,
-                            const char *key_id, const char *principal, const char *agent,
-                            const char *cred, int64_t version, const char *digest,
-                            const char *provider, const char *model, const char *operation,
-                            const uint8_t *att, size_t att_len, db2_vault_key_use_envelope_t *out)
+int kb_store_vault_key_use_admit(const char *actor, int64_t team, const char *origin,
+                                 const char *use_id, const char *key_id, const char *principal,
+                                 const char *agent, const char *cred, int64_t version,
+                                 const char *digest, const char *provider, const char *model,
+                                 const char *operation, const uint8_t *att, size_t att_len,
+                                 kb_store_vault_key_use_envelope_t *out)
 {
    if (!actor || team != 7 || !origin || !use_id || !key_id || !principal || !agent || !cred ||
        version != 2 || !digest || !provider || !model || !operation || att_len != 3)
@@ -218,7 +219,7 @@ static void test_prebuilt_aad(void)
 {
    static const uint8_t correct[] = "token-root-aad";
    static const uint8_t wrong[] = "token-root-bad";
-   db2_vault_key_use_envelope_t e;
+   kb_store_vault_key_use_envelope_t e;
    memset(&e, 0, sizeof(e));
    e.seal_epoch = 23;
    e.version = 2;
@@ -265,10 +266,10 @@ int main(void)
    g_admit_result = -1;
    assert(run() == KB_VAULT_KEY_USE_RETRY && g_callback_calls == 0);
    reset();
-   g_admit_result = DB2_VAULT_KEY_USE_INTEGRITY;
+   g_admit_result = KB_STORE_VAULT_KEY_USE_INTEGRITY;
    assert(run() == KB_VAULT_KEY_USE_INTEGRITY && g_callback_calls == 0);
    reset();
-   g_admit_result = DB2_VAULT_KEY_USE_SEALED;
+   g_admit_result = KB_STORE_VAULT_KEY_USE_SEALED;
    assert(run() == KB_VAULT_KEY_USE_SEALED && g_callback_calls == 0);
    reset();
    g_admit_epoch = 0;

@@ -29,37 +29,37 @@
 #include <time.h>
 
 /* Apply KB-owned schema through the PostgreSQL provider's migration role. */
-static int bootstrap_db2(int json_output)
+static int bootstrap_kb_store(int json_output)
 {
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_embedder_dims_current());
-   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_embedder_dims_current());
+   kb_store_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
-   db2_set_embedder_model_id(config_embedder_model());
-   if (db2_init_migration() == 0)
+   kb_store_set_embedder_model_id(config_embedder_model());
+   if (kb_store_init_migration() == 0)
    {
       int schema_ok = 0;
       int have_pg_trgm = 0;
-      if (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm)
+      if (kb_store_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm)
       {
          if (!json_output)
-            fprintf(stderr, "DB2 reachable: schema applied, pg_trgm installed.\n");
-         db2_shutdown();
+            fprintf(stderr, "KB_STORE reachable: schema applied, pg_trgm installed.\n");
+         kb_store_shutdown();
          return 0;
       }
-      db2_shutdown();
+      kb_store_shutdown();
       if (!json_output)
-         fprintf(stderr, "DB2 reachable but health probe failed (schema=%d trgm=%d).\n", schema_ok,
-                 have_pg_trgm);
+         fprintf(stderr, "KB_STORE reachable but health probe failed (schema=%d trgm=%d).\n",
+                 schema_ok, have_pg_trgm);
       return -1;
    }
 
-   /* db2_init prints the pg_trgm-missing remediation directly when that's
+   /* kb_store_init prints the pg_trgm-missing remediation directly when that's
     * the cause; otherwise the failure is connect/auth/database-missing.
     * Surface a generic remediation that covers the common cases. */
    if (!json_output)
-      fprintf(stderr, "DB2 init failed.\n"
+      fprintf(stderr, "KB_STORE init failed.\n"
                       "Common fixes:\n"
                       "  - Ensure the postgres server is running and reachable from this host.\n"
                       "  - Ensure the PostgreSQL runtime and migration roles exist:\n"
@@ -108,7 +108,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
       fatal("failed to initialize database");
    db1_shutdown();
 
-   int db2_ok = (bootstrap_db2(ctx->json_output) == 0);
+   int postgres_ok = (bootstrap_kb_store(ctx->json_output) == 0);
 
    /* Create workspace-local .mcp.json for MCP-capable clients */
    char cwd[MAX_PATH_LEN];
@@ -160,7 +160,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    {
       cJSON *root = cJSON_CreateObject();
       cJSON_AddStringToObject(root, "db1_path", config_db1_path());
-      cJSON_AddBoolToObject(root, "db2_ready", db2_ok);
+      cJSON_AddBoolToObject(root, "postgres_ready", postgres_ok);
       cJSON_AddBoolToObject(root, "postgres_configured", runtime_secret_has("AIMEE_STORE_URL"));
       emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
       cJSON_Delete(root);
@@ -168,7 +168,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
    else
    {
       fprintf(stderr, "Initialized: %s%s\n", config_db1_path(),
-              db2_ok ? "" : " (DB2 not ready — see above)");
+              postgres_ok ? "" : " (KB_STORE not ready — see above)");
    }
 }
 

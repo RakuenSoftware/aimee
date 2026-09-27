@@ -37,7 +37,7 @@ for source in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
         printf '[kb-entrypoint] preserving operator policy in %s; it differs from the shipped grant\n' "$dest" >&2
     fi
 done
-# Principal 29 was the retired Db2 process. Its executable is no longer in
+# Principal 29 was the retired KbStore process. Its executable is no longer in
 # either composition, and leaving the old grant active prevents bus startup.
 # Preserve the exact policy outside the active directory, including operator
 # edits; never transfer any of its capabilities to PostgreSQL.

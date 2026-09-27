@@ -1,7 +1,7 @@
 #include "kb_management_health_exchange.h"
 
 #include "cJSON.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_mgmt_endpoint.h"
 
 #include <openssl/crypto.h>
@@ -215,7 +215,7 @@ int kb_management_health_response_decode(const char *raw, size_t len, const char
    return rc;
 }
 
-static int snapshot_valid(const db2_server_snapshot_t *s, const char *target)
+static int snapshot_valid(const kb_store_server_snapshot_t *s, const char *target)
 {
    size_t serial_len =
        s ? strnlen(s->management_serial_norm, sizeof(s->management_serial_norm)) : 0;
@@ -227,7 +227,7 @@ static int snapshot_valid(const db2_server_snapshot_t *s, const char *target)
           lower_hex(s->management_fingerprint, 64) && s->revocation_generation >= 1;
 }
 
-static int snapshot_equal(const db2_server_snapshot_t *a, const db2_server_snapshot_t *b)
+static int snapshot_equal(const kb_store_server_snapshot_t *a, const kb_store_server_snapshot_t *b)
 {
    return !strcmp(a->server_id, b->server_id) && !strcmp(a->endpoint, b->endpoint) &&
           !strcmp(a->management_issuer, b->management_issuer) &&
@@ -248,7 +248,7 @@ static void fp_hex(const unsigned char in[32], char out[65])
 
 static kb_management_health_result_t status_check(const kb_mgmt_status_t *s,
                                                   const kb_management_cert_active_t *active,
-                                                  const db2_server_snapshot_t *snap,
+                                                  const kb_store_server_snapshot_t *snap,
                                                   const unsigned char nonce[32], uint64_t now,
                                                   const kb_management_health_dependencies_t *d)
 {
@@ -272,7 +272,7 @@ kb_management_health_exchange(const kb_management_health_request_t *r,
                               const kb_management_health_dependencies_t *d)
 {
    kb_management_health_result_t rc = KB_MANAGEMENT_HEALTH_INVALID;
-   db2_server_snapshot_t a = {0}, b = {0};
+   kb_store_server_snapshot_t a = {0}, b = {0};
    kb_management_cert_bundle_t bundle = {0};
    kb_management_cert_active_t active = {0};
    unsigned char nonce[32] = {0};
@@ -426,20 +426,20 @@ done:
 kb_management_health_result_t kb_management_health_snapshot_primary(void *unused,
                                                                     const kb_principal_t *actor,
                                                                     int64_t team, const char *id,
-                                                                    db2_server_snapshot_t *out)
+                                                                    kb_store_server_snapshot_t *out)
 {
    (void)unused;
    if (!actor || !id || !out)
       return KB_MANAGEMENT_HEALTH_INVALID;
-   int rc = db2_tenant_scope_begin(actor, team);
-   if (rc == DB2_ERR_TENANT_DENIED || rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   int rc = kb_store_tenant_scope_begin(actor, team);
+   if (rc == KB_STORE_ERR_TENANT_DENIED || rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return KB_MANAGEMENT_HEALTH_DENIED;
    if (rc)
       return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
-   rc = db2_server_registry_snapshot(team, id, out);
-   if (rc == 0 && db2_tenant_scope_commit() == 0)
+   rc = kb_store_server_registry_snapshot(team, id, out);
+   if (rc == 0 && kb_store_tenant_scope_commit() == 0)
       return KB_MANAGEMENT_HEALTH_OK;
-   db2_tenant_scope_rollback();
+   kb_store_tenant_scope_rollback();
    return rc == 1 ? KB_MANAGEMENT_HEALTH_NOT_FOUND : KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -473,7 +473,7 @@ void kb_management_health_bundle_cleanse(void *unused, kb_management_cert_bundle
 }
 
 kb_management_health_result_t
-kb_management_health_server_open_production(void *ctx, const db2_server_snapshot_t *snapshot,
+kb_management_health_server_open_production(void *ctx, const kb_store_server_snapshot_t *snapshot,
                                             const kb_management_cert_bundle_t *bundle,
                                             uint64_t deadline, void **out)
 {

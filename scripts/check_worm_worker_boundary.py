@@ -73,7 +73,7 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
         if needle not in roles:
             failures.append(f"roles: missing {label}")
 
-    production = c_appender.split("#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM", 1)
+    production = c_appender.split("#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM", 1)
     if len(production) != 2:
         failures.append("C appender: production branch is not explicit")
     else:
@@ -83,7 +83,7 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
         if "INSERT INTO kb_audit_event" in foreground or "pg_advisory_xact_lock" in foreground:
             failures.append("C appender: production path still constructs the chain")
 
-    fm_production = fact_mutation.split("#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM", 1)
+    fm_production = fact_mutation.split("#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM", 1)
     if len(fm_production) != 2 or "kb_fact_commit_worm_seal" not in fm_production[1].split(
         "#else", 1
     )[0]:

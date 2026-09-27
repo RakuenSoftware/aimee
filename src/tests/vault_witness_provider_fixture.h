@@ -1,7 +1,7 @@
 #ifndef AIMEE_TEST_VAULT_WITNESS_PROVIDER_FIXTURE_H
 #define AIMEE_TEST_VAULT_WITNESS_PROVIDER_FIXTURE_H
 
-#include "modules/kb/c/db2_vault_witness_provider.h"
+#include "modules/kb/c/kb_store_vault_witness_provider.h"
 #include "modules/vault/vault_witness_export.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "modules/vault/vault_witness_verify.h"
@@ -30,7 +30,7 @@ static int test_vault_witness_verify_checkpoint_run(const vault_witness_checkpoi
 
 static inline void test_register_vault_witness_provider(void)
 {
-   static const db2_vault_witness_provider_t provider = {
+   static const kb_store_vault_witness_provider_t provider = {
        .checkpoint_digest = vault_witness_checkpoint_digest,
        .checkpoint_encode = vault_witness_checkpoint_encode,
        .checkpoint_sign = vault_witness_checkpoint_sign,
@@ -44,7 +44,7 @@ static inline void test_register_vault_witness_provider(void)
        .signer_identity = vault_witness_signer_identity,
        .verify_checkpoint_run = test_vault_witness_verify_checkpoint_run,
    };
-   aimee_db2_register_vault_witness_provider(&provider);
+   aimee_kb_store_register_vault_witness_provider(&provider);
 }
 
 #endif /* AIMEE_TEST_VAULT_WITNESS_PROVIDER_FIXTURE_H */

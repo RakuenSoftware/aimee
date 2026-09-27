@@ -1,8 +1,8 @@
-/* db2/css_graph.c: CSS style-graph persistence. See css_graph.h. */
+/* kb_store/css_graph.c: CSS style-graph persistence. See css_graph.h. */
 #include "css_graph.h"
 
-#include "db2.h"
-#include "db2_internal.h"
+#include "kb_store.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_runtime_state.h" /* purge fence: guard + commit-point check */
 
@@ -32,20 +32,20 @@ static int cssg_purge_fence_abort(void *conn, int64_t file_id)
       return 1;
    aimee_pg_bind_int64(st, "?1", file_id);
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      db2_copy_text(project, sizeof(project), aimee_pg_column_text(st, 0));
+      kb_store_copy_text(project, sizeof(project), aimee_pg_column_text(st, 0));
    aimee_pg_finalize(st);
    if (!project[0])
       return 0;
-   if (db2_kb_purge_txn_guard(project) != 0)
+   if (kb_store_kb_purge_txn_guard(project) != 0)
       return 1;
-   return db2_kb_purge_fence_active(project) ? 1 : 0;
+   return kb_store_kb_purge_fence_active(project) ? 1 : 0;
 }
 
-int64_t db2_css_graph_resolve_file(const char *project, const char *file_path)
+int64_t kb_store_css_graph_resolve_file(const char *project, const char *file_path)
 {
    if (!project || !file_path)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT f.id FROM files f"
@@ -66,11 +66,11 @@ int64_t db2_css_graph_resolve_file(const char *project, const char *file_path)
    return id;
 }
 
-int db2_css_graph_replace(int64_t file_id, const css_rule_t *rules, int n)
+int kb_store_css_graph_replace(int64_t file_id, const css_rule_t *rules, int n)
 {
    if (file_id < 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -80,7 +80,7 @@ int db2_css_graph_replace(int64_t file_id, const css_rule_t *rules, int n)
 
    int rc = 0;
    /* css_declarations cascade off css_rules, so one delete clears the file. */
-   if (db2_exec_conn_int64(conn, "DELETE FROM css_rules WHERE file_id = ?1", file_id) != 0)
+   if (kb_store_exec_conn_int64(conn, "DELETE FROM css_rules WHERE file_id = ?1", file_id) != 0)
       rc = -1;
 
    for (int i = 0; rc == 0 && i < n && rules; i++)
@@ -146,20 +146,20 @@ int db2_css_graph_replace(int64_t file_id, const css_rule_t *rules, int n)
    return rc;
 }
 
-int db2_css_graph_upsert_file(const char *project, const char *file_path, const css_rule_t *rules,
-                              int n)
+int kb_store_css_graph_upsert_file(const char *project, const char *file_path,
+                                   const css_rule_t *rules, int n)
 {
-   int64_t file_id = db2_css_graph_resolve_file(project, file_path);
+   int64_t file_id = kb_store_css_graph_resolve_file(project, file_path);
    if (file_id < 0)
       return -1;
-   return db2_css_graph_replace(file_id, rules, n);
+   return kb_store_css_graph_replace(file_id, rules, n);
 }
 
-int db2_css_graph_rules_by_selector(const char *selector, css_rule_hit_t *out, int max)
+int kb_store_css_graph_rules_by_selector(const char *selector, css_rule_hit_t *out, int max)
 {
    if (!selector || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT p.name, f.path, c.selector, c.spec_a, c.spec_b, c.spec_c,"
@@ -202,11 +202,11 @@ int db2_css_graph_rules_by_selector(const char *selector, css_rule_hit_t *out, i
    return count;
 }
 
-int db2_css_graph_declarations_by_property(const char *property, css_decl_hit_t *out, int max)
+int kb_store_css_graph_declarations_by_property(const char *property, css_decl_hit_t *out, int max)
 {
    if (!property || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    static const char *sql = "SELECT p.name, f.path, c.selector, d.property, d.value, d.important"
@@ -251,11 +251,12 @@ int db2_css_graph_declarations_by_property(const char *property, css_decl_hit_t 
  * components are tiny in practice; the multipliers keep them lexicographic. */
 #define CSS_SPEC_SQL(pfx) "(" pfx ".spec_a*1000000 + " pfx ".spec_b*1000 + " pfx ".spec_c)"
 
-int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_decl_t *out, int max)
+int kb_store_css_graph_duplicate_declarations(const char *project_filter, css_dup_decl_t *out,
+                                              int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;
@@ -312,11 +313,12 @@ int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_dec
    return count;
 }
 
-int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_selector_t *out, int max)
+int kb_store_css_graph_duplicate_selectors(const char *project_filter, css_dup_selector_t *out,
+                                           int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;
@@ -365,12 +367,12 @@ int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_select
    return count;
 }
 
-int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_conflict_t *out,
-                                        int max)
+int kb_store_css_graph_specificity_conflicts(const char *project_filter, css_spec_conflict_t *out,
+                                             int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;
@@ -437,12 +439,12 @@ int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_con
 
 /* ---- component <-> style join (WP-D) ----------------------------------- */
 
-int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CSS_CLASS_TOKEN_MAX],
-                              int n)
+int kb_store_css_component_resolve(int64_t component_file_id,
+                                   const char (*tokens)[CSS_CLASS_TOKEN_MAX], int n)
 {
    if (component_file_id < 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -450,8 +452,9 @@ int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CS
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return -1;
    int rc = 0;
-   if (db2_exec_conn_int64(conn, "DELETE FROM css_component_styles WHERE component_file_id = ?1",
-                           component_file_id) != 0)
+   if (kb_store_exec_conn_int64(conn,
+                                "DELETE FROM css_component_styles WHERE component_file_id = ?1",
+                                component_file_id) != 0)
       rc = -1;
 
    for (int i = 0; rc == 0 && i < n && tokens; i++)
@@ -506,11 +509,12 @@ int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CS
    return rc;
 }
 
-int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_t *out, int max)
+int kb_store_css_component_unresolved(const char *project_filter, css_unresolved_hit_t *out,
+                                      int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;
@@ -567,11 +571,11 @@ int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_
    "   AND cf.generation = f.generation"                                                           \
    "   AND ('.' || cs.class_token) = c.selector)"
 
-int db2_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int max)
+int kb_store_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;

@@ -1,6 +1,6 @@
-/* db2/mining.h: DB2 substrate for aimee-kb continuous mining. */
-#ifndef DEC_DB2_MINING_H
-#define DEC_DB2_MINING_H 1
+/* kb_store/mining.h: KB_STORE substrate for aimee-kb continuous mining. */
+#ifndef DEC_KB_STORE_MINING_H
+#define DEC_KB_STORE_MINING_H 1
 
 #include <stdint.h>
 
@@ -17,7 +17,7 @@ extern "C"
       int interval_s;
       int enabled;
       char last_error[512];
-   } db2_mining_job_row_t;
+   } kb_store_mining_job_row_t;
 
    typedef struct
    {
@@ -38,17 +38,17 @@ extern "C"
       char payload_json[4096];
       char embedding[2048];
       char cluster_key[128];
-   } db2_mining_event_t;
+   } kb_store_mining_event_t;
 
-   int db2_mining_seed_job_defaults(void);
-   int db2_mining_job_get(const char *id, db2_mining_job_row_t *out);
-   int db2_mining_job_complete(const char *id, int64_t hwm, const char *error);
-   int db2_mining_job_try_lock(const char *id);
-   void db2_mining_job_unlock(const char *id);
-   int db2_mining_event_upsert(const db2_mining_event_t *event);
+   int kb_store_mining_seed_job_defaults(void);
+   int kb_store_mining_job_get(const char *id, kb_store_mining_job_row_t *out);
+   int kb_store_mining_job_complete(const char *id, int64_t hwm, const char *error);
+   int kb_store_mining_job_try_lock(const char *id);
+   void kb_store_mining_job_unlock(const char *id);
+   int kb_store_mining_event_upsert(const kb_store_mining_event_t *event);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_MINING_H */
+#endif /* DEC_KB_STORE_MINING_H */

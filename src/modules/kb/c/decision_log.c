@@ -1,14 +1,14 @@
-/* db2/decision_log.c: task-keyed decision log — Postgres via libpq. */
+/* kb_store/decision_log.c: task-keyed decision log — Postgres via libpq. */
 
 #include "decision_log.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_decision_log_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_decision_log_row_t *row)
 {
    if (!st || !row)
       return;
@@ -40,13 +40,13 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_decision_log_row_t *row)
    row->linked_policy_id = aimee_pg_column_int64(st, 13);
 }
 
-int db2_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
-                            const char *rationale, const char *assumptions, const char *created_at,
-                            db2_decision_log_row_t *out)
+int kb_store_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
+                                 const char *rationale, const char *assumptions,
+                                 const char *created_at, kb_store_decision_log_row_t *out)
 {
    if (!options || !chosen)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -78,18 +78,18 @@ int db2_decision_log_insert(int64_t task_id, const char *options, const char *ch
       return -1;
 
    if (out)
-      return db2_decision_log_get(new_id, out);
+      return kb_store_decision_log_get(new_id, out);
    return 0;
 }
 
-int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
-                            const char *rationale, const char *author, int64_t linked_policy_id,
-                            const char *revisit_when, int64_t supersedes_id,
-                            db2_decision_log_row_t *out)
+int kb_store_decision_log_record(const char *subject, const char *options, const char *chosen,
+                                 const char *rationale, const char *author,
+                                 int64_t linked_policy_id, const char *revisit_when,
+                                 int64_t supersedes_id, kb_store_decision_log_row_t *out)
 {
    if (!subject || !subject[0] || !options || !chosen)
       return -1; /* a real scope is required (empty subject would be one global slot) */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -168,13 +168,13 @@ int db2_decision_log_record(const char *subject, const char *options, const char
    }
 
    if (out)
-      return db2_decision_log_get(new_id, out);
+      return kb_store_decision_log_get(new_id, out);
    return 0;
 }
 
-int db2_decision_log_mark_revisit_due(void)
+int kb_store_decision_log_mark_revisit_due(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -194,9 +194,9 @@ int db2_decision_log_mark_revisit_due(void)
    return rc == AIMEE_PG_DONE ? changes : -1;
 }
 
-int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
+int kb_store_decision_log_get(int64_t id, kb_store_decision_log_row_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -221,9 +221,9 @@ int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
    return rc;
 }
 
-int db2_decision_log_set_outcome(int64_t id, const char *outcome)
+int kb_store_decision_log_set_outcome(int64_t id, const char *outcome)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !outcome)
       return -1;
 
@@ -246,12 +246,12 @@ int db2_decision_log_set_outcome(int64_t id, const char *outcome)
    "id, task_id, options, chosen, rationale, assumptions, outcome, created_at, status, "           \
    "revisit_when, supersedes_id, subject, author, linked_policy_id"
 
-int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
-                                 db2_decision_log_row_t *out, int max)
+int kb_store_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                      kb_store_decision_log_row_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (limit <= 0 || limit > max)
@@ -283,7 +283,7 @@ int db2_decision_log_list_scoped(const char *subject, const char *status, int li
 
 static int dl_update_field(int64_t id, const char *sql, const char *val)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !val)
       return -1;
    char err[256] = "";
@@ -298,11 +298,11 @@ static int dl_update_field(int64_t id, const char *sql, const char *val)
    return (rc == AIMEE_PG_DONE && changes > 0) ? 0 : -1;
 }
 
-int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id)
+int64_t kb_store_decision_log_active_id(const char *subject, int64_t linked_policy_id)
 {
    if (!subject || !subject[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char err[256] = "";
@@ -323,20 +323,21 @@ int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id
    return id;
 }
 
-int db2_decision_log_set_status(int64_t id, const char *status)
+int kb_store_decision_log_set_status(int64_t id, const char *status)
 {
    return dl_update_field(id, "UPDATE decision_log SET status = ?1 WHERE id = ?2", status);
 }
 
-int db2_decision_log_set_revisit(int64_t id, const char *revisit_when)
+int kb_store_decision_log_set_revisit(int64_t id, const char *revisit_when)
 {
    return dl_update_field(id, "UPDATE decision_log SET revisit_when = ?1 WHERE id = ?2",
                           revisit_when);
 }
 
-int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out, int max)
+int kb_store_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
+                               int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
 

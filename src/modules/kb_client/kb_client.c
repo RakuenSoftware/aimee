@@ -779,8 +779,8 @@ int kb_client_health(kb_health_t *out)
          snprintf(out->field, sizeof(out->field), "%s", _j->valuestring);                          \
    } while (0)
 
-   COPY_BOOL(db2_ok, "db2_ok");
-   COPY_BOOL(db2_kb_tables_ok, "db2_kb_tables_ok");
+   COPY_BOOL(postgres_ok, "postgres_ok");
+   COPY_BOOL(knowledge_tables_ok, "knowledge_tables_ok");
    COPY_BOOL(pgvec_ok, "pgvec_ok");
    COPY_BOOL(pgvec_collection_ok, "pgvec_collection_ok");
    COPY_INT(pgvec_vectors, "pgvec_vectors");
@@ -899,7 +899,7 @@ static char *kb_error_json(const char *message)
    return json ? json : strdup("{\"status\":\"error\"}");
 }
 
-/* Synchronous build/update now run entirely inside aimee-kb (which owns DB2
+/* Synchronous build/update now run entirely inside aimee-kb (which owns KB_STORE
  * and the filesystem) via the /v1/code/{build,update} endpoints — no
  * server-side compute or chunk push. */
 static char *kb_client_code_post_json(const char *endpoint, const char *path, const char *project,
@@ -1092,7 +1092,7 @@ char *kb_client_corpus_pipeline_drain_json(int limit)
    return kb_error_json("knowledge service /v1/corpus/pipeline/drain did not respond");
 }
 
-/* Reconcile scans DB2 and issues pgvector deletes; size the timeout generously
+/* Reconcile scans KB_STORE and issues pgvector deletes; size the timeout generously
  * but bounded. */
 #define KB_CLIENT_RECONCILE_TIMEOUT_MS (2 * 60 * 1000)
 
@@ -2033,7 +2033,7 @@ char *kb_client_bandit_replay_record_json(const char *decision_point, const char
    return resp ? resp : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
 }
 
-/* Sample an arm for a server-side decision point via the kb DB2 bandit. On
+/* Sample an arm for a server-side decision point via the kb KB_STORE bandit. On
  * success (status "ok"), fills arm_out + decision_id_out and returns 0. Returns
  * -1 when sampling is disabled (no optimize command), on transport failure, or
  * on a malformed response — the caller falls back to its default behaviour. */

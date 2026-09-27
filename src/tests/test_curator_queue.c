@@ -4,7 +4,7 @@
  * ingest route. See kb_curator_queue.c + kb_curator_drain.c.
  *
  * (Asserts on the observable side effect — rows in kb_async_jobs — not the
- * function return, whose exact value is a db2-backend detail.) */
+ * function return, whose exact value is a kb_store-backend detail.) */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +15,7 @@
 #include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "modules/kb/c/kb_payload.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
@@ -84,8 +84,8 @@ static void test_provider_outage_arms_global_backoff(void)
 
 static sqlite3 *open_db(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    return db;
 }
@@ -113,7 +113,7 @@ static void test_polymorphic_async_subject(sqlite3 *db)
 {
    /* memory_facts uses a memories.id as the queue subject. It must not require
     * an unrelated kb_documents row with the same numeric id. */
-   assert(db2_kb_async_enqueue("memory_facts", 777777, "memory") == 0);
+   assert(kb_store_kb_async_enqueue("memory_facts", 777777, "memory") == 0);
    sqlite3_stmt *st = NULL;
    assert(sqlite3_prepare_v2(db,
                              "SELECT count(*) FROM kb_async_jobs"
@@ -141,23 +141,23 @@ static void test_polymorphic_async_subject(sqlite3 *db)
 static void test_pending_count_excludes_finished(sqlite3 *db)
 {
    seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts'");
-   assert(db2_kb_async_count_kind_pending("memory_facts") == 0);
+   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 0);
 
-   assert(db2_kb_async_enqueue("memory_facts", 881001, "memory") == 0);
-   assert(db2_kb_async_enqueue("memory_facts", 881002, "memory") == 0);
-   assert(db2_kb_async_count_kind_pending("memory_facts") == 2);
-   assert(db2_kb_async_count_kind("memory_facts") == 2);
+   assert(kb_store_kb_async_enqueue("memory_facts", 881001, "memory") == 0);
+   assert(kb_store_kb_async_enqueue("memory_facts", 881002, "memory") == 0);
+   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 2);
+   assert(kb_store_kb_async_count_kind("memory_facts") == 2);
 
    /* One finishes. The backlog is 1, even though two rows exist -- reporting 2
     * here would keep warning about work that already completed. */
    seed(db, "UPDATE kb_async_jobs SET status='done' WHERE kind='memory_facts'"
             " AND document_id=881001");
-   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
-   assert(db2_kb_async_count_kind("memory_facts") == 2);
+   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 1);
+   assert(kb_store_kb_async_count_kind("memory_facts") == 2);
 
    /* Other kinds are not counted into this backlog: kb_async_jobs is shared. */
-   assert(db2_kb_async_enqueue("extract_doc", 881003, "p") == 0);
-   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
+   assert(kb_store_kb_async_enqueue("extract_doc", 881003, "p") == 0);
+   assert(kb_store_kb_async_count_kind_pending("memory_facts") == 1);
 
    seed(db, "DELETE FROM kb_async_jobs WHERE document_id IN (881001,881002,881003)");
    printf("  PASS: pending count is the backlog, not the row total\n");
@@ -191,7 +191,7 @@ static int job_attempts(sqlite3 *db, int64_t id)
 /* The exact production regression: kb_curator_extract_one only ever CLAIMS
  * status='pending', so an extract_doc job orphaned in 'running' (worker crash,
  * restart, wedged sidecar) stayed there forever — one sat for 15h on the .254
- * appliance, never retried, pinning a db2 pool member past its 300s ceiling.
+ * appliance, never retried, pinning a kb_store pool member past its 300s ceiling.
  * The code-unit stage had a lease reclaim from the start; kb_async_jobs had none.
  *
  * The reclaim self-throttles (it runs at most once a minute, since the drain
@@ -361,7 +361,7 @@ static void test_only_current_document_generation_queues(sqlite3 *db)
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_queue"))
+   if (kb_store_test_shim_skip_on_postgres("curator_queue"))
       return 0;
 
    /* The queue reads through the config module. Set the gate explicitly so this

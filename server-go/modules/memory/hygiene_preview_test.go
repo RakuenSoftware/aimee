@@ -291,7 +291,7 @@ func TestHygieneCursorBindsScopeAndSnapshotIdentity(t *testing.T) {
 }
 
 func TestHygieneGovernedPostgres(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
 		t.Skip("PostgreSQL replay fixture required")
 	}

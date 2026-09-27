@@ -1782,7 +1782,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
     * subsequent native blocks in this build add their retained proofs. */
    int native_started = 0;
 
-   /* Rules (budget: procedures) — DB2 lives in aimee-kb. */
+   /* Rules (budget: procedures) — KB_STORE lives in aimee-kb. */
 
    char *rules = NULL;
    if (!skip_kb_client)

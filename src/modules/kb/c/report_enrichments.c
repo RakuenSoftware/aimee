@@ -1,7 +1,7 @@
-/* db2/report_enrichments.c: subject-keyed report enrichment cache. */
+/* kb_store/report_enrichments.c: subject-keyed report enrichment cache. */
 #include "report_enrichments.h"
 
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "../headers/aimee.h"
 
@@ -14,16 +14,16 @@ static int valid_subject(const report_subject_t *subject)
           strcmp(subject->type, REPORT_SUBJECT_TYPE_AGGREGATE) != 0;
 }
 
-int db2_report_enrichment_upsert(const report_subject_t *subject, const char *enrichment_kind,
-                                 const char *source, const char *schema_version,
-                                 const char *payload_json, const char *input_hash,
-                                 const char *computed_at, const char *expires_at)
+int kb_store_report_enrichment_upsert(const report_subject_t *subject, const char *enrichment_kind,
+                                      const char *source, const char *schema_version,
+                                      const char *payload_json, const char *input_hash,
+                                      const char *computed_at, const char *expires_at)
 {
    if (!valid_subject(subject) || !enrichment_kind || !enrichment_kind[0] || !schema_version ||
        !schema_version[0] || !payload_json)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -64,15 +64,15 @@ int db2_report_enrichment_upsert(const report_subject_t *subject, const char *en
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_report_enrichment_read(const report_subject_t *subject, const char *enrichment_kind,
-                               const char *source, const char *schema_version,
-                               db2_report_enrichment_row_t *out)
+int kb_store_report_enrichment_read(const report_subject_t *subject, const char *enrichment_kind,
+                                    const char *source, const char *schema_version,
+                                    kb_store_report_enrichment_row_t *out)
 {
    if (!valid_subject(subject) || !enrichment_kind || !enrichment_kind[0] || !schema_version ||
        !schema_version[0] || !out)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -116,8 +116,8 @@ int db2_report_enrichment_read(const report_subject_t *subject, const char *enri
    return found ? 0 : -1;
 }
 
-int db2_report_enrichment_is_expired(const db2_report_enrichment_row_t *row,
-                                     const char *now_utc_text)
+int kb_store_report_enrichment_is_expired(const kb_store_report_enrichment_row_t *row,
+                                          const char *now_utc_text)
 {
    if (!row || !row->expires_at[0] || !now_utc_text || !now_utc_text[0])
       return 0;

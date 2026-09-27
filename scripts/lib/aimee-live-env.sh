@@ -189,7 +189,7 @@ pg_val() {
 #
 # kb_write_tier_grant_set/_revoke and kb_management_identity_intent_start are all
 # SECURITY DEFINER and read the acting identity from aimee.principal, which only a
-# tenant scope sets (db2_tenant_scope_begin). Calling them from a bare psql session
+# tenant scope sets (kb_store_tenant_scope_begin). Calling them from a bare psql session
 # leaves the definer with no actor, and it correctly refuses -- which reads as "the
 # feature is broken" rather than "the test forgot the scope". This is the same
 # defect that cost this branch an evening at the route layer.

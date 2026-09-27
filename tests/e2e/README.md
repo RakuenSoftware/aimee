@@ -12,11 +12,11 @@ Three suites live here, each with its own section below:
 none of them run under `make unit-tests`, which is the point.
 
 `make unit-tests` runs every C test against the in-memory sqlite shim
-(`db2_test_shim_open`). Production is Postgres via libpq, and sqlite accepts SQL
+(`kb_store_test_shim_open`). Production is Postgres via libpq, and sqlite accepts SQL
 that Postgres rejects, so a green unit run is not evidence that this
 subsystem's SQL executes at all.
 
-That gap was not hypothetical. `db2_entity_edge_two_hop_neighbors` built an
+That gap was not hypothetical. `kb_store_entity_edge_two_hop_neighbors` built an
 unparenthesised per-branch `LIMIT` inside a `UNION`, which Postgres rejects as a
 syntax error. The function had no production caller and its tests ran on the
 shim, so it had never executed against the real database for as long as it had
@@ -115,12 +115,10 @@ AIMEE_ROOT=/path/to/aimee AIMEE_SRC=/path/to/aimee/src \
   tests/e2e/module-liveness-pg-e2e.sh
 ```
 
-`AIMEE_DB2_URL` must reach the same database. The **postgres module** connects
-by that URL rather than by the libpq defaults `aimee-kb` itself uses, and with
-it unset the KB publishes the blocker *"store unavailable: the KB database
-schema is not ready"* while it is visibly storing and retrieving; that is an
-under-configured environment, not a defect, and section 5 asserts the service
-does not contradict itself this way.
+Set `AIMEE_STORE_URL` to the non-owner runtime role and
+`AIMEE_STORE_MIGRATION_URL` to the schema owner on the same database. Both
+daemons reach that database through their PostgreSQL provider process; the
+KB has no direct database connection or legacy credential fallback.
 
 ## What it covers
 
@@ -164,9 +162,9 @@ arm selection always fell back to its default. Every slice passed its unit tests
 throughout, because a unit test can prove a consumer reads a row correctly
 without ever asking whether anything writes one.
 
-**The endogeneity gate could not see its own evidence.** It is a DB2 reader, and
-DB2 lives in the KB; an earlier version ran in `aimee-server`, which builds with
-`-DAIMEE_DB2_DISABLED`, so it reported "open" by never having consulted a ledger
+**The endogeneity gate could not see its own evidence.** It is a KB_STORE reader, and
+KB_STORE lives in the KB; an earlier version ran in `aimee-server`, which builds with
+`-DAIMEE_KB_STORE_DISABLED`, so it reported "open" by never having consulted a ledger
 at all.
 
 ## Running it

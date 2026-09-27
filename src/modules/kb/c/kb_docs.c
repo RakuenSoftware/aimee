@@ -1,10 +1,10 @@
-/* db2/kb_docs.c: aimee-kb ingest API — docs table accessors (DB2).
+/* kb_store/kb_docs.c: aimee-kb ingest API — docs table accessors (KB_STORE).
  *
  * See docs/proposals/pending/aimee-kb-ingest-api-and-corpus-staging.md */
 
 #include "kb_docs.h"
 #include "corpus_jobs.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -12,11 +12,11 @@
 #include <string.h>
 #include <stdint.h>
 
-int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
-                         const char *converter, const char *converter_version,
-                         const char *normalized_text, int *was_existing)
+int64_t kb_store_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
+                              const char *converter, const char *converter_version,
+                              const char *normalized_text, int *was_existing)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !content_hash || !converter || !converter_version || !scope)
       return -1;
 
@@ -67,17 +67,17 @@ int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const c
    aimee_pg_finalize(st);
    if (id > 0)
    {
-      if (db2_corpus_job_seed_doc(id, content_hash) != 0)
+      if (kb_store_corpus_job_seed_doc(id, content_hash) != 0)
          return -1;
-      if (db2_corpus_job_record_version(id, scope, filename, content_hash) != 0)
+      if (kb_store_corpus_job_record_version(id, scope, filename, content_hash) != 0)
          return -1;
    }
    return id;
 }
 
-int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
+int kb_store_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !content_hash || !content_hash[0] || !scope || !scope[0])
       return -1;
 
@@ -99,9 +99,9 @@ int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
    return -1;
 }
 
-int db2_kb_doc_read(int64_t id, db2_kb_doc_t *out)
+int kb_store_kb_doc_read(int64_t id, kb_store_kb_doc_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -159,10 +159,10 @@ int db2_kb_doc_read(int64_t id, db2_kb_doc_t *out)
    return 0;
 }
 
-int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
-                         const char *review_reason)
+int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
+                              const char *review_reason)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !state)
       return -1;
 
@@ -213,7 +213,7 @@ int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_kb_doc_delete(int64_t id)
+int kb_store_kb_doc_delete(int64_t id)
 {
    /* Retained as an ABI compatibility symbol only.  Physical removal must go
     * through document_lifecycle_preview/apply so the evidence, derived-memory,
@@ -222,9 +222,9 @@ int db2_kb_doc_delete(int64_t id)
    return -1;
 }
 
-int db2_kb_doc_list_review(int limit, int64_t cursor_id, db2_kb_doc_t *out, int max_out)
+int kb_store_kb_doc_list_review(int limit, int64_t cursor_id, kb_store_kb_doc_t *out, int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
 
@@ -245,7 +245,7 @@ int db2_kb_doc_list_review(int limit, int64_t cursor_id, db2_kb_doc_t *out, int 
    int n = 0;
    while (n < max_out && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_kb_doc_t *row = &out[n++];
+      kb_store_kb_doc_t *row = &out[n++];
       memset(row, 0, sizeof(*row));
       row->id = aimee_pg_column_int64(st, 0);
       const char *v;

@@ -7,7 +7,7 @@
 #include "roadmap_reassess.h"
 #include "modules/kb/c/artifacts.h"
 #include "modules/kb/c/db_postgres.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "headers/agent_exec.h"
 #include "headers/agent_config.h"
 #include "headers/dstr.h"
@@ -25,10 +25,10 @@ char *roadmap_reassess_build_prompt(const char *roadmap_id)
    if (!roadmap_id)
       return NULL;
 
-   db2_artifact_row_t row;
+   kb_store_artifact_row_t row;
    memset(&row, 0, sizeof(row));
 
-   if (db2_artifact_read(roadmap_id, &row, NULL, 0, NULL) != 0)
+   if (kb_store_artifact_read(roadmap_id, &row, NULL, 0, NULL) != 0)
       return NULL;
 
    cJSON *payload = cJSON_Parse(row.payload_json);
@@ -46,7 +46,7 @@ char *roadmap_reassess_build_prompt(const char *roadmap_id)
    dstr_appendf(&s, "Goal: %s\n\n", goal);
    dstr_append_str(&s, "All milestone acceptance criteria:\n");
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (conn)
    {
       char err[256] = "";

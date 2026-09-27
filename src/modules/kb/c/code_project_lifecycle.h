@@ -1,6 +1,6 @@
 /* code_project_lifecycle.h: stable code-project detach/purge/gc contract. */
-#ifndef AIMEE_DB2_CODE_PROJECT_LIFECYCLE_H
-#define AIMEE_DB2_CODE_PROJECT_LIFECYCLE_H 1
+#ifndef AIMEE_KB_STORE_CODE_PROJECT_LIFECYCLE_H
+#define AIMEE_KB_STORE_CODE_PROJECT_LIFECYCLE_H 1
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,21 +37,22 @@ enum
 
 /* Mark the current generation detached. Indexed rows remain recoverable. The
  * verified principal and state transition commit with one WORM audit event. */
-int db2_code_project_detach(const char *project, const char *principal, int64_t *generation_out);
+int kb_store_code_project_detach(const char *project, const char *principal,
+                                 int64_t *generation_out);
 
 /* Read-only exact target manifests. GC retention is measured from last_seen /
  * detached_at. */
-int db2_code_project_purge_manifest(const char *project, code_project_manifest_t *out);
-int db2_code_project_gc_manifest(const char *project, int retention_days,
-                                 code_project_manifest_t *out);
+int kb_store_code_project_purge_manifest(const char *project, code_project_manifest_t *out);
+int kb_store_code_project_gc_manifest(const char *project, int retention_days,
+                                      code_project_manifest_t *out);
 
 /* Confirmed mutations. The expected hash must equal a newly computed manifest;
  * audit and deletion commit in one transaction. */
-int db2_code_project_purge_confirm(const char *project, const char *expected_hash,
-                                   const char *principal, const char *reason,
-                                   code_project_manifest_t *out);
-int db2_code_project_gc_confirm(const char *project, int retention_days, const char *expected_hash,
-                                const char *principal, const char *reason,
-                                code_project_manifest_t *out);
+int kb_store_code_project_purge_confirm(const char *project, const char *expected_hash,
+                                        const char *principal, const char *reason,
+                                        code_project_manifest_t *out);
+int kb_store_code_project_gc_confirm(const char *project, int retention_days,
+                                     const char *expected_hash, const char *principal,
+                                     const char *reason, code_project_manifest_t *out);
 
 #endif

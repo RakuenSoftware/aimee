@@ -16,14 +16,14 @@
 #define CAL_MAX_SURFACES 64
 
 /* Enumerate surfaces that have enough audit data to calibrate. */
-static int enumerate_surfaces(db2_calibration_surface_t *out, int max)
+static int enumerate_surfaces(kb_store_calibration_surface_t *out, int max)
 {
-   return db2_calibration_surface_list(CAL_MIN_ROWS, out, max);
+   return kb_store_calibration_surface_list(CAL_MIN_ROWS, out, max);
 }
 
-static int build_sidecar_request(const db2_calibration_surface_t *surface,
-                                 const db2_calibration_bucket_t *buckets, int n_buckets,
-                                 const db2_calibration_conformal_row_t *conformal_rows,
+static int build_sidecar_request(const kb_store_calibration_surface_t *surface,
+                                 const kb_store_calibration_bucket_t *buckets, int n_buckets,
+                                 const kb_store_calibration_conformal_row_t *conformal_rows,
                                  int n_conformal, char *buf, size_t len)
 {
    cJSON *req = cJSON_CreateObject();
@@ -119,7 +119,7 @@ int kb_calibrate_run(void)
       return 0;
 
    /* Enumerate surfaces to calibrate */
-   db2_calibration_surface_t surfaces[CAL_MAX_SURFACES];
+   kb_store_calibration_surface_t surfaces[CAL_MAX_SURFACES];
    int n_surfaces = enumerate_surfaces(surfaces, CAL_MAX_SURFACES);
    if (n_surfaces <= 0)
       return 0;
@@ -127,17 +127,17 @@ int kb_calibrate_run(void)
    int written = 0;
    int bucket_count = config_calibration_buckets();
    if (bucket_count < 2)
-      bucket_count = DB2_CALIBRATION_BUCKETS;
-   if (bucket_count > DB2_CALIBRATION_BUCKETS)
-      bucket_count = DB2_CALIBRATION_BUCKETS;
+      bucket_count = KB_STORE_CALIBRATION_BUCKETS;
+   if (bucket_count > KB_STORE_CALIBRATION_BUCKETS)
+      bucket_count = KB_STORE_CALIBRATION_BUCKETS;
 
    for (int i = 0; i < n_surfaces; i++)
    {
-      const db2_calibration_surface_t *surf = &surfaces[i];
+      const kb_store_calibration_surface_t *surf = &surfaces[i];
 
       /* Gather audit stats */
-      db2_calibration_bucket_t buckets[DB2_CALIBRATION_BUCKETS];
-      int n_filled = db2_calibration_audit_stats(
+      kb_store_calibration_bucket_t buckets[KB_STORE_CALIBRATION_BUCKETS];
+      int n_filled = kb_store_calibration_audit_stats(
           surf->target_surface, surf->kind, surf->scope_kind[0] ? surf->scope_kind : NULL,
           surf->scope_id[0] ? surf->scope_id : NULL, config_calibration_conformal_window(), buckets,
           bucket_count);
@@ -152,11 +152,11 @@ int kb_calibrate_run(void)
       if (total_rows < CAL_MIN_ROWS)
          continue;
 
-      db2_calibration_conformal_row_t conformal_rows[DB2_CALIBRATION_CONFORMAL_MAX];
-      int n_conformal = db2_calibration_conformal_window(
+      kb_store_calibration_conformal_row_t conformal_rows[KB_STORE_CALIBRATION_CONFORMAL_MAX];
+      int n_conformal = kb_store_calibration_conformal_window(
           surf->target_surface, surf->kind, surf->scope_kind[0] ? surf->scope_kind : NULL,
           surf->scope_id[0] ? surf->scope_id : NULL, config_calibration_conformal_window(),
-          conformal_rows, DB2_CALIBRATION_CONFORMAL_MAX);
+          conformal_rows, KB_STORE_CALIBRATION_CONFORMAL_MAX);
       if (n_conformal < 0)
          n_conformal = 0;
 
@@ -230,7 +230,7 @@ int kb_calibrate_run(void)
       char feature_set_version[160];
       snprintf(feature_set_version, sizeof(feature_set_version), "%s/%s", prompt_version,
                model_version);
-      int wrc = db2_calibration_profile_write(
+      int wrc = kb_store_calibration_profile_write(
           surf->target_surface, surf->kind, surf->scope_kind[0] ? surf->scope_kind : "global",
           surf->scope_id, feature_set_version, payload_buf, art_id, sizeof(art_id));
       if (wrc == 0)
@@ -251,8 +251,8 @@ int kb_calibrate_run(void)
 
 int kb_calibrate_consume_drift_signals(void)
 {
-   db2_artifact_proposed_t rows[32];
-   int n = db2_artifact_list_proposed(NULL, 64, rows, 32);
+   kb_store_artifact_proposed_t rows[32];
+   int n = kb_store_artifact_list_proposed(NULL, 64, rows, 32);
    if (n <= 0)
       return 0;
 
@@ -261,7 +261,7 @@ int kb_calibrate_consume_drift_signals(void)
    {
       if (strcmp(rows[i].kind, "drift_signal") != 0)
          continue;
-      if (db2_artifact_stamp_reflected(rows[i].id) == 0)
+      if (kb_store_artifact_stamp_reflected(rows[i].id) == 0)
       {
          aimee_log(LOG_INFO, "calibration", "drift_signal consumed: id=%s payload=%s", rows[i].id,
                    rows[i].payload_json[0] ? rows[i].payload_json : "{}");

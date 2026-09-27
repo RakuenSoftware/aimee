@@ -79,7 +79,7 @@ func TestCorpusIsolatedSemanticReplay(t *testing.T) {
 		}
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	const schema = "../../../../../src/modules/kb/c/schema.sql"
 	for _, fail := range []bool{false, true} {
 		executor := &corpusExecutor{failQuery: fail}
@@ -174,7 +174,7 @@ func TestCorpusCommandReplayAndBaselineFailure(t *testing.T) {
 		}
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	directory := t.TempDir()
 	corpus := validCorpus()
 	prefix := strings.Repeat("shared-prefix-", 10)
@@ -251,7 +251,7 @@ func TestCorpusCancellationStopsQueryEmbedding(t *testing.T) {
 	if url == "" {
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	executor := &corpusExecutor{blockQuery: make(chan struct{})}

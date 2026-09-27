@@ -1,11 +1,11 @@
-/* db2/tool_registry.h: tool registry — DB2 subsystem.
+/* kb_store/tool_registry.h: tool registry — KB_STORE subsystem.
  *
  * Stores per-tool metadata (input schema, side-effect class, enabled flag,
- * usage prompt). Read-mostly: DB2 schema bootstrap seeds known tools;
- * callers query via db2_tool_registry_lookup or iterate enabled
- * prompts via db2_tool_registry_iter_prompts. */
-#ifndef DEC_DB2_TOOL_REGISTRY_H
-#define DEC_DB2_TOOL_REGISTRY_H 1
+ * usage prompt). Read-mostly: KB_STORE schema bootstrap seeds known tools;
+ * callers query via kb_store_tool_registry_lookup or iterate enabled
+ * prompts via kb_store_tool_registry_iter_prompts. */
+#ifndef DEC_KB_STORE_TOOL_REGISTRY_H
+#define DEC_KB_STORE_TOOL_REGISTRY_H 1
 
 #ifdef __cplusplus
 extern "C"
@@ -22,22 +22,22 @@ extern "C"
 
    /* Look up a tool by name. Sets out->found = 1 if present.
     * Returns 0 on success, -1 on db error. */
-   int db2_tool_registry_lookup(const char *name, tool_registry_entry_t *out);
+   int kb_store_tool_registry_lookup(const char *name, tool_registry_entry_t *out);
 
    /* Get the side_effect classification for a tool. Returns "read" if
     * tool is missing or db is unavailable. The returned pointer references
     * a thread-local buffer; copy if you need to retain it across calls. */
-   const char *db2_tool_registry_side_effect(const char *name);
+   const char *kb_store_tool_registry_side_effect(const char *name);
 
    /* Visit each enabled (name, tool_prompt) pair.
     * cb receives raw tool_prompt from the table — empty when caller
     * should fall back to the embedded prompts table.
     * Iteration stops if cb returns non-zero; that value is returned. */
    typedef int (*tool_registry_prompt_cb)(const char *name, const char *prompt, void *user);
-   int db2_tool_registry_iter_prompts(tool_registry_prompt_cb cb, void *user);
+   int kb_store_tool_registry_iter_prompts(tool_registry_prompt_cb cb, void *user);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_TOOL_REGISTRY_H */
+#endif /* DEC_KB_STORE_TOOL_REGISTRY_H */

@@ -1,6 +1,6 @@
 #include "server_registry.h"
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 #include <stdio.h>
 #include <string.h>
@@ -8,13 +8,14 @@ static void cp(char *d, size_t n, const char *s)
 {
    snprintf(d, n, "%s", s ? s : "");
 }
-int db2_server_registry_pending(const db2_server_pending_t *p, char *status, size_t status_cap)
+int kb_store_server_registry_pending(const kb_store_server_pending_t *p, char *status,
+                                     size_t status_cap)
 {
-   if (db2_tenant_require_pg() != 0 || !p || !p->operation || !p->server_id || !p->endpoint ||
+   if (kb_store_tenant_require_pg() != 0 || !p || !p->operation || !p->server_id || !p->endpoint ||
        !p->client_cn || !p->management_cn || !p->client_csr_digest || !p->management_csr_digest ||
        !status || !status_cap)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -42,18 +43,18 @@ int db2_server_registry_pending(const db2_server_pending_t *p, char *status, siz
    return rc;
 }
 
-int db2_server_registry_finalize(const char *operation, const char *client_csr_digest,
-                                 const char *management_csr_digest,
-                                 const db2_server_cert_identity_t *client,
-                                 const db2_server_cert_identity_t *management, char *status,
-                                 size_t status_cap)
+int kb_store_server_registry_finalize(const char *operation, const char *client_csr_digest,
+                                      const char *management_csr_digest,
+                                      const kb_store_server_cert_identity_t *client,
+                                      const kb_store_server_cert_identity_t *management,
+                                      char *status, size_t status_cap)
 {
-   if (db2_tenant_require_pg() != 0 || !operation || !client_csr_digest || !management_csr_digest ||
-       !client || !client->issuer || !client->serial_norm || !client->fingerprint || !management ||
-       !management->issuer || !management->serial_norm || !management->fingerprint || !status ||
-       !status_cap)
+   if (kb_store_tenant_require_pg() != 0 || !operation || !client_csr_digest ||
+       !management_csr_digest || !client || !client->issuer || !client->serial_norm ||
+       !client->fingerprint || !management || !management->issuer || !management->serial_norm ||
+       !management->fingerprint || !status || !status_cap)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -80,11 +81,11 @@ int db2_server_registry_finalize(const char *operation, const char *client_csr_d
    aimee_pg_finalize(s);
    return rc;
 }
-int db2_server_registry_list(int64_t team, db2_server_row_t *out, int max)
+int kb_store_server_registry_list(int64_t team, kb_store_server_row_t *out, int max)
 {
-   if (db2_tenant_require_pg() != 0 || !out || max <= 0)
+   if (kb_store_tenant_require_pg() != 0 || !out || max <= 0)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -100,7 +101,7 @@ int db2_server_registry_list(int64_t team, db2_server_row_t *out, int max)
    aimee_pg_step_t step = AIMEE_PG_DONE;
    while (n < max && (step = aimee_pg_step(s, e, sizeof(e))) == AIMEE_PG_ROW)
    {
-      db2_server_row_t *r = &out[n++];
+      kb_store_server_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       cp(r->server_id, sizeof(r->server_id), aimee_pg_column_text(s, 0));
       cp(r->cert_cn, sizeof(r->cert_cn), aimee_pg_column_text(s, 1));
@@ -116,12 +117,13 @@ int db2_server_registry_list(int64_t team, db2_server_row_t *out, int max)
       return -1;
    return n;
 }
-int db2_server_registry_heartbeat(const char *id, const char *issuer, const char *serial,
-                                  const char *fingerprint, const char *health, const char *version)
+int kb_store_server_registry_heartbeat(const char *id, const char *issuer, const char *serial,
+                                       const char *fingerprint, const char *health,
+                                       const char *version)
 {
-   if (db2_tenant_require_pg() != 0 || !id || !issuer || !serial || !fingerprint)
+   if (kb_store_tenant_require_pg() != 0 || !id || !issuer || !serial || !fingerprint)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -145,12 +147,12 @@ int db2_server_registry_heartbeat(const char *id, const char *issuer, const char
    return rc;
 }
 
-int db2_server_registry_client_match(const char *id, int64_t team, const char *issuer,
-                                     const char *serial, const char *fingerprint)
+int kb_store_server_registry_client_match(const char *id, int64_t team, const char *issuer,
+                                          const char *serial, const char *fingerprint)
 {
-   if (db2_tenant_require_pg() != 0 || !id || team <= 0 || !issuer || !serial || !fingerprint)
+   if (kb_store_tenant_require_pg() != 0 || !id || team <= 0 || !issuer || !serial || !fingerprint)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -173,11 +175,11 @@ int db2_server_registry_client_match(const char *id, int64_t team, const char *i
    return rc;
 }
 
-int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
+int kb_store_server_registry_get(int64_t team, const char *id, kb_store_server_row_t *r)
 {
-   if (db2_tenant_require_pg() != 0 || !id || !r)
+   if (kb_store_tenant_require_pg() != 0 || !id || !r)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -208,11 +210,11 @@ int db2_server_registry_get(int64_t team, const char *id, db2_server_row_t *r)
    return rc;
 }
 
-int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapshot_t *r)
+int kb_store_server_registry_snapshot(int64_t team, const char *id, kb_store_server_snapshot_t *r)
 {
-   if (db2_tenant_require_pg() != 0 || !id || !r)
+   if (kb_store_tenant_require_pg() != 0 || !id || !r)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];
@@ -248,14 +250,15 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
    return rc;
 }
 
-int db2_management_status_lookup(const char *issuer, const char *serial, const char *fingerprint,
-                                 const char *target, const char *purpose, int64_t *generation,
-                                 char *target_fingerprint, size_t target_fingerprint_len)
+int kb_store_management_status_lookup(const char *issuer, const char *serial,
+                                      const char *fingerprint, const char *target,
+                                      const char *purpose, int64_t *generation,
+                                      char *target_fingerprint, size_t target_fingerprint_len)
 {
-   if (db2_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target || !purpose ||
-       !generation || !target_fingerprint || target_fingerprint_len < 65)
+   if (kb_store_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target ||
+       !purpose || !generation || !target_fingerprint || target_fingerprint_len < 65)
       return -1;
-   void *c = db2_conn();
+   void *c = kb_store_conn();
    if (!c)
       return -1;
    char e[256];

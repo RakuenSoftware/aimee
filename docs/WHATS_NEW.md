@@ -283,7 +283,7 @@ did nothing useful, which is why they are listed here rather than folded into th
   synthesis uses the KB's configured endpoint. After the wizard selects the
   bundled embedder, a fresh install embeds with no download and no second service. Set the embedder
   before you ingest. A later change is a data migration: the guarded reset handles a dimension
-  change, while a same-dimension vector-space change needs a fresh DB2 and source re-ingestion.
+  change, while a same-dimension vector-space change needs a fresh KB_STORE and source re-ingestion.
 - **A clean install could enrol no identity and store zero vectors.** The published config snapshot
   did not match what `legacy_config_read` returned on the cached path, so first-user enrolment failed
   silently and env-var deployments indexed nothing. Both are fixed, and the write and guarded

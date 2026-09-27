@@ -1,8 +1,8 @@
 /* On-demand P7 D2b integration harness.  Each command is a fresh process so
  * TPM/provider caches and the process-local primary epoch cannot leak between
  * crash-boundary fixtures.  Driven only by p7_reseal_d2b_swtpm_pg_test.sh. */
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/org_vault_rewrap.h"
 #include "kb/kb_vault_policy.h"
@@ -58,14 +58,14 @@ static void pg_fail(const char *what, const char *err)
 static void sql_exec(const char *sql)
 {
    char err[ERR_CAP] = "";
-   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   if (aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) != 0)
       pg_fail(sql, err);
 }
 
 static int64_t sql_i64(const char *sql)
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st || aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
       pg_fail(sql, err);
    int64_t value = aimee_pg_column_int64(st, 0);
@@ -75,8 +75,8 @@ static int64_t sql_i64(const char *sql)
 
 static void db_open(void)
 {
-   if (db2_init(db_url()) != 0)
-      fail("db2_init");
+   if (kb_store_init(db_url()) != 0)
+      fail("kb_store_init");
 }
 
 static int hex_key(const char *hex, uint8_t key[VAULT_KEK_LEN])
@@ -119,8 +119,8 @@ static void seed_salts(const uint8_t old_kek[VAULT_KEK_LEN])
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)", err,
-       sizeof(err));
+       kb_store_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)",
+       err, sizeof(err));
    if (!st)
       pg_fail("prepare salt seed", err);
    for (size_t i = 0; i < CHECK_ROWS; i++)
@@ -148,7 +148,7 @@ static void seed_secrets(const uint8_t old_kek[VAULT_KEK_LEN])
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "INSERT INTO org_vault_secret(principal,team_id,agent,cred,version,wrapped_dek,nonce,"
        "ciphertext,tag) VALUES(?1,NULL,?2,?3,?4,?5,?6,?7,?8)",
        err, sizeof(err));
@@ -196,7 +196,7 @@ static void seed(const char *old_hex)
    seed_secrets(old_kek);
    CHECK(sql_i64("SELECT count(*) FROM org_vault_secret") == SECRET_ROWS);
    OPENSSL_cleanse(old_kek, sizeof(old_kek));
-   db2_shutdown();
+   kb_store_shutdown();
    puts("p7-d2b-live: seeded 257 secrets and 5 checks");
 }
 
@@ -221,14 +221,14 @@ static void fixture_begin(const char *op_hex, const char *secret, const char *ne
    CHECK(vault_custody_tpm2_nv_generation(secret, &generation) == VAULT_TPM2_RESEAL_OK);
    CHECK(generation < (uint64_t)INT64_MAX);
    db_open();
-   db2_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_tx_t *tx = NULL;
    int64_t epoch = 0, fence = 0;
-   db2_vault_rewrap_state_t state = DB2_VAULT_REWRAP_PREPARING;
-   CHECK(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   CHECK(db2_vault_rewrap_begin(tx, actor, request_id, op, (int64_t)generation,
-                                (int64_t)generation + 1, &epoch, &fence,
-                                &state) == DB2_VAULT_REWRAP_OK);
-   CHECK(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && tx == NULL);
+   kb_store_vault_rewrap_state_t state = KB_STORE_VAULT_REWRAP_PREPARING;
+   CHECK(kb_store_vault_rewrap_tx_begin(&tx) == KB_STORE_VAULT_REWRAP_OK);
+   CHECK(kb_store_vault_rewrap_begin(tx, actor, request_id, op, (int64_t)generation,
+                                     (int64_t)generation + 1, &epoch, &fence,
+                                     &state) == KB_STORE_VAULT_REWRAP_OK);
+   CHECK(kb_store_vault_rewrap_tx_commit(&tx) == KB_STORE_VAULT_REWRAP_OK && tx == NULL);
    if (prepare)
    {
       vault_tpm2_reseal_receipt_t receipt;
@@ -237,15 +237,16 @@ static void fixture_begin(const char *op_hex, const char *secret, const char *ne
       CHECK(vault_custody_tpm2_reseal_prepare(op, generation, new_kek, secret, &receipt) ==
             VAULT_TPM2_RESEAL_OK);
       CHECK(vault_reseal_receipt_encode(&receipt, wire) == 0);
-      CHECK(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-      CHECK(db2_vault_rewrap_record_prepared(tx, op, fence, (int64_t)generation,
-                                             (int64_t)generation + 1, wire) == DB2_VAULT_REWRAP_OK);
-      CHECK(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && tx == NULL);
+      CHECK(kb_store_vault_rewrap_tx_begin(&tx) == KB_STORE_VAULT_REWRAP_OK);
+      CHECK(kb_store_vault_rewrap_record_prepared(tx, op, fence, (int64_t)generation,
+                                                  (int64_t)generation + 1,
+                                                  wire) == KB_STORE_VAULT_REWRAP_OK);
+      CHECK(kb_store_vault_rewrap_tx_commit(&tx) == KB_STORE_VAULT_REWRAP_OK && tx == NULL);
       OPENSSL_cleanse(&receipt, sizeof(receipt));
       OPENSSL_cleanse(wire, sizeof(wire));
       OPENSSL_cleanse(new_kek, sizeof(new_kek));
    }
-   db2_shutdown();
+   kb_store_shutdown();
    OPENSSL_cleanse(op, sizeof(op));
    puts(prepare ? "p7-d2b-live: custody_prepared fixture" : "p7-d2b-live: preparing fixture");
 }
@@ -295,7 +296,7 @@ static void run_orchestrator(const char *mode, const char *op_hex, const char *s
               out.has_state ? (int)out.state : -1, out.failure_class);
       fail("orchestrator result");
    }
-   db2_shutdown();
+   kb_store_shutdown();
    OPENSSL_cleanse(&req, sizeof(req));
    OPENSSL_cleanse(&out, sizeof(out));
    OPENSSL_cleanse(op, sizeof(op));
@@ -314,7 +315,7 @@ static void assert_state(const char *state, int64_t operations)
       CHECK(sql_i64(query) == operations);
       CHECK(sql_i64("SELECT sealed::int FROM kb_vault_control WHERE singleton=1") == 1);
    }
-   db2_shutdown();
+   kb_store_shutdown();
    puts("p7-d2b-live: durable state asserted");
 }
 
@@ -333,7 +334,7 @@ static void verify_completed(const char *old_hex, const char *secret)
 
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "SELECT version,wrapped_dek,nonce,ciphertext,tag FROM org_vault_secret ORDER BY id", err,
        sizeof(err));
    if (!st)
@@ -373,8 +374,8 @@ static void verify_completed(const char *old_hex, const char *secret)
    aimee_pg_finalize(st);
    CHECK(seen == SECRET_ROWS);
 
-   st = aimee_pg_prepare(db2_conn(), "SELECT kek_check FROM org_vault_salt ORDER BY principal", err,
-                         sizeof(err));
+   st = aimee_pg_prepare(kb_store_conn(), "SELECT kek_check FROM org_vault_salt ORDER BY principal",
+                         err, sizeof(err));
    if (!st)
       pg_fail("verify check prepare", err);
    int empty = 0, nonempty = 0;
@@ -398,7 +399,7 @@ static void verify_completed(const char *old_hex, const char *secret)
    OPENSSL_cleanse(old_kek, sizeof(old_kek));
    OPENSSL_cleanse(active_kek, sizeof(active_kek));
    OPENSSL_cleanse(dek, sizeof(dek));
-   db2_shutdown();
+   kb_store_shutdown();
    puts("p7-d2b-live: completed inventory verified under installed KEK only");
 }
 
@@ -424,30 +425,31 @@ static void unseal_ok(const char *secret)
 static void diagnose_verify(const char *op_hex, const char *secret)
 {
    uint8_t op[16], kek[VAULT_KEK_LEN], dek[VAULT_DEK_LEN];
-   db2_vault_rewrap_snapshot_t snap;
-   db2_vault_rewrap_verify_summary_t sum;
-   db2_vault_rewrap_secret_t secrets[DB2_VAULT_REWRAP_PAGE_MAX];
-   db2_vault_rewrap_check_t checks[DB2_VAULT_REWRAP_PAGE_MAX];
-   db2_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
-   db2_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_snapshot_t snap;
+   kb_store_vault_rewrap_verify_summary_t sum;
+   kb_store_vault_rewrap_secret_t secrets[KB_STORE_VAULT_REWRAP_PAGE_MAX];
+   kb_store_vault_rewrap_check_t checks[KB_STORE_VAULT_REWRAP_PAGE_MAX];
+   kb_store_vault_rewrap_cursor_t cursor = {{0}, 0}, next = {{0}, 0};
+   kb_store_vault_rewrap_tx_t *tx = NULL;
    CHECK(hex_op(op_hex, op) == 0);
    db_open();
-   CHECK(db2_vault_rewrap_snapshot(op, &snap) == DB2_VAULT_REWRAP_OK);
+   CHECK(kb_store_vault_rewrap_snapshot(op, &snap) == KB_STORE_VAULT_REWRAP_OK);
    CHECK(bind_tpm() == 0);
    CHECK(vault_unseal(secret, strlen(secret)) == 0);
    CHECK(vault_server_kek(kek) == 0);
-   CHECK(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   CHECK(db2_vault_rewrap_verify_summary(tx, op, snap.fencing_token, &sum) == DB2_VAULT_REWRAP_OK);
+   CHECK(kb_store_vault_rewrap_tx_begin(&tx) == KB_STORE_VAULT_REWRAP_OK);
+   CHECK(kb_store_vault_rewrap_verify_summary(tx, op, snap.fencing_token, &sum) ==
+         KB_STORE_VAULT_REWRAP_OK);
    int64_t after = 0, seen_s = 0, seen_c = 0;
    while (seen_s < sum.secret_count)
    {
       size_t n = 0;
-      int limit = sum.secret_count - seen_s > DB2_VAULT_REWRAP_PAGE_MAX
-                      ? DB2_VAULT_REWRAP_PAGE_MAX
+      int limit = sum.secret_count - seen_s > KB_STORE_VAULT_REWRAP_PAGE_MAX
+                      ? KB_STORE_VAULT_REWRAP_PAGE_MAX
                       : (int)(sum.secret_count - seen_s);
-      db2_vault_rewrap_result_t rc = db2_vault_rewrap_verify_secret_page(
-          tx, op, snap.fencing_token, after, limit, secrets, DB2_VAULT_REWRAP_PAGE_MAX, &n);
-      if (rc != DB2_VAULT_REWRAP_OK)
+      kb_store_vault_rewrap_result_t rc = kb_store_vault_rewrap_verify_secret_page(
+          tx, op, snap.fencing_token, after, limit, secrets, KB_STORE_VAULT_REWRAP_PAGE_MAX, &n);
+      if (rc != KB_STORE_VAULT_REWRAP_OK)
       {
          fprintf(stderr, "p7-d2b-live: diagnose secret page rc=%d seen=%lld limit=%d\n", rc,
                  (long long)seen_s, limit);
@@ -461,35 +463,36 @@ static void diagnose_verify(const char *op_hex, const char *secret)
       seen_s += (int64_t)n;
    }
    size_t n = 0;
-   CHECK(db2_vault_rewrap_verify_secret_page(tx, op, snap.fencing_token, after, 1, secrets,
-                                             DB2_VAULT_REWRAP_PAGE_MAX,
-                                             &n) == DB2_VAULT_REWRAP_OK &&
+   CHECK(kb_store_vault_rewrap_verify_secret_page(tx, op, snap.fencing_token, after, 1, secrets,
+                                                  KB_STORE_VAULT_REWRAP_PAGE_MAX,
+                                                  &n) == KB_STORE_VAULT_REWRAP_OK &&
          n == 0);
    while (seen_c < sum.check_count)
    {
-      int limit = sum.check_count - seen_c > DB2_VAULT_REWRAP_PAGE_MAX
-                      ? DB2_VAULT_REWRAP_PAGE_MAX
+      int limit = sum.check_count - seen_c > KB_STORE_VAULT_REWRAP_PAGE_MAX
+                      ? KB_STORE_VAULT_REWRAP_PAGE_MAX
                       : (int)(sum.check_count - seen_c);
-      CHECK(db2_vault_rewrap_verify_check_page(tx, op, snap.fencing_token, &cursor, limit, checks,
-                                               DB2_VAULT_REWRAP_PAGE_MAX, &n,
-                                               &next) == DB2_VAULT_REWRAP_OK);
+      CHECK(kb_store_vault_rewrap_verify_check_page(tx, op, snap.fencing_token, &cursor, limit,
+                                                    checks, KB_STORE_VAULT_REWRAP_PAGE_MAX, &n,
+                                                    &next) == KB_STORE_VAULT_REWRAP_OK);
       for (size_t i = 0; i < n; i++)
          CHECK(!checks[i].kek_check_len || vault_kek_check_verify(kek, checks[i].kek_check) == 0);
       seen_c += (int64_t)n;
       cursor = next;
    }
-   CHECK(db2_vault_rewrap_verify_check_page(tx, op, snap.fencing_token, &cursor, 1, checks,
-                                            DB2_VAULT_REWRAP_PAGE_MAX, &n,
-                                            &next) == DB2_VAULT_REWRAP_OK &&
+   CHECK(kb_store_vault_rewrap_verify_check_page(tx, op, snap.fencing_token, &cursor, 1, checks,
+                                                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &n,
+                                                 &next) == KB_STORE_VAULT_REWRAP_OK &&
          n == 0);
-   CHECK(db2_vault_rewrap_verify_crypto_ack(tx, op, snap.fencing_token) == DB2_VAULT_REWRAP_OK);
-   db2_vault_rewrap_tx_rollback(&tx);
+   CHECK(kb_store_vault_rewrap_verify_crypto_ack(tx, op, snap.fencing_token) ==
+         KB_STORE_VAULT_REWRAP_OK);
+   kb_store_vault_rewrap_tx_rollback(&tx);
    CHECK(vault_seal() == 0);
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(dek, sizeof(dek));
-   db2_vault_rewrap_snapshot_clear(&snap);
-   db2_vault_rewrap_verify_summary_clear(&sum);
-   db2_shutdown();
+   kb_store_vault_rewrap_snapshot_clear(&snap);
+   kb_store_vault_rewrap_verify_summary_clear(&sum);
+   kb_store_shutdown();
    puts("p7-d2b-live: typed verification diagnosis passed");
 }
 

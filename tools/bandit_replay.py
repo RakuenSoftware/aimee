@@ -9,7 +9,7 @@ Usage:
       --bump-before 2026-01-01T00:00:00 --bump-after 2026-02-01T00:00:00 \
       --estimator synthetic_control
 
-Reads closed decisions (from db2_bandit_decisions_export output or a JSON file) and
+Reads closed decisions (from kb_store_bandit_decisions_export output or a JSON file) and
 computes counterfactual reward estimates.
 
 See docs/proposals/accepted/contextual-bandits-and-counterfactual-replay.md

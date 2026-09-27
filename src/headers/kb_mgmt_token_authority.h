@@ -63,7 +63,7 @@ typedef struct kb_mgmt_token_authority_record
    uint8_t hwm_attestation[KB_MGMT_ROOT_ATTEST_MAX];
    size_t hwm_attestation_len;
    uint8_t hwm_attestation_digest[32];
-   db2_vault_key_use_envelope_t envelope;
+   kb_store_vault_key_use_envelope_t envelope;
    int64_t key_use_created_at_epoch;
 } kb_mgmt_token_authority_record_t;
 
@@ -112,7 +112,7 @@ typedef struct kb_identity_token_authority_record
    uint8_t hwm_attestation[KB_MGMT_ROOT_ATTEST_MAX];
    size_t hwm_attestation_len;
    uint8_t hwm_attestation_digest[32];
-   db2_vault_key_use_envelope_t envelope;
+   kb_store_vault_key_use_envelope_t envelope;
    int64_t key_use_created_at_epoch;
 } kb_identity_token_authority_record_t;
 

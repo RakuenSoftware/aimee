@@ -1,5 +1,5 @@
 /* kb_service_workers.c: kb_service socket init/shutdown.
- * aimee-kb owns DB2 and now drives KB ingest in-process via the worker
+ * aimee-kb owns KB_STORE and now drives KB ingest in-process via the worker
  * pool in kb_ingest_workers.c, alongside its KB maintenance, reflection,
  * curation, and mining background loops. */
 
@@ -20,7 +20,7 @@
 #include "kb_reflection.h"
 #include "kb_service.h"
 #include "config.h"
-#include "modules/kb/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "modules/kb/c/kb_service_backend.h"
 #include "modules/kb/c/kb_maintenance.h"
 #include "kb_blob_reconcile.h"
@@ -76,7 +76,7 @@ static void *kb_maintenance_timer_thread(void *arg)
    {
       /* Drop any pool connection held from the last maintenance run so this
        * long-lived timer doesn't pin one while idle (stuck-lease reaper). */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       sleep(1);
       elapsed++;
       if (elapsed < interval_secs)
@@ -108,12 +108,12 @@ static void *kb_maintenance_timer_thread(void *arg)
          aimee_log(LOG_INFO, "kb.maintenance",
                    "scheduled run %s: decayed=%d pruned=%d elapsed=%ldms", res.run_id,
                    res.rows_decayed, res.orphans_pruned, res.elapsed_ms);
-         db2_kb_runtime_state_set_now("last_maintenance_at");
+         kb_store_kb_runtime_state_set_now("last_maintenance_at");
          char buf[32];
          snprintf(buf, sizeof(buf), "%d", res.rows_decayed);
-         db2_kb_runtime_state_set("last_maintenance_decayed", buf);
+         kb_store_kb_runtime_state_set("last_maintenance_decayed", buf);
          snprintf(buf, sizeof(buf), "%d", res.orphans_pruned);
-         db2_kb_runtime_state_set("last_maintenance_pruned", buf);
+         kb_store_kb_runtime_state_set("last_maintenance_pruned", buf);
       }
 
       /* Phase 4: learning-to-rank scheduled refit (default-off). Folded into the
@@ -129,7 +129,7 @@ static void *kb_maintenance_timer_thread(void *arg)
          aimee_log(frc == 0 ? LOG_INFO : LOG_DEBUG, "kb.ranker_fit",
                    "scheduled refit rc=%d report=%s", frc, fit_report ? fit_report : "(none)");
          free(fit_report);
-         db2_kb_runtime_state_set_now("last_ranker_fit_at");
+         kb_store_kb_runtime_state_set_now("last_ranker_fit_at");
          kb_background_clear("ranker_fit");
       }
 
@@ -150,7 +150,7 @@ static void *kb_blob_recon_timer_thread(void *arg)
    long elapsed = 0;
    while (!g_blob_recon_stop)
    {
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       sleep(1);
       elapsed++;
       int interval = config_kb_pdf_blob_recon_secs();
@@ -166,10 +166,10 @@ static void *kb_blob_recon_timer_thread(void *arg)
       if (kb_blob_reconcile_run(config_kb_pdf_blob_orphan_alarm_mb(), KB_BLOB_RECON_GRACE_SECS,
                                 &st) == 0)
       {
-         db2_kb_runtime_state_set_now("last_blob_recon_at");
+         kb_store_kb_runtime_state_set_now("last_blob_recon_at");
          char buf[32];
          snprintf(buf, sizeof(buf), "%lld", st.orphans_unlinked);
-         db2_kb_runtime_state_set("last_blob_recon_unlinked", buf);
+         kb_store_kb_runtime_state_set("last_blob_recon_unlinked", buf);
       }
    }
    return NULL;
@@ -269,19 +269,19 @@ int kb_service_init(kb_service_ctx_t *ctx)
 
    g_kb_ctx = ctx;
 
-   /* DB2 owns canonical-index argv construction; the KB service owns process
+   /* KB_STORE owns canonical-index argv construction; the KB service owns process
     * execution. Install this once at the service entry point, before either
     * HTTP routing or ingest-worker startup can initiate a local scan. */
    canonical_index_set_exec_capture(safe_exec_capture);
 
    /* Reset any jobs left running from a previous crash so this process's
     * ingest workers can claim them again. */
-   int reset = db2_kb_ingest_queue_reset_running();
+   int reset = kb_store_kb_ingest_queue_reset_running();
    if (reset > 0)
       aimee_log(LOG_INFO, "kb.service", "crash recovery: reset %d running job(s) to pending",
                 reset);
 
-   /* Drive KB ingest in-process (claim from DB2, build, store). */
+   /* Drive KB ingest in-process (claim from KB_STORE, build, store). */
    kb_ingest_workers_start(ctx);
 
    g_maintenance_stop = 0;
@@ -311,12 +311,12 @@ int kb_service_init(kb_service_ctx_t *ctx)
       kb_curator_version_replay_t cvr;
       /* The two model identities are passed alongside the declared versions so that
        * switching a model replays the pass that depends on it, without an operator
-       * having to remember to bump a label. db2_embedder_serving_id() is the same value
-       * db2's drift guard records against the corpus, so a change means the same thing
+       * having to remember to bump a label. kb_store_embedder_serving_id() is the same value
+       * kb_store's drift guard records against the corpus, so a change means the same thing
        * in both places. */
-      (void)kb_curator_version_replay(config_kb_curator_extract_prompt_version(),
-                                      config_kb_curator_embed_model_version(),
-                                      config_synthesis_model(), db2_embedder_serving_id(), &cvr);
+      (void)kb_curator_version_replay(
+          config_kb_curator_extract_prompt_version(), config_kb_curator_embed_model_version(),
+          config_synthesis_model(), kb_store_embedder_serving_id(), &cvr);
    }
 
    return 0;

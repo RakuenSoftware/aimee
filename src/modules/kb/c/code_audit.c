@@ -1,4 +1,4 @@
-/* db2/code_audit.c: fetch + assemble the graph-derived code-health audit.
+/* kb_store/code_audit.c: fetch + assemble the graph-derived code-health audit.
  *
  * Fetches `exports`/`imports`/`references` edges from entity_edges and
  * code-unit body hashes from code_embeddings, runs the pure algorithms in
@@ -10,7 +10,7 @@
  * unit-testable without a DB (see tests/test_code_audit_graph.c).
  */
 #include "aimee.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "entity_nodes.h"
 #include "code_audit_graph.h"
@@ -23,8 +23,8 @@
 #define CA_DEP_MAX         8000
 #define CA_CLONE_MIN_LINES 5
 
-int db2_code_audit_edge_target_like(const char *relation, const char *project, char *out,
-                                    size_t cap)
+int kb_store_code_audit_edge_target_like(const char *relation, const char *project, char *out,
+                                         size_t cap)
 {
    if (!relation || !project || !out || cap == 0)
       return -1;
@@ -43,7 +43,7 @@ int db2_code_audit_edge_target_like(const char *relation, const char *project, c
       return -1;
 
    char enc_project[256];
-   if (db2_entity_node_encode_component(project, enc_project, sizeof(enc_project)) < 0)
+   if (kb_store_entity_node_encode_component(project, enc_project, sizeof(enc_project)) < 0)
       return -1;
    int n = snprintf(out, cap, "%s:%s:%%", prefix, enc_project);
    return (n >= 0 && (size_t)n < cap) ? 0 : -1;
@@ -51,7 +51,7 @@ int db2_code_audit_edge_target_like(const char *relation, const char *project, c
 
 static int fetch_edges(const char *relation, const char *project, char **src, char **tgt, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    static const char *sql = "SELECT source, target FROM entity_edges"
@@ -69,8 +69,8 @@ static int fetch_edges(const char *relation, const char *project, char **src, ch
    aimee_pg_bind_text(st, "?1", relation);
    aimee_pg_bind_text(st, "?2", project ? project : "");
    char project_like[512];
-   if (db2_code_audit_edge_target_like(relation, project ? project : "", project_like,
-                                       sizeof(project_like)) != 0)
+   if (kb_store_code_audit_edge_target_like(relation, project ? project : "", project_like,
+                                            sizeof(project_like)) != 0)
       project_like[0] = '\0';
    aimee_pg_bind_text(st, "?3", project_like);
    aimee_pg_bind_int(st, "?4", max);
@@ -118,7 +118,7 @@ static int clone_payload_line_count(const char *payload)
  * small span floor; legacy rows without span metadata remain eligible. */
 static void add_clones(cJSON *resp, const char *project, int limit)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    cJSON *arr = cJSON_AddArrayToObject(resp, "clones");
    if (!conn || !arr)
       return;
@@ -182,7 +182,7 @@ static void add_clones(cJSON *resp, const char *project, int limit)
  * runs on the live kb's Postgres (not exercised by the sqlite test shim). */
 static void add_near_clones(cJSON *resp, const char *project, int limit)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    cJSON *arr = cJSON_AddArrayToObject(resp, "near_clones");
    if (!conn || !arr)
       return;
@@ -221,7 +221,7 @@ static void add_near_clones(cJSON *resp, const char *project, int limit)
    aimee_pg_finalize(st);
 }
 
-cJSON *db2_kb_service_code_audit_json(const char *project, int limit)
+cJSON *kb_store_kb_service_code_audit_json(const char *project, int limit)
 {
    if (limit <= 0 || limit > 200)
       limit = 50;

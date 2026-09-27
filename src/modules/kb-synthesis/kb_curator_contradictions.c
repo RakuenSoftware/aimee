@@ -5,7 +5,7 @@
  * linked, then writes a `contradicts` artifact_link between the two claim
  * artifacts. This is the deterministic exact-facet pass; fuzzy
  * subj_attr-similar / value-different mining over the named vectors is a
- * refinement. db2_artifact_link is idempotent, so re-running is safe.
+ * refinement. kb_store_artifact_link is idempotent, so re-running is safe.
  * No DB1 access from this file. */
 
 #ifndef _GNU_SOURCE
@@ -16,7 +16,7 @@
 #include "aimee.h"
 #include "log.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <string.h>
@@ -27,7 +27,7 @@
 int kb_curator_detect_contradictions_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -69,7 +69,7 @@ int kb_curator_detect_contradictions_one(const kb_curator_extract_opts_t *opts)
    {
       if (!from_ids[i][0] || !to_ids[i][0])
          continue;
-      if (db2_artifact_link(from_ids[i], to_ids[i], "contradicts") == 0)
+      if (kb_store_artifact_link(from_ids[i], to_ids[i], "contradicts") == 0)
          written++;
    }
    if (written > 0)

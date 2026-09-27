@@ -108,8 +108,8 @@ rather than reusing the number for another module.
 
 KB owns its existing knowledge SQL and persisted graph definitions under
 `src/modules/kb/c`. Database I/O is exclusively the PostgreSQL module's session
-contract. No native pool, libpq driver, DB2 executable, or DB2 descriptor remains.
-The internal `db2_*` names in these domain APIs and historical SQL identifiers
+contract. No native pool, libpq driver, KB_STORE executable, or KB_STORE descriptor remains.
+The internal `kb_store_*` names in these domain APIs and historical SQL identifiers
 are retained compatibility names, not another database provider.
 
 Startup verifies the schema using runtime authority. An older schema is upgraded

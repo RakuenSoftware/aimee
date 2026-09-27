@@ -1,4 +1,4 @@
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
@@ -7,7 +7,7 @@
 
 static sqlite3 *test_db;
 
-sqlite3 *db2_shared_sqlite(void)
+sqlite3 *kb_store_shared_sqlite(void)
 {
    return test_db;
 }

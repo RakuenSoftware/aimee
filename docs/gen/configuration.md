@@ -53,7 +53,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `delegate_sandbox_package_access` | string | Runtime package access for a `--network none` delegate. The delegate has no outside socket: the Go egress module proxies only its immutable package registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` (default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy `gated` and `governance` values cannot widen the live proxy allowlist. |
 | `delegate_sandbox_require_isolation` | bool | Deprecated compatibility key. Its value is ignored: every delegate is created with no network, its complete network/mount/environment posture is verified after every start or resume, and any breach or unverifiable fact destroys the container and refuses the delegation. There is no host fallback. |
 | `embedder_command` | string | Command that produces embeddings (overrides the endpoint). |
-| `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the DB2 column ceiling. A ONE-WAY DOOR once anything is embedded: DB2 records the width and refuses to start on drift. |
+| `embedder_dims` | int | Embedding vector width. Leave unset for a bundled embedder - it declares its own width and the kb derives it (pinned > recorded > probed). REQUIRED for an external endpoint, whose width cannot be derived; valid to 4000, the KB_STORE column ceiling. A ONE-WAY DOOR once anything is embedded: KB_STORE records the width and refuses to start on drift. |
 | `embedder_model` | string | Embedder identity. Written for a bundled model too, not just an external one: it is the registry key pooling and prefixes resolve from, and the value recorded against the corpus. |
 | `embedder_url` | string | External embedder endpoint. A non-empty value IS the external embedder; empty means the model baked into this image variant (bekko-a25m at 384, or nomic-v2 at 768 on the -nomic images). |
 | `extended_thinking_enabled` | bool | Ask for extended thinking on aimee's OWN Anthropic requests (default off). Sends the adaptive thinking config, and only to a model whose capabilities report that it accepts it. A model nobody has reported that for is left alone rather than sent a shape the provider would reject. Off by default because thinking tokens are billed: enabling it changes spend, not just visibility. |
@@ -223,7 +223,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
 
-## Config-file sections (54)
+## Config-file sections (53)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the external config module metadata; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -239,7 +239,6 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`cost_reward`**: _Cost-aware reward shaping._ Keys: `enabled`, `lambda_pct`, `ref_usd_milli`
 - **`cron_jobs`**: _Scheduled job definitions (array of objects)._ Keys: `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
 - **`cross_verify`**: _Cross-model output verification._ Keys: `enabled`, `prompt`, `role`, `verify_cmd`
-- **`db2`**: _Legacy knowledge-index settings; connections are owned by PostgreSQL._ Keys: `vector`
 - **`dedup`**: _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`**: _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`**: _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
@@ -282,15 +281,15 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`workspaces`**: _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`**: `enabled`, `max_age_days`
 
-## Other top-level config-file keys (4)
+## Other top-level config-file keys (3)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `economizer`, `modules`, `toolsets`
+`economizer`, `modules`, `toolsets`
 
 ## Environment variables
 
-The binaries read 248 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -442,9 +441,8 @@ The binaries read 248 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 | Variable | Description |
 |----------|-------------|
-| `AIMEE_DB2_EVAL_URL` | Separate DB2 URL used by evaluation harnesses; never the production default. The harness applies the DB2 schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server. |
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
-| `AIMEE_TEST_DB2_TEMPLATE_URL` | Test-only. Postgres template database the DB2 test shim clones per test process, so unit tests run against the real engine instead of the sqlite shim (which translates DB2's SQL rather than executing it). Build the template with `make db2-test-template` and the suite with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test binaries; no production code path consults it. |
+| `AIMEE_TEST_KB_STORE_TEMPLATE_URL` | Test-only. Postgres template database the KB_STORE test shim clones per test process, so unit tests run against the real engine instead of the sqlite shim (which translates KB_STORE's SQL rather than executing it). Build the template with `make kb-store-test-template` and the suite with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test binaries; no production code path consults it. |
 
 ### Memory
 

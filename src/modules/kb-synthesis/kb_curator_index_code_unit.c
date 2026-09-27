@@ -20,10 +20,10 @@
 #include "log.h"
 #include "memory.h"
 #include "modules/kb/c/artifacts.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
-#include "modules/kb/c/kb_payload.h"       /* db2_kb_txn_* wrappers */
-#include "modules/kb/c/kb_runtime_state.h" /* db2_kb_purge_fence_active */
+#include "modules/kb/c/kb_payload.h"       /* kb_store_kb_txn_* wrappers */
+#include "modules/kb/c/kb_runtime_state.h" /* kb_store_kb_purge_fence_active */
 #include "modules/kb/c/pgvec_transport.h"
 
 #include <stdint.h>
@@ -52,7 +52,7 @@ static int64_t fnv1a(const char *s)
 int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -105,12 +105,12 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
       /* Fence check before the state write: a project being purged must not
        * see even a bare artifact state transition. Return 0 (stop this drain
        * tick) so the still-proposed row cannot spin the caller. */
-      if (project[0] && db2_kb_purge_fence_active(project))
+      if (project[0] && kb_store_kb_purge_fence_active(project))
       {
          free(payload);
          return 0;
       }
-      db2_artifact_set_state(id, "committed");
+      kb_store_artifact_set_state(id, "committed");
       free(payload);
       return 1;
    }
@@ -155,7 +155,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
     * re-insert into the vector store post-purge (webchat-project-lifecycle
     * slice 2). On fence, return 0 (this drain tick stops) so the untouched
     * proposed row cannot spin the caller. */
-   if (db2_kb_txn_begin() != 0)
+   if (kb_store_kb_txn_begin() != 0)
    {
       cJSON_Delete(pj);
       free(payload);
@@ -175,7 +175,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    if (!still_proposed)
    {
       /* Purged (or committed elsewhere) since the claim: nothing to index. */
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       cJSON_Delete(pj);
       free(payload);
       return 1;
@@ -183,9 +183,10 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    /* Advisory guard immediately before the fence check: serializes this
     * check+commit against the fence-publish transaction. Guard failure is
     * treated like an active fence (fail closed). */
-   if (project[0] && (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
+   if (project[0] &&
+       (kb_store_kb_purge_txn_guard(project) != 0 || kb_store_kb_purge_fence_active(project)))
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       aimee_log(LOG_WARN, "kb.curator.code_unit",
                 "purge fence active for project '%s': aborting code_unit %s", project, id);
       cJSON_Delete(pj);
@@ -209,10 +210,10 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
                 d2, d3, id);
    }
 
-   db2_artifact_set_state(id, "committed");
-   if (db2_kb_txn_commit() != 0)
+   kb_store_artifact_set_state(id, "committed");
+   if (kb_store_kb_txn_commit() != 0)
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       cJSON_Delete(pj);
       free(payload);
       return 0;

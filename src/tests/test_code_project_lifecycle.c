@@ -7,15 +7,15 @@
 
 #include "../modules/kb/c/code_index.h"
 #include "../modules/kb/c/code_project_lifecycle.h"
-#include "../modules/kb/c/db2_internal.h"
-#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/db_postgres.h"
 #include "../modules/kb/c/kb_audit_worm.h"
 
 static long scalar(const char *sql)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st);
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
    long out = (long)aimee_pg_column_int64(st, 0);
@@ -34,7 +34,7 @@ static long target_rows(const code_project_manifest_t *m, const char *table)
 static void exec_ok(const char *sql)
 {
    char err[256] = "";
-   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   if (aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) != 0)
    {
       fprintf(stderr, "exec_ok failed: %s\n  sql: %s\n", err, sql);
       assert(0 && "exec_ok");
@@ -49,7 +49,7 @@ static void insert_signature(const char *project, int generation, const char *pa
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "INSERT INTO kb_minhash_signatures(project,generation,file_path,signature_bytes)"
        " VALUES(?1,?2,?3,?4)",
        err, sizeof(err));
@@ -70,9 +70,10 @@ static void insert_signature(const char *project, int generation, const char *pa
 
 static void test_move_detach_readd(void)
 {
-   int64_t first = db2_code_index_project_upsert("stable-project", "/checkout/old");
+   int64_t first = kb_store_code_index_project_upsert("stable-project", "/checkout/old");
    assert(first > 0);
-   int64_t first_file = db2_code_index_file_upsert(first, "src/main.c", "2026-01-01T00:00:00Z");
+   int64_t first_file =
+       kb_store_code_index_file_upsert(first, "src/main.c", "2026-01-01T00:00:00Z");
    assert(first_file > 0);
    exec_ok("INSERT INTO terms(file_id,name,kind,line)"
            " SELECT id,'stable_symbol','definition',1 FROM files WHERE project_id="
@@ -90,10 +91,10 @@ static void test_move_detach_readd(void)
            " SELECT 'project:stable-project','contains','file:stable-project:src/main.c',"
            " 'code_projection',id FROM code_projection_generations"
            " WHERE project='stable-project' AND state='visible'");
-   int64_t other = db2_code_index_project_upsert("other-project", "/checkout/other");
+   int64_t other = kb_store_code_index_project_upsert("other-project", "/checkout/other");
    assert(other > 0 && other != first);
 
-   int64_t moved = db2_code_index_project_upsert("stable-project", "/checkout/new");
+   int64_t moved = kb_store_code_index_project_upsert("stable-project", "/checkout/new");
    assert(moved == first);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 1);
    assert(scalar("SELECT current_generation FROM projects WHERE name='stable-project'") == 1);
@@ -104,12 +105,12 @@ static void test_move_detach_readd(void)
 
    int64_t detached_generation = 0;
    exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
-   assert(db2_code_project_detach("stable-project", "tester", &detached_generation) ==
+   assert(kb_store_code_project_detach("stable-project", "tester", &detached_generation) ==
           CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'"
                  " AND lifecycle_state='current'") == 1);
    exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
-   assert(db2_code_project_detach("stable-project", "tester", &detached_generation) == 0);
+   assert(kb_store_code_project_detach("stable-project", "tester", &detached_generation) == 0);
    assert(detached_generation == 1);
    assert(scalar("SELECT COUNT(*) FROM code_projection_generations"
                  " WHERE project='stable-project' AND state='visible'") == 0);
@@ -118,18 +119,19 @@ static void test_move_detach_readd(void)
    assert(scalar("SELECT COUNT(*) FROM kb_audit_outbox WHERE action='code.index.detach'"
                  " AND actor_principal='tester' AND subject='stable-project'") == 1);
    project_info_t projects[8];
-   int listed = db2_code_index_project_list(projects, 8);
+   int listed = kb_store_code_index_project_list(projects, 8);
    assert(listed == 1 && strcmp(projects[0].name, "other-project") == 0);
    term_hit_t hits[8];
-   assert(db2_code_index_term_find("stable_symbol", hits, 8) == 0);
+   assert(kb_store_code_index_term_find("stable_symbol", hits, 8) == 0);
    assert(scalar("SELECT COUNT(*) FROM files WHERE project_id="
                  " (SELECT id FROM projects WHERE name='stable-project')") == 1);
 
    /* Re-adding is a new current generation of the same stable project. */
-   assert(db2_code_index_project_upsert("stable-project", "/checkout/new") == first);
+   assert(kb_store_code_index_project_upsert("stable-project", "/checkout/new") == first);
    assert(scalar("SELECT current_generation FROM projects WHERE name='stable-project'") == 2);
-   assert(db2_code_index_term_find("stable_symbol", hits, 8) == 0);
-   int64_t second_file = db2_code_index_file_upsert(first, "src/main.c", "2026-01-02T00:00:00Z");
+   assert(kb_store_code_index_term_find("stable_symbol", hits, 8) == 0);
+   int64_t second_file =
+       kb_store_code_index_file_upsert(first, "src/main.c", "2026-01-02T00:00:00Z");
    assert(second_file > 0 && second_file != first_file);
    exec_ok("INSERT INTO terms(file_id,name,kind,line)"
            " SELECT id,'stable_symbol','definition',2 FROM files WHERE project_id="
@@ -149,7 +151,7 @@ static void test_move_detach_readd(void)
                  " AND file_path='docs/same.md'") == 2);
    assert(scalar("SELECT COUNT(*) FROM kb_lsh_buckets WHERE project='stable-project'"
                  " AND file_path='docs/same.md'") == 2);
-   assert(db2_code_index_term_find("stable_symbol", hits, 8) == 1);
+   assert(kb_store_code_index_term_find("stable_symbol", hits, 8) == 1);
    assert(hits[0].line == 2);
    assert(scalar("SELECT COUNT(*) FROM files WHERE project_id="
                  " (SELECT id FROM projects WHERE name='stable-project')") == 2);
@@ -158,8 +160,8 @@ static void test_move_detach_readd(void)
 
 static void test_manifest_confirmation_and_audit(void)
 {
-   assert(db2_kb_audit_append_in_txn(db2_conn(), "operator", "tester", "misuse", "project", "deny",
-                                     "{}") == -1);
+   assert(kb_store_kb_audit_append_in_txn(kb_store_conn(), "operator", "tester", "misuse",
+                                          "project", "deny", "{}") == -1);
    exec_ok("INSERT INTO kb_documents(project,file_path,file_hash,chunk_index,content)"
            " VALUES('stable-project','docs/a.pdf','h',0,'chunk'),"
            " ('stable-project','docs/a.pdf','h',1,'legacy chunk')");
@@ -178,7 +180,7 @@ static void test_manifest_confirmation_and_audit(void)
            " VALUES(901,'artifact-stable'),(902,'artifact-other')");
 
    code_project_manifest_t dry;
-   assert(db2_code_project_purge_manifest("stable-project", &dry) == 0);
+   assert(kb_store_code_project_purge_manifest("stable-project", &dry) == 0);
    assert(strcmp(dry.operation, "purge") == 0);
    assert(strcmp(dry.mode, "dry_run") == 0);
    assert(target_rows(&dry, "projects") == 1);
@@ -203,11 +205,12 @@ static void test_manifest_confirmation_and_audit(void)
            " SELECT id,'src/late.c','2026-01-01T00:00:00Z' FROM projects"
            " WHERE name='stable-project'");
    code_project_manifest_t confirmed;
-   assert(db2_code_project_purge_confirm("stable-project", dry.manifest_hash, "tester", "cleanup",
-                                         &confirmed) == CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
+   assert(kb_store_code_project_purge_confirm("stable-project", dry.manifest_hash, "tester",
+                                              "cleanup",
+                                              &confirmed) == CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 1);
 
-   assert(db2_code_project_purge_manifest("stable-project", &dry) == 0);
+   assert(kb_store_code_project_purge_manifest("stable-project", &dry) == 0);
    char unchanged_count_hash[72];
    snprintf(unchanged_count_hash, sizeof(unchanged_count_hash), "%s", dry.manifest_hash);
    exec_ok("DELETE FROM files WHERE project_id=(SELECT id FROM projects"
@@ -215,20 +218,20 @@ static void test_manifest_confirmation_and_audit(void)
    exec_ok("INSERT INTO files(project_id,path,scanned_at)"
            " SELECT id,'src/replacement.c','2026-01-01T00:00:00Z' FROM projects"
            " WHERE name='stable-project'");
-   assert(db2_code_project_purge_confirm("stable-project", unchanged_count_hash, "tester",
-                                         "cleanup",
-                                         &confirmed) == CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
+   assert(kb_store_code_project_purge_confirm("stable-project", unchanged_count_hash, "tester",
+                                              "cleanup",
+                                              &confirmed) == CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
    assert(scalar("SELECT COUNT(*) FROM files WHERE project_id="
                  " (SELECT id FROM projects WHERE name='stable-project')") == 3);
 
-   assert(db2_code_project_purge_manifest("stable-project", &dry) == 0);
+   assert(kb_store_code_project_purge_manifest("stable-project", &dry) == 0);
    char hash[72];
    snprintf(hash, sizeof(hash), "%s", dry.manifest_hash);
 
    /* If the standard WORM audit store cannot accept a row, no deletion lands. */
    exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
-   assert(db2_code_project_purge_confirm("stable-project", hash, "tester", "cleanup", &confirmed) ==
-          CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
+   assert(kb_store_code_project_purge_confirm("stable-project", hash, "tester", "cleanup",
+                                              &confirmed) == CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 1);
    exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
 
@@ -236,8 +239,8 @@ static void test_manifest_confirmation_and_audit(void)
    memset(escaped_reason, '\n', sizeof(escaped_reason) - 1);
    memcpy(escaped_reason, "cleanup", 7);
    escaped_reason[sizeof(escaped_reason) - 1] = '\0';
-   assert(db2_code_project_purge_confirm("stable-project", hash, "tester", escaped_reason,
-                                         &confirmed) == 0);
+   assert(kb_store_code_project_purge_confirm("stable-project", hash, "tester", escaped_reason,
+                                              &confirmed) == 0);
    assert(strcmp(confirmed.mode, "confirmed") == 0);
    assert(strcmp(confirmed.manifest_hash, hash) == 0);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 0);
@@ -273,17 +276,17 @@ static void test_manifest_confirmation_and_audit(void)
 
 static void test_gc_audit(void)
 {
-   int64_t id = db2_code_index_project_upsert("gc-project", "/gc/old");
+   int64_t id = kb_store_code_index_project_upsert("gc-project", "/gc/old");
    assert(id > 0);
-   int64_t old_file = db2_code_index_file_upsert(id, "src/gc.c", "2026-01-01T00:00:00Z");
+   int64_t old_file = kb_store_code_index_file_upsert(id, "src/gc.c", "2026-01-01T00:00:00Z");
    assert(old_file > 0);
-   assert(db2_code_index_project_upsert("gc-project", "/gc/new") == id);
+   assert(kb_store_code_index_project_upsert("gc-project", "/gc/new") == id);
    int64_t detached_generation = 0;
-   assert(db2_code_project_detach("gc-project", "tester", &detached_generation) == 0);
+   assert(kb_store_code_project_detach("gc-project", "tester", &detached_generation) == 0);
    assert(detached_generation == 1);
-   assert(db2_code_index_project_upsert("gc-project", "/gc/new") == id);
+   assert(kb_store_code_index_project_upsert("gc-project", "/gc/new") == id);
    assert(scalar("SELECT current_generation FROM projects WHERE name='gc-project'") == 2);
-   int64_t current_file = db2_code_index_file_upsert(id, "src/gc.c", "2026-01-02T00:00:00Z");
+   int64_t current_file = kb_store_code_index_file_upsert(id, "src/gc.c", "2026-01-02T00:00:00Z");
    assert(current_file > 0 && current_file != old_file);
    exec_ok("INSERT INTO code_embeddings(point_id,project,generation,node_key,content_hash)"
            " VALUES(8101,'gc-project',1,'file:gc-project:old.c','old'),"
@@ -316,7 +319,7 @@ static void test_gc_audit(void)
            " WHERE project_id=(SELECT id FROM projects WHERE name='gc-project')"
            " AND state<>'current'");
    code_project_manifest_t dry, done;
-   assert(db2_code_project_gc_manifest("gc-project", 30, &dry) == 0);
+   assert(kb_store_code_project_gc_manifest("gc-project", 30, &dry) == 0);
    assert(strcmp(dry.operation, "gc") == 0);
    assert(dry.total_rows == 12);
    assert(target_rows(&dry, "files.retired") == 1);
@@ -328,11 +331,11 @@ static void test_gc_audit(void)
 
    /* Retention criteria are part of the confirmation token even when two
     * windows currently select the same number of rows. */
-   assert(db2_code_project_gc_confirm("gc-project", 60, hash, "tester", "retention", &done) ==
+   assert(kb_store_code_project_gc_confirm("gc-project", 60, hash, "tester", "retention", &done) ==
           CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
 
    exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
-   assert(db2_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) ==
+   assert(kb_store_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) ==
           CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE project_id="
                  " (SELECT id FROM projects WHERE name='gc-project')") == 2);
@@ -340,7 +343,8 @@ static void test_gc_audit(void)
                  " (SELECT id FROM projects WHERE name='gc-project')") == 2);
    exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
 
-   assert(db2_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) == 0);
+   assert(kb_store_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) ==
+          0);
    assert(strcmp(done.mode, "confirmed") == 0);
    assert(strcmp(done.manifest_hash, hash) == 0);
    assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE project_id="
@@ -380,14 +384,14 @@ static void test_gc_audit(void)
 static void test_reindex_under_new_name_takes_the_alias(void)
 {
    const char *root = "/checkout/shared";
-   int64_t owner = db2_code_index_project_upsert("first-owner", root);
+   int64_t owner = kb_store_code_index_project_upsert("first-owner", root);
    assert(owner > 0);
    assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE alias='/checkout/shared'"
                  " AND is_current=1 AND project_id=(SELECT id FROM projects"
                  " WHERE name='first-owner')") == 1);
 
    /* Same checkout, different project name: accepted, not refused. */
-   int64_t taker = db2_code_index_project_upsert("second-owner", root);
+   int64_t taker = kb_store_code_index_project_upsert("second-owner", root);
    assert(taker > 0);
    assert(taker != owner);
 
@@ -402,12 +406,12 @@ static void test_reindex_under_new_name_takes_the_alias(void)
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_move_detach_readd();
    test_manifest_confirmation_and_audit();
    test_gc_audit();
    test_reindex_under_new_name_takes_the_alias();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    puts("code_project_lifecycle: all tests passed");
    return 0;
 }

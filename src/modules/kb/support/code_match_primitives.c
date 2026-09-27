@@ -1,5 +1,5 @@
-/* Descriptor-owned DB2 process support for code-search line enrichment. */
-#include "db2_code_match.h"
+/* Descriptor-owned KB_STORE process support for code-search line enrichment. */
+#include "kb_store_code_match.h"
 
 #include <string.h>
 

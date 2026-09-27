@@ -1,4 +1,4 @@
-/* db2/css_insights.h: read-only CSS analysis signals derived from the style
+/* kb_store/css_insights.h: read-only CSS analysis signals derived from the style
  * graph (css_rules / css_declarations). These extend the WP-B/WP-C signal set
  * (dead rules, conflicts, duplicates) with insights that guide a migration to
  * clean, tokenised CSS:
@@ -8,8 +8,8 @@
  *   - design-token candidates   : literal colours/lengths repeated enough to
  *                                 deserve a custom property
  * All are pure reads (no app-code changes) and project-scopable. */
-#ifndef DEC_DB2_CSS_INSIGHTS_H
-#define DEC_DB2_CSS_INSIGHTS_H 1
+#ifndef DEC_KB_STORE_CSS_INSIGHTS_H
+#define DEC_KB_STORE_CSS_INSIGHTS_H 1
 
 #include "css_graph.h" /* CSS_GRAPH_PROJECT_MAX, MAX_PATH_LEN, CSS_*_MAX */
 
@@ -58,23 +58,24 @@ extern "C"
    } css_token_cand_t;
 
    /* !important declarations grouped by property, most-frequent first. */
-   int db2_css_important_audit(const char *project_filter, css_important_t *out, int max);
+   int kb_store_css_important_audit(const char *project_filter, css_important_t *out, int max);
 
    /* Rules whose specificity includes an id (spec_a > 0), highest id-count first. */
-   int db2_css_high_specificity(const char *project_filter, css_high_spec_t *out, int max);
+   int kb_store_css_high_specificity(const char *project_filter, css_high_spec_t *out, int max);
 
    /* Declared `--vars` that no value references via var(). NULL-/prefix-safe:
     * `--brand` is NOT marked used just because `--brandColor` is referenced. */
-   int db2_css_unused_custom_properties(const char *project_filter, css_unused_var_t *out, int max);
+   int kb_store_css_unused_custom_properties(const char *project_filter, css_unused_var_t *out,
+                                             int max);
 
    /* Literal colours (#hex / rgb()/rgba()/hsl()/hsla()) and lengths (px/rem/em)
     * that recur >= min_count times across declarations (values already using
     * var() are skipped). Most-repeated first — the best tokenisation candidates. */
-   int db2_css_token_candidates(const char *project_filter, int min_count, css_token_cand_t *out,
-                                int max);
+   int kb_store_css_token_candidates(const char *project_filter, int min_count,
+                                     css_token_cand_t *out, int max);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CSS_INSIGHTS_H */
+#endif /* DEC_KB_STORE_CSS_INSIGHTS_H */

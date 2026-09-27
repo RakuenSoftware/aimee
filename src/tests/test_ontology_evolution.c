@@ -2,8 +2,8 @@
  * external relation-change contract covered until rollback also moves to Go. */
 #include "../headers/aimee.h"
 #include "../modules/kb/c/fact_mutation.h"
-#include "../modules/kb/c/db2_test_shim.h"
-#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "../modules/kb/c/db_postgres.h"
 #include <assert.h>
 #include <stdio.h>
@@ -11,10 +11,10 @@
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    char err[256] = "";
    assert(aimee_pg_exec(
-              db2_conn(),
+              kb_store_conn(),
               "INSERT INTO rel_types(rel_type,status,sensitivity) "
               "VALUES('frobnicates','provisional','pii');"
               "INSERT INTO ontology_evaluations(rel_type,occurrence_count,status) "
@@ -26,16 +26,16 @@ int main(void)
    snprintf(actor.principal, sizeof(actor.principal), "test:operator");
    snprintf(actor.role, sizeof(actor.role), "operator");
    char commit[FACT_COMMIT_ID_MAX], rollback[FACT_COMMIT_ID_MAX];
-   assert(db2_fact_graph_record_external_in_txn(&actor, "ontology.approve", "relation",
-                                                "frobnicates", "promote", "provisional/pending",
-                                                "active/approved", 1, commit) == 0);
-   assert(aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0);
+   assert(kb_store_fact_graph_record_external_in_txn(
+              &actor, "ontology.approve", "relation", "frobnicates", "promote",
+              "provisional/pending", "active/approved", 1, commit) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), "COMMIT", err, sizeof(err)) == 0);
    fact_commit_change_t diff[2];
-   assert(db2_fact_commit_preview(commit, diff, 2) == 1);
+   assert(kb_store_fact_commit_preview(commit, diff, 2) == 1);
    assert(!strcmp(diff[0].object_kind, "relation") && !strcmp(diff[0].object_key, "frobnicates"));
-   assert(db2_fact_commit_rollback(&actor, commit, rollback) == 1);
+   assert(kb_store_fact_commit_rollback(&actor, commit, rollback) == 1);
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT r.status,o.status FROM rel_types r JOIN ontology_evaluations o "
                         "ON o.rel_type=r.rel_type WHERE r.rel_type='frobnicates'",
                         err, sizeof(err));
@@ -43,7 +43,7 @@ int main(void)
    assert(!strcmp(aimee_pg_column_text(st, 0), "provisional"));
    assert(!strcmp(aimee_pg_column_text(st, 1), "pending"));
    aimee_pg_finalize(st);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    puts("ontology relation rollback contract: passed");
    return 0;
 }

@@ -1,13 +1,13 @@
-/* kb_runtime_state.c: DB2-backed runtime state for aimee-kb.
+/* kb_runtime_state.c: KB_STORE-backed runtime state for aimee-kb.
  *
  * Postgres-only: drives the kb_runtime_state table over libpq via the
- * shared db2 connection. Returns -1 / 0 for "no handle" so callers fail
- * soft when DB2 isn't initialised. */
+ * shared kb_store connection. Returns -1 / 0 for "no handle" so callers fail
+ * soft when KB_STORE isn't initialised. */
 
 #include "kb_runtime_state.h"
 
-#include "../support/db2_runtime_config.h"
-#include "db2_internal.h"
+#include "../support/kb_store_runtime_config.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stddef.h>
@@ -16,11 +16,11 @@
 
 #define KBRS_ERRBUF 256
 
-int db2_kb_runtime_state_set(const char *key, const char *value)
+int kb_store_kb_runtime_state_set(const char *key, const char *value)
 {
    if (!key)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -39,12 +39,12 @@ int db2_kb_runtime_state_set(const char *key, const char *value)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
+int kb_store_kb_runtime_state_get(const char *key, char *out, size_t out_len)
 {
    if (!key || !out || out_len == 0)
       return -1;
    out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -66,11 +66,11 @@ int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
    return rc;
 }
 
-int db2_kb_runtime_state_delete(const char *key)
+int kb_store_kb_runtime_state_delete(const char *key)
 {
    if (!key)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -85,16 +85,16 @@ int db2_kb_runtime_state_delete(const char *key)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_kb_runtime_state_set_now(const char *key)
+int kb_store_kb_runtime_state_set_now(const char *key)
 {
    if (!key)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
    char err[KBRS_ERRBUF] = "";
-   /* pg_now_text() stores the DB2 canonical UTC text format. */
+   /* pg_now_text() stores the KB_STORE canonical UTC text format. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "INSERT INTO kb_runtime_state (state_key, state_value) VALUES (?1, pg_now_text()) "
@@ -108,9 +108,9 @@ int db2_kb_runtime_state_set_now(const char *key)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
-int db2_kb_runtime_state_vector_rebuild_lock_held(void)
+int kb_store_kb_runtime_state_vector_rebuild_lock_held(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -132,16 +132,16 @@ int db2_kb_runtime_state_vector_rebuild_lock_held(void)
    return held;
 }
 
-int db2_kb_runtime_state_vector_rebuild_lock_try_acquire(void)
+int kb_store_kb_runtime_state_vector_rebuild_lock_try_acquire(void)
 {
-   if (db2_kb_runtime_state_vector_rebuild_lock_held())
+   if (kb_store_kb_runtime_state_vector_rebuild_lock_held())
       return 0;
-   return db2_kb_runtime_state_set_now("vector_rebuild_lock") == 0 ? 1 : 0;
+   return kb_store_kb_runtime_state_set_now("vector_rebuild_lock") == 0 ? 1 : 0;
 }
 
-void db2_kb_runtime_state_vector_rebuild_lock_release(void)
+void kb_store_kb_runtime_state_vector_rebuild_lock_release(void)
 {
-   (void)db2_kb_runtime_state_delete("vector_rebuild_lock");
+   (void)kb_store_kb_runtime_state_delete("vector_rebuild_lock");
 }
 
 /* ── Project-purge generation fence (webchat-project-lifecycle slice 2) ──
@@ -175,10 +175,10 @@ static void kbrs_fence_keys(const char *project, char *key, size_t key_cap, char
 /* 1 iff the heartbeat row for ts_key is younger than `secs`. A missing or
  * unparseable heartbeat row counts as NOT within. (Writer-side fail-closed
  * handling of "identity row without a heartbeat row" lives in
- * db2_kb_purge_fence_active, not here — liveness callers want stale=0.) */
+ * kb_store_kb_purge_fence_active, not here — liveness callers want stale=0.) */
 static int kbrs_fence_ts_within(const char *ts_key, int secs)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    if (secs < 1)
@@ -208,11 +208,11 @@ static int kbrs_fence_ts_within(const char *ts_key, int secs)
  * called INSIDE an open transaction (the lock is xact-scoped). Under the
  * sqlite test shim both functions are registered as no-ops — sqlite's
  * single-writer serialization covers the same guarantee. */
-int db2_kb_purge_txn_guard(const char *project)
+int kb_store_kb_purge_txn_guard(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -236,16 +236,16 @@ static int kbrs_fence_write_rows(const char *project, const char *generation, co
    char key[320], ts_key[320], value[256];
    kbrs_fence_keys(project, key, sizeof(key), ts_key, sizeof(ts_key));
    snprintf(value, sizeof(value), "%s %s", generation, purge_id);
-   if (db2_kb_runtime_state_set_now(ts_key) != 0)
+   if (kb_store_kb_runtime_state_set_now(ts_key) != 0)
       return -1;
-   return db2_kb_runtime_state_set(key, value);
+   return kb_store_kb_runtime_state_set(key, value);
 }
 
-int db2_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
 {
    if (!project || !project[0] || !generation || !generation[0] || !purge_id || !purge_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -261,9 +261,10 @@ int db2_kb_purge_fence_write(const char *project, const char *generation, const 
    return 0;
 }
 
-int db2_kb_purge_fence_acquire(const char *project, const char *generation, const char *purge_id,
-                               int takeover, char *cur_gen, size_t gen_cap, char *cur_pid,
-                               size_t pid_cap, int *replaced_out)
+int kb_store_kb_purge_fence_acquire(const char *project, const char *generation,
+                                    const char *purge_id, int takeover, char *cur_gen,
+                                    size_t gen_cap, char *cur_pid, size_t pid_cap,
+                                    int *replaced_out)
 {
    if (cur_gen && gen_cap)
       cur_gen[0] = '\0';
@@ -273,7 +274,7 @@ int db2_kb_purge_fence_acquire(const char *project, const char *generation, cons
       *replaced_out = 0;
    if (!project || !project[0] || !generation || !generation[0] || !purge_id || !purge_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -285,7 +286,7 @@ int db2_kb_purge_fence_acquire(const char *project, const char *generation, cons
       return -1;
    /* Guard FIRST: serializes this publish against every writer's
     * guard-then-check commit point. */
-   if (db2_kb_purge_txn_guard(project) != 0)
+   if (kb_store_kb_purge_txn_guard(project) != 0)
    {
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
@@ -346,8 +347,8 @@ int db2_kb_purge_fence_acquire(const char *project, const char *generation, cons
    return 1;
 }
 
-int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
-                            size_t pid_cap, int *live_out)
+int kb_store_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                                 size_t pid_cap, int *live_out)
 {
    if (gen_out && gen_cap)
       gen_out[0] = '\0';
@@ -360,7 +361,7 @@ int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, 
 
    char key[320], ts_key[320], value[256];
    kbrs_fence_keys(project, key, sizeof(key), ts_key, sizeof(ts_key));
-   if (db2_kb_runtime_state_get(key, value, sizeof(value)) != 0)
+   if (kb_store_kb_runtime_state_get(key, value, sizeof(value)) != 0)
       return 0;
 
    char *sp = strchr(value, ' ');
@@ -379,13 +380,13 @@ int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, 
    return 1;
 }
 
-int db2_kb_purge_fence_active(const char *project)
+int kb_store_kb_purge_fence_active(const char *project)
 {
    if (!project || !project[0])
       return 0;
    char key[320], ts_key[320], value[256];
    kbrs_fence_keys(project, key, sizeof(key), ts_key, sizeof(ts_key));
-   if (db2_kb_runtime_state_get(key, value, sizeof(value)) != 0)
+   if (kb_store_kb_runtime_state_get(key, value, sizeof(value)) != 0)
       return 0;
    /* Identity row present but no heartbeat row: FAIL CLOSED (active). The
     * publish path writes the ts row first inside one transaction, so this
@@ -393,7 +394,7 @@ int db2_kb_purge_fence_active(const char *project)
     * treating it as active keeps "a partially written fence is never
     * inactive". An OLD heartbeat (row present, past TTL) is still expiry. */
    char ts[64] = "";
-   if (db2_kb_runtime_state_get(ts_key, ts, sizeof(ts)) != 0)
+   if (kb_store_kb_runtime_state_get(ts_key, ts, sizeof(ts)) != 0)
       return 1;
    return kbrs_fence_ts_within(ts_key, kbrs_fence_ttl_s());
 }
@@ -429,7 +430,7 @@ static int kbrs_fence_match_locked(void *conn, const char *key, const char *expe
  * is NOT safe here: under READ COMMITTED row re-evaluation (EvalPlanQual) the
  * statement can block on a concurrent takeover's transaction and then mutate
  * the rows the takeover just rewrote, while its EXISTS subplan still saw the
- * old snapshot. So mirror db2_kb_purge_fence_acquire: one transaction that
+ * old snapshot. So mirror kb_store_kb_purge_fence_acquire: one transaction that
  * takes the project advisory lock FIRST, locks the identity row FOR UPDATE,
  * compares in C, and only then mutates. Returns 1 mutated, 0 mismatch/absent,
  * -1 error. */
@@ -438,7 +439,7 @@ static int kbrs_fence_mutate_matched(const char *project, const char *generation
 {
    if (!project || !project[0] || !generation || !purge_id)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -449,7 +450,7 @@ static int kbrs_fence_mutate_matched(const char *project, const char *generation
    char err[KBRS_ERRBUF] = "";
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
       return -1;
-   if (db2_kb_purge_txn_guard(project) != 0)
+   if (kb_store_kb_purge_txn_guard(project) != 0)
    {
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
@@ -464,13 +465,13 @@ static int kbrs_fence_mutate_matched(const char *project, const char *generation
    int rc;
    if (clear)
    {
-      rc = db2_kb_runtime_state_delete(key);
+      rc = kb_store_kb_runtime_state_delete(key);
       if (rc == 0)
-         rc = db2_kb_runtime_state_delete(ts_key);
+         rc = kb_store_kb_runtime_state_delete(ts_key);
    }
    else
    {
-      rc = db2_kb_runtime_state_set_now(ts_key);
+      rc = kb_store_kb_runtime_state_set_now(ts_key);
    }
    if (rc != 0 || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
@@ -480,12 +481,13 @@ static int kbrs_fence_mutate_matched(const char *project, const char *generation
    return 1;
 }
 
-int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_heartbeat(const char *project, const char *generation,
+                                      const char *purge_id)
 {
    return kbrs_fence_mutate_matched(project, generation, purge_id, 0);
 }
 
-int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
 {
    return kbrs_fence_mutate_matched(project, generation, purge_id, 1);
 }

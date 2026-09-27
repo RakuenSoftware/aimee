@@ -1,17 +1,17 @@
-/* db2/team.c: P1 tenancy teams (kb_team) — Postgres via libpq.
- * See team.h. Mirrors the db2/enrollments.c access pattern. Tenant-scoped:
+/* kb_store/team.c: P1 tenancy teams (kb_team) — Postgres via libpq.
+ * See team.h. Mirrors the kb_store/enrollments.c access pattern. Tenant-scoped:
  * every entry requires the RLS-enforcing Postgres backend. */
 
 #include "team.h"
-#include "db2_tenant.h"
-#include "db2_internal.h"
+#include "kb_store_tenant.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/db2_log.h"
+#include "../support/kb_store_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static void row_from_stmt(aimee_pg_stmt_t *st, db2_team_row_t *row)
+static void row_from_stmt(aimee_pg_stmt_t *st, kb_store_team_row_t *row)
 {
    memset(row, 0, sizeof(*row));
    row->id = aimee_pg_column_int64(st, 0);
@@ -26,14 +26,14 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_team_row_t *row)
 
 #define TEAM_COLS "id, name, created_at, operator_id"
 
-int db2_team_create(const char *name, const char *operator_id, int64_t *out_id)
+int kb_store_team_create(const char *name, const char *operator_id, int64_t *out_id)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!name || !name[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    const char *sql = "INSERT INTO kb_team (name, operator_id) VALUES (?1, ?2) RETURNING id";
@@ -53,14 +53,14 @@ int db2_team_create(const char *name, const char *operator_id, int64_t *out_id)
    return 0;
 }
 
-int db2_team_list(db2_team_row_t *out, int max)
+int kb_store_team_list(kb_store_team_row_t *out, int max)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -75,14 +75,14 @@ int db2_team_list(db2_team_row_t *out, int max)
    return n;
 }
 
-int db2_team_get(int64_t id, db2_team_row_t *out)
+int kb_store_team_get(int64_t id, kb_store_team_row_t *out)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -101,14 +101,14 @@ int db2_team_get(int64_t id, db2_team_row_t *out)
    return rc;
 }
 
-int db2_team_get_by_name(const char *name, db2_team_row_t *out)
+int kb_store_team_get_by_name(const char *name, kb_store_team_row_t *out)
 {
-   int __g = db2_tenant_require_pg();
+   int __g = kb_store_tenant_require_pg();
    if (__g)
       return __g;
    if (!out || !name)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";

@@ -1,7 +1,7 @@
 /* fact_mutation.c: mandatory authority/evidence/lifecycle seam for semantic facts. */
 #include "fact_mutation.h"
 
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 #include "platform_random.h"
@@ -141,7 +141,7 @@ static int fm_tombstone_restore_assertion(void *conn, int64_t assertion_id,
    return ok ? 0 : -1;
 }
 
-int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out)
+int kb_store_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out)
 {
    if (!out || rank == FACT_ACTOR_OPERATOR ||
        (rank != FACT_ACTOR_MODEL && rank != FACT_ACTOR_SYSTEM && rank != FACT_ACTOR_USER))
@@ -169,7 +169,7 @@ int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out)
    return 0;
 }
 
-int db2_fact_actor_from_request(int require_operator, fact_actor_t *out)
+int kb_store_fact_actor_from_request(int require_operator, fact_actor_t *out)
 {
    if (!out)
       return -1;
@@ -451,7 +451,7 @@ static int fm_commit_finish(void *conn, const fact_actor_t *actor, const char *c
    aimee_pg_finalize(st);
    if (!ok)
       return -1;
-#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#ifdef AIMEE_DISABLE_KB_STORE_SQLITE_SHIM
    /* PostgreSQL owns the security boundary: the narrow definer reads the
     * canonical actor/operation/status from this changeset and writes only a
     * durable outbox intent. The separately credentialed WORM process constructs
@@ -469,8 +469,8 @@ static int fm_commit_finish(void *conn, const fact_actor_t *actor, const char *c
     * its local append solely as a deterministic unit-test implementation. */
    char detail[160];
    snprintf(detail, sizeof(detail), "commit_id=%s", commit_id);
-   return db2_kb_audit_append_in_txn(conn, actor->role, actor->principal, operation,
-                                     subject ? subject : "", "allow", detail);
+   return kb_store_kb_audit_append_in_txn(conn, actor->role, actor->principal, operation,
+                                          subject ? subject : "", "allow", detail);
 #endif
 }
 
@@ -636,15 +636,15 @@ static int fm_end(void *conn, int ok)
    return 0;
 }
 
-int db2_fact_graph_record_external_in_txn(const fact_actor_t *actor, const char *operation,
-                                          const char *object_kind, const char *object_key,
-                                          const char *action, const char *before_state,
-                                          const char *after_state, int reversible,
-                                          char commit_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_graph_record_external_in_txn(const fact_actor_t *actor, const char *operation,
+                                               const char *object_kind, const char *object_key,
+                                               const char *action, const char *before_state,
+                                               const char *after_state, int reversible,
+                                               char commit_id[FACT_COMMIT_ID_MAX])
 {
    if (commit_id)
       commit_id[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!fm_actor_ok(actor) || !operation || !operation[0] || !object_kind || !object_kind[0] ||
        !object_key || !object_key[0] || !action || !action[0] || !conn ||
        !aimee_pg_in_transaction(conn))
@@ -661,15 +661,15 @@ int db2_fact_graph_record_external_in_txn(const fact_actor_t *actor, const char 
    return 0;
 }
 
-int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *in,
-                             fact_mutation_result_t *out)
+int kb_store_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *in,
+                                  fact_mutation_result_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    if (!fm_actor_ok(actor) || !in || !in->source || !in->source[0] || !in->relation ||
        !in->relation[0] || !in->target || !in->target[0] || !fm_kind_ok(in->assertion_kind))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    if (fm_backfill_identity(conn) != 0)
@@ -1041,14 +1041,14 @@ static void fm_bind_selector(aimee_pg_stmt_t *st, const char *source, const char
       aimee_pg_bind_text(st, relation && relation[0] ? "?3" : "?2", target);
 }
 
-int db2_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
-                               const char *annotation, fact_mutation_result_t *out)
+int kb_store_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
+                                    const char *annotation, fact_mutation_result_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    if (!fm_actor_ok(actor) || assertion_id <= 0 || !annotation || !annotation[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    char err[FM_ERRBUF] = "";
@@ -1125,8 +1125,8 @@ static int fm_load_id(void *conn, int64_t id, fm_state_t *out)
    return step == AIMEE_PG_ERR ? -1 : 0;
 }
 
-int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
-                             fact_review_action_t action, fact_mutation_result_t *out)
+int kb_store_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
+                                  fact_review_action_t action, fact_mutation_result_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -1134,7 +1134,7 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
        (action != FACT_REVIEW_APPROVE && action != FACT_REVIEW_REJECT &&
         action != FACT_REVIEW_UNDO))
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    fm_state_t before;
@@ -1392,11 +1392,11 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    return 0;
 }
 
-int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max)
+int kb_store_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, int max)
 {
    if (!commit_id || !commit_id[0] || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[FM_ERRBUF] = "";
@@ -1433,11 +1433,11 @@ int db2_fact_commit_preview(const char *commit_id, fact_commit_change_t *out, in
    return n;
 }
 
-int db2_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max)
+int kb_store_fact_ingest_run_preview(const char *ingest_run_id, fact_commit_change_t *out, int max)
 {
    if (!ingest_run_id || !ingest_run_id[0] || !out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[FM_ERRBUF] = "";
@@ -1558,15 +1558,15 @@ static int fm_rollback_external(void *conn, const char *kind, const char *key, c
    return ok ? 0 : -1;
 }
 
-int db2_fact_commit_rollback(const fact_actor_t *actor, const char *target_commit,
-                             char rollback_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_commit_rollback(const fact_actor_t *actor, const char *target_commit,
+                                  char rollback_id[FACT_COMMIT_ID_MAX])
 {
    if (rollback_id)
       rollback_id[0] = '\0';
    if (!fm_actor_ok(actor) || actor->rank != FACT_ACTOR_OPERATOR || !target_commit ||
        !target_commit[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    char err[FM_ERRBUF] = "";
@@ -1739,15 +1739,15 @@ int db2_fact_commit_rollback(const fact_actor_t *actor, const char *target_commi
    return n;
 }
 
-int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
-                                 char rollback_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_run_id,
+                                      char rollback_id[FACT_COMMIT_ID_MAX])
 {
    if (rollback_id)
       rollback_id[0] = '\0';
    if (!fm_actor_ok(actor) || actor->rank != FACT_ACTOR_OPERATOR || !ingest_run_id ||
        !ingest_run_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    char err[FM_ERRBUF] = "";
@@ -1885,7 +1885,7 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
          after = current;
          fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
          fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
-         /* See db2_fact_commit_rollback: the operator's authority must land on
+         /* See kb_store_fact_commit_rollback: the operator's authority must land on
           * the row so re-extraction cannot re-establish the rolled-back triple. */
          if ((int)actor->rank > after.authority_rank)
             after.authority_rank = (int)actor->rank;
@@ -1954,15 +1954,15 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
    return n;
 }
 
-int db2_fact_erasure_preview(const char *source, const char *relation, const char *target,
-                             fact_erasure_impact_t *out)
+int kb_store_fact_erasure_preview(const char *source, const char *relation, const char *target,
+                                  fact_erasure_impact_t *out)
 {
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
    if (!source || !source[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char sql[768], err[FM_ERRBUF] = "";
@@ -1999,20 +1999,20 @@ int db2_fact_erasure_preview(const char *source, const char *relation, const cha
    return 0;
 }
 
-int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, const char *relation,
-                             const char *target, fact_erasure_impact_t *out,
-                             char commit_id[FACT_COMMIT_ID_MAX])
+int kb_store_fact_erasure_execute(const fact_actor_t *actor, const char *source,
+                                  const char *relation, const char *target,
+                                  fact_erasure_impact_t *out, char commit_id[FACT_COMMIT_ID_MAX])
 {
    if (commit_id)
       commit_id[0] = '\0';
    if (!fm_actor_ok(actor) || actor->rank != FACT_ACTOR_OPERATOR || !source || !source[0] || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (fm_begin(conn) != 0)
       return -1;
    /* Recompute the impact inside the erasure transaction.  The public preview
     * remains advisory; this report is the cascade actually authorized. */
-   if (db2_fact_erasure_preview(source, relation, target, out) != 0)
+   if (kb_store_fact_erasure_preview(source, relation, target, out) != 0)
       return fm_end(conn, 0);
    char cid[FACT_COMMIT_ID_MAX];
    if (fm_commit_open(conn, actor, "fact.erase", 0, cid) != 0)

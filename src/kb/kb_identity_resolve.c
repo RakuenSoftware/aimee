@@ -8,7 +8,7 @@
 
 #include "kb_identity.h"
 
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "membership.h"
 #include "log.h"
 
@@ -28,15 +28,15 @@ static void lookup_principal(const kb_principal_t *p, int64_t *teams, int *n, in
       return;
    /* Bootstrap: set aimee.principal only (team 0), so the own-rows policy on
     * kb_team_membership exposes exactly this principal's rows. */
-   *scope_rc = db2_tenant_scope_begin(p, 0);
+   *scope_rc = kb_store_tenant_scope_begin(p, 0);
    if (*scope_rc != 0)
       return;
-   int cnt = db2_membership_teams(key, teams, KB_MAX_TEAMS);
+   int cnt = kb_store_membership_teams(key, teams, KB_MAX_TEAMS);
    *teams_rc = cnt;
    if (cnt > 0)
       *n = cnt;
-   (void)db2_membership_default_team(key, deflt); /* leaves *deflt=0 when none */
-   db2_tenant_scope_rollback();                   /* read-only unit; clears the GUCs */
+   (void)kb_store_membership_default_team(key, deflt); /* leaves *deflt=0 when none */
+   kb_store_tenant_scope_rollback();                   /* read-only unit; clears the GUCs */
 }
 
 kb_resolve_status_t kb_identity_resolve(const kb_principal_t *transport,

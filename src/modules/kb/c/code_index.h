@@ -1,9 +1,9 @@
-/* db2/code_index.h: code-index primitives over the projects/files/terms
+/* kb_store/code_index.h: code-index primitives over the projects/files/terms
  * tables. Owns SQL for the indexer pipeline that scans repos and lets
  * `aimee index find` resolve symbols. The pure-domain types
  * (project_info_t, term_hit_t, ...) live in headers/index.h. */
-#ifndef DEC_DB2_CODE_INDEX_H
-#define DEC_DB2_CODE_INDEX_H 1
+#ifndef DEC_KB_STORE_CODE_INDEX_H
+#define DEC_KB_STORE_CODE_INDEX_H 1
 
 #include "../headers/index.h"
 
@@ -18,85 +18,87 @@ extern "C"
    /* List rows from the projects table in name-ASC order, capped at
     * |max| (caller's buffer size). On success returns count (>=0). On
     * DB / connection error returns -1. */
-   int db2_code_index_project_list(project_info_t *out, int max);
+   int kb_store_code_index_project_list(project_info_t *out, int max);
 
    /* Total row count of the projects table. Returns 0 on miss / DB
     * unavailable. */
-   int db2_code_index_project_count(void);
+   int kb_store_code_index_project_count(void);
    /* Current visible generation for a stable project id. Returns 0 when
     * current, -2 when unknown/detached, -1 on storage error. */
-   int db2_code_index_project_current_generation(const char *name, int64_t *generation_out);
+   int kb_store_code_index_project_current_generation(const char *name, int64_t *generation_out);
 
    /* Most recent scanned_at timestamp across all rows in the projects
     * table, written to |out| (NUL-terminated, ISO-8601). Returns 0 on
     * success (out filled, may be empty if no rows), -1 on DB /
     * connection error / bad args. */
-   int db2_code_index_project_last_scan(char *out, size_t cap);
+   int kb_store_code_index_project_last_scan(char *out, size_t cap);
 
    /* Find every (project, file, line, kind) where a term named
     * |identifier| exists. Definition rows sort first, then
     * (project_name, file_path) ASC. Capped at |max|. Returns count
     * (>=0) on success, -1 on DB / connection error. */
-   int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max);
+   int kb_store_code_index_term_find(const char *identifier, term_hit_t *out, int max);
 
    /* Fill exact current-generation structural edges for (project,file_path).
     * Import identities are language-normalized; direct callers and resolved
     * cross-repo routes are merged without path-only deduplication. Every edge
     * carries provenance/confidence/project/generation/freshness metadata.
     * Returns -1 unless the target resolves in the current generation. */
-   int db2_code_index_blast_radius(const char *project, const char *file_path, blast_radius_t *out);
+   int kb_store_code_index_blast_radius(const char *project, const char *file_path,
+                                        blast_radius_t *out);
 
    /* Stable-partition dependent edges so every active-project edge precedes
     * every cross-project tail. Call after additive local projections. */
-   void db2_code_index_blast_radius_local_first(const char *project, blast_radius_t *out);
+   void kb_store_code_index_blast_radius_local_first(const char *project, blast_radius_t *out);
 
    /* Resolve basename to a current-generation file only when exactly one file
     * in project has that basename. Used to make projection edges authoritative. */
-   int db2_code_index_unique_file_basename(const char *project, const char *basename, char *out,
-                                           size_t out_cap);
+   int kb_store_code_index_unique_file_basename(const char *project, const char *basename,
+                                                char *out, size_t out_cap);
 
    /* List terms with kind='definition' for the (project, file_path),
     * ordered by line. Capped at |max|. Returns count (>=0) on
     * success, 0 if the project or file is unknown, -1 on DB /
     * connection error. */
-   int db2_code_index_file_definitions(const char *project, const char *file_path,
-                                       definition_t *out, int max);
+   int kb_store_code_index_file_definitions(const char *project, const char *file_path,
+                                            definition_t *out, int max);
 
    /* List call sites where |callee| matches |symbol|. If |project|
     * is non-empty, restrict to that project. Capped at |max|.
     * Returns count (>=0) on success, -1 on DB / connection error. */
-   int db2_code_index_callers_find(const char *project, const char *symbol, caller_hit_t *out,
-                                   int max);
+   int kb_store_code_index_callers_find(const char *project, const char *symbol, caller_hit_t *out,
+                                        int max);
 
    /* Upsert a row in projects keyed by name; sets root and stamps
     * scanned_at = now. Returns the project's id (>0) on success, -1
     * on DB / connection error. */
-   int64_t db2_code_index_project_upsert(const char *name, const char *root);
+   int64_t kb_store_code_index_project_upsert(const char *name, const char *root);
 
    /* Upsert a row in files keyed by (project_id, path), stamping
     * scanned_at = |scanned_at|. Returns the file's id (>0) on
     * success, -1 on DB / connection error. */
-   int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path,
-                                      const char *scanned_at);
+   int64_t kb_store_code_index_file_upsert(int64_t project_id, const char *rel_path,
+                                           const char *scanned_at);
 
    /* Returns 1 if the file at (project_id, rel_path) is unscanned or
     * was scanned strictly before |mtime|, 0 if scanned_at >= mtime. On
     * DB / connection error returns 1 (treat as modified, conservative
     * for a scanner). */
-   int db2_code_index_file_modified_since(int64_t project_id, const char *rel_path, time_t mtime);
+   int kb_store_code_index_file_modified_since(int64_t project_id, const char *rel_path,
+                                               time_t mtime);
 
    /* Delete file rows in |project_id| whose path matches the SQL LIKE
     * pattern |path_glob|. CASCADE drops terms / file_exports /
     * file_imports / code_calls / file_contents automatically (FKs in
     * schema.sql). Returns rows deleted (>=0), or -1 on DB / connection
     * error. */
-   int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glob);
+   int kb_store_code_index_purge_files_matching(int64_t project_id, const char *path_glob);
 
    /* Purge one project's files whose path has a hidden component, EXCEPT a wanted
     * dotfile build manifest (.gitmodules with all non-hidden ancestors) — mirrors
     * the ingest allowlist so a re-scan does not delete legitimately-indexed
     * submodule declarations (recall §2.2). Returns rows deleted (>=0) or -1. */
-   int db2_code_index_purge_hidden_except_manifests(int64_t project_id);
+   int kb_store_code_index_purge_hidden_except_manifests(int64_t project_id);
 
    /* One-shot cleanup of hidden-path pollution across the whole code
     * index. Drops every files row whose project-relative path has any
@@ -107,7 +109,7 @@ extern "C"
     * registered before that guard. Returns total rows deleted (files +
     * projects), or -1 on DB / connection error. Safe to call repeatedly;
     * a no-op once the index is clean. */
-   int db2_code_index_purge_hidden_pollution(void);
+   int kb_store_code_index_purge_hidden_pollution(void);
 
    /* Delete one project's entire canonical-index tree by project NAME:
     * the projects row plus (via ON DELETE CASCADE) files, file_exports,
@@ -115,9 +117,9 @@ extern "C"
     * /v1/maintenance/purge-project fan-out (webchat-project-lifecycle
     * slice 2). Returns projects rows deleted (0 when the name is unknown —
     * idempotent), or -1 on DB / connection error. */
-   int db2_code_index_project_delete(const char *name);
+   int kb_store_code_index_project_delete(const char *name);
 
-   /* Bundle of per-file derived data passed to db2_code_index_file_replace. */
+   /* Bundle of per-file derived data passed to kb_store_code_index_file_replace. */
    typedef struct
    {
       const char *content;
@@ -139,7 +141,7 @@ extern "C"
     * exports / imports / routes (terms with kind='route') /
     * definitions (terms with kind from definition_t::kind) / calls.
     * Returns 0 on success, -1 on DB / connection error. */
-   int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data);
+   int kb_store_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data);
 
    /* Full-text search across file_contents. |query| is plain text
     * (FTS5 / plainto_tsquery semantics); empty / NULL returns 0. If
@@ -148,15 +150,17 @@ extern "C"
     * error. When |enrich| is non-zero, also locates each hit's matched line
     * (out[].line) from file content; 0 leaves line=0 and keeps the query/cost
     * identical to before (ingress-compression P1b). */
-   int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                  int max, int enrich);
+   int kb_store_code_index_code_search(const char *query, const char *project,
+                                       code_search_hit_t *out, int max, int enrich);
    /* As above, but search every current project except |excluded_project|;
     * exclusion happens in SQL before the result limit. */
-   int db2_code_index_code_search_excluding_project(const char *query, const char *excluded_project,
-                                                    code_search_hit_t *out, int max, int enrich);
+   int kb_store_code_index_code_search_excluding_project(const char *query,
+                                                         const char *excluded_project,
+                                                         code_search_hit_t *out, int max,
+                                                         int enrich);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEC_DB2_CODE_INDEX_H */
+#endif /* DEC_KB_STORE_CODE_INDEX_H */

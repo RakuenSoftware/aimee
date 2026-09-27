@@ -15,8 +15,8 @@
 #include "index.h"           /* index_list_projects, project_info_t */
 #include "log.h"
 #include "modules/kb/c/kb_payload.h"
-#include "modules/kb/c/db2_internal.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <stdint.h>
@@ -32,14 +32,14 @@ int kb_curator_queue_docs_for_project(const char *project)
    if (!config_kb_curator_extract_docs_enabled())
       return 0;
 
-   int read_scope = db2_maintenance_scope_begin_current();
+   int read_scope = kb_store_maintenance_scope_begin_current();
    if (read_scope < 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       if (read_scope == 1)
-         db2_maintenance_scope_rollback();
+         kb_store_maintenance_scope_rollback();
       return -1;
    }
 
@@ -68,7 +68,7 @@ int kb_curator_queue_docs_for_project(const char *project)
       aimee_log(LOG_WARN, "kb.curator.queue", "failed to query kb_documents for project '%s': %s",
                 project, err);
       if (read_scope == 1)
-         db2_maintenance_scope_rollback();
+         kb_store_maintenance_scope_rollback();
       return -1;
    }
    aimee_pg_bind_text(st, "?1", project);
@@ -77,12 +77,12 @@ int kb_curator_queue_docs_for_project(const char *project)
    while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       int64_t doc_id = aimee_pg_column_int64(st, 0);
-      int rc = db2_kb_async_enqueue("extract_doc", doc_id, project);
+      int rc = kb_store_kb_async_enqueue("extract_doc", doc_id, project);
       if (rc > 0)
          enqueued++;
    }
    aimee_pg_finalize(st);
-   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
       return -1;
 
    if (enqueued > 0)
@@ -99,7 +99,7 @@ int kb_curator_queue_code_unit(const char *project, const char *file_path, const
    if (!config_kb_curator_extract_code_enabled())
       return 0;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -131,7 +131,7 @@ int kb_curator_code_unit_jobs_delete_project(const char *project)
 {
    if (!project || !project[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -184,7 +184,7 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
 
    (void)root_path;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -272,7 +272,7 @@ void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
    if (!out)
       return;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -369,9 +369,9 @@ void kb_curator_queue_docs_all_projects(int extract_docs_enabled)
    int np = index_list_projects(projects, (int)(sizeof(projects) / sizeof(projects[0])));
    for (int i = 0; i < np; i++)
    {
-      if (db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, projects[i].name) != 0)
+      if (kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CURATOR, projects[i].name) != 0)
          continue;
       (void)kb_curator_queue_docs_for_project(projects[i].name);
-      db2_maintenance_job_leave();
+      kb_store_maintenance_job_leave();
    }
 }

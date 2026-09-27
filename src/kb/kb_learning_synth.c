@@ -2,7 +2,7 @@
  *
  * bundle (learning_bundle) -> sidecar (model) -> proposed candidate artifacts,
  * each citing the neighbourhood evidence so judge/promote can act unchanged.
- * DB2 only; no DB1 access from this file. */
+ * KB_STORE only; no DB1 access from this file. */
 
 #include "kb_learning_synth.h"
 
@@ -65,9 +65,9 @@ static char *synth_build_request(const char *query, const learning_bundle_t *bun
    for (int i = 0; i < bundle->count; i++)
    {
       const learning_bundle_item_t *bi = &bundle->items[i];
-      db2_artifact_row_t row;
+      kb_store_artifact_row_t row;
       char content[4096] = "";
-      if (db2_artifact_read(bi->artifact_id, &row, NULL, 0, NULL) == 0)
+      if (kb_store_artifact_read(bi->artifact_id, &row, NULL, 0, NULL) == 0)
          synth_extract_content(row.payload_json, content, sizeof(content));
 
       cJSON *n = cJSON_CreateObject();
@@ -154,7 +154,7 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
 
       /* Honour the substrate's rejection suppression: don't re-propose a
        * candidate kind that was thumbs-downed for this scope. */
-      if (db2_artifact_verdict_suppressed(kind, scope_id ? scope_id : ""))
+      if (kb_store_artifact_verdict_suppressed(kind, scope_id ? scope_id : ""))
       {
          aimee_log(LOG_DEBUG, "kb.learning.synth", "suppressed candidate kind=%s scope=%s", kind,
                    scope_id ? scope_id : "");
@@ -171,9 +171,9 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
          payload_str = cJSON_PrintUnformatted(payload_j);
 
       char id[64];
-      db2_artifact_gen_id(id, sizeof(id));
-      int wrc = db2_artifact_write(id, kind, "proposed", scope_kind, scope_id, operator_id,
-                                   confidence, payload_str ? payload_str : "{}");
+      kb_store_artifact_gen_id(id, sizeof(id));
+      int wrc = kb_store_artifact_write(id, kind, "proposed", scope_kind, scope_id, operator_id,
+                                        confidence, payload_str ? payload_str : "{}");
       free(payload_str);
       if (wrc != 0)
          continue;
@@ -181,7 +181,7 @@ int kb_learning_synth_generate(const char *query, const char *synth_cmd, const c
       /* Cite every neighbourhood evidence artifact as a corroborating source so
        * the judge's distinct-source count reflects the neighbourhood. */
       for (int i = 0; i < bundle.count; i++)
-         db2_artifact_cite(id, bundle.items[i].kind, bundle.items[i].artifact_id);
+         kb_store_artifact_cite(id, bundle.items[i].kind, bundle.items[i].artifact_id);
 
       if (proposed_ids && written < max_ids)
          snprintf(proposed_ids[written], 37, "%s", id);
@@ -205,18 +205,18 @@ int kb_learning_synth_drain(int max, const char *synth_cmd, const char *embed_cm
 
    char pend[64][37];
    int cap = max < 64 ? max : 64;
-   int got = db2_synth_list_pending(pend, cap);
+   int got = kb_store_synth_list_pending(pend, cap);
    if (got <= 0)
       return got < 0 ? -1 : 0;
 
    int processed = 0;
    for (int i = 0; i < got; i++)
    {
-      db2_artifact_row_t row;
-      if (db2_artifact_read(pend[i], &row, NULL, 0, NULL) != 0)
+      kb_store_artifact_row_t row;
+      if (kb_store_artifact_read(pend[i], &row, NULL, 0, NULL) != 0)
       {
          /* Evidence vanished — retire the op so the queue advances. */
-         db2_synth_mark_done(pend[i]);
+         kb_store_synth_mark_done(pend[i]);
          processed++;
          continue;
       }
@@ -228,9 +228,9 @@ int kb_learning_synth_drain(int max, const char *synth_cmd, const char *embed_cm
                                          max_tokens, row.scope_kind, row.scope_id, "synthesis",
                                          NULL, 0);
       if (n < 0)
-         db2_synth_mark_failed(pend[i], "synthesis failed");
+         kb_store_synth_mark_failed(pend[i], "synthesis failed");
       else
-         db2_synth_mark_done(pend[i]);
+         kb_store_synth_mark_done(pend[i]);
       processed++;
    }
    return processed;

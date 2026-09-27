@@ -12,7 +12,7 @@
  * over it — when the two are materially different. The two EDIT verbs (update,
  * forget) walked around that defence and destroyed the prior value outright.
  *
- * This mirrors fact_authority_t and the rule db2_fact_retract() already enforces
+ * This mirrors fact_authority_t and the rule kb_store_fact_retract() already enforces
  * for typed facts: a model correction must not silently destroy what the user
  * stated. MODEL is 0 so that any caller that forgets to say (or any wire request
  * that omits the field) gets the non-destructive path by default. */

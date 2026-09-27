@@ -475,7 +475,7 @@ int eval_synthesis_retire(const char *suite_dir, int retire_windows)
    return (suite_dir && suite_dir[0]) ? 0 : -1;
 }
 
-/* Approach recall reaches DB2, which this test deliberately does not link —
+/* Approach recall reaches KB_STORE, which this test deliberately does not link —
  * it proves the dispatch table routes, not what the stores hold. */
 int approach_store_recall(const char *goal, learning_approach_hit_t *out, int max)
 {
@@ -502,7 +502,7 @@ int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t
    return max > 0 ? 0 : -1;
 }
 
-/* The backlog drain reaches DB2; this test proves routing, not resolution. */
+/* The backlog drain reaches KB_STORE; this test proves routing, not resolution. */
 int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
 {
    if (out)
@@ -1895,8 +1895,8 @@ static void test_removed_storage_named_migration_alias(void)
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAPS_AUTHENTICATED;
 
-   cJSON *json = dispatch_json(ctx, conn, "{\"method\":\"migrate.db2_to_postgres\"}",
-                               strlen("{\"method\":\"migrate.db2_to_postgres\"}"));
+   cJSON *json = dispatch_json(ctx, conn, "{\"method\":\"migrate.kb_store_to_postgres\"}",
+                               strlen("{\"method\":\"migrate.kb_store_to_postgres\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "message")->valuestring, "unknown method") == 0);
    assert(strcmp(cJSON_GetObjectItem(json, "code")->valuestring, "UNKNOWN_METHOD") == 0);
    cJSON_Delete(json);

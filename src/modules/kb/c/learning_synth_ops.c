@@ -1,7 +1,7 @@
-/* learning_synth_ops.c: the candidate-generation work queue (DB2). */
+/* learning_synth_ops.c: the candidate-generation work queue (KB_STORE). */
 
 #include "learning_synth_ops.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -9,11 +9,11 @@
 
 #define LSO_ERRBUF 256
 
-int db2_synth_enqueue(const char *artifact_id)
+int kb_store_synth_enqueue(const char *artifact_id)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -29,11 +29,11 @@ int db2_synth_enqueue(const char *artifact_id)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_synth_list_pending(char out[][37], int max)
+int kb_store_synth_list_pending(char out[][37], int max)
 {
    if (!out || max <= 0)
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -56,11 +56,11 @@ int db2_synth_list_pending(char out[][37], int max)
    return count;
 }
 
-int db2_synth_mark_done(const char *artifact_id)
+int kb_store_synth_mark_done(const char *artifact_id)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -77,11 +77,11 @@ int db2_synth_mark_done(const char *artifact_id)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_synth_mark_failed(const char *artifact_id, const char *error)
+int kb_store_synth_mark_failed(const char *artifact_id, const char *error)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -100,9 +100,9 @@ int db2_synth_mark_failed(const char *artifact_id, const char *error)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_synth_reenqueue_all(void)
+int kb_store_synth_reenqueue_all(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -118,10 +118,10 @@ int db2_synth_reenqueue_all(void)
    return changes;
 }
 
-int db2_synth_ops_count(const char *status)
+int kb_store_synth_ops_count(const char *status)
 {
    if (status)
-      return db2_scalar_int_text("SELECT COUNT(*) FROM learning_synth_ops WHERE status = ?1",
-                                 status, -1);
-   return db2_scalar_int("SELECT COUNT(*) FROM learning_synth_ops", -1);
+      return kb_store_scalar_int_text("SELECT COUNT(*) FROM learning_synth_ops WHERE status = ?1",
+                                      status, -1);
+   return kb_store_scalar_int("SELECT COUNT(*) FROM learning_synth_ops", -1);
 }

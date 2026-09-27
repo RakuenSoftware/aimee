@@ -590,7 +590,7 @@ func pluginArgvFromEnv() []string {
 // Kinds are now derived from the principal ref, so the variable is obsolete. It
 // is not merely ignored: a deployment provisioned under the old scheme has a
 // .grant whose `serve=` list names the OLD kinds, and those kinds sit in the
-// blocks belonging to postgres, db2 and aimeecontract. Starting such an instance would
+// blocks belonging to postgres, kb_store and aimeecontract. Starting such an instance would
 // either be denied at attach or, worse, win the race and deny a core module.
 // Failing here with a pointer to re-provisioning is the safe outcome.
 func checkLegacyEventBase(invoke uint32) error {

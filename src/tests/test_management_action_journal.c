@@ -1,5 +1,5 @@
 #include "modules/kb/c/management_action_journal.h"
-#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
@@ -49,33 +49,33 @@ static int parameter_index(const char *name)
    return n;
 }
 
-int db2_tenant_scope_begin(const kb_principal_t *principal, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *principal, int64_t team)
 {
    assert(principal && team == 7);
    return mock_begin_result;
 }
 
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    return mock_commit_failure ? -1 : 0;
 }
 
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    mock_rollback_count++;
 }
 
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return &mock_stmt;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
 
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *conn, const char *sql, aimee_pg_prepare_error_t *kind,
@@ -237,15 +237,15 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *st, int col)
    return NULL;
 }
 
-static db2_management_action_operation_t make_operation(void)
+static kb_store_management_action_operation_t make_operation(void)
 {
    uint8_t digest[32];
    memset(digest, 0xa5, sizeof(digest));
-   db2_management_action_operation_t op;
-   assert(db2_management_action_operation_init(
-              7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, digest,
+   kb_store_management_action_operation_t op;
+   assert(kb_store_management_action_operation_init(
+              7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, digest,
               "https://kb.example.test", "management-key-1", 60, "0123456789abcdef0123456789abcdef",
-              &op) == DB2_MANAGEMENT_ACTION_OK);
+              &op) == KB_STORE_MANAGEMENT_ACTION_OK);
    assert(strlen(op.correlation_id) == 64 && strlen(op.jti) == 64);
    assert(strcmp(op.correlation_id, op.jti) != 0);
    for (size_t i = 0; i < 64; ++i)
@@ -255,178 +255,191 @@ static db2_management_action_operation_t make_operation(void)
 
 static void test_init_and_validation(void)
 {
-   db2_management_action_operation_t op = make_operation(), clear;
+   kb_store_management_action_operation_t op = make_operation(), clear;
    memset(&clear, 0x5a, sizeof(clear));
-   assert(db2_management_action_operation_init_hex(
-              7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, "BAD", "issuer", "kid", 60,
-              "0123456789abcdef0123456789abcdef", &clear) == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(!memcmp(&clear, &(db2_management_action_operation_t){0}, sizeof(clear)));
+   assert(kb_store_management_action_operation_init_hex(
+              7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, "BAD", "issuer", "kid",
+              60, "0123456789abcdef0123456789abcdef",
+              &clear) == KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(!memcmp(&clear, &(kb_store_management_action_operation_t){0}, sizeof(clear)));
 
 #define INVALID_INIT(team, target, cap, digest, issuer, kid, ttl, installation)                    \
    do                                                                                              \
    {                                                                                               \
       memset(&clear, 0x5a, sizeof(clear));                                                         \
-      assert(db2_management_action_operation_init_hex(team, target, cap, digest, issuer, kid, ttl, \
-                                                      installation,                                \
-                                                      &clear) == DB2_MANAGEMENT_ACTION_INVALID);   \
-      assert(!memcmp(&clear, &(db2_management_action_operation_t){0}, sizeof(clear)));             \
+      assert(kb_store_management_action_operation_init_hex(team, target, cap, digest, issuer, kid, \
+                                                           ttl, installation, &clear) ==           \
+             KB_STORE_MANAGEMENT_ACTION_INVALID);                                                  \
+      assert(!memcmp(&clear, &(kb_store_management_action_operation_t){0}, sizeof(clear)));        \
    } while (0)
    static const char hex64[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-   INVALID_INIT(0, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid", 60,
-                "0123456789abcdef0123456789abcdef");
-   INVALID_INIT(7, "bad/server", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid",
+   INVALID_INIT(0, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid",
                 60, "0123456789abcdef0123456789abcdef");
+   INVALID_INIT(7, "bad/server", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer",
+                "kid", 60, "0123456789abcdef0123456789abcdef");
    INVALID_INIT(7, "server-a", 0, hex64, "issuer", "kid", 60, "0123456789abcdef0123456789abcdef");
-   INVALID_INIT(7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "bad\nissuer", "kid",
-                60, "0123456789abcdef0123456789abcdef");
-   INVALID_INIT(7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "bad/kid",
-                60, "0123456789abcdef0123456789abcdef");
-   INVALID_INIT(7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid", 91,
-                "0123456789abcdef0123456789abcdef");
-   INVALID_INIT(7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid", 60,
-                "0123456789abcdef0123456789abcdeF");
+   INVALID_INIT(7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "bad\nissuer",
+                "kid", 60, "0123456789abcdef0123456789abcdef");
+   INVALID_INIT(7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer",
+                "bad/kid", 60, "0123456789abcdef0123456789abcdef");
+   INVALID_INIT(7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid",
+                91, "0123456789abcdef0123456789abcdef");
+   INVALID_INIT(7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid",
+                60, "0123456789abcdef0123456789abcdeF");
 #undef INVALID_INIT
 
    mock_random_failure = 1;
    memset(&clear, 0x5a, sizeof(clear));
-   assert(db2_management_action_operation_init_hex(
-              7, "server-a", DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid", 60,
-              "0123456789abcdef0123456789abcdef", &clear) == DB2_MANAGEMENT_ACTION_UNAVAILABLE);
-   assert(!memcmp(&clear, &(db2_management_action_operation_t){0}, sizeof(clear)));
+   assert(kb_store_management_action_operation_init_hex(
+              7, "server-a", KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES, hex64, "issuer", "kid",
+              60, "0123456789abcdef0123456789abcdef",
+              &clear) == KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE);
+   assert(!memcmp(&clear, &(kb_store_management_action_operation_t){0}, sizeof(clear)));
    mock_random_failure = 0;
 
    /* A visible string prefix is insufficient: unused bytes are part of the
     * fixed record and must stay zero to reject embedded-NUL suffixes. */
    op.target_server_id[strlen(op.target_server_id) + 1] = 'x';
-   db2_management_action_intent_t out;
+   kb_store_management_action_intent_t out;
    memset(&out, 0x5a, sizeof(out));
    kb_principal_t principal = {0};
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INVALID);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
 }
 
 static void test_intent_and_ambiguity(void)
 {
-   db2_management_action_operation_t op = make_operation();
-   db2_management_action_operation_t retained = op;
-   db2_management_action_intent_t out;
+   kb_store_management_action_operation_t op = make_operation();
+   kb_store_management_action_operation_t retained = op;
+   kb_store_management_action_intent_t out;
    kb_principal_t principal = {0};
    mock_commit_failure = 1;
    memset(&out, 0x5a, sizeof(out));
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    assert(!memcmp(&op, &retained, sizeof(op)));
 
    mock_commit_failure = 0;
-   assert(db2_management_action_intent_start(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
-   assert(out.dispatch_eligibility == DB2_MANAGEMENT_ACTION_JOURNALED_ONLY);
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_OK);
+   assert(out.dispatch_eligibility == KB_STORE_MANAGEMENT_ACTION_JOURNALED_ONLY);
    assert(!strcmp(out.correlation_id, op.correlation_id));
    assert(!strcmp(out.jti, op.jti));
    assert(!strcmp(out.audience, op.target_server_id));
 
    mock_bad_shape = 1;
    memset(&out, 0x5a, sizeof(out));
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INTEGRITY);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_bad_shape = 0;
 
    mock_bad_field = 1;
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INTEGRITY);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_bad_field = 0;
 
    mock_bad_field = 2;
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INTEGRITY);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_bad_field = 0;
 
    mock_duplicate_row = 1;
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INTEGRITY);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_duplicate_row = 0;
 
-   mock_begin_result = DB2_ERR_TENANT_UNAUTHENTICATED;
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_DENIED);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   mock_begin_result = KB_STORE_ERR_TENANT_UNAUTHENTICATED;
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_DENIED);
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_begin_result = 0;
 }
 
 static void test_outcome(void)
 {
-   db2_management_action_operation_t start = make_operation();
-   db2_management_action_outcome_operation_t op;
+   kb_store_management_action_operation_t start = make_operation();
+   kb_store_management_action_outcome_operation_t op;
    memset(&op, 0, sizeof(op));
    memcpy(op.correlation_id, start.correlation_id, sizeof(op.correlation_id));
    op.team_id = 7;
-   op.result = DB2_MANAGEMENT_ACTION_SUCCEEDED;
-   op.result_class = DB2_MANAGEMENT_ACTION_CLASS_REMOTE_SUCCESS;
+   op.result = KB_STORE_MANAGEMENT_ACTION_SUCCEEDED;
+   op.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_SUCCESS;
    op.has_status_code = 1;
    op.status_code = 204;
    op.has_response_sha256 = 1;
    memcpy(op.response_sha256, start.request_sha256, sizeof(op.response_sha256));
-   db2_management_action_outcome_operation_t retained = op;
-   db2_management_action_outcome_t out;
+   kb_store_management_action_outcome_operation_t retained = op;
+   kb_store_management_action_outcome_t out;
    kb_principal_t principal = {0};
 
    mock_commit_failure = 1;
    memset(&out, 0x5a, sizeof(out));
-   assert(db2_management_action_outcome_append(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
-   assert(!memcmp(&out, &(db2_management_action_outcome_t){0}, sizeof(out)));
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS);
+   assert(!memcmp(&out, &(kb_store_management_action_outcome_t){0}, sizeof(out)));
    assert(!memcmp(&op, &retained, sizeof(op)));
    mock_commit_failure = 0;
 
-   assert(db2_management_action_outcome_append(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_OK);
    assert(out.result == op.result && out.result_class == op.result_class);
    assert(out.status_code == 204 && out.has_response_sha256);
 
-   op.result_class = DB2_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS;
+   op.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS;
    memset(&out, 0x5a, sizeof(out));
-   assert(db2_management_action_outcome_append(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INVALID);
-   assert(!memcmp(&out, &(db2_management_action_outcome_t){0}, sizeof(out)));
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(!memcmp(&out, &(kb_store_management_action_outcome_t){0}, sizeof(out)));
 
-   op.result = DB2_MANAGEMENT_ACTION_INDETERMINATE;
+   op.result = KB_STORE_MANAGEMENT_ACTION_INDETERMINATE;
    op.has_status_code = 0;
    op.status_code = 0;
    op.has_response_sha256 = 0;
    memset(op.response_sha256, 0, sizeof(op.response_sha256));
-   assert(db2_management_action_outcome_append(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_OK);
    assert(!out.has_status_code && !out.has_response_sha256);
 
-   op.result_class = DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
-   assert(db2_management_action_outcome_append(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
-   op.result = DB2_MANAGEMENT_ACTION_FAILED;
-   assert(db2_management_action_outcome_append(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_INVALID);
+   op.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_OK);
+   op.result = KB_STORE_MANAGEMENT_ACTION_FAILED;
+   assert(kb_store_management_action_outcome_append(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
 }
 
 static void test_sqlstate(void)
 {
-   assert(db2_management_action_classify_sqlstate("22023") == DB2_MANAGEMENT_ACTION_INVALID);
-   assert(db2_management_action_classify_sqlstate("42501") == DB2_MANAGEMENT_ACTION_DENIED);
-   assert(db2_management_action_classify_sqlstate("23505") == DB2_MANAGEMENT_ACTION_CONFLICT);
-   assert(db2_management_action_classify_sqlstate("40001") == DB2_MANAGEMENT_ACTION_RETRY);
-   assert(db2_management_action_classify_sqlstate("25006") == DB2_MANAGEMENT_ACTION_RETRY);
-   assert(db2_management_action_classify_sqlstate("55000") == DB2_MANAGEMENT_ACTION_INTEGRITY);
-   assert(db2_management_action_classify_sqlstate("XX000") == DB2_MANAGEMENT_ACTION_UNAVAILABLE);
+   assert(kb_store_management_action_classify_sqlstate("22023") ==
+          KB_STORE_MANAGEMENT_ACTION_INVALID);
+   assert(kb_store_management_action_classify_sqlstate("42501") ==
+          KB_STORE_MANAGEMENT_ACTION_DENIED);
+   assert(kb_store_management_action_classify_sqlstate("23505") ==
+          KB_STORE_MANAGEMENT_ACTION_CONFLICT);
+   assert(kb_store_management_action_classify_sqlstate("40001") ==
+          KB_STORE_MANAGEMENT_ACTION_RETRY);
+   assert(kb_store_management_action_classify_sqlstate("25006") ==
+          KB_STORE_MANAGEMENT_ACTION_RETRY);
+   assert(kb_store_management_action_classify_sqlstate("55000") ==
+          KB_STORE_MANAGEMENT_ACTION_INTEGRITY);
+   assert(kb_store_management_action_classify_sqlstate("XX000") ==
+          KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE);
 
-   db2_management_action_operation_t op = make_operation();
-   db2_management_action_intent_t out;
+   kb_store_management_action_operation_t op = make_operation();
+   kb_store_management_action_intent_t out;
    kb_principal_t principal = {0};
    mock_sqlstate = "23505";
    int before = mock_rollback_count;
-   assert(db2_management_action_intent_start(&principal, &op, &out) ==
-          DB2_MANAGEMENT_ACTION_CONFLICT);
+   assert(kb_store_management_action_intent_start(&principal, &op, &out) ==
+          KB_STORE_MANAGEMENT_ACTION_CONFLICT);
    assert(mock_rollback_count == before + 1);
-   assert(!memcmp(&out, &(db2_management_action_intent_t){0}, sizeof(out)));
+   assert(!memcmp(&out, &(kb_store_management_action_intent_t){0}, sizeof(out)));
    mock_sqlstate = NULL;
 }
 

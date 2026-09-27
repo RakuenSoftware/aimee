@@ -4,8 +4,8 @@
  * scratch vault on real Postgres and drives the owner-only whole-vault staging API.
  * It models custody with two in-memory KEKs, but every DEK and verifier re-wrap is
  * the production RFC 3394 AES-KW implementation. */
-#include "modules/kb/c/db2.h"
-#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "modules/kb/c/db_postgres.h"
 #include "modules/kb/c/org_vault_rewrap.h"
 #include "modules/vault/vault_crypto.h"
@@ -71,14 +71,14 @@ static void die_pg(const char *what, const char *err)
 static void exec_sql(const char *sql)
 {
    char err[ERR_CAP] = "";
-   if (aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) != 0)
+   if (aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) != 0)
       die_pg(sql, err);
 }
 
 static int64_t scalar_i64(const char *sql)
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
       die_pg(sql, err);
    if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
@@ -134,8 +134,8 @@ static void seed_salts(const uint8_t old_kek[VAULT_KEK_LEN])
 
       char err[ERR_CAP] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(
-          db2_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)", err,
-          sizeof(err));
+          kb_store_conn(), "INSERT INTO org_vault_salt(principal,salt,kek_check) VALUES(?1,?2,?3)",
+          err, sizeof(err));
       if (!st)
          die_pg("prepare salt insert", err);
       assert(aimee_pg_bind_text(st, "?1", PRINCIPALS[i]) == 0);
@@ -155,7 +155,7 @@ static void seed_secrets(const uint8_t old_kek[VAULT_KEK_LEN])
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "INSERT INTO org_vault_secret(principal,team_id,agent,cred,version,wrapped_dek,nonce,"
        "ciphertext,tag) VALUES(?1,NULL,?2,?3,?4,?5,?6,?7,?8)",
        err, sizeof(err));
@@ -203,9 +203,9 @@ static void verify_bad_old_material(const uint8_t old_kek[VAULT_KEK_LEN],
                                     const uint8_t wrong_kek[VAULT_KEK_LEN])
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT wrapped_dek FROM org_vault_secret ORDER BY id LIMIT 1",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT wrapped_dek FROM org_vault_secret ORDER BY id LIMIT 1", err,
+       sizeof(err));
    if (!st)
       die_pg("prepare bad-material probe", err);
    if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
@@ -236,7 +236,7 @@ static int64_t begin_operation(void)
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT fencing_token FROM org_vault_rewrap_begin(?1,?2,?3,?4,?5)", err,
+       kb_store_conn(), "SELECT fencing_token FROM org_vault_rewrap_begin(?1,?2,?3,?4,?5)", err,
        sizeof(err));
    if (!st)
       die_pg("prepare begin", err);
@@ -272,7 +272,7 @@ static void record_prepared(int64_t fence, uint8_t receipt_digest[32])
    assert(vault_reseal_receipt_digest(receipt, receipt_digest) == 0);
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rewrap_record_prepared(?1,?2,?3,?4)", err, sizeof(err));
+       kb_store_conn(), "SELECT org_vault_rewrap_record_prepared(?1,?2,?3,?4)", err, sizeof(err));
    if (!st)
       die_pg("prepare record_prepared", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -296,9 +296,9 @@ static void stage_secret(const secret_row_t *row, int64_t fence,
    assert(vault_dek_unwrap(old_kek, row->wrapped, dek) == 0);
    assert(vault_dek_wrap(new_kek, dek, new_wrapped) == 0);
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT org_vault_rewrap_stage_dek(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT org_vault_rewrap_stage_dek(?1,?2,?3,?4,?5,?6,?7,?8,?9)", err,
+       sizeof(err));
    if (!st)
       die_pg("prepare stage_dek", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -321,8 +321,9 @@ static void stage_secret(const secret_row_t *row, int64_t fence,
 static int load_secret_page(int64_t after, int64_t fence, secret_row_t page[PAGE_LIMIT])
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_rewrap_secret_page(?1,?2,?3,?4)", err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(kb_store_conn(), "SELECT * FROM org_vault_rewrap_secret_page(?1,?2,?3,?4)",
+                        err, sizeof(err));
    if (!st)
       die_pg("prepare secret page", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -377,7 +378,7 @@ static void stage_check(const check_row_t *row, size_t principal_index, int64_t 
    }
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT org_vault_rewrap_stage_check(?1,?2,?3,?4,?5)", err, sizeof(err));
+       kb_store_conn(), "SELECT org_vault_rewrap_stage_check(?1,?2,?3,?4,?5)", err, sizeof(err));
    if (!st)
       die_pg("prepare stage_check", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -398,7 +399,7 @@ static int load_check_page(const uint8_t *after, size_t after_len, int64_t fence
 {
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_rewrap_check_page(?1,?2,?3,?4)", err, sizeof(err));
+       kb_store_conn(), "SELECT * FROM org_vault_rewrap_check_page(?1,?2,?3,?4)", err, sizeof(err));
    if (!st)
       die_pg("prepare check page", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -496,7 +497,7 @@ static void stage_all(int64_t fence, const uint8_t old_kek[VAULT_KEK_LEN],
 
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT org_vault_rewrap_stage_finish(?1,?2,x.secret_count,x.check_count,"
                         "x.inventory_digest) FROM org_vault_rewrap_inventory_summary(?1,?2) AS x",
                         err, sizeof(err));
@@ -521,7 +522,7 @@ static void stage_all(int64_t fence, const uint8_t old_kek[VAULT_KEK_LEN],
 static void transition(const char *sql, int64_t fence, const uint8_t *digest)
 {
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    if (!st)
       die_pg("prepare transition", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
@@ -547,9 +548,9 @@ static void verify_promoted(const uint8_t old_kek[VAULT_KEK_LEN],
                      "maintenance_id='7123456789abcdef0123456789abcdef'") == 1);
 
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT version,wrapped_dek FROM org_vault_secret ORDER BY id",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT version,wrapped_dek FROM org_vault_secret ORDER BY id", err,
+       sizeof(err));
    if (!st)
       die_pg("prepare promoted wraps", err);
    int seen = 0;
@@ -580,7 +581,7 @@ static void verify_promoted(const uint8_t old_kek[VAULT_KEK_LEN],
    aimee_pg_finalize(st);
    assert(seen == SECRET_ROWS);
 
-   st = aimee_pg_prepare(db2_conn(),
+   st = aimee_pg_prepare(kb_store_conn(),
                          "SELECT principal,kek_check FROM org_vault_salt "
                          "ORDER BY principal COLLATE \"C\"",
                          err, sizeof(err));
@@ -632,7 +633,7 @@ static void verify_promoted_bounded(int64_t fence)
    char err[ERR_CAP] = "";
    exec_sql("BEGIN ISOLATION LEVEL SERIALIZABLE");
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM org_vault_rewrap_verify_summary(?1,?2)", err, sizeof(err));
+       kb_store_conn(), "SELECT * FROM org_vault_rewrap_verify_summary(?1,?2)", err, sizeof(err));
    assert(st);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
    assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
@@ -650,7 +651,7 @@ static void verify_promoted_bounded(int64_t fence)
    int secret_seen = 0;
    do
    {
-      st = aimee_pg_prepare(db2_conn(),
+      st = aimee_pg_prepare(kb_store_conn(),
                             "SELECT * FROM org_vault_rewrap_verify_secret_page(?1,?2,?3,?4)", err,
                             sizeof(err));
       assert(st);
@@ -678,7 +679,7 @@ static void verify_promoted_bounded(int64_t fence)
    int check_seen = 0;
    do
    {
-      st = aimee_pg_prepare(db2_conn(),
+      st = aimee_pg_prepare(kb_store_conn(),
                             "SELECT * FROM org_vault_rewrap_verify_check_page(?1,?2,?3,?4)", err,
                             sizeof(err));
       assert(st);
@@ -716,21 +717,22 @@ static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_
 {
    uint8_t opid[16];
    assert(vault_reseal_operation_id_from_hex(OP, opid) == 0);
-   db2_vault_rewrap_tx_t *tx = NULL;
-   db2_vault_rewrap_verify_summary_t summary;
-   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_verify_summary(tx, opid, fence, &summary) == DB2_VAULT_REWRAP_OK);
+   kb_store_vault_rewrap_tx_t *tx = NULL;
+   kb_store_vault_rewrap_verify_summary_t summary;
+   assert(kb_store_vault_rewrap_tx_begin(&tx) == KB_STORE_VAULT_REWRAP_OK);
+   assert(kb_store_vault_rewrap_verify_summary(tx, opid, fence, &summary) ==
+          KB_STORE_VAULT_REWRAP_OK);
    assert(summary.secret_count == SECRET_ROWS && summary.check_count == CHECK_ROWS);
 
    int64_t after = 0;
    int64_t secret_seen = 0;
    for (;;)
    {
-      db2_vault_rewrap_secret_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
+      kb_store_vault_rewrap_secret_t rows[KB_STORE_VAULT_REWRAP_PAGE_MAX];
       size_t count = 0;
-      assert(db2_vault_rewrap_verify_secret_page(tx, opid, fence, after, DB2_VAULT_REWRAP_PAGE_MAX,
-                                                 rows, DB2_VAULT_REWRAP_PAGE_MAX,
-                                                 &count) == DB2_VAULT_REWRAP_OK);
+      assert(kb_store_vault_rewrap_verify_secret_page(
+                 tx, opid, fence, after, KB_STORE_VAULT_REWRAP_PAGE_MAX, rows,
+                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &count) == KB_STORE_VAULT_REWRAP_OK);
       if (count == 0)
          break;
       for (size_t i = 0; i < count; i++)
@@ -747,15 +749,15 @@ static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_
       secret_seen += (int64_t)count;
    }
 
-   db2_vault_rewrap_cursor_t cursor = {0}, next = {0};
+   kb_store_vault_rewrap_cursor_t cursor = {0}, next = {0};
    int64_t check_seen = 0;
    for (;;)
    {
-      db2_vault_rewrap_check_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
+      kb_store_vault_rewrap_check_t rows[KB_STORE_VAULT_REWRAP_PAGE_MAX];
       size_t count = 0;
-      assert(db2_vault_rewrap_verify_check_page(tx, opid, fence, &cursor, DB2_VAULT_REWRAP_PAGE_MAX,
-                                                rows, DB2_VAULT_REWRAP_PAGE_MAX, &count,
-                                                &next) == DB2_VAULT_REWRAP_OK);
+      assert(kb_store_vault_rewrap_verify_check_page(
+                 tx, opid, fence, &cursor, KB_STORE_VAULT_REWRAP_PAGE_MAX, rows,
+                 KB_STORE_VAULT_REWRAP_PAGE_MAX, &count, &next) == KB_STORE_VAULT_REWRAP_OK);
       if (count == 0)
       {
          assert(next.len == cursor.len && CRYPTO_memcmp(next.bytes, cursor.bytes, cursor.len) == 0);
@@ -781,16 +783,18 @@ static void verify_typed_wrapper(int64_t fence, const uint8_t new_kek[VAULT_KEK_
       OPENSSL_cleanse(rows, sizeof(rows));
       check_seen += (int64_t)count;
    }
-   assert(db2_vault_rewrap_verify_crypto_ack(tx, opid, fence) == DB2_VAULT_REWRAP_OK);
-   db2_vault_rewrap_tx_rollback(&tx);
+   assert(kb_store_vault_rewrap_verify_crypto_ack(tx, opid, fence) == KB_STORE_VAULT_REWRAP_OK);
+   kb_store_vault_rewrap_tx_rollback(&tx);
    assert(tx == NULL);
 
-   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_verify_summary(tx, opid, fence, &summary) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_verify_crypto_ack(tx, opid, fence) == DB2_VAULT_REWRAP_INVALID);
-   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_INVALID && tx != NULL);
-   db2_vault_rewrap_tx_rollback(&tx);
-   db2_vault_rewrap_verify_summary_clear(&summary);
+   assert(kb_store_vault_rewrap_tx_begin(&tx) == KB_STORE_VAULT_REWRAP_OK);
+   assert(kb_store_vault_rewrap_verify_summary(tx, opid, fence, &summary) ==
+          KB_STORE_VAULT_REWRAP_OK);
+   assert(kb_store_vault_rewrap_verify_crypto_ack(tx, opid, fence) ==
+          KB_STORE_VAULT_REWRAP_INVALID);
+   assert(kb_store_vault_rewrap_tx_commit(&tx) == KB_STORE_VAULT_REWRAP_INVALID && tx != NULL);
+   kb_store_vault_rewrap_tx_rollback(&tx);
+   kb_store_vault_rewrap_verify_summary_clear(&summary);
    OPENSSL_cleanse(opid, sizeof(opid));
 }
 
@@ -802,9 +806,9 @@ int main(void)
       puts("p7-rewrap-live: SKIP (AIMEE_TEST_PG_URL unset; empty real-PG scratch DB required)");
       return 0;
    }
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fputs("p7-rewrap-live: db2_init failed\n", stderr);
+      fputs("p7-rewrap-live: kb_store_init failed\n", stderr);
       return 1;
    }
    if (scalar_i64("SELECT count(*) FROM org_vault_secret") != 0 ||
@@ -812,7 +816,7 @@ int main(void)
        scalar_i64("SELECT count(*) FROM kb_vault_rewrap_operation") != 0)
    {
       fputs("p7-rewrap-live: requires an empty scratch vault database\n", stderr);
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -842,7 +846,7 @@ int main(void)
    OPENSSL_cleanse(receipt_digest, sizeof(receipt_digest));
    assert(all_zero(old_kek, sizeof(old_kek)) && all_zero(new_kek, sizeof(new_kek)) &&
           all_zero(receipt_digest, sizeof(receipt_digest)));
-   db2_shutdown();
+   kb_store_shutdown();
    puts("PASS: P7 rewrap mock staged/promoted 521 AES-KW DEKs with bounded pages");
    return 0;
 }

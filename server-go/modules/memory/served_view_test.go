@@ -47,9 +47,9 @@ func TestServedViewPublicValidation(t *testing.T) {
 }
 
 func TestServedViewsOwnerAndCachePostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("AIMEE_DB2_REPLAY_URL required")
+		t.Skip("AIMEE_KB_STORE_REPLAY_URL required")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)

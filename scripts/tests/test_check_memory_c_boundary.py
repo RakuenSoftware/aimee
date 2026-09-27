@@ -74,7 +74,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
         root = self.fixture()
         target = root / "src/modules/benchmarks/unsafe_eval.c"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("int setup(void) { return db2_eval_open_temp_store(); }\n")
+        target.write_text("int setup(void) { return kb_store_eval_open_temp_store(); }\n")
         with self.assertRaisesRegex(BoundaryError, "native-evaluation-store-retarget"):
             validate(root)
 
@@ -113,10 +113,10 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_relocated_native_client_or_declaration(self) -> None:
         for suffix, declaration in (
-            ("c", "int db2_fidelity_report_write(void) { return 0; }"),
-            ("h", "int db2_fidelity_report_by_turn(void);"),
-            ("c", "int db2_fidelity_attribution_write(void) { return 0; }"),
-            ("h", "int db2_fidelity_attribution_count_by_turn(void);"),
+            ("c", "int kb_store_fidelity_report_write(void) { return 0; }"),
+            ("h", "int kb_store_fidelity_report_by_turn(void);"),
+            ("c", "int kb_store_fidelity_attribution_write(void) { return 0; }"),
+            ("h", "int kb_store_fidelity_attribution_count_by_turn(void);"),
             ("c", "int memory_extract_patterns(void) { return 0; }"),
             ("c", "int session_append_scope_section(void) { return 0; }"),
             ("h", "int kb_client_memory_find_facts(void);"),
@@ -158,7 +158,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
             validate(root)
 
     def test_rejects_retired_scope_bridge_relocation(self) -> None:
-        for symbol in ("db2_memory_scope_context_set", "memory_bus_read_context",
+        for symbol in ("kb_store_memory_scope_context_set", "memory_bus_read_context",
                        "memory_bus_set_context_reader", "memory_bus_add_context"):
             with self.subTest(symbol=symbol):
                 root = self.fixture()
@@ -170,7 +170,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
     def test_rejects_direct_store_call_without_include(self) -> None:
         root = self.fixture()
         target = root / next(iter(EXTERNAL_CONNECTION_C))
-        target.write_text("void *p = db2_conn();\n", encoding="utf-8")
+        target.write_text("void *p = kb_store_conn();\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 

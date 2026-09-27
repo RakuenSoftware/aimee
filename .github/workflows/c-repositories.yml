@@ -74,7 +74,7 @@ jobs:
       # These are the Go pieces that ship in the module runtime bundle this
       # workflow builds, tested here without cgo because that is how they are
       # bundled. It is deliberately NOT complete coverage of server-go: eleven
-      # top-level packages (config, db1, db2, db3, delegate, internal/**,
+      # top-level packages (config, db1, kb_store, db3, delegate, internal/**,
       # cmd/aimee-server) fall outside it, and a new top-level package falls
       # outside it silently.
       #

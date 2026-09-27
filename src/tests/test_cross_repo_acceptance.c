@@ -7,7 +7,7 @@
  * .254 corpus (docs/proposals/pending/cross-repo-dependency-graph.md §9).
  *
  * Stratified positives + enumerated negatives (acceptance #2-#3, shim tier). Each
- * no-edge case cites the rule it exercises (crd_flush in db2/cross_repo_deps.c /
+ * no-edge case cites the rule it exercises (crd_flush in kb_store/cross_repo_deps.c /
  * the pure suite in test_cross_repo_deps.c):
  *   - import-resolvable, trusted        -> HIGH   (LiStartConnection-style)
  *   - import-corroborated, UNTRUSTED caller -> capped MEDIUM (§0 caller cap)
@@ -25,16 +25,16 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../modules/kb/c/cross_repo_deps.h"
 #include "../modules/kb/c/cross_repo_review.h"
-#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/kb_store.h"
 #include "../modules/kb/c/db_postgres.h"
 
 static void X(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "seed failed: %s\n  sql: %s\n", err, sql);
    assert(rc == 0);
@@ -211,7 +211,7 @@ static void test_call_site_only_no_edge(void)
    size_t n = 0;
    run("app", &edges, &n);
    /* WidgetComputeLayout: distinctive, single trusted definer, but `app` does NOT
-    * import lib-med. Grounded in crd_flush (db2/cross_repo_deps.c): an edge gets a
+    * import lib-med. Grounded in crd_flush (kb_store/cross_repo_deps.c): an edge gets a
     * target -- and is emitted -- ONLY via (a) an import route the caller has, or
     * (b) the dominant definer among MULTIPLE definers. A lone definer with no
     * caller import has neither route, so no edge of any tier. Core precision rule. */
@@ -250,7 +250,7 @@ static void test_multi_definer_ambiguous(void)
     * bare name noise, not a review-worthy cross-repo ambiguity. (The route-backed
     * ambiguity-IS-surfaced case is covered in test_cross_repo_deps_orch.) */
    xrepo_review_row_t rows[16];
-   int rn = db2_cross_repo_review_list("app", "open", rows, 16, NULL);
+   int rn = kb_store_cross_repo_review_list("app", "open", rows, 16, NULL);
    int found = 0;
    for (int i = 0; i < rn; i++)
       if (strcmp(rows[i].symbol, "AmbiguousThing") == 0)
@@ -294,7 +294,7 @@ static void test_untrusted_definer_no_edge(void)
 
 int main(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    seed_corpus();
    test_import_resolvable_high();
    test_call_site_only_no_edge();

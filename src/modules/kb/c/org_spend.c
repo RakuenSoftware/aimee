@@ -1,5 +1,5 @@
-/* db2/org_spend.c: P3b org spend reporting — Postgres via libpq. See org_spend.h.
- * Mirrors the db2/org_model_catalog.c access pattern: one prepared call into the
+/* kb_store/org_spend.c: P3b org spend reporting — Postgres via libpq. See org_spend.h.
+ * Mirrors the kb_store/org_model_catalog.c access pattern: one prepared call into the
  * SECURITY DEFINER aggregation function, the definer's RAISE mapped to a sentinel by
  * message text (libpq surfaces the RAISE message, not the SQLSTATE, in the step error).
  * Reads cost_usd as TEXT (it is NUMERIC — never a double) and carries it through as a
@@ -7,8 +7,8 @@
 
 #include "org_spend.h"
 
-#include "db2_internal.h"
-#include "db2_tenant.h"
+#include "kb_store_internal.h"
+#include "kb_store_tenant.h"
 #include "db_postgres.h"
 
 #include <stdio.h>
@@ -20,21 +20,22 @@
 static int spend_step_err(const char *err)
 {
    if (err && strstr(err, "not authorized"))
-      return DB2_SPEND_ERR_DENIED;
+      return KB_STORE_SPEND_ERR_DENIED;
    if (err && strstr(err, "bad date"))
-      return DB2_SPEND_ERR_BADDATE;
+      return KB_STORE_SPEND_ERR_BADDATE;
    return -1;
 }
 
-int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t project,
-                        const char *since, const char *until, db2_org_spend_row_t *out, int max)
+int kb_store_org_spend_query(int has_team, int64_t team, int has_project, int64_t project,
+                             const char *since, const char *until, kb_store_org_spend_row_t *out,
+                             int max)
 {
-   int g = db2_tenant_require_pg();
+   int g = kb_store_tenant_require_pg();
    if (g)
       return g;
    if (!out || max <= 0 || !since || !until)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -42,7 +43,7 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
     * (it reads aimee.principal for its admin/lead predicate). NULL team = org-wide
     * (admin-only) branch; NULL project = no project filter. LIMIT ?5 = max+1 is a cheap
     * overflow probe: reading a (max+1)th row means the report exceeds the caller's buffer,
-    * so we return DB2_SPEND_ERR_TOOBIG rather than SILENTLY TRUNCATE — total/by_* always
+    * so we return KB_STORE_SPEND_ERR_TOOBIG rather than SILENTLY TRUNCATE — total/by_* always
     * reconcile because a too-large report is an explicit error, never partial data. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
@@ -74,7 +75,7 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
          overflow = 1; /* the (max+1)th row from the LIMIT probe — report too large */
          break;
       }
-      db2_org_spend_row_t *r = &out[n++];
+      kb_store_org_spend_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       r->team_id = aimee_pg_column_int64(st, 0);
       if (aimee_pg_column_is_null(st, 1))
@@ -105,6 +106,6 @@ int db2_org_spend_query(int has_team, int64_t team, int has_project, int64_t pro
    if (failed)
       return spend_step_err(err);
    if (overflow)
-      return DB2_SPEND_ERR_TOOBIG;
+      return KB_STORE_SPEND_ERR_TOOBIG;
    return n;
 }

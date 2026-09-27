@@ -1,7 +1,7 @@
-/* db2/notes.c: investigation notes — Postgres via libpq. */
+/* kb_store/notes.c: investigation notes — Postgres via libpq. */
 
 #include "notes.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 
 #include <ctype.h>
@@ -11,7 +11,7 @@
 
 /* --- Slug generation --- */
 
-void db2_note_title_to_slug(const char *title, char *slug, size_t slug_len)
+void kb_store_note_title_to_slug(const char *title, char *slug, size_t slug_len)
 {
    if (!title || !slug || slug_len == 0)
       return;
@@ -47,26 +47,26 @@ static void row_to_note(aimee_pg_stmt_t *st, note_t *n)
 {
    memset(n, 0, sizeof(*n));
    n->id = aimee_pg_column_int64(st, 0);
-   db2_copy_col_text(n->title, sizeof(n->title), st, 1);
-   db2_copy_col_text(n->slug, sizeof(n->slug), st, 2);
-   db2_copy_col_text(n->content, sizeof(n->content), st, 3);
-   db2_copy_col_text(n->tags, sizeof(n->tags), st, 4);
-   db2_copy_col_text(n->author, sizeof(n->author), st, 5);
-   db2_copy_col_text(n->created_at, sizeof(n->created_at), st, 6);
-   db2_copy_col_text(n->updated_at, sizeof(n->updated_at), st, 7);
+   kb_store_copy_col_text(n->title, sizeof(n->title), st, 1);
+   kb_store_copy_col_text(n->slug, sizeof(n->slug), st, 2);
+   kb_store_copy_col_text(n->content, sizeof(n->content), st, 3);
+   kb_store_copy_col_text(n->tags, sizeof(n->tags), st, 4);
+   kb_store_copy_col_text(n->author, sizeof(n->author), st, 5);
+   kb_store_copy_col_text(n->created_at, sizeof(n->created_at), st, 6);
+   kb_store_copy_col_text(n->updated_at, sizeof(n->updated_at), st, 7);
 }
 
 /* --- CRUD --- */
 
-int db2_note_create(const char *title, const char *content, const char *tags, const char *author,
-                    note_t *out)
+int kb_store_note_create(const char *title, const char *content, const char *tags,
+                         const char *author, note_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !title || !content)
       return -1;
 
    char slug[NOTE_MAX_SLUG];
-   db2_note_title_to_slug(title, slug, sizeof(slug));
+   kb_store_note_title_to_slug(title, slug, sizeof(slug));
    if (slug[0] == '\0')
       return -1;
 
@@ -114,7 +114,7 @@ int db2_note_create(const char *title, const char *content, const char *tags, co
          return -1;
 
       if (out)
-         return db2_note_get(existing.id, out);
+         return kb_store_note_get(existing.id, out);
       return 0;
    }
    aimee_pg_finalize(st);
@@ -140,13 +140,13 @@ int db2_note_create(const char *title, const char *content, const char *tags, co
       return -1;
 
    if (out)
-      return db2_note_get(new_id, out);
+      return kb_store_note_get(new_id, out);
    return 0;
 }
 
-int db2_note_list(const char *tag, int limit, note_t *out, int max)
+int kb_store_note_list(const char *tag, int limit, note_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max <= 0)
       return 0;
    if (limit <= 0 || limit > max)
@@ -186,9 +186,9 @@ int db2_note_list(const char *tag, int limit, note_t *out, int max)
    return count;
 }
 
-int db2_note_search(const char *query, note_t *out, int max)
+int kb_store_note_search(const char *query, note_t *out, int max)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !query || !out || max <= 0)
       return 0;
 
@@ -214,9 +214,9 @@ int db2_note_search(const char *query, note_t *out, int max)
    return count;
 }
 
-int db2_note_get(int64_t id, note_t *out)
+int kb_store_note_get(int64_t id, note_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out)
       return -1;
 
@@ -235,9 +235,9 @@ int db2_note_get(int64_t id, note_t *out)
    return rc;
 }
 
-int db2_note_delete(int64_t id)
+int kb_store_note_delete(int64_t id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

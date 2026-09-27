@@ -3,10 +3,10 @@
  * unimplemented anchors — kept out of the shared config layer so the enum + the
  * "real anchor only" rule live in one kb-owned place. */
 #include "kb_vault_policy.h"
-#include "modules/kb/c/db2_witness_checkpoint.h" /* anchor coverage + freshness (P2b gate) */
-#include "kb/kb_witness_cadence.h"               /* last-verification-clean + freshness bound */
-#include "vault_custody_mock.h"                  /* vault_custody_mock_provider */
-#include "vault_custody_tpm2.h"                  /* vault_custody_tpm2_provider (real or stub) */
+#include "modules/kb/c/kb_store_witness_checkpoint.h" /* anchor coverage + freshness (P2b gate) */
+#include "kb/kb_witness_cadence.h" /* last-verification-clean + freshness bound */
+#include "vault_custody_mock.h"    /* vault_custody_mock_provider */
+#include "vault_custody_tpm2.h"    /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_custody_pkcs11.h"
 #include "vault_custody_kms.h"
 #include "vault_internal.h"       /* vault_custody_set_provider */
@@ -178,7 +178,8 @@ static int witness_release_gate_open(void)
        *    signed by a key this kb cannot derive (a foreign/revoked key). A coverage
        *    check that cannot run is treated as not-covered. */
       int64_t unknown = -1;
-      if (db2_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, NULL, 0) != 0 ||
+      if (kb_store_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, NULL, 0) !=
+              0 ||
           unknown != 0)
          break;
 
@@ -186,7 +187,7 @@ static int witness_release_gate_open(void)
        *    with zero checkpoints has not stalled (no evidence yet) and is not gated
        *    on this term; once a chain exists, a stale head closes the gate. */
       int64_t count = 0, age = 0;
-      if (db2_witness_checkpoint_freshness(&count, &age) != 0)
+      if (kb_store_witness_checkpoint_freshness(&count, &age) != 0)
          break;
       if (count > 0 && age > KB_WITNESS_CHECKPOINT_MAX_AGE_S)
          break;

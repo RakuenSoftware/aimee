@@ -57,7 +57,7 @@ int pipeline_list(char *buf, size_t buf_len, int limit);
 
 /* MCP tool handler (action: start|advance|status|list|cancel|resume|
  *                           link-plan|link-job).
- * Pipelines are stored in DB1 (db1_pipeline_*); no DB2 dependency.
+ * Pipelines are stored in DB1 (db1_pipeline_*); no KB_STORE dependency.
  * Returns a malloc'd JSON string; caller frees. */
 char *handle_autopilot(cJSON *args);
 

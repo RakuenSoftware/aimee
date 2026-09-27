@@ -1,8 +1,8 @@
-/* db2/artifacts.c: charter artifact table — DB2 (Postgres via libpq).
+/* kb_store/artifacts.c: charter artifact table — KB_STORE (Postgres via libpq).
  * See docs/proposals/done/cross-source-learning-substrate.md */
 
 #include "artifacts.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "feature_rows.h"
 #include "kb_audit_worm.h"
@@ -16,14 +16,14 @@
 
 #define ARTIFACT_MDL_FEATURE_SET_VERSION "mdl-v1"
 
-static db2_mdl_score_fn g_mdl_score_provider;
+static kb_store_mdl_score_fn g_mdl_score_provider;
 
-void aimee_db2_register_mdl_score_provider(db2_mdl_score_fn provider)
+void aimee_kb_store_register_mdl_score_provider(kb_store_mdl_score_fn provider)
 {
    g_mdl_score_provider = provider;
 }
 
-int db2_artifact_gen_id(char *buf, size_t len)
+int kb_store_artifact_gen_id(char *buf, size_t len)
 {
    if (!buf || len < 37)
       return -1;
@@ -86,12 +86,12 @@ static int artifact_payload_rank(cJSON *root)
    return cJSON_IsNumber(item) && item->valueint > 0 ? item->valueint : 1;
 }
 
-static void db2_artifact_emit_mdl_features_if_needed(const char *id, const char *new_state)
+static void kb_store_artifact_emit_mdl_features_if_needed(const char *id, const char *new_state)
 {
    if (!id || !id[0] || !new_state || strcmp(new_state, "committed") != 0)
       return;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -155,18 +155,18 @@ static void db2_artifact_emit_mdl_features_if_needed(const char *id, const char 
                "{\"mdl.l_candidate\":%.6f,\"mdl.l_residual\":%.6f,"
                "\"mdl.total\":%.6f,\"mdl.rank_in_cluster\":%d}",
                l_candidate, l_residual, total, rank);
-      (void)db2_feature_row_upsert(id, "artifact", scope_kind_copy, scope_id_copy,
-                                   ARTIFACT_MDL_FEATURE_SET_VERSION, features, NULL);
+      (void)kb_store_feature_row_upsert(id, "artifact", scope_kind_copy, scope_id_copy,
+                                        ARTIFACT_MDL_FEATURE_SET_VERSION, features, NULL);
    }
    cJSON_Delete(root);
    free(payload_copy);
 }
 
-int db2_artifact_write(const char *id, const char *kind, const char *state, const char *scope_kind,
-                       const char *scope_id, const char *operator_id, double confidence,
-                       const char *payload_json)
+int kb_store_artifact_write(const char *id, const char *kind, const char *state,
+                            const char *scope_kind, const char *scope_id, const char *operator_id,
+                            double confidence, const char *payload_json)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !kind)
       return -1;
 
@@ -200,15 +200,16 @@ int db2_artifact_write(const char *id, const char *kind, const char *state, cons
    aimee_pg_finalize(st);
    if (rc != AIMEE_PG_DONE && rc != AIMEE_PG_ROW)
       return -1;
-   db2_artifact_emit_mdl_features_if_needed(id, state ? state : "proposed");
+   kb_store_artifact_emit_mdl_features_if_needed(id, state ? state : "proposed");
    return 0;
 }
 
-int db2_artifact_write_ex(const char *id, const char *kind, const char *state,
-                          const char *scope_kind, const char *scope_id, const char *operator_id,
-                          double confidence, int attempt_count, const char *payload_json)
+int kb_store_artifact_write_ex(const char *id, const char *kind, const char *state,
+                               const char *scope_kind, const char *scope_id,
+                               const char *operator_id, double confidence, int attempt_count,
+                               const char *payload_json)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !kind)
       return -1;
 
@@ -244,13 +245,13 @@ int db2_artifact_write_ex(const char *id, const char *kind, const char *state,
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_write_evidence(const char *kind, const char *scope_kind, const char *scope_id,
-                                const char *operator_id, const char *content_hash,
-                                const char *payload_json, char *id_out, int id_out_len)
+int kb_store_artifact_write_evidence(const char *kind, const char *scope_kind, const char *scope_id,
+                                     const char *operator_id, const char *content_hash,
+                                     const char *payload_json, char *id_out, int id_out_len)
 {
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !kind || !kind[0])
       return -1;
 
@@ -280,7 +281,7 @@ int db2_artifact_write_evidence(const char *kind, const char *scope_kind, const 
    }
 
    char id[37];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
    char ts[32];
    now_utc(ts, sizeof(ts));
 
@@ -317,13 +318,13 @@ int db2_artifact_write_evidence(const char *kind, const char *scope_kind, const 
 /* Read the before_snapshot of the most recent audit event for an artifact.
  * Writes the JSON text into out (or "" if none). Returns 0 on success (even
  * when there is no audit row), -1 on error. */
-int db2_audit_read_latest_before(const char *artifact_id, char *out, int out_len)
+int kb_store_audit_read_latest_before(const char *artifact_id, char *out, int out_len)
 {
    if (out && out_len > 0)
       out[0] = '\0';
    if (!artifact_id || !artifact_id[0] || !out || out_len <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -345,31 +346,31 @@ int db2_audit_read_latest_before(const char *artifact_id, char *out, int out_len
    return 0;
 }
 
-int db2_artifact_review_rollback(const char *artifact_id, const char *restore_state,
-                                 const char *verdict_tag, const char *verdict_scope,
-                                 const char *counter_example)
+int kb_store_artifact_review_rollback(const char *artifact_id, const char *restore_state,
+                                      const char *verdict_tag, const char *verdict_scope,
+                                      const char *counter_example)
 {
    if (!artifact_id || !artifact_id[0] || !restore_state || !restore_state[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
    /* Capture the current state for the audit before/after, then roll the
     * artifact back to restore_state (its pre-commit snapshot state). */
-   db2_artifact_row_t cur;
+   kb_store_artifact_row_t cur;
    char before_json[64] = "{\"state\":\"committed\"}";
-   if (db2_artifact_read(artifact_id, &cur, NULL, 0, NULL) == 0 && cur.state[0])
+   if (kb_store_artifact_read(artifact_id, &cur, NULL, 0, NULL) == 0 && cur.state[0])
       snprintf(before_json, sizeof(before_json), "{\"state\":\"%s\"}", cur.state);
 
-   if (db2_artifact_set_state(artifact_id, restore_state) != 0)
+   if (kb_store_artifact_set_state(artifact_id, restore_state) != 0)
       return -1;
 
    char after_json[64];
    snprintf(after_json, sizeof(after_json), "{\"state\":\"%s\"}", restore_state);
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
 
    char err[256] = "";
    aimee_pg_stmt_t *st =
@@ -395,11 +396,11 @@ int db2_artifact_review_rollback(const char *artifact_id, const char *restore_st
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_verdict_suppressed(const char *verdict_tag, const char *verdict_scope)
+int kb_store_artifact_verdict_suppressed(const char *verdict_tag, const char *verdict_scope)
 {
    if (!verdict_tag || !verdict_tag[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char err[256] = "";
@@ -419,11 +420,11 @@ int db2_artifact_verdict_suppressed(const char *verdict_tag, const char *verdict
    return suppressed;
 }
 
-int db2_artifact_citation_count(const char *artifact_id)
+int kb_store_artifact_citation_count(const char *artifact_id)
 {
    if (!artifact_id || !artifact_id[0])
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -440,9 +441,9 @@ int db2_artifact_citation_count(const char *artifact_id)
    return n;
 }
 
-int db2_artifact_set_state(const char *id, const char *new_state)
+int kb_store_artifact_set_state(const char *id, const char *new_state)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !new_state)
       return -1;
 
@@ -459,13 +460,13 @@ int db2_artifact_set_state(const char *id, const char *new_state)
    aimee_pg_finalize(st);
    if (rc != AIMEE_PG_DONE && rc != AIMEE_PG_ROW)
       return -1;
-   db2_artifact_emit_mdl_features_if_needed(id, new_state);
+   kb_store_artifact_emit_mdl_features_if_needed(id, new_state);
    return 0;
 }
 
-int db2_artifact_set_target_surface(const char *id, const char *target_surface)
+int kb_store_artifact_set_target_surface(const char *id, const char *target_surface)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !target_surface)
       return -1;
    char err[256] = "";
@@ -480,13 +481,13 @@ int db2_artifact_set_target_surface(const char *id, const char *target_surface)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_target_surface(const char *id, char *out, int out_len)
+int kb_store_artifact_target_surface(const char *id, char *out, int out_len)
 {
    if (out && out_len > 0)
       out[0] = '\0';
    if (!id || !id[0] || !out || out_len <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    char err[256] = "";
@@ -505,9 +506,9 @@ int db2_artifact_target_surface(const char *id, char *out, int out_len)
    return 0;
 }
 
-int db2_artifact_register_exemplar(const char *artifact_id, const char *collection)
+int kb_store_artifact_register_exemplar(const char *artifact_id, const char *collection)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !artifact_id || !artifact_id[0])
       return -1;
    /* Register the artifact as a case/guardrail exemplar. The embedding column
@@ -526,9 +527,9 @@ int db2_artifact_register_exemplar(const char *artifact_id, const char *collecti
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_touch(const char *id)
+int kb_store_artifact_touch(const char *id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !id[0])
       return -1;
 
@@ -547,9 +548,9 @@ int db2_artifact_touch(const char *id)
    return (rc == AIMEE_PG_DONE && changed > 0) ? 0 : -1;
 }
 
-int db2_artifact_cite(const char *artifact_id, const char *source_kind, const char *source_id)
+int kb_store_artifact_cite(const char *artifact_id, const char *source_kind, const char *source_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !artifact_id || !source_kind || !source_id)
       return -1;
 
@@ -573,9 +574,9 @@ int db2_artifact_cite(const char *artifact_id, const char *source_kind, const ch
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_link(const char *from_id, const char *to_id, const char *link_kind)
+int kb_store_artifact_link(const char *from_id, const char *to_id, const char *link_kind)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !from_id || !to_id || !link_kind)
       return -1;
 
@@ -597,13 +598,14 @@ int db2_artifact_link(const char *from_id, const char *to_id, const char *link_k
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_audit_event_write(const char *id, const char *source_artifact_id,
-                          const char *target_surface, const char *target_id,
-                          const char *operator_id, const char *scope_kind, const char *scope_id,
-                          double applied_confidence, int flagged_for_review,
-                          const char *before_json, const char *after_json)
+int kb_store_audit_event_write(const char *id, const char *source_artifact_id,
+                               const char *target_surface, const char *target_id,
+                               const char *operator_id, const char *scope_kind,
+                               const char *scope_id, double applied_confidence,
+                               int flagged_for_review, const char *before_json,
+                               const char *after_json)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !source_artifact_id || !target_surface || !target_id)
       return -1;
 
@@ -650,24 +652,24 @@ int db2_audit_event_write(const char *id, const char *source_artifact_id,
     * WORM store (the tamper-evident audit of record) when enabled. Best-effort —
     * the charter audit_events row above stays authoritative during rollout, so a
     * WORM failure is recoverable audit loss, never a functional change. */
-   if (wrote == 0 && db2_kb_audit_worm_enabled())
+   if (wrote == 0 && kb_store_kb_audit_worm_enabled())
    {
       char detail[512];
       snprintf(detail, sizeof detail,
                "{\"source\":\"%s\",\"scope_kind\":\"%s\",\"scope_id\":\"%s\"}", source_artifact_id,
                scope_kind ? scope_kind : "", scope_id ? scope_id : "");
-      db2_kb_audit_append(operator_id ? operator_id : "", source_artifact_id, target_surface,
-                          target_id, "ok", detail);
+      kb_store_kb_audit_append(operator_id ? operator_id : "", source_artifact_id, target_surface,
+                               target_id, "ok", detail);
    }
    return wrote;
 }
 
-int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
-                         db2_audit_event_row_t *out, int max)
+int kb_store_audit_event_list(const char *since, const char *until, const char *scope_kind,
+                              int limit, kb_store_audit_event_row_t *out, int max)
 {
    if (!out || max <= 0 || !since || !since[0])
       return -1; /* since is required: no unbounded full-table scans */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
    if (limit <= 0 || limit > max)
@@ -699,7 +701,7 @@ int db2_audit_event_list(const char *since, const char *until, const char *scope
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_audit_event_row_t *r = &out[n++];
+      kb_store_audit_event_row_t *r = &out[n++];
       memset(r, 0, sizeof(*r));
       const char *c;
       c = aimee_pg_column_text(st, 0);
@@ -723,9 +725,9 @@ int db2_audit_event_list(const char *since, const char *until, const char *scope
    return n;
 }
 
-int db2_artifact_count(const char *kind, const char *state)
+int kb_store_artifact_count(const char *kind, const char *state)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -762,7 +764,7 @@ int db2_artifact_count(const char *kind, const char *state)
    return count;
 }
 
-static int artifact_load_citation_ids(void *conn, db2_artifact_proposed_t *rows, int count)
+static int artifact_load_citation_ids(void *conn, kb_store_artifact_proposed_t *rows, int count)
 {
    static const char *sql = "SELECT source_id FROM artifact_citations WHERE artifact_id = ?1"
                             " ORDER BY source_kind, source_id, span_start, span_end";
@@ -789,10 +791,10 @@ static int artifact_load_citation_ids(void *conn, db2_artifact_proposed_t *rows,
    return 0;
 }
 
-int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifact_proposed_t *out,
-                               int max_out)
+int kb_store_artifact_list_proposed(const char *target_surface, int limit,
+                                    kb_store_artifact_proposed_t *out, int max_out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !out || max_out <= 0)
       return -1;
 
@@ -832,7 +834,7 @@ int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifa
    int n = 0;
    while (n < max_out && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_artifact_proposed_t *row = &out[n++];
+      kb_store_artifact_proposed_t *row = &out[n++];
       memset(row, 0, sizeof(*row));
       const char *v;
       v = aimee_pg_column_text(st, 0);
@@ -858,14 +860,14 @@ int db2_artifact_list_proposed(const char *target_surface, int limit, db2_artifa
    return n;
 }
 
-int db2_artifact_reject(const char *id, const char *verdict_tag, const char *verdict_scope,
-                        const char *counter_example, const char *before_json)
+int kb_store_artifact_reject(const char *id, const char *verdict_tag, const char *verdict_scope,
+                             const char *counter_example, const char *before_json)
 {
-   if (db2_artifact_set_state(id, "rejected") != 0)
+   if (kb_store_artifact_set_state(id, "rejected") != 0)
       return -1;
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
 
    cJSON *after = cJSON_CreateObject();
    cJSON_AddStringToObject(after, "state", "rejected");
@@ -878,7 +880,8 @@ int db2_artifact_reject(const char *id, const char *verdict_tag, const char *ver
    char *after_json = cJSON_PrintUnformatted(after);
    cJSON_Delete(after);
 
-   int rc = db2_audit_event_write(audit_id, id, "", "", "", "user", "", 0.0, 0,
+   int rc =
+       kb_store_audit_event_write(audit_id, id, "", "", "", "user", "", 0.0, 0,
                                   before_json ? before_json : "{}", after_json ? after_json : "{}");
    free(after_json);
    return rc;
@@ -906,22 +909,23 @@ static int payload_field_eq(const cJSON *payload, const char *key, const char *w
    return cJSON_IsString(j) && strcasecmp(j->valuestring, want) == 0;
 }
 
-int db2_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
-                               const char *status, const char *priority, const char *component,
-                               db2_artifact_row_t *out, int max)
+int kb_store_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
+                                    const char *status, const char *priority, const char *component,
+                                    kb_store_artifact_row_t *out, int max)
 {
-   return db2_artifact_filter_facets_scoped(release_id, project, NULL, kind, status, priority,
-                                            component, out, max);
+   return kb_store_artifact_filter_facets_scoped(release_id, project, NULL, kind, status, priority,
+                                                 component, out, max);
 }
 
-int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
-                                      const char *exclude_project, const char *kind,
-                                      const char *status, const char *priority,
-                                      const char *component, db2_artifact_row_t *out, int max)
+int kb_store_artifact_filter_facets_scoped(int64_t release_id, const char *project,
+                                           const char *exclude_project, const char *kind,
+                                           const char *status, const char *priority,
+                                           const char *component, kb_store_artifact_row_t *out,
+                                           int max)
 {
    if (!out || max <= 0)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1010,7 +1014,7 @@ int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
 
       if (ok)
       {
-         db2_artifact_row_t *r = &out[n];
+         kb_store_artifact_row_t *r = &out[n];
          memset(r, 0, sizeof(*r));
          const char *v;
          if ((v = aimee_pg_column_text(st, 0)))
@@ -1040,9 +1044,9 @@ int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
 /* Version-bump (model_version): re-embed every committed curator artifact by
  * sending it back to 'proposed' so the index passes re-embed it WITHOUT
  * re-extracting. Returns the number of artifacts re-queued. */
-int db2_curator_reembed_all(void)
+int kb_store_curator_reembed_all(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    char err[256] = "";
@@ -1060,10 +1064,10 @@ int db2_curator_reembed_all(void)
    return n;
 }
 
-int db2_artifact_invalidate_citing(const char *source_kind, const char *source_id,
-                                   int edit_span_start, int edit_span_end)
+int kb_store_artifact_invalidate_citing(const char *source_kind, const char *source_id,
+                                        int edit_span_start, int edit_span_end)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !source_kind || !source_id)
       return -1;
 
@@ -1113,11 +1117,11 @@ int db2_artifact_invalidate_citing(const char *source_kind, const char *source_i
 
       for (int i = 0; i < n; i++)
       {
-         if (db2_artifact_set_state(ids[i], "stale") != 0)
+         if (kb_store_artifact_set_state(ids[i], "stale") != 0)
             return -1;
 
          char audit_id[37];
-         db2_artifact_gen_id(audit_id, sizeof(audit_id));
+         kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
 
          char before_json[128];
          snprintf(before_json, sizeof(before_json), "{\"state\":\"%.31s\"}", states[i]);
@@ -1131,7 +1135,8 @@ int db2_artifact_invalidate_citing(const char *source_kind, const char *source_i
          char *after_json = cJSON_PrintUnformatted(after);
          cJSON_Delete(after);
 
-         int rc = db2_audit_event_write(audit_id, ids[i], "", "", "kb.curator.invalidate", "", "",
+         int rc =
+             kb_store_audit_event_write(audit_id, ids[i], "", "", "kb.curator.invalidate", "", "",
                                         0.0, 0, before_json, after_json ? after_json : "{}");
          free(after_json);
          if (rc != 0)
@@ -1143,9 +1148,9 @@ int db2_artifact_invalidate_citing(const char *source_kind, const char *source_i
    return total;
 }
 
-int db2_artifact_stamp_reflected(const char *id)
+int kb_store_artifact_stamp_reflected(const char *id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !id[0])
       return -1;
 
@@ -1161,12 +1166,13 @@ int db2_artifact_stamp_reflected(const char *id)
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
-int db2_artifact_read(const char *id, db2_artifact_row_t *out, db2_artifact_citation_t *citations,
-                      int max_citations, int *citation_count)
+int kb_store_artifact_read(const char *id, kb_store_artifact_row_t *out,
+                           kb_store_artifact_citation_t *citations, int max_citations,
+                           int *citation_count)
 {
    if (!id || !id[0] || !out)
       return -1;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1245,11 +1251,11 @@ int db2_artifact_read(const char *id, db2_artifact_row_t *out, db2_artifact_cita
    return 0;
 }
 
-int db2_artifact_links_read(const char *id, db2_artifact_link_row_t *out, int max)
+int kb_store_artifact_links_read(const char *id, kb_store_artifact_link_row_t *out, int max)
 {
    if (!id || !id[0])
       return 0;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -1275,9 +1281,9 @@ int db2_artifact_links_read(const char *id, db2_artifact_link_row_t *out, int ma
    return n;
 }
 
-int db2_artifact_flag_review(const char *id, const char *reason)
+int kb_store_artifact_flag_review(const char *id, const char *reason)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !id || !id[0])
       return -1;
 

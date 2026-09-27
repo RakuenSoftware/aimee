@@ -62,7 +62,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 "include_roots": ["src/modules/fixture/include"],
                 "compile_definitions": [
                     "AIMEE_DB1_DISABLED",
-                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                    "AIMEE_DISABLE_KB_STORE_SQLITE_SHIM",
                 ],
                 "pkg_config": ["libssl"],
                 "system_libraries": [
@@ -125,7 +125,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 self.assertEqual(arguments.count(str(source)), 1)
             for flag in ("-I/pkg/include", "-L/pkg/lib", "-lssl", "-lcrypto",
                          "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
-                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM", "-Os",
+                         "-DAIMEE_DISABLE_KB_STORE_SQLITE_SHIM", "-Os",
                          "-Wno-unused-parameter", "-Wno-format-truncation",
                          "-Wno-unused-result"):
                 self.assertIn(flag, arguments)
@@ -187,7 +187,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             value["modules"][0]["generated_headers"] = [{
                 "entries": [{
                     "source": "src/modules/fixture/c/schema.sql",
-                    "symbol": "AIMEE_DB2_SCHEMA_SQL",
+                    "symbol": "AIMEE_KB_STORE_SCHEMA_SQL",
                 }],
                 "output": "schema_data.h",
             }]
@@ -199,7 +199,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             )
             header = generated / "schema_data.h"
             self.assertIn(
-                'AIMEE_DB2_SCHEMA_SQL __attribute__((unused)) = "select \'fixture\';\\n";',
+                'AIMEE_KB_STORE_SCHEMA_SQL __attribute__((unused)) = "select \'fixture\';\\n";',
                 header.read_text(encoding="utf-8"),
             )
             command = builder.compiler_command(

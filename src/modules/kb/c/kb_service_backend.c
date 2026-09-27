@@ -1,12 +1,12 @@
-/* db2/kb_service_backend.c: kb-service backend SQL primitives — Postgres via libpq. */
+/* kb_store/kb_service_backend.c: kb-service backend SQL primitives — Postgres via libpq. */
 
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "../support/db2_runtime_config.h"
+#include "../support/kb_store_runtime_config.h"
 #include "curiosity.h"
 #include "notes.h"
-#include "db2_internal.h"
+#include "kb_store_internal.h"
 #include "kb_payload.h"
 #include "kb_runtime_state.h"
 #include "pgvec_transport.h"
@@ -19,7 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 
-/* The standalone DB2 process has no host command registry. Without a Go
+/* The standalone KB_STORE process has no host command registry. Without a Go
  * memory owner, leave the curiosity item pending for a later attempt. */
 extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
     __attribute__((weak));
@@ -27,7 +27,7 @@ extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, 
 #define KBS_ERRBUF 256
 
 /* The job kinds this drain handles — the single source of truth for BOTH the
- * claim's IN-list and the dispatch in db2_kb_service_async_queue_drain. They
+ * claim's IN-list and the dispatch in kb_store_kb_service_async_queue_drain. They
  * must agree, and the failure mode when they drift is silent and destructive:
  * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
  * which own their own claim lifecycle, and the dispatch marks every kind it
@@ -38,7 +38,7 @@ extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, 
  * here leaves them unclaimed forever. */
 #define KBS_ASYNC_DRAIN_KINDS_SQL "('embed_raw', 'embed_pdf')"
 
-static int db2_worker_identity_valid(const char *claimed_by)
+static int kb_store_worker_identity_valid(const char *claimed_by)
 {
    if (!claimed_by || !claimed_by[0])
       return 0;
@@ -48,12 +48,12 @@ static int db2_worker_identity_valid(const char *claimed_by)
    return 0;
 }
 
-static const char *DB2_KB_LEARNING_SELECT_COLS =
+static const char *KB_STORE_KB_LEARNING_SELECT_COLS =
     "id, signal_id, sink, state, target_key, target_memory_id, action_json,"
     " evidence_refs, corroboration_count, expires_at, committed_at, archive_reason,"
     " created_at, updated_at";
 
-static void db2_kb_resolve_project(const char *project, char *out, size_t out_len)
+static void kb_store_kb_resolve_project(const char *project, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return;
@@ -68,7 +68,7 @@ static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
    return t ? t : "";
 }
 
-static cJSON *db2_kb_learning_json_from_stmt(aimee_pg_stmt_t *stmt)
+static cJSON *kb_store_kb_learning_json_from_stmt(aimee_pg_stmt_t *stmt)
 {
    cJSON *obj = cJSON_CreateObject();
    if (!obj)
@@ -91,13 +91,13 @@ static cJSON *db2_kb_learning_json_from_stmt(aimee_pg_stmt_t *stmt)
    return obj;
 }
 
-static void db2_kb_learning_archive_expired(void)
+static void kb_store_kb_learning_archive_expired(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[KBS_ERRBUF] = "";
-   /* pg_now_text() returns the DB2 canonical UTC text format. */
+   /* pg_now_text() returns the KB_STORE canonical UTC text format. */
    (void)aimee_pg_exec(
        conn,
        "UPDATE learning_proposals"
@@ -106,13 +106,13 @@ static void db2_kb_learning_archive_expired(void)
        err, sizeof(err));
 }
 
-int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
+int kb_store_kb_service_async_queue_status(kb_store_kb_service_async_queue_stats_t *out)
 {
    if (!out)
       return -1;
 
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -141,12 +141,12 @@ int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
    return 0;
 }
 
-int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out)
+int kb_store_kb_service_async_job_get(int64_t job_id, kb_store_kb_service_async_job_t *out)
 {
    if (job_id <= 0 || !out)
       return -1;
    memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -169,25 +169,26 @@ int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out
    }
 
    out->id = aimee_pg_column_int64(stmt, 0);
-   db2_copy_text(out->kind, sizeof(out->kind), aimee_pg_column_text(stmt, 1));
+   kb_store_copy_text(out->kind, sizeof(out->kind), aimee_pg_column_text(stmt, 1));
    out->document_id = aimee_pg_column_int64(stmt, 2);
-   db2_copy_text(out->project, sizeof(out->project), aimee_pg_column_text(stmt, 3));
-   db2_copy_text(out->status, sizeof(out->status), aimee_pg_column_text(stmt, 4));
+   kb_store_copy_text(out->project, sizeof(out->project), aimee_pg_column_text(stmt, 3));
+   kb_store_copy_text(out->status, sizeof(out->status), aimee_pg_column_text(stmt, 4));
    out->attempts = aimee_pg_column_int(stmt, 5);
-   db2_copy_text(out->last_error, sizeof(out->last_error), aimee_pg_column_text(stmt, 6));
-   db2_copy_text(out->claimed_by, sizeof(out->claimed_by), aimee_pg_column_text(stmt, 7));
-   db2_copy_text(out->claimed_at, sizeof(out->claimed_at), aimee_pg_column_text(stmt, 8));
-   db2_copy_text(out->created_at, sizeof(out->created_at), aimee_pg_column_text(stmt, 9));
-   db2_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(stmt, 10));
+   kb_store_copy_text(out->last_error, sizeof(out->last_error), aimee_pg_column_text(stmt, 6));
+   kb_store_copy_text(out->claimed_by, sizeof(out->claimed_by), aimee_pg_column_text(stmt, 7));
+   kb_store_copy_text(out->claimed_at, sizeof(out->claimed_at), aimee_pg_column_text(stmt, 8));
+   kb_store_copy_text(out->created_at, sizeof(out->created_at), aimee_pg_column_text(stmt, 9));
+   kb_store_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(stmt, 10));
    aimee_pg_finalize(stmt);
    return 1;
 }
 
-static int db2_kb_service_async_queue_claim_next(const char *claimed_by, int64_t *job_id,
-                                                 int64_t *document_id, char *kind, size_t kind_len)
+static int kb_store_kb_service_async_queue_claim_next(const char *claimed_by, int64_t *job_id,
+                                                      int64_t *document_id, char *kind,
+                                                      size_t kind_len)
 {
-   void *conn = db2_conn();
-   if (!conn || !db2_worker_identity_valid(claimed_by) || !job_id || !document_id || !kind ||
+   void *conn = kb_store_conn();
+   if (!conn || !kb_store_worker_identity_valid(claimed_by) || !job_id || !document_id || !kind ||
        kind_len == 0)
       return -1;
 
@@ -224,7 +225,7 @@ static int db2_kb_service_async_queue_claim_next(const char *claimed_by, int64_t
     * same conn (libpq one-active-result-per-conn). */
    int64_t id = aimee_pg_column_int64(sel, 0);
    int64_t doc_id = aimee_pg_column_int64(sel, 1);
-   db2_copy_text(kind, kind_len, aimee_pg_column_text(sel, 2));
+   kb_store_copy_text(kind, kind_len, aimee_pg_column_text(sel, 2));
    aimee_pg_finalize(sel);
 
    aimee_pg_stmt_t *upd = aimee_pg_prepare(conn,
@@ -260,10 +261,10 @@ static int db2_kb_service_async_queue_claim_next(const char *claimed_by, int64_t
    return 1;
 }
 
-static int db2_kb_service_async_queue_mark_job(int64_t job_id, const char *status,
-                                               const char *error)
+static int kb_store_kb_service_async_queue_mark_job(int64_t job_id, const char *status,
+                                                    const char *error)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -285,11 +286,10 @@ static int db2_kb_service_async_queue_mark_job(int64_t job_id, const char *statu
    return rc == AIMEE_PG_DONE ? 0 : -1;
 }
 
-static int db2_kb_service_async_process_embed_raw(int64_t document_id, const char *embedding_cmd,
-                                                  const char *vector_collection,
-                                                  db2_kb_service_vector_upsert_fn vector_upsert,
-                                                  void *vector_upsert_ctx, char *errbuf,
-                                                  size_t errbuf_size)
+static int kb_store_kb_service_async_process_embed_raw(
+    int64_t document_id, const char *embedding_cmd, const char *vector_collection,
+    kb_store_kb_service_vector_upsert_fn vector_upsert, void *vector_upsert_ctx, char *errbuf,
+    size_t errbuf_size)
 {
    if (!vector_collection || !vector_collection[0] || !vector_upsert)
    {
@@ -297,10 +297,10 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
       return -1;
    }
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
-      snprintf(errbuf, errbuf_size, "no db2 conn");
+      snprintf(errbuf, errbuf_size, "no kb_store conn");
       return -1;
    }
 
@@ -329,8 +329,8 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
     * follow-up pgvector write. */
    char heading_buf[1024];
    char content_buf[3072];
-   db2_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
-   db2_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
+   kb_store_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
+   kb_store_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
    aimee_pg_finalize(stmt);
 
    char embed_text[4096];
@@ -340,23 +340,24 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
       snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
 
    float vec[EMBED_MAX_DIM];
-   int dim = db2_kb_embed_text(embed_text, embedding_cmd, DB2_EMBED_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = kb_store_kb_embed_text(embed_text, embedding_cmd, KB_STORE_EMBED_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
    if (dim <= 0)
    {
       snprintf(errbuf, errbuf_size, "embedding generation failed");
       return -1;
    }
-   char *payload_json = db2_kb_build_document_payload(document_id);
+   char *payload_json = kb_store_kb_build_document_payload(document_id);
    if (!payload_json)
    {
-      db2_vector_index_op_record(document_id, vector_collection, 0, 0, "payload build failed");
+      kb_store_vector_index_op_record(document_id, vector_collection, 0, 0, "payload build failed");
       snprintf(errbuf, errbuf_size, "payload build failed");
       return -1;
    }
    int upsert_rc = vector_upsert(document_id, vec, dim, payload_json, vector_upsert_ctx);
    free(payload_json);
-   db2_vector_index_op_record(document_id, vector_collection, 0, upsert_rc == 0,
-                              upsert_rc ? "upsert failed" : NULL);
+   kb_store_vector_index_op_record(document_id, vector_collection, 0, upsert_rc == 0,
+                                   upsert_rc ? "upsert failed" : NULL);
    if (upsert_rc != 0)
    {
       snprintf(errbuf, errbuf_size, "vector upsert failed");
@@ -373,13 +374,14 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
  * skipped (marked done, no vector); when it is later confirmed, the confirm path
  * re-enqueues an embed_pdf job. Returns 0 on success or benign skip, -1 on error
  * (which fails the job so kb_async_jobs retries the embed). */
-static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const char *embedding_cmd,
-                                                  char *errbuf, size_t errbuf_size)
+static int kb_store_kb_service_async_process_embed_pdf(int64_t document_id,
+                                                       const char *embedding_cmd, char *errbuf,
+                                                       size_t errbuf_size)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
-      snprintf(errbuf, errbuf_size, "no db2 conn");
+      snprintf(errbuf, errbuf_size, "no kb_store conn");
       return -1;
    }
 
@@ -408,11 +410,11 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    char doc_kind[32];
    char quarantine[32];
    char project_buf[256];
-   db2_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
-   db2_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
-   db2_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
-   db2_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
-   db2_copy_text(project_buf, sizeof(project_buf), aimee_pg_column_text(stmt, 4));
+   kb_store_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
+   kb_store_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
+   kb_store_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
+   kb_store_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
+   kb_store_copy_text(project_buf, sizeof(project_buf), aimee_pg_column_text(stmt, 4));
    aimee_pg_finalize(stmt);
 
    /* Defense-in-depth: never write a PDF vector for a non-PDF row or for ANY quarantined
@@ -430,16 +432,17 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
       snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
 
    float vec[EMBED_MAX_DIM];
-   int dim = db2_kb_embed_text(embed_text, embedding_cmd, DB2_EMBED_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = kb_store_kb_embed_text(embed_text, embedding_cmd, KB_STORE_EMBED_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
    if (dim <= 0)
    {
       snprintf(errbuf, errbuf_size, "embedding generation failed");
       return -1;
    }
-   char *payload_json = db2_kb_build_document_payload(document_id);
+   char *payload_json = kb_store_kb_build_document_payload(document_id);
    if (!payload_json)
    {
-      db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, 0, "payload build failed");
+      kb_store_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, 0, "payload build failed");
       snprintf(errbuf, errbuf_size, "payload build failed");
       return -1;
    }
@@ -449,29 +452,29 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
     * and the advisory guard serializes this check+commit against the fence
     * publish. Failing the job is safe — on retry after the purge the chunk
     * row is gone (benign skip above). */
-   if (db2_kb_txn_begin() != 0)
+   if (kb_store_kb_txn_begin() != 0)
    {
       free(payload_json);
       snprintf(errbuf, errbuf_size, "pdf vector txn begin failed");
       return -1;
    }
-   if (project_buf[0] &&
-       (db2_kb_purge_txn_guard(project_buf) != 0 || db2_kb_purge_fence_active(project_buf)))
+   if (project_buf[0] && (kb_store_kb_purge_txn_guard(project_buf) != 0 ||
+                          kb_store_kb_purge_fence_active(project_buf)))
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       free(payload_json);
       snprintf(errbuf, errbuf_size, "purge fence active for project '%.200s'", project_buf);
       return -1;
    }
    int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);
-   if (db2_kb_txn_commit() != 0)
+   if (kb_store_kb_txn_commit() != 0)
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       upsert_rc = -1;
    }
    free(payload_json);
-   db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
-                              upsert_rc ? "pdf upsert failed" : NULL);
+   kb_store_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
+                                   upsert_rc ? "pdf upsert failed" : NULL);
    if (upsert_rc != 0)
    {
       snprintf(errbuf, errbuf_size, "pdf vector upsert failed");
@@ -480,19 +483,19 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    return 0;
 }
 
-int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
-                                     int timeout_secs, const char *vector_collection,
-                                     db2_kb_service_vector_upsert_fn vector_upsert,
-                                     void *vector_upsert_ctx,
-                                     db2_kb_service_async_queue_stats_t *out)
+int kb_store_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                          int timeout_secs, const char *vector_collection,
+                                          kb_store_kb_service_vector_upsert_fn vector_upsert,
+                                          void *vector_upsert_ctx,
+                                          kb_store_kb_service_async_queue_stats_t *out)
 {
-   if (!db2_worker_identity_valid(claimed_by))
+   if (!kb_store_worker_identity_valid(claimed_by))
       return -1;
    const char *effective_cmd = config_embedder_command_current(embedding_cmd);
    int processed = 0;
 
    time_t started = time(NULL);
-   db2_kb_service_async_queue_stats_t stats;
+   kb_store_kb_service_async_queue_stats_t stats;
    memset(&stats, 0, sizeof(stats));
 
    for (;;)
@@ -501,13 +504,13 @@ int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embeddi
       int64_t document_id = 0;
       char kind[32];
       kind[0] = '\0';
-      int claim = db2_kb_service_async_queue_claim_next(claimed_by, &job_id, &document_id, kind,
-                                                        sizeof(kind));
+      int claim = kb_store_kb_service_async_queue_claim_next(claimed_by, &job_id, &document_id,
+                                                             kind, sizeof(kind));
       if (claim < 0)
          return -1;
       if (claim == 0)
       {
-         if (db2_kb_service_async_queue_status(&stats) != 0)
+         if (kb_store_kb_service_async_queue_status(&stats) != 0)
             return -1;
          if (stats.running == 0)
             break;
@@ -520,12 +523,12 @@ int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embeddi
       char errbuf[256] = "";
       int rc = -1;
       if (strcmp(kind, "embed_raw") == 0)
-         rc = db2_kb_service_async_process_embed_raw(document_id, effective_cmd, vector_collection,
-                                                     vector_upsert, vector_upsert_ctx, errbuf,
-                                                     sizeof(errbuf));
+         rc = kb_store_kb_service_async_process_embed_raw(
+             document_id, effective_cmd, vector_collection, vector_upsert, vector_upsert_ctx,
+             errbuf, sizeof(errbuf));
       else if (strcmp(kind, "embed_pdf") == 0)
-         rc = db2_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
-                                                     sizeof(errbuf));
+         rc = kb_store_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
+                                                          sizeof(errbuf));
       else
          /* Unreachable unless KBS_ASYNC_DRAIN_KINDS_SQL and this chain have
           * drifted apart — the claim cannot hand us a kind not in that list. If
@@ -537,16 +540,16 @@ int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embeddi
                   kind);
 
       if (rc == 0)
-         (void)db2_kb_service_async_queue_mark_job(job_id, "done", "");
+         (void)kb_store_kb_service_async_queue_mark_job(job_id, "done", "");
       else
-         (void)db2_kb_service_async_queue_mark_job(job_id, "failed", errbuf);
+         (void)kb_store_kb_service_async_queue_mark_job(job_id, "failed", errbuf);
       processed++;
 
       if (timeout_secs > 0 && (int)(time(NULL) - started) >= timeout_secs)
          break;
    }
 
-   if (db2_kb_service_async_queue_status(&stats) != 0)
+   if (kb_store_kb_service_async_queue_status(&stats) != 0)
       return -1;
    stats.processed = processed;
    if (out)
@@ -554,7 +557,8 @@ int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embeddi
    return 0;
 }
 
-int db2_kb_service_collect_project_status(const char *project, db2_kb_service_project_status_t *out)
+int kb_store_kb_service_collect_project_status(const char *project,
+                                               kb_store_kb_service_project_status_t *out)
 {
    if (!out)
       return -1;
@@ -562,10 +566,10 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
    memset(out, 0, sizeof(*out));
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
    snprintf(out->project, sizeof(out->project), "%s", proj);
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -619,17 +623,17 @@ int db2_kb_service_collect_project_status(const char *project, db2_kb_service_pr
       out->embeddings = aimee_pg_column_int(stmt, 0);
    aimee_pg_finalize(stmt);
 
-   return db2_kb_service_async_queue_status(&out->queue);
+   return kb_store_kb_service_async_queue_status(&out->queue);
 }
 
-int db2_kb_service_clear_project(const char *project)
+int kb_store_kb_service_clear_project(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
 
    char err[KBS_ERRBUF] = "";
 
@@ -662,14 +666,14 @@ int db2_kb_service_clear_project(const char *project)
    return deleted;
 }
 
-int db2_kb_service_clear_current_project(const char *project)
+int kb_store_kb_service_clear_current_project(const char *project)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn || !project || !project[0])
       return -1;
 
    char proj[256];
-   db2_kb_resolve_project(project, proj, sizeof(proj));
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
    char err[KBS_ERRBUF] = "";
    static const char *current_docs =
        "SELECT d.id FROM kb_documents d JOIN projects p ON p.name=d.project"
@@ -701,9 +705,9 @@ int db2_kb_service_clear_current_project(const char *project)
    return rc == AIMEE_PG_DONE ? deleted : -1;
 }
 
-int db2_kb_service_memory_record_exists(int64_t record_id)
+int kb_store_kb_service_memory_record_exists(int64_t record_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -724,9 +728,9 @@ int db2_kb_service_memory_record_exists(int64_t record_id)
    return exists;
 }
 
-int db2_kb_service_kb_document_exists(int64_t document_id)
+int kb_store_kb_service_kb_document_exists(int64_t document_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -744,7 +748,7 @@ int db2_kb_service_kb_document_exists(int64_t document_id)
    return exists;
 }
 
-cJSON *db2_kb_service_curiosity_list_json(const char *state, int max_rows)
+cJSON *kb_store_kb_service_curiosity_list_json(const char *state, int max_rows)
 {
    if (max_rows < 1)
       return NULL;
@@ -764,7 +768,7 @@ cJSON *db2_kb_service_curiosity_list_json(const char *state, int max_rows)
       cJSON_Delete(resp);
       return NULL;
    }
-   int n = db2_curiosity_list((state && state[0]) ? state : NULL, rows, max_rows);
+   int n = kb_store_curiosity_list((state && state[0]) ? state : NULL, rows, max_rows);
    for (int i = 0; i < n; i++)
    {
       cJSON *obj = cJSON_CreateObject();
@@ -812,14 +816,14 @@ static cJSON *curiosity_to_json(const curiosity_item_t *it)
    return obj;
 }
 
-cJSON *db2_kb_service_curiosity_create_json(const char *gap_type, const char *target_entity,
-                                            const char *target_topic, const char *evidence,
-                                            double importance, double novelty,
-                                            const char *source_session)
+cJSON *kb_store_kb_service_curiosity_create_json(const char *gap_type, const char *target_entity,
+                                                 const char *target_topic, const char *evidence,
+                                                 double importance, double novelty,
+                                                 const char *source_session)
 {
    curiosity_item_t created;
-   int rc = db2_curiosity_create(gap_type, target_entity, target_topic, evidence, importance,
-                                 novelty, source_session, &created);
+   int rc = kb_store_curiosity_create(gap_type, target_entity, target_topic, evidence, importance,
+                                      novelty, source_session, &created);
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -840,9 +844,9 @@ cJSON *db2_kb_service_curiosity_create_json(const char *gap_type, const char *ta
    return resp;
 }
 
-cJSON *db2_kb_service_curiosity_sweep_json(void)
+cJSON *kb_store_kb_service_curiosity_sweep_json(void)
 {
-   int created = db2_curiosity_sweep_failed_queries();
+   int created = kb_store_curiosity_sweep_failed_queries();
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -851,9 +855,9 @@ cJSON *db2_kb_service_curiosity_sweep_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_curiosity_rescore_json(void)
+cJSON *kb_store_kb_service_curiosity_rescore_json(void)
 {
-   int rescored = db2_curiosity_rescore_all();
+   int rescored = kb_store_curiosity_rescore_all();
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -862,10 +866,10 @@ cJSON *db2_kb_service_curiosity_rescore_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_curiosity_get_json(int64_t id)
+cJSON *kb_store_kb_service_curiosity_get_json(int64_t id)
 {
    curiosity_item_t item;
-   int found = db2_curiosity_get(id, &item);
+   int found = kb_store_curiosity_get(id, &item);
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -887,18 +891,18 @@ cJSON *db2_kb_service_curiosity_get_json(int64_t id)
    return resp;
 }
 
-cJSON *db2_kb_service_curiosity_update_state_json(int64_t id, const char *new_state)
+cJSON *kb_store_kb_service_curiosity_update_state_json(int64_t id, const char *new_state)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   if (!new_state || !db2_curiosity_state_is_valid(new_state))
+   if (!new_state || !kb_store_curiosity_state_is_valid(new_state))
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "invalid state");
       return resp;
    }
-   if (db2_curiosity_update_state(id, new_state) != 0)
+   if (kb_store_curiosity_update_state(id, new_state) != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
       cJSON_AddStringToObject(resp, "message", "curiosity update_state failed");
@@ -906,7 +910,7 @@ cJSON *db2_kb_service_curiosity_update_state_json(int64_t id, const char *new_st
    }
    /* Return the updated row so callers can render without a follow-up RPC. */
    curiosity_item_t after;
-   if (db2_curiosity_get(id, &after) > 0)
+   if (kb_store_curiosity_get(id, &after) > 0)
    {
       cJSON *obj = curiosity_to_json(&after);
       if (!obj)
@@ -951,7 +955,7 @@ static void route_curiosity_build_question(const curiosity_item_t *it, char *out
       snprintf(out, cap, "Investigate %s", target);
 }
 
-cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_session)
+cJSON *kb_store_kb_service_curiosity_route_top_json(int limit, const char *source_session)
 {
    if (limit <= 0)
       limit = 5;
@@ -959,7 +963,7 @@ cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_ses
       limit = 32;
 
    curiosity_item_t batch[32];
-   int n = db2_curiosity_list_top_open_by_score(batch, limit);
+   int n = kb_store_curiosity_list_top_open_by_score(batch, limit);
 
    int routed = 0;
    for (int i = 0; i < n; i++)
@@ -997,7 +1001,7 @@ cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_ses
        * the curiosity item along. */
       if (rc == 0)
       {
-         db2_curiosity_update_state(it->id, CURIOSITY_STATE_IN_PROGRESS);
+         kb_store_curiosity_update_state(it->id, CURIOSITY_STATE_IN_PROGRESS);
          routed++;
       }
    }
@@ -1026,11 +1030,11 @@ static cJSON *note_to_json(const note_t *note)
    return obj;
 }
 
-cJSON *db2_kb_service_note_create_json(const char *title, const char *content, const char *tags,
-                                       const char *author)
+cJSON *kb_store_kb_service_note_create_json(const char *title, const char *content,
+                                            const char *tags, const char *author)
 {
    note_t note;
-   if (db2_note_create(title, content, tags, author, &note) != 0)
+   if (kb_store_note_create(title, content, tags, author, &note) != 0)
    {
       cJSON *resp = cJSON_CreateObject();
       if (!resp)
@@ -1052,7 +1056,7 @@ cJSON *db2_kb_service_note_create_json(const char *title, const char *content, c
    return resp;
 }
 
-cJSON *db2_kb_service_note_list_json(const char *tag, int max_rows)
+cJSON *kb_store_kb_service_note_list_json(const char *tag, int max_rows)
 {
    if (max_rows < 1)
       return NULL;
@@ -1071,7 +1075,7 @@ cJSON *db2_kb_service_note_list_json(const char *tag, int max_rows)
       cJSON_Delete(resp);
       return NULL;
    }
-   int n = db2_note_list((tag && tag[0]) ? tag : NULL, max_rows, rows, max_rows);
+   int n = kb_store_note_list((tag && tag[0]) ? tag : NULL, max_rows, rows, max_rows);
    for (int i = 0; i < n; i++)
    {
       cJSON *obj = note_to_json(&rows[i]);
@@ -1087,7 +1091,7 @@ cJSON *db2_kb_service_note_list_json(const char *tag, int max_rows)
    return resp;
 }
 
-cJSON *db2_kb_service_note_search_json(const char *query, int max_rows)
+cJSON *kb_store_kb_service_note_search_json(const char *query, int max_rows)
 {
    if (max_rows < 1)
       return NULL;
@@ -1106,7 +1110,7 @@ cJSON *db2_kb_service_note_search_json(const char *query, int max_rows)
       cJSON_Delete(resp);
       return NULL;
    }
-   int n = db2_note_search(query ? query : "", rows, max_rows);
+   int n = kb_store_note_search(query ? query : "", rows, max_rows);
    for (int i = 0; i < n; i++)
    {
       cJSON *obj = note_to_json(&rows[i]);
@@ -1127,17 +1131,17 @@ cJSON *db2_kb_service_note_search_json(const char *query, int max_rows)
 
 /* Memory-domain RPC backends (find_facts, list, get, insert, briefing,
  * context_block, entity_profile, entity_edges) live in
- * db2/kb_service_backend_memory.c so this file stays under the per-file
+ * kb_store/kb_service_backend_memory.c so this file stays under the per-file
  * line cap. */
 
-cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, int max_rows)
+cJSON *kb_store_kb_service_learning_list_json(const char *state, const char *sink, int max_rows)
 {
    if (max_rows < 1)
       return NULL;
 
-   db2_kb_learning_archive_expired();
+   kb_store_kb_learning_archive_expired();
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 
@@ -1147,7 +1151,7 @@ cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, in
             "SELECT %s FROM learning_proposals"
             " WHERE (?1 = '' OR state = ?2) AND (?3 = '' OR sink = ?4)"
             " ORDER BY id DESC LIMIT ?5",
-            DB2_KB_LEARNING_SELECT_COLS);
+            KB_STORE_KB_LEARNING_SELECT_COLS);
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!stmt)
       return NULL;
@@ -1170,7 +1174,7 @@ cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, in
    cJSON_AddStringToObject(resp, "status", "ok");
    while (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      cJSON *row = db2_kb_learning_json_from_stmt(stmt);
+      cJSON *row = kb_store_kb_learning_json_from_stmt(stmt);
       if (!row)
       {
          aimee_pg_finalize(stmt);
@@ -1184,20 +1188,20 @@ cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, in
    return resp;
 }
 
-cJSON *db2_kb_service_learning_get_json(int id)
+cJSON *kb_store_kb_service_learning_get_json(int id)
 {
    if (id <= 0)
       return NULL;
 
-   db2_kb_learning_archive_expired();
+   kb_store_kb_learning_archive_expired();
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 
    char sql[512];
    snprintf(sql, sizeof(sql), "SELECT %s FROM learning_proposals WHERE id = ?1",
-            DB2_KB_LEARNING_SELECT_COLS);
+            KB_STORE_KB_LEARNING_SELECT_COLS);
    char err[KBS_ERRBUF] = "";
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!stmt)
@@ -1206,19 +1210,19 @@ cJSON *db2_kb_service_learning_get_json(int id)
    aimee_pg_bind_int(stmt, "?1", id);
    cJSON *row = NULL;
    if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      row = db2_kb_learning_json_from_stmt(stmt);
+      row = kb_store_kb_learning_json_from_stmt(stmt);
    aimee_pg_finalize(stmt);
    return row;
 }
 
-cJSON *db2_kb_service_learning_reject_json(int id)
+cJSON *kb_store_kb_service_learning_reject_json(int id)
 {
    if (id <= 0)
       return NULL;
 
-   db2_kb_learning_archive_expired();
+   kb_store_kb_learning_archive_expired();
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return NULL;
 
@@ -1233,7 +1237,7 @@ cJSON *db2_kb_service_learning_reject_json(int id)
    int found = 0;
    if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      db2_copy_text(state, sizeof(state), aimee_pg_column_text(stmt, 0));
+      kb_store_copy_text(state, sizeof(state), aimee_pg_column_text(stmt, 0));
       found = 1;
    }
    aimee_pg_finalize(stmt);
@@ -1260,5 +1264,5 @@ cJSON *db2_kb_service_learning_reject_json(int id)
       aimee_pg_finalize(upd);
    }
 
-   return db2_kb_service_learning_get_json(id);
+   return kb_store_kb_service_learning_get_json(id);
 }
