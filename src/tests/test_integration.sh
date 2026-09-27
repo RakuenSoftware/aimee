@@ -155,6 +155,28 @@ stop_providers_module() {
     fi
 }
 
+# Native tool admission requires the real execution-policy owner, just as in
+# the shipped Server placement. Absence must remain a refusal in production.
+POLICY_MODULE="$AIMEE_HOME/aimee-module-execution-policy"
+POLICY_MODULE_PID=""
+install_policy_module() {
+    cp "$DB1_MODULE_BUILT" "$POLICY_MODULE"
+    chmod 0755 "$POLICY_MODULE"
+    install_generated_grant execution-policy "$POLICY_MODULE"
+}
+start_policy_module() {
+    stop_policy_module
+    "$POLICY_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-policy.log" 2>&1 &
+    POLICY_MODULE_PID=$!
+}
+stop_policy_module() {
+    if [ -n "$POLICY_MODULE_PID" ]; then
+        kill "$POLICY_MODULE_PID" 2>/dev/null || true
+        wait "$POLICY_MODULE_PID" 2>/dev/null || true
+        POLICY_MODULE_PID=""
+    fi
+}
+
 # Memory admission and validation are provided by the same Go process used in
 # production. A missing owner is an outage, not native validation fallback.
 MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
@@ -431,6 +453,7 @@ install_db1_module
 install_config_module
 install_providers_module
 install_memory_module
+install_policy_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -757,6 +780,7 @@ start_server() {
             start_config_module
             start_providers_module
             start_memory_module
+            start_policy_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -797,6 +821,7 @@ cleanup() {
     stop_config_module
     stop_providers_module
     stop_memory_module
+    stop_policy_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""

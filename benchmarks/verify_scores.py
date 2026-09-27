@@ -130,10 +130,14 @@ def verify_file(path: Path) -> dict[str, object]:
     summary = payload.get("summary", {})
     derived = summary.get("derived")
     if derived:
+        def metric(name):
+            value = derived.get(name)
+            return "undefined" if value is None else f"{float(value):.3f}"
+
         print(
-            f"  derived: factoid_recall={float(derived.get('factoid_recall', 0.0)):.3f} "
-            f"abstention_precision={float(derived.get('abstention_precision', 0.0)):.3f} "
-            f"false_abstention_rate={float(derived.get('false_abstention_rate', 0.0)):.3f}"
+            f"  derived: factoid_recall={metric('factoid_recall')} "
+            f"abstention_precision={metric('abstention_precision')} "
+            f"false_abstention_rate={metric('false_abstention_rate')}"
         )
     return {
         "path": path,

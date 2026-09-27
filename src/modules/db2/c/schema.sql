@@ -18833,7 +18833,7 @@ REVOKE ALL ON FUNCTION memory_compact_source_children(BIGINT) FROM PUBLIC;
 
 -- A narrow storage lock, without granting the index owner canonical write
 -- privileges. NOWAIT avoids lock-order deadlocks with mutation/index workers.
-CREATE OR REPLACE FUNCTION memory_index_cutover_lock() RETURNS void
+CREATE OR REPLACE FUNCTION kb_memory_index_cutover_lock() RETURNS void
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
 BEGIN
  IF COALESCE(current_setting('aimee.memory_scope_all',true),'')<>'1' THEN
@@ -18842,7 +18842,7 @@ BEGIN
  PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE NOWAIT;
  IF NOT FOUND THEN RAISE EXCEPTION 'embedding cutover barrier unavailable'; END IF;
 END $$;
-REVOKE ALL ON FUNCTION memory_index_cutover_lock() FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_memory_index_cutover_lock() FROM PUBLIC;
 
 DO $memory_store_grants$
 DECLARE
@@ -18878,7 +18878,7 @@ BEGIN
     END LOOP;
   END LOOP;
   GRANT EXECUTE ON FUNCTION memory_compact_source_children(BIGINT) TO aimee_store_runtime;
-  GRANT EXECUTE ON FUNCTION memory_index_cutover_lock() TO aimee_store_runtime;
+  GRANT EXECUTE ON FUNCTION kb_memory_index_cutover_lock() TO aimee_store_runtime;
   -- Dependency freshness checks run as the caller. They need identity/version
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation,project_id) ON files TO aimee_store_runtime;

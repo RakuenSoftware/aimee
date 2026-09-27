@@ -15,6 +15,9 @@ sqlite3 *db2_shared_sqlite(void)
 int main(void)
 {
    assert(sqlite3_open(":memory:", &test_db) == SQLITE_OK);
+   /* Force prepare allocations through the heap limit, rather than allowing
+    * SQLite builds with lookaside enabled to satisfy them from a reserved pool. */
+   assert(sqlite3_db_config(test_db, SQLITE_DBCONFIG_LOOKASIDE, NULL, 0, 0) == SQLITE_OK);
 
    char err[256] = "";
    aimee_pg_prepare_error_t kind = AIMEE_PG_PREPARE_OK;

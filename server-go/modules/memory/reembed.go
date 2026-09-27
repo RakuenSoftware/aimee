@@ -333,7 +333,7 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
 		if dim != actual {
 			return errors.New("memory: target dimension requires schema-owner maintenance")
 		}
-		if _, err = bound.db.Exec(ctx, `SELECT memory_index_cutover_lock()`); err != nil {
+		if _, err = bound.db.Exec(ctx, `SELECT kb_memory_index_cutover_lock()`); err != nil {
 			return err
 		}
 		total, done, err := bound.reembedCounts(ctx, version)

@@ -329,7 +329,7 @@ def inside(output):
             models=[dict(name=prefix, model='native-memory-fixture', provider='openai', auth_type='none',
                          endpoint=f'http://127.0.0.1:{provider.server_port}/v1', roles=['all'], enabled=True,
                          # Leave room for the real tool catalog and conversation
-                         # under the fixture's unchanged 32 KiB operator ceiling.
+                         # under the fixture's 64 KiB operator ceiling.
                          # Go must select whole memory rows within this smaller
                          # model allocation, including both private identities.
                          tools_enabled=True, context_window=8192, max_tokens=4096,
@@ -395,7 +395,7 @@ def inside(output):
         primary_started = time.monotonic()
         scenario, scenario_start = 'exploration-recovery', len(captures)
         # A short, session-specific fixture persona leaves room for recovery
-        # history beneath the unchanged 32 KiB operator ceiling. The complete
+        # history beneath the 64 KiB operator ceiling. The complete
         # production tool catalog and memory assembly remain in use.
         persona = roster.parent / 'personas' / (prefix + '.md')
         persona.parent.mkdir(exist_ok=True)

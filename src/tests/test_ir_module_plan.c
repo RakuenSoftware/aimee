@@ -202,6 +202,24 @@ char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSO
    return NULL;
 }
 
+/* The IR renderer has no exploration owner and no task-specific requirements. */
+char *kb_client_memory_assemble_typed_context_requirements_json(const char *query,
+                                                                const cJSON *context_limits,
+                                                                const char *requirements)
+{
+   assert(!requirements);
+   return kb_client_memory_assemble_typed_context_json(query, context_limits);
+}
+int policy_prepare_exploration(const cJSON *offer, const char *session, const char *workspace,
+                               const char *project)
+{
+   (void)offer;
+   (void)session;
+   (void)workspace;
+   (void)project;
+   return 0;
+}
+
 /* Typed-facts gate stub (typed_facts feature added this call to ingress_preinject.c;
  * the test link needs the symbol). Off -> the builder's facts path stays inert. */
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,

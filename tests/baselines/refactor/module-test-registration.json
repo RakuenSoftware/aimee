@@ -524,6 +524,36 @@
       "test": "src/tests/test_learning_bundle.c"
     },
     {
+      "ctest": false,
+      "make": false,
+      "module": "memory",
+      "test": "tests/eval/memory_mr05_coverage_cases.json"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "memory",
+      "test": "tests/eval/memory_mr09/baseline-policy.json"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "memory",
+      "test": "tests/eval/memory_mr09/code-navigation-pilot.json"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "memory",
+      "test": "tests/eval/memory_mr09/diversity-policy.json"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "memory",
+      "test": "tests/eval/memory_mr09/diversity-v2-policy.json"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "module-runtime",

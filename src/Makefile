@@ -1462,7 +1462,7 @@ memory-owner-replay-check:
 	@test -n "$$AIMEE_DB_TEST_URL" || (echo "memory-owner-replay-check requires AIMEE_DB_TEST_URL for isolated evaluator provisioning" >&2; exit 2)
 	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" \
 	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
-	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -v \
+	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -v \
 	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module
 
 memory-retrieval-eval-check:

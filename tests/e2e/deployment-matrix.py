@@ -621,6 +621,42 @@ def typed_source_version_gate(kb, check):
         raw = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()
         return result.get('selection_digest') == 'sha256:' + hashlib.sha256(raw).hexdigest()
     try:
+        # Coverage requires an available dense arm as well as the lexical hit.
+        # Fresh installations have no active generation. Initialize it through
+        # the real owner, including this fixture's exact assertion revision.
+        # The ordinary fixture bearer remains service-scoped. Only the local
+        # disposable instance owner may run cross-scope index maintenance.
+        service_token = kb.env['AIMEE_KB_API_BEARER_TOKEN']
+        def install_bearer(token):
+            command('docker', 'exec', '-i', '-u', '1000',
+                    '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1', kb.application,
+                    'aimee-kb', '--bootstrap-vault-stdin',
+                    data='AIMEE_KB_API_BEARER_TOKEN=' + token + '\0')
+            command('docker', 'restart', kb.application)
+            deadline = time.monotonic() + 120
+            while command('docker', 'inspect', '--format', '{{.State.Health.Status}}', kb.application) != 'healthy':
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('typed fixture owner restart did not become healthy')
+                time.sleep(1)
+            kb.env['AIMEE_KB_API_BEARER_TOKEN'] = token
+        try:
+            install_bearer(secrets.token_hex(32))
+            deadline = time.monotonic() + 180
+            while True:
+                code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
+                    version=key, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
+                check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
+                      and not indexed.get('failed', 0))
+                if indexed.get('ready') is True:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('typed fixture indexing did not become ready')
+                time.sleep(1)
+            code, activated = kb.kb_request('/v1/actions/memory.reembed_cutover', dict(scope='all'))
+            check('Typed fixture activates its verified embedding generation', code == 200 and
+                  activated.get('status') == 'ok')
+        finally:
+            install_bearer(service_token)
         code, before = call()
         source = selected(before).get('source_version', {})
         expected = dict(schema_version=1, **{k:fixture[k] for k in ('owner_id','record_id','record_revision')})
@@ -1202,7 +1238,7 @@ def main():
     # A missing operator cap silently skips the deployment-ceiling regressions.
     # Every release topology must exercise this boundary in the actual process.
     if not env.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
-        env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=32768))
+        env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=65536))
     for name in ('AIMEE_APPLICATION_IMAGE', 'AIMEE_POSTGRES_IMAGE', 'AIMEE_EMBEDDER_IMAGE'):
         if not env.get(name):
             parser.error(name + ' must name the candidate image')

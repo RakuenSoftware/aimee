@@ -515,6 +515,10 @@ BEGIN
   GRANT EXECUTE ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   ALTER FUNCTION kb_subject_erasure_complete(TEXT,TEXT,BIGINT)
     OWNER TO aimee_kb_privacy_erasure;
+  -- A repeat application above revokes the definer's own EXECUTE ACL too.
+  -- Restore only the internal calls; the runtime cannot call require_owners.
+  GRANT EXECUTE ON FUNCTION kb_subject_erasure_require_owners(TEXT),
+    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_privacy_erasure;
   ALTER FUNCTION kb_memory_retention_reap(INTEGER)
     OWNER TO aimee_kb_privacy_erasure;
   ALTER FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER)

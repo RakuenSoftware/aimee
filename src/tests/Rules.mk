@@ -1599,7 +1599,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 
 # agents.json secret-serialization test split out of test_agent.c (2000-line
 # limit). Mirrors unit-test-agent's link line.
-$(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
+$(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/support/agent_admission_stub.o $(OBJDIR)/tests/test_agent_apikey.o \
                      $(OBJDIR)/db1_store_ready.o \
                       $(OBJDIR)/tests/support/role_template_toolset_stub.o \
                       $(OBJDIR)/server/execution_policy_bus.o \
@@ -2801,7 +2801,7 @@ $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integra
 # The three that DO read the store back are gated on store_module_fixture, the
 # convention seven other suites here already use: bring the real module up, or
 # skip saying why.
-$(TESTPREFIX)/unit-test-agent: | $(OBJDIR)/aimee-module
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/support/agent_admission_stub.o | $(OBJDIR)/aimee-module
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/module_commands.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                       $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/store_module_fixture.o $(DB1_CLIENT_OBJS) \

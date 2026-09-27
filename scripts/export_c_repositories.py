@@ -743,6 +743,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/config": {"config", "providers", "memory"},
     "server-go/modules/egress": {"providers", "memory"},
     "server-go/modules/audit": {"memory"},
+    "server-go/modules/execution-policy": {"aimee"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory", "postgres"},

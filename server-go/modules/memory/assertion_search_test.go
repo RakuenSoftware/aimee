@@ -66,7 +66,7 @@ func (e *assertionEgressFixture) Do(_ context.Context, _ uint64, r egress.HTTPRe
 	e.seen = append(e.seen, string(r.Body))
 	dim := e.dim
 	if e.wrong {
-		dim = 3
+		dim++
 	}
 	v := make([]float32, dim)
 	v[0] = 1
@@ -146,12 +146,18 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 		t.Fatal("source version disagrees with the selected owner row", projection)
 	}
 
-	t.Run("bounded selection behind thirty duplicate SQL candidates", func(t *testing.T) {
+	t.Run("bounded selection behind thirty similar SQL candidates", func(t *testing.T) {
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := tx.Exec(ctx, sql, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
 		t.Setenv("AIMEE_MEMORY_SELECTION_POLICY", typedSelectionPolicyVersion)
 		exec(`SAVEPOINT mr09_selector; RESET ROLE`)
 		defer exec(`ROLLBACK TO SAVEPOINT mr09_selector; RELEASE SAVEPOINT mr09_selector`)
 		exec(`INSERT INTO entity_edges(id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,commit_id)
- SELECT 9007199254790000+i,CASE WHEN i=0 THEN 'required-service' ELSE 'duplicate-service' END,'uses','MR09Selector','semantic','world_fact','persistent','A',.8,80,'assertion-search-fixture' FROM generate_series(0,30) i`)
+ SELECT 9007199254790000+i,CASE WHEN i=0 THEN 'required-service' ELSE 'similar-service-'||i::text END,'uses','MR09Selector','semantic','world_fact','persistent','A',.8,80,'assertion-search-fixture' FROM generate_series(0,30) i`)
 		exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version)
  SELECT 'assertion-search-fixture',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version FROM entity_edges WHERE id BETWEEN 9007199254790000 AND 9007199254790030`)
 		exec(`SET LOCAL ROLE aimee_store_runtime`)
