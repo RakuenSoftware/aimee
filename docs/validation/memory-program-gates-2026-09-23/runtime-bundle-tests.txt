@@ -1,0 +1,7 @@
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 0.111s
+
+OK
+build_c_module_runtime_bundle: ok (1 C module(s))
+build_c_module_runtime_bundle: ok (0 C module(s))

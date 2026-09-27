@@ -109,23 +109,50 @@ WHERE t.path<>r.path`
 func (s *postgresDataStore) searchCode(ctx context.Context, project, query string, limit int) (json.RawMessage, error) {
 	vector, serving := "", ""
 	if s.personal != nil && query != "" {
-		bounded, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		budget := 1500 * time.Millisecond
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline)/2 < budget {
+			budget = time.Until(deadline) / 2
+		}
+		bounded, cancel := context.WithTimeout(ctx, budget)
 		vector, serving, _ = s.personal.codeQueryVector(bounded, query)
 		cancel()
 	}
 
-	return s.codeJSON(ctx, `WITH lexical AS MATERIALIZED (
+	run := func(reader *postgresDataStore, dense bool) (json.RawMessage, error) {
+		denseSQL := `SELECT project,path,0::real AS rank FROM user_code_files WHERE false`
+		diagnostics := `'[]'::json`
+		args := []any{project, query, limit, s.graphFusionEnabled()}
+		if dense {
+			args = append(args, vector, serving, codeGenerationPolicy)
+			denseSQL = `SELECT f.project,f.path,1-(v.embedding <=> $5::vector) AS rank
+ FROM user_code_files f JOIN user_code_projects p ON p.name=f.project
+ JOIN user_code_embedding_active a ON a.project=f.project
+ JOIN user_code_embedding_generations g ON g.project=a.project AND g.generation=a.generation
+ JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=a.generation
+ WHERE ($1='' OR f.project=$1) AND g.serving_id=$6 AND g.policy=$7 AND g.state='active'
+ AND g.validated_watermark=p.generation AND v.content_fingerprint=f.fingerprint
+ AND CASE WHEN vector_dims(v.embedding)=vector_dims($5::vector)
+ THEN 1-(v.embedding <=> $5::vector)>0.3 ELSE false END
+ ORDER BY rank DESC,f.project,f.path LIMIT 32`
+			diagnostics = `(SELECT COALESCE(json_agg(d),'[]'::json) FROM (
+ SELECT p.name AS project,a.generation AS index_generation,g.identity_state,
+ p.generation AS current_watermark,g.validated_watermark,
+ CASE WHEN a.generation IS NULL THEN 'rebuilding'
+ WHEN g.serving_id<>$6 OR g.policy<>$7 THEN 'identity_mismatch'
+ WHEN g.validated_watermark<>p.generation THEN 'lagging' ELSE 'ready' END AS readiness,
+ 'current_only' AS temporal_coverage
+ FROM user_code_projects p LEFT JOIN user_code_embedding_active a ON a.project=p.name
+ LEFT JOIN user_code_embedding_generations g ON g.project=a.project AND g.generation=a.generation
+ WHERE ($1='' OR p.name=$1) ORDER BY p.name LIMIT 32) d)`
+		}
+		return reader.codeJSON(ctx, `WITH lexical AS MATERIALIZED (
  SELECT project,path,ts_rank_cd(to_tsvector('simple',path||' '||content),plainto_tsquery('simple',$2)) AS rank
  FROM user_code_files WHERE ($1='' OR project=$1) AND $2<>'' AND
  (to_tsvector('simple',path||' '||content) @@ plainto_tsquery('simple',$2)
  OR strpos(lower(path||' '||content),lower($2))>0)
  ORDER BY rank DESC,project,path LIMIT 32
 ), dense AS MATERIALIZED (
- SELECT project,path,1-(embedding <=> NULLIF($5,'')::vector) AS rank FROM user_code_files
- WHERE $5<>'' AND ($1='' OR project=$1) AND embedding_serving=$6 AND embedding_fingerprint=fingerprint
- AND CASE WHEN vector_dims(embedding)=vector_dims(NULLIF($5,'')::vector)
- THEN 1-(embedding <=> NULLIF($5,'')::vector)>0.3 ELSE false END
- ORDER BY rank DESC,project,path LIMIT 32
+ `+denseSQL+`
 ), seeds AS (SELECT * FROM lexical UNION ALL SELECT * FROM dense),
  anchors AS MATERIALIZED (SELECT DISTINCT project,path FROM seeds WHERE $4),
  edges AS (`+codeCallEdges+`), expanded AS (
@@ -146,7 +173,45 @@ func (s *postgresDataStore) searchCode(ctx context.Context, project, query strin
  WHEN EXISTS(SELECT 1 FROM dense d WHERE d.project=f.project AND d.path=f.path) THEN 'vector' ELSE 'graph' END AS source
  FROM ranked r JOIN user_code_files f USING(project,path) JOIN user_code_projects p ON p.name=f.project
  ORDER BY r.direct DESC,r.rank DESC,f.project,f.path LIMIT $3
-) SELECT json_build_object('hits',COALESCE(json_agg(hits),'[]'::json),'results',COALESCE(json_agg(hits),'[]'::json),'status','ok','graph_code_fusion_state',CASE WHEN $4 THEN 'on' ELSE 'off' END)::text FROM hits`, project, query, limit, s.graphFusionEnabled(), vector, serving)
+) SELECT json_build_object('hits',COALESCE(json_agg(hits),'[]'::json),'results',COALESCE(json_agg(hits),'[]'::json),'status','ok','index_generations',`+diagnostics+`,'dense_state',CASE WHEN `+strconv.FormatBool(dense)+` THEN 'query_executed' ELSE 'unavailable' END,'graph_code_fusion_state',CASE WHEN $4 THEN 'on' ELSE 'off' END)::text FROM hits`, args...)
+	}
+	if vector == "" {
+		return run(s, false)
+	}
+	// Isolate optional-index SQL failures from the lexical read and the caller's
+	// transaction. Store-backed calls own a transaction; bound calls own a savepoint.
+	if db, ok := s.db.(store.DB); ok {
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return run(s, false)
+		}
+		bound := *s
+		bound.db = tx
+		raw, queryErr := run(&bound, true)
+		if queryErr == nil {
+			if err = tx.Commit(ctx); err == nil {
+				return raw, nil
+			}
+		}
+		_ = tx.Rollback(context.Background())
+		return run(s, false)
+	}
+	if _, err := s.db.Exec(ctx, `SAVEPOINT code_vectors`); err != nil {
+		return nil, err
+	}
+	raw, queryErr := run(s, true)
+	if queryErr != nil {
+		if _, err := s.db.Exec(ctx, `ROLLBACK TO SAVEPOINT code_vectors`); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.db.Exec(ctx, `RELEASE SAVEPOINT code_vectors`); err != nil {
+		return nil, err
+	}
+	if queryErr != nil {
+		return run(s, false)
+	}
+	return raw, nil
 }
 
 func (s *postgresDataStore) blastCode(ctx context.Context, project, file string) (json.RawMessage, error) {

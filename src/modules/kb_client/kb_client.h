@@ -508,6 +508,9 @@ char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int 
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start);
+/* Ask the Go owner to render within the remaining native context allocation. */
+char *kb_client_memory_recall_native_json(const char *task_hint, int limit_tokens,
+                                          int session_start, size_t native_bytes);
 /* ABI-compatible legacy form; the fusion argument is ignored. The receiving
  * instance applies its own configuration. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
@@ -552,7 +555,14 @@ char *kb_client_memory_assemble_context(const char *task_hint);
 /* Assemble the default temporal-learning context (current semantic assertions,
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
+/* Owned raw owner response; preserve item numbers and projection identity. */
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits);
+char *kb_client_memory_assemble_typed_context_requirements_json(
+    const char *query, const cJSON *context_limits, const char *evidence_requirements_json);
 char *kb_client_memory_assemble_typed_context(const char *query);
+/* Forward the Go owner's budget contract unchanged. The JSON is borrowed. */
+char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
+                                                          const cJSON *context_limits);
 
 /* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
 int kb_client_rules_export_jsonl(const char *path);
@@ -1099,6 +1109,9 @@ char *kb_client_code_graph_node(const char *project, const char *node, int max_r
  * Returns 0 on success and writes to the out pointers (either may be NULL),
  * -1 if kb is unreachable.  Mirrors canonical_index_project_stats(). */
 int kb_client_index_project_stats(const char *project, int *files_out, int *defs_out);
+/* Bounded read with an exact expected generation; Go interprets the response. */
+char *kb_client_index_generation_check(const char *project, const char *generation,
+                                       int *status_out);
 
 /* Language breakdown for one project: writes a JSON array of {lang,count}
  * objects sorted by count desc (up to 8 entries) into buf. Returns 0 on
@@ -1117,5 +1130,8 @@ void kb_client_memory_scope_context_clear(void);
 void kb_client_memory_scope_context_apply(cJSON *req);
 /* Consumes req; optional host file is bounded and sent as unchanged text. */
 char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path);
+
+/* Host-constructed receipt attribution; consumes the request object. */
+char *kb_client_learning_application_json(cJSON *request);
 
 #endif /* DEC_KB_CLIENT_H */

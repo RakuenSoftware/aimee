@@ -242,3 +242,26 @@ void agent_tools_effect_finish(const char *verdict, const char *reason)
    }
    g_effect_authorized = 0;
 }
+
+static agent_tool_action_begin_fn g_action_begin;
+static agent_tool_action_finish_fn g_action_finish;
+void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
+                                       agent_tool_action_finish_fn finish)
+{
+   g_action_begin = begin;
+   g_action_finish = finish;
+}
+int agent_tools_effect_admit(const char *name, cJSON **args, const char *cwd, const char *sid,
+                             int classification)
+{
+   if (g_action_begin &&
+       (known_reversible(name, *args) || external_mutation(name) || !strcmp(name, "read_file")))
+      if (g_action_begin(name, args, cwd, sid, g_effect_authorized) != 0)
+         return -1;
+   agent_tools_effect_propose(name, *args, classification);
+   return agent_tools_effect_validate_and_execute(name, *args, classification);
+}
+char *agent_tools_effect_receipt(const char *verdict, char *result)
+{
+   return g_action_finish ? g_action_finish(verdict, result) : result;
+}

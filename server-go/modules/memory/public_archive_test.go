@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,17 +32,28 @@ func TestArchiveCommandsPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA archive_command_test;
 CREATE FUNCTION archive_command_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
 SET LOCAL search_path TO pg_temp,archive_command_test,public;
-CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',epistemic_kind text DEFAULT 'world_fact',
+CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,key text,content text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',epistemic_kind text DEFAULT 'world_fact',
  scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',confidence double precision DEFAULT 0.8,use_count int DEFAULT 0,
- source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value),valid_from text DEFAULT '',valid_until text DEFAULT '',activation_suppressed int DEFAULT 0);
+ source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value),valid_from text DEFAULT '',valid_until text DEFAULT '',activation_suppressed int DEFAULT 0,activation_sticky_turns bigint DEFAULT 0,activation_cooldown_turns bigint DEFAULT 0,activation_delay_turns bigint DEFAULT 0);
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
 CREATE TEMP TABLE memory_units(id bigserial PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,weight double precision,memory_kind text,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text,confidence double precision);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+-- This command fixture isolates card admission. Registry SQL/replay is tested
+-- against the shipping schema in dependency_registry_test.go.
+CREATE FUNCTION archive_command_test.derived_memory_declare(text,text,jsonb,text) RETURNS bigint LANGUAGE sql AS $$ SELECT jsonb_array_length($3)::bigint $$;
 CREATE TEMP TABLE memory_relations(memory_id bigint,src_entity text,relation text,dst_entity text,fact_text text);
 INSERT INTO memories(key,content,scope_type,scope_value,artifact_ref) VALUES ('common','shared conventions','global','_global','README.md'),('app','project details','project','app','main.go'),('private','secret source','project','private','');
 INSERT INTO memory_scopes VALUES (2,'workspace','team');
 CREATE ROLE memory_archive_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA archive_command_test TO memory_archive_test;
+GRANT SELECT ON memory_collection_owner TO memory_archive_test;
+GRANT UPDATE ON memories TO memory_archive_test;
 GRANT SELECT,INSERT ON memories,memory_scopes,memory_units,memory_lineage,memory_relations TO memory_archive_test;
 GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_units_id_seq TO memory_archive_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
@@ -49,11 +62,16 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	modelCalls := 0
 	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB,
 		settings: func() (map[string]any, error) {
 			return map[string]any{"memory_episode_summaries_enabled": true, "memory_cognify_command": "fixture"}, nil
 		},
 		episodeCommand: func(_ context.Context, command string, input []byte) ([]byte, error) {
+			modelCalls++
+			if strings.Contains(string(input), "ineligible-card-source") {
+				t.Fatal("ineligible source sent to card model", string(input))
+			}
 			if command != "fixture" {
 				t.Fatal(command)
 			}
@@ -75,6 +93,36 @@ SET LOCAL ROLE memory_archive_test;`)
 		t.Helper()
 		data, _ := json.Marshal(args)
 		return runPublicCommand(t, client, verb, string(data))
+	}
+	// Exclude unavailable source states before scope compatibility, capacity and
+	// the external model call. The fixture uses a savepoint to isolate exports.
+	if _, err := tx.Exec(ctx, `SAVEPOINT card_source_eligibility; RESET ROLE;
+ INSERT INTO memories(key,content,source_session,lifecycle_state,activation_suppressed,valid_from,valid_until)
+ SELECT 'card-source-'||name,'ineligible-card-source '||name,'card-eligibility',state,suppressed,starts,ends
+ FROM (VALUES
+ ('future','active',0,(CURRENT_TIMESTAMP+interval '1 hour')::text,''),
+ ('expired','active',0,'',CURRENT_TIMESTAMP::text),
+ ('suppressed','active',1,'',''),
+ ('superseded','superseded',0,'',''),
+ ('archived','archived',0,'',''),
+ ('quarantined','quarantined',0,'',''),
+ ('deleted','deleted',0,'',''),
+ ('revoked','revoked',0,'','')) fixture(name,state,suppressed,starts,ends);
+ SET LOCAL ROLE memory_archive_test;`); err != nil {
+		t.Fatal(err)
+	}
+	callsBefore := modelCalls
+	if r := run("episode_card_generate", map[string]any{"source_session": "card-eligibility", "scope_context": true}); r["kind"] != "not_found" || modelCalls != callsBefore {
+		t.Fatal("empty eligible source set reached model", r, modelCalls, callsBefore)
+	}
+	if _, err := tx.Exec(ctx, `RESET ROLE; INSERT INTO memories(key,content,source_session) VALUES('card-source-current','current allowed card source','card-eligibility'); SET LOCAL ROLE memory_archive_test`); err != nil {
+		t.Fatal(err)
+	}
+	if r := run("episode_card_generate", map[string]any{"source_session": "card-eligibility", "scope_context": true}); r["status"] != "ok" || modelCalls != callsBefore+1 {
+		t.Fatal("eligible card source was not generated", r, modelCalls, callsBefore)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT card_source_eligibility; RELEASE SAVEPOINT card_source_eligibility`); err != nil {
+		t.Fatal(err)
 	}
 	for _, verb := range []string{"episode_cards", "episode_card_generate", "export_jsonl", "decisions_export_jsonl"} {
 		if r := run(verb, map[string]any{}); r["kind"] != "invalid_argument" {
@@ -130,8 +178,60 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err != nil || scope != "app" || strings.Contains(content, "secret") || !strings.Contains(content, "project details") || !strings.Contains(content, "shared conventions") || epistemic != "episode" {
 		t.Fatal(scope, content, epistemic, err)
 	}
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&lineage); err != nil || lineage != 2 {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&lineage); err != nil || lineage != 3 {
 		t.Fatal(lineage, err)
+	}
+	var cardParent int64
+	if err := tx.QueryRow(ctx, `SELECT memory_id FROM memory_units WHERE id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&cardParent); err != nil {
+		t.Fatal(err)
+	}
+	checkActivatedCard := func(want int) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','app',true)`); err != nil {
+			t.Fatal(err)
+		}
+		records, _, _, err := backend.recallActivated(ctx, &ActivationSnapshot{CurrentTurn: 100, Rows: []ActivationRow{}},
+			"m.id=$1", 1, false, false, cardParent)
+		if err != nil || len(records) != want {
+			t.Fatal("activated card input fence", records, want, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE memory_archive_test"); err != nil {
+		t.Fatal(err)
+	}
+	checkActivatedCard(1)
+	if _, err := tx.Exec(ctx, "RESET ROLE"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, mutation string
+		cards          int
+	}{
+		{"new private input", "INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,source_session) SELECT 'L2','fact','new-session-input','additional evidence','project','app',source_session FROM memories WHERE key='app'", 1},
+		{"shared input changed", "UPDATE memories SET record_revision=record_revision+1 WHERE key='common'", 0},
+		{"private input changed", "UPDATE memories SET record_revision=record_revision+1 WHERE key='app'", 1},
+		{"private input revoked", "UPDATE memories SET lifecycle_state='revoked' WHERE key='app'", 1},
+		{"private input expired", "UPDATE memories SET valid_until=(now()-interval '1 second')::text WHERE key='app'", 1},
+		{"private input hidden", "UPDATE memories SET scope_value='private' WHERE key='app'", 1},
+		{"unit changed", fmt.Sprintf("UPDATE memory_units SET unit_text='unobserved text' WHERE id=%d", int64(private["memory_unit_id"].(float64))), 1},
+		{"observation missing", fmt.Sprintf("DELETE FROM memory_lineage WHERE object_type='memory_unit' AND object_id=%d AND source_kind='episode-card-input-v1'", int64(private["memory_unit_id"].(float64))), 1},
+		{"card parent changed", fmt.Sprintf("UPDATE memories SET record_revision=record_revision+1 WHERE id=%d", cardParent), 1},
+	} {
+		if _, err := tx.Exec(ctx, "SAVEPOINT card_input_observation; "+tc.mutation+"; SET LOCAL ROLE memory_archive_test"); err != nil {
+			t.Fatal(err)
+		}
+		checkActivatedCard(0)
+		listed := run("episode_cards", args)
+		cards, ok := listed["cards"].([]any)
+		if listed["status"] != "ok" || !ok || len(cards) != tc.cards {
+			t.Fatal(tc.name, listed)
+		}
+		if record, err := backend.Get(ctx, Scope{Type: "project", Value: "app"}, cardParent); !errors.Is(err, ErrMemoryNotFound) {
+			t.Fatal("canonical card bypassed input fence", tc.name, record, err)
+		}
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT card_input_observation; RELEASE SAVEPOINT card_input_observation"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var links int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_relations r JOIN memory_units u ON u.memory_id=r.memory_id WHERE u.id=$1 AND r.relation='REL_SUMMARISES'`, int64(private["memory_unit_id"].(float64))).Scan(&links); err != nil || links != 2 {

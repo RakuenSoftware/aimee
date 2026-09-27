@@ -1,0 +1,30 @@
+[
+  {
+    "name": "host issues a clean owned worktree binding",
+    "passed": true
+  },
+  {
+    "name": "live typed context is complete with current owner and index",
+    "passed": true
+  },
+  {
+    "name": "experiment raw scan allowance is explicitly zero",
+    "passed": true
+  },
+  {
+    "name": "activated native work records experiment approval without claiming calibration",
+    "passed": true
+  },
+  {
+    "name": "bounded recovery preserves the shared raw scan counter",
+    "passed": true
+  },
+  {
+    "name": "revoked experiment returns new work to observe",
+    "passed": true
+  },
+  {
+    "name": "inside fixture actual process exit zero",
+    "passed": true
+  }
+]

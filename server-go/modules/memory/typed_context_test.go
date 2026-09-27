@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -10,6 +12,245 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestTypedProjectionRendersReviewedProcedureOnce(t *testing.T) {
+	build := func() *typedContextResult {
+		r := newTypedContext(DataRequest{TypedContext: typedTestOptions(t, `{}`)})
+		r.add("observations", typedItem{id: "observed-1", text: "reported", value: map[string]any{"summary": "reported"}})
+		r.add("approved_procedures", typedItem{id: "reviewed-1", text: "do not erase 界", value: map[string]any{
+			"proposal_id": "9007199254740993", "state": "committed", "procedure": "do not erase 界",
+		}})
+		if err := r.finish(); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	r := build()
+	boundary := strings.Index(r.Rendered, `<approved_procedures authority="reviewed" authorization="none">`)
+	if boundary < 0 || strings.Count(r.Rendered, "do not erase 界") != 1 || strings.Contains(r.Rendered[:boundary], "9007199254740993") {
+		t.Fatal("reviewed procedure duplicated or lost trust separation", r.Rendered)
+	}
+	for _, diagnostic := range []string{"budget_tokens", "used_tokens", "enabled", "packing_trace"} {
+		if strings.Contains(r.Rendered, diagnostic) {
+			t.Fatal("response diagnostics leaked into prompt projection", diagnostic)
+		}
+	}
+	if r.RenderedBytes != len(r.Rendered) || r.ProjectionDigest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(r.Rendered))) || r.TokenCountState != "unavailable" || r.ProjectionVersion != 1 {
+		t.Fatal("projection accounting misrepresents bytes or token certainty", r)
+	}
+	if r.Sufficiency != "unknown" || r.Availability != "available" {
+		t.Fatal("nonempty projection claimed task coverage without requirements", r)
+	}
+	if len(r.Retained) != 2 || r.Retained[0] != (typedProjectionRef{Channel: "observations", ID: "observed-1"}) || r.Retained[1] != (typedProjectionRef{Channel: "approved_procedures", ID: "reviewed-1"}) {
+		t.Fatal("projection retained identities mismatch", r.Retained)
+	}
+	if again := build(); again.Rendered != r.Rendered || again.ProjectionDigest != r.ProjectionDigest {
+		t.Fatal("projection is not deterministic", r, again)
+	}
+	legacyChannels, _ := json.Marshal(r.Channels)
+	legacyProcedures, _ := json.Marshal(r.Channels["approved_procedures"].Items)
+	legacy := `<memory_data trust="untrusted" authorization="none">` + string(legacyChannels) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(legacyProcedures) + `</approved_procedures>`
+	t.Logf("same evidence: previous projection %d bytes, current projection %d bytes", len(legacy), r.RenderedBytes)
+	if r.RenderedBytes >= len(legacy) {
+		t.Fatal("projection retained diagnostic or duplicate-procedure overhead")
+	}
+	degraded := newTypedContext(DataRequest{TypedContext: typedTestOptions(t, `{}`)})
+	degraded.fail("observations", "owner unavailable")
+	if err := degraded.finish(); err != nil || degraded.Availability != "degraded" || degraded.Sufficiency != "unknown" {
+		t.Fatal("unavailable retrieval was reported as an empty successful result", degraded, err)
+	}
+}
+
+func TestTypedProjectionExactByteLimits(t *testing.T) {
+	build := func(limit *int) *typedContextResult {
+		cfg := typedTestOptions(t, `{}`)
+		cfg.Flags["working_context"] = true
+		if limit != nil {
+			cfg.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: limit}
+		}
+		r := newTypedContext(DataRequest{TypedContext: cfg})
+		r.add("observations", typedItem{id: "small", text: "small", value: map[string]any{"text": "small 界 constraint"}})
+		r.add("working_context", typedItem{id: "large", text: "x", value: map[string]any{"metadata": strings.Repeat("界\"\\\n", 150)}})
+		if err := r.finish(); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	baseline := build(nil)
+	if len(baseline.Retained) != 2 {
+		t.Fatal(baseline)
+	}
+	for _, limit := range []int{0, 1, 100, 250, baseline.RenderedBytes - 1, baseline.RenderedBytes, baseline.RenderedBytes + 1} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			got := build(&limit)
+			a := got.Accounting
+			if len(got.Rendered) > limit || !utf8.ValidString(got.Rendered) || a.RenderedBytes != len(got.Rendered) || a.MaxContextBytes != limit || a.Boundary != "typed_memory_projection" || a.CountState != "exact" || a.Unit != "utf8_bytes" || a.TokenCountState != "unavailable" || a.Digest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(got.Rendered))) {
+				t.Fatal(got)
+			}
+			if limit < baseline.RenderedBytes && strings.Contains(got.Rendered, "metadata") {
+				t.Fatal("oversized metadata charged as its short summary", got.Rendered)
+			}
+			if limit == 0 && (got.Rendered != "" || len(got.Retained) != 0 || got.Sufficiency != "insufficient" || got.RenderedTokens != 0) {
+				t.Fatal(got)
+			}
+			if limit >= baseline.RenderedBytes && (got.Rendered != baseline.Rendered || len(got.Retained) != 2) {
+				t.Fatal("exact-fit projection was removed", got)
+			}
+			if got.Rendered != "" {
+				projection := map[string][]any{}
+				for _, name := range typedChannelOrder {
+					if name != "approved_procedures" && len(got.Channels[name].Items) > 0 {
+						projection[name] = got.Channels[name].Items
+					}
+				}
+				channels, _ := json.Marshal(projection)
+				procedures, _ := json.Marshal(got.Channels["approved_procedures"].Items)
+				expected := `<memory_data trust="untrusted" authorization="none">` + string(channels) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(procedures) + `</approved_procedures>`
+				if got.Rendered != expected {
+					t.Fatal("cached renderer differs from canonical JSON", got.Rendered, expected)
+				}
+			}
+			again := build(&limit)
+			if again.Rendered != got.Rendered || again.ProjectionDigest != got.ProjectionDigest {
+				t.Fatal("nondeterministic packing")
+			}
+			if got.Rendered != "" && len(got.Retained) > 0 && got.Retained[0].ID != "small" {
+				t.Fatal("small earlier evidence displaced", got)
+			}
+		})
+	}
+}
+
+// Compare every channel combination against the independent standard-library
+// object/array encoder, including reviewed procedures outside the data object.
+func TestTypedProjectionCachedEncodingMatchesCanonicalChannels(t *testing.T) {
+	for mask := 0; mask < 1<<len(typedChannelOrder); mask++ {
+		for _, limit := range []int{0, 200, 500, 2000} {
+			cfg := typedTestOptions(t, `{}`)
+			cfg.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit}
+			for _, name := range typedChannelOrder {
+				cfg.Flags[name] = true
+			}
+			r := newTypedContext(DataRequest{TypedContext: cfg})
+			for i, name := range typedChannelOrder {
+				if mask&(1<<i) == 0 {
+					continue
+				}
+				for j := 0; j < 3; j++ {
+					r.add(name, typedItem{id: fmt.Sprintf("%s:%d", name, j), value: map[string]any{
+						"text": "<untrusted> 界 \"quoted\"\n", "index": j,
+					}})
+				}
+			}
+			if err := r.finish(); err != nil {
+				t.Fatalf("channels=%d limit=%d: %v", mask, limit, err)
+			}
+			projection := map[string][]any{}
+			count := 0
+			for _, name := range typedChannelOrder {
+				rows := r.Channels[name].Items
+				count += len(rows)
+				if name != "approved_procedures" && len(rows) > 0 {
+					projection[name] = rows
+				}
+			}
+			data, _ := json.Marshal(projection)
+			procedures, _ := json.Marshal(r.Channels["approved_procedures"].Items)
+			expected := `<memory_data trust="untrusted" authorization="none">` + string(data) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(procedures) + `</approved_procedures>`
+			if len(expected) > limit && count == 0 {
+				expected = ""
+			}
+			if r.Rendered != expected || len(r.Rendered) > limit || count != len(r.Retained) {
+				t.Fatalf("channels=%d limit=%d: canonical projection or retained identities differ", mask, limit)
+			}
+		}
+	}
+}
+
+func TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval(t *testing.T) {
+	h := NewHandler(nil, WithDataStore(PlacementKB, nil))
+	for _, tc := range []struct{ raw, kind string }{
+		{`{"schema_version":2}`, "unsupported_version"},
+		{`{"schema_version":1,"max_context_bytes":-1}`, "invalid_argument"},
+		{`{"schema_version":1,"max_context_tokens":0}`, "unsupported_mode"},
+		{`{"schema_version":1,"max_request_tokens":1}`, "unsupported_mode"},
+		{`{"schema_version":1,"reserved_response_tokens":0}`, "unsupported_mode"},
+		{`{"schema_version":1,"reserved_tool_tokens":1}`, "unsupported_mode"},
+	} {
+		var args commandArgs
+		if err := json.Unmarshal([]byte(`{"query":"fixture","context_limits":`+tc.raw+`}`), &args); err != nil {
+			t.Fatal(err)
+		}
+		for _, envelope := range []bool{false, true} {
+			encoded, status := handleTypedContextResult(handlerOptions{placement: PlacementKB}, bus.ModuleInvocation{}, args, envelope)
+			if status != bus.ModuleStatusOK {
+				t.Fatal(tc, status)
+			}
+			raw, err := bus.DecodeCommandResult(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err = json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			if envelope {
+				if err = json.Unmarshal([]byte(result["json"].(string)), &result); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if result["kind"] != tc.kind {
+				t.Fatal(tc, result)
+			}
+		}
+	}
+	for _, raw := range []string{`null`, `{"schema_version":1,"max_context_byte":0}`, `{"schema_version":1,"max_context_bytes":"1"}`} {
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"typed-context","query":"fixture","context_limits":`+raw+`}`))
+		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(raw, status)
+		}
+	}
+}
+
+type countedTypedItem struct{ calls *int }
+
+func (item countedTypedItem) MarshalJSON() ([]byte, error) {
+	*item.calls++
+	return []byte(`{"text":"escaped \"value\" 界","metadata":{"key":"value"}}`), nil
+}
+func TestTypedProjectionRepackingHasLinearSerializationWork(t *testing.T) {
+	const count = 512
+	calls := 0
+	cfg := typedTestOptions(t, `{}`)
+	cfg.Flags["working_context"] = true
+	cfg.Budgets["total"] = 0
+	r := newTypedContext(DataRequest{TypedContext: cfg})
+	for i := 0; i < count; i++ {
+		r.add("working_context", typedItem{id: fmt.Sprint(i), value: countedTypedItem{&calls}})
+	}
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != count || len(r.Retained) != 0 {
+		t.Fatalf("packing reserialized candidates: calls=%d candidates=%d retained=%d", calls, count, len(r.Retained))
+	}
+}
+
+func BenchmarkTypedProjectionRepacking(b *testing.B) {
+	cfg := typedOptions(commandArgs{})
+	cfg.Flags["working_context"] = true
+	cfg.Budgets["total"] = 0
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r := newTypedContext(DataRequest{TypedContext: cfg})
+		for n := 0; n < 128; n++ {
+			r.add("working_context", typedItem{id: fmt.Sprint(n), value: map[string]any{"text": "escaped \"value\" 界", "metadata": strings.Repeat("item", 24)}})
+		}
+		if err := r.finish(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
 
 func typedTestOptions(t *testing.T, raw string) *typedContextOptions {
 	t.Helper()
@@ -125,12 +366,78 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 			t.Fatal(name, body)
 		}
 	}
-	if len(got.Channels["observations"].Items) != 2 || strings.Contains(body, "hidden") || strings.Contains(body, "9999-12-31") || !strings.Contains(body, `"proposal_id":9007199254743001`) || !strings.Contains(body, `"stable_id":"9007199254743001"`) || got.RenderedTokens > 4096 || got.Sufficiency != "complete" {
+	if len(got.Channels["observations"].Items) != 2 || strings.Contains(body, "hidden") || strings.Contains(body, "9999-12-31") || !strings.Contains(body, `"proposal_id":9007199254743001`) || !strings.Contains(body, `"stable_id":"9007199254743001"`) || got.RenderedTokens > 4096 || got.Sufficiency != "unknown" || got.Availability != "available" {
 		t.Fatal(body)
 	}
 	if got.Watermark.Observations != "2026-01-02" || got.Watermark.Durable == "9999-12-31" {
 		t.Fatal(got.Watermark)
 	}
+	// Episode and parent versions are independent. Keep all mutations inside a
+	// savepoint so the remaining public boundary checks use the original fixture.
+	exec(`SAVEPOINT typed_episode_versions`)
+	episodeSource := func(result typedContextResult) *typedSourceVersion {
+		t.Helper()
+		for _, ref := range result.Retained {
+			if ref.Channel == "episodes" {
+				if !validTypedSource(ref) || ref.Source == nil || ref.Source.Kind != "memory_episode" || ref.ID != "9007199254743001" {
+					t.Fatal("invalid episode source", ref)
+				}
+				return ref.Source
+			}
+		}
+		t.Fatal("episode source missing", result)
+		return nil
+	}
+	initial := episodeSource(got)
+	var owner, parentRevision, parentID string
+	if err := tx.QueryRow(ctx, `SELECT o.owner_id::text,m.record_revision::text,m.id::text FROM memories m,memory_collection_owner o WHERE m.id=$1 AND o.id=1`, parent).Scan(&owner, &parentRevision, &parentID); err != nil {
+		t.Fatal(err)
+	}
+	if initial.Version.OwnerID != owner || initial.Version.RecordRevision != "1" || initial.MemoryParents[0] != (MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: parentID, RecordRevision: parentRevision}) {
+		t.Fatal("episode does not bind exact canonical parent", initial)
+	}
+	exec(`UPDATE memory_episodes SET episode_text=episode_text,record_revision=900 WHERE id=$1`, large)
+	unchanged, _ := call()
+	if unchanged.SelectionDigest != got.SelectionDigest || episodeSource(unchanged).Version != initial.Version {
+		t.Fatal("no-op or caller-assigned revision changed episode identity")
+	}
+	exec(`UPDATE memory_episodes SET source_session='changed-session' WHERE id=$1`, large)
+	edited, _ := call()
+	if episodeSource(edited).Version.RecordRevision != "2" || episodeSource(edited).MemoryParents[0] != initial.MemoryParents[0] || edited.SelectionDigest == got.SelectionDigest {
+		t.Fatal("independent episode provenance change not versioned")
+	}
+	exec(`UPDATE memories SET content=content||' parent revision' WHERE id=$1`, parent)
+	parentEdited, _ := call()
+	if parentEdited.Rendered != edited.Rendered || parentEdited.SelectionDigest == edited.SelectionDigest || episodeSource(parentEdited).Version != episodeSource(edited).Version || episodeSource(parentEdited).MemoryParents[0].RecordRevision == initial.MemoryParents[0].RecordRevision {
+		t.Fatal("parent change not bound independently of identical episode bytes")
+	}
+	for _, state := range []string{"activation_suppressed=1", "lifecycle_state='superseded'", "valid_until='2000-01-01'"} {
+		exec(`SAVEPOINT typed_episode_hidden`)
+		exec(`UPDATE memories SET `+state+` WHERE id=$1`, parent)
+		ineligible, _ := call()
+		if len(ineligible.Channels["episodes"].Items) != 0 {
+			t.Fatal("typed episode retained an ineligible parent", state)
+		}
+		exec(`ROLLBACK TO SAVEPOINT typed_episode_hidden; RELEASE SAVEPOINT typed_episode_hidden`)
+	}
+	exec(`ROLLBACK TO SAVEPOINT typed_episode_versions; RELEASE SAVEPOINT typed_episode_versions`)
+	// Explicit byte limits survive the public command and scoped data hop.
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 0}
+	got, body = call()
+	if got.Rendered != "" || len(got.Retained) != 0 || got.Accounting.MaxContextBytes != 0 || got.Accounting.CountState != "exact" {
+		t.Fatal(body)
+	}
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 300}
+	got, body = call()
+	if got.RenderedBytes > 300 || got.Accounting.MaxContextBytes != 300 || got.Accounting.Boundary != "typed_memory_projection" {
+		t.Fatal(body)
+	}
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_tokens": 1}
+	_, body = call()
+	if !strings.Contains(body, `"kind":"unsupported_mode"`) {
+		t.Fatal(body)
+	}
+	delete(args, "context_limits")
 	// Missing host context admits only the global learning row, not local/private outputs.
 	delete(args, "project")
 	got, body = call()
@@ -154,13 +461,13 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	// A failed channel rolls back to its savepoint without erasing other channels.
 	exec(`SAVEPOINT typed_denied; RESET ROLE; REVOKE SELECT(action_json) ON learning_proposals FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	got, body = call()
-	if got.Channels["approved_procedures"].Status != "degraded" || got.Sufficiency != "partial" || len(got.Channels["observations"].Items) != 2 || len(got.Channels["episodes"].Items) != 1 {
+	if got.Channels["approved_procedures"].Status != "degraded" || got.Sufficiency != "unknown" || got.Availability != "degraded" || len(got.Channels["observations"].Items) != 2 || len(got.Channels["episodes"].Items) != 1 {
 		t.Fatal(body)
 	}
 	exec(`ROLLBACK TO SAVEPOINT typed_denied; RELEASE SAVEPOINT typed_denied`)
 	exec(`SAVEPOINT typed_watermark_denied; RESET ROLE; REVOKE SELECT(refreshed_at) ON learning_observations FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	got, body = call()
-	if got.Watermark.Status != "unavailable" || got.Sufficiency != "partial" {
+	if got.Watermark.Status != "unavailable" || got.Sufficiency != "unknown" || got.Availability != "degraded" {
 		t.Fatal(body)
 	}
 	exec(`ROLLBACK TO SAVEPOINT typed_watermark_denied; RELEASE SAVEPOINT typed_watermark_denied`)

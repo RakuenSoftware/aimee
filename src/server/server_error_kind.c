@@ -19,6 +19,15 @@ void server_error_kind_register_http_status_provider(server_error_http_status_pr
    g_http_status_provider = provider;
 }
 
+int server_error_kind_http_status(const char *kind)
+{
+   uint32_t status = 0;
+   if (g_http_status_provider && g_http_status_provider(kind, &status) == 0 && status >= 400u &&
+       status <= 599u)
+      return (int)status;
+   return 0;
+}
+
 void server_error_kind_apply(cJSON *resp, const char *kind)
 {
    if (!resp)
@@ -29,9 +38,8 @@ void server_error_kind_apply(cJSON *resp, const char *kind)
       cJSON_AddStringToObject(resp, "kind", kind);
 
    cJSON_DeleteItemFromObjectCaseSensitive(resp, "http_status");
-   uint32_t http_status = 0;
-   if (g_http_status_provider && g_http_status_provider(kind, &http_status) == 0 &&
-       http_status >= 400u && http_status <= 599u)
+   int http_status = server_error_kind_http_status(kind);
+   if (http_status)
       cJSON_AddNumberToObject(resp, "http_status", (double)http_status);
 }
 

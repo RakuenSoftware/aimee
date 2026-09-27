@@ -204,3 +204,30 @@ func TestAgentModelBoundsOutput(t *testing.T) {
 		t.Fatal("oversized request reached subprocess", err)
 	}
 }
+
+func TestQAUnanswerableKeepsGoldOutOfReader(t *testing.T) {
+	schema, command := moduleEvaluationFixture(t)
+	sample := strings.Replace(longmemSample, "question-1", "question_abs", 1)
+	sample = strings.Replace(sample, `"question":`, `"answer":"GOLD_CANARY","question":`, 1)
+	var output bytes.Buffer
+	calls := 0
+	model := func(_ context.Context, system, prompt string, _ int) (modelReply, error) {
+		calls++
+		if system == answerSystem {
+			if strings.Contains(prompt, "GOLD_CANARY") || strings.Contains(prompt, "Unanswerable from") {
+				t.Fatal("gold leaked into reader")
+			}
+			return modelReply{Response: "Unknown"}, nil
+		}
+		if !strings.Contains(prompt, "Unanswerable from supplied history") {
+			t.Fatal("unanswerable judge not selected")
+		}
+		return modelReply{Response: `{"score":1}`}, nil
+	}
+	if err := runDatasetQA(context.Background(), schema, 3, datasetFile(t, "["+sample+"]"), "longmemeval-qa", 0, command, "", "json", "", "", qaOptions{10, 2000, 5, false, model}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || !strings.Contains(output.String(), `"unanswerable_abstained":1`) || !strings.Contains(output.String(), `"abstention_precision":1`) {
+		t.Fatal(output.String())
+	}
+}

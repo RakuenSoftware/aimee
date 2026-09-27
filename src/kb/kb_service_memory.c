@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_service_memory.c: aimee-kb dispatch handlers for the memory.*
  * RPC family (find_facts, list, get, briefing, context_block,
  * entity_profile, entity_edges, search_graph, get_episode, ask,
@@ -29,33 +30,6 @@ int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
 
-static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(int limit),
-                                              const char *err_msg)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-   cJSON *resp = fn(limit);
-   if (!resp)
-      return kb_send_error(fd, err_msg);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-int kb_handle_session_briefing_commitments(int fd, cJSON *req)
-{
-   return kb_handle_session_briefing_section(fd, req,
-                                             db2_kb_service_session_briefing_commitments_json,
-                                             "failed to render session-briefing commitments");
-}
-
-int kb_handle_session_briefing_directives(int fd, cJSON *req)
-{
-   return kb_handle_session_briefing_section(fd, req,
-                                             db2_kb_service_session_briefing_directives_json,
-                                             "failed to render session-briefing directives");
-}
-
 /* Auditable-correctness P1: record one per-turn retrieval_event keyed by the
  * caller-visible turn_id, listing the int64 memory rows surfaced into the turn.
  * The emission decision (the kb_evidence_emit_enabled flag) is made server-side
@@ -64,39 +38,41 @@ int kb_handle_session_briefing_directives(int fd, cJSON *req)
  * Returns {status:ok, retrieval_event_id} on success. */
 int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
 {
-   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
-   cJSON *role_j = cJSON_GetObjectItemCaseSensitive(req, "role");
-   cJSON *fp_j = cJSON_GetObjectItemCaseSensitive(req, "query_fingerprint");
-   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_ids");
-   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
-      return kb_send_error(fd, "evidence.emit_retrieval_event requires turn_id");
-   const char *role =
-       cJSON_IsString(role_j) && role_j->valuestring[0] ? role_j->valuestring : "Recall";
-   const char *fp = cJSON_IsString(fp_j) ? fp_j->valuestring : "";
-
-   int n = cJSON_IsArray(ids_j) ? cJSON_GetArraySize(ids_j) : 0;
-   int64_t *ids = NULL;
-   int n_ids = 0;
-   if (n > 0)
+   cJSON *args = cJSON_Duplicate(req, 1), *plan = NULL;
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "operation");
+   cJSON_AddStringToObject(args, "operation", "legacy-exposure-plan");
+   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &plan);
+   cJSON_Delete(args);
+   if (dispatched != 1 || strcmp(jo_str(plan, "status", ""), "ok"))
    {
-      ids = (int64_t *)calloc((size_t)n, sizeof(int64_t));
-      if (!ids)
-         return kb_send_error(fd, "out of memory");
-      for (int i = 0; i < n; i++)
+      cJSON_Delete(plan);
+      return kb_send_error(fd, "memory exposure owner unavailable or invalid identifiers");
+   }
+   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(plan, "surfaced_ids");
+   int n = cJSON_GetArraySize(ids_j);
+   int64_t *ids = n > 0 ? calloc((size_t)n, sizeof(*ids)) : NULL;
+   if (n > 0 && !ids)
+   {
+      cJSON_Delete(plan);
+      return kb_send_error(fd, "out of memory");
+   }
+   for (int i = 0; i < n; i++)
+   {
+      if (!jo_read_i64_exact(cJSON_GetArrayItem(ids_j, i), &ids[i]))
       {
-         cJSON *e = cJSON_GetArrayItem(ids_j, i);
-         if (cJSON_IsNumber(e) && e->valuedouble > 0)
-            ids[n_ids++] = (int64_t)e->valuedouble;
+         free(ids);
+         cJSON_Delete(plan);
+         return kb_send_error(fd, "invalid owner identifier envelope");
       }
    }
-
    char ev_id[64] = "";
-   int rc = db2_demotion_retrieval_event_write_turn(turn_j->valuestring, fp, role, ids, n_ids,
-                                                    ev_id, sizeof(ev_id));
+   int rc = db2_demotion_retrieval_event_write_turn(
+       jo_str(plan, "turn_id", ""), jo_str(plan, "query_fingerprint", ""),
+       jo_str(plan, "role", "Recall"), ids, n, ev_id, sizeof(ev_id));
    free(ids);
+   cJSON_Delete(plan);
    if (rc != 0)
       return kb_send_error(fd, "failed to write retrieval_event");
-
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
@@ -278,15 +254,23 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
       for (int i = 0; sources && i < n; i++)
       {
          cJSON *e = cJSON_GetArrayItem(ids, i);
-         if (!cJSON_IsNumber(e) || e->valuedouble <= 0)
+         int64_t id;
+         if (!jo_read_i64_exact(e, &id))
+         {
+            cJSON *unknown = cJSON_CreateObject();
+            cJSON_AddStringToObject(unknown, "identity_state", "unavailable");
+            cJSON_AddStringToObject(unknown, "reason",
+                                    "stored source identity is not an exact integer");
+            cJSON_AddBoolToObject(unknown, "present", 0);
+            cJSON_AddBoolToObject(unknown, "error", 1);
+            cJSON_AddItemToArray(sources, unknown);
             continue;
-         /* Same cast the emit writer (kb_handle_evidence_emit_retrieval_event)
-          * used to store the id, so the round-trip is lossless for the values
-          * actually persisted. */
-         int64_t id = (int64_t)e->valuedouble;
+         }
+         if (id <= 0)
+            continue;
          cJSON *record_args = cJSON_CreateObject(), *record_reply = NULL;
          cJSON_AddStringToObject(record_args, "operation", "record");
-         cJSON_AddNumberToObject(record_args, "id", (double)id);
+         cJSON_AddItemToObject(record_args, "id", jo_i64_value_exact(id));
          int fetched =
              aimee_module_commands_dispatch_internal("memory.runtime", record_args, &record_reply);
          cJSON_Delete(record_args);
@@ -299,7 +283,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          const char *kind = jo_cstr(record, "kind"), *source = jo_cstr(record, "source_session"),
                     *version = jo_cstr(record, "updated_at");
          cJSON *src = cJSON_CreateObject();
-         cJSON_AddNumberToObject(src, "id", (double)id);
+         cJSON_AddItemToObject(src, "id", jo_i64_value_exact(id));
          cJSON_AddStringToObject(src, "kind", kind);
          cJSON_AddStringToObject(src, "source", source);
          cJSON_AddStringToObject(src, "version", version); /* live/current version */
@@ -320,7 +304,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
             {
                cJSON *it = cJSON_GetArrayItem(items, j);
                cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
-               if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+               int64_t item_id;
+               if (jo_read_i64_exact(iid, &item_id) && item_id == id)
                {
                   cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
                   if (cJSON_IsString(v) && v->valuestring)

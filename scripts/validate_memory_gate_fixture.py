@@ -40,7 +40,7 @@ def main() -> int:
     if missing:
         raise SystemExit(f"missing temporal/contradiction cases: {missing}")
     for row in cases:
-        if row.get("context_sufficiency") not in {"COMPLETE", "PARTIAL", "INSUFFICIENT"}:
+        if row.get("context_sufficiency") not in {"COMPLETE", "PARTIAL", "INSUFFICIENT", "UNKNOWN"}:
             raise SystemExit(f"invalid sufficiency grade: {row.get('case_id')}")
         if row.get("authority_violations") != 0 or row.get("scope_violations") != 0:
             raise SystemExit(f"authority/scope violation: {row.get('case_id')}")

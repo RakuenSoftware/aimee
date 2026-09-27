@@ -31,6 +31,10 @@ func TestIngressPlanModesScopeAndOptOut(t *testing.T) {
 					if assembly["budget"] != 6144 || assembly["compress"] != false {
 						t.Fatal(assembly)
 					}
+					limits := assembly["context_limits"].(ContextLimits)
+					if limits.SchemaVersion != 1 || limits.MaxContextBytes == nil || *limits.MaxContextBytes != 6144 {
+						t.Fatal("shipping host plan lacks versioned byte limit", limits)
+					}
 				}
 				request.Disabled = true
 				if plan := ingressBegin(state, request); plan["active"] != false {
@@ -61,6 +65,51 @@ func TestIngressPlanBudgetDoesNotConsumeTaskClaim(t *testing.T) {
 	}
 	if plan := ingressBegin(state, r); plan["task"] != false {
 		t.Fatal("duplicate task", plan)
+	}
+}
+
+func TestIngressRequirementsRefreshIndexForEveryAssembly(t *testing.T) {
+	state := &gatewayState{}
+	r := ingressBeginRequest{Query: "fix local resolver", Session: "s", Project: "p",
+		ActiveScope: true, PreviewEnabled: true, Mode: "on", Budget: 1200}
+	if ingressBegin(state, r)["task"] != true || ingressBegin(state, r)["task"] != false {
+		t.Fatal("ordinary related turns must retain first-task suppression")
+	}
+	r.TaskRequirements = true
+	for i := 0; i < 3; i++ {
+		if ingressBegin(state, r)["task"] != true {
+			t.Fatal("explicit obligations reused another assembly's index observation")
+		}
+	}
+	r.Mode = "off"
+	if ingressBegin(state, r)["task"] != false {
+		t.Fatal("explicit obligations bypassed code-context opt-out")
+	}
+	r.Mode, r.Disabled = "on", true
+	if ingressBegin(state, r)["active"] != false {
+		t.Fatal("explicit obligations bypassed request opt-out")
+	}
+	r.Disabled, r.Budget = false, 384
+	if ingressBegin(state, r)["active"] != false {
+		t.Fatal("explicit obligations bypassed the usable-budget check")
+	}
+}
+
+func TestIngressVersionedBudgetBeforeTaskClaim(t *testing.T) {
+	state := &gatewayState{}
+	zero := 0
+	r := ingressBeginRequest{Query: "fix local resolver", Session: "s", Project: "p", ActiveScope: true,
+		PreviewEnabled: true, Mode: "on", Budget: 1200, ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &zero}}
+	if plan := ingressBegin(state, r); plan["active"] != false {
+		t.Fatal("explicit zero inherited the legacy budget", plan)
+	}
+	r.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextTokens: &zero}
+	if plan := ingressBegin(state, r); plan["active"] != false || plan["kind"] != "unsupported_mode" {
+		t.Fatal("unsupported token counting consumed retrieval work", plan)
+	}
+	r.ContextLimits = nil
+	if plan := ingressBegin(state, r); plan["task"] != true {
+		t.Fatal("refused limits consumed the first task claim", plan)
 	}
 }
 

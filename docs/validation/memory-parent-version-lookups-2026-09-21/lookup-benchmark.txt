@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/JBailes/aimee/server-go/modules/memory
+cpu: Intel(R) Core(TM) i7-14700K
+BenchmarkMemoryEvidenceParentLookup/concatenated_parent_id-8         	     518	   2298268 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/concatenated_parent_id-8         	     519	   2446890 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/concatenated_parent_id-8         	     525	   2695828 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/parsed_evidence_id-8             	     655	   1899891 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/parsed_evidence_id-8             	     643	   1868217 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/parsed_evidence_id-8             	     627	   1899109 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/bounded_primary_key_lookup-8     	   23343	     50864 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/bounded_primary_key_lookup-8     	   23688	     50499 ns/op	     344 B/op	       5 allocs/op
+BenchmarkMemoryEvidenceParentLookup/bounded_primary_key_lookup-8     	   23619	     50654 ns/op	     344 B/op	       5 allocs/op
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	14.971s

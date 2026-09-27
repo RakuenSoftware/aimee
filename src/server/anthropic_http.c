@@ -24,6 +24,7 @@
 #include "cJSON.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "wire_fence.h"
+#include "http_retry.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include <aimee/gateway/gateway_policy.h>
@@ -604,12 +605,21 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                          &wire_snapshot, &wire_body) != 0)
    {
-      status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
-                           AIMEE_ERR_REQUEST_PIPELINE);
+      const char *error = wire_fence_last_error();
+      status = write_error(resp, cap, wire_fence_error_http_status(error),
+                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
-   http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
-                                       ag->timeout_ms, extra[0] ? extra : NULL);
+   http_status =
+       wire_fence_post(url, auth, wire_body.data, wire_body.len, &response, ag->timeout_ms,
+                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
+   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      const char *error = wire_fence_last_error();
+      status = write_error(resp, cap, wire_fence_error_http_status(error),
+                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
+      goto cleanup;
+   }
 
    /* THE GATEWAY SAFETY NET. Until now nothing called this, so a reduced payload
     * the provider rejected tripped no breaker and repeated on every later turn.
@@ -1017,6 +1027,17 @@ static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
    return sse_parser_feed(&c->parser, data, len, anthropic_relay_line_cb, c);
 }
 
+static void messages_stream_pipeline_error(server_http_sse_event_emit emit, void *ctx)
+{
+   const char *error = wire_fence_last_error();
+   char frame[256];
+   snprintf(frame, sizeof(frame),
+            "{\"type\":\"error\",\"error\":{\"type\":\"%s\",\"message\":\"%s\"}}",
+            wire_fence_error_type(error), error);
+   if (emit)
+      emit(ctx, "error", frame);
+}
+
 /* P2c buffered-replay streaming: fetch the upstream reply to completion, police the
  * parsed struct, and replay it as a well-formed Anthropic SSE sequence. Used when
  * gateway_prevent_subagents is on, or the primary speaks the OpenAI Responses wire
@@ -1036,8 +1057,19 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
    parsed_response_t parsed;
    int raw_responses = responses_wire;
    memset(&parsed, 0, sizeof(parsed));
-   buf_status = agent_http_post_bytes(url, auth, prov_body, prov_body_len, &buf_resp,
-                                      ag->timeout_ms, extra[0] ? extra : NULL);
+   wire_fence_route_t wire_route = responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
+                                   : driver && driver->name && !strcmp(driver->name, "anthropic")
+                                       ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                       : WIRE_FENCE_OPENAI_CHAT;
+   buf_status =
+       wire_fence_post(url, auth, prov_body, prov_body_len, &buf_resp, ag->timeout_ms,
+                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
+   if (buf_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      messages_stream_pipeline_error(emit, ctx);
+      free(buf_resp);
+      return;
+   }
    if (buf_status == 200 && buf_resp)
    {
       if (raw_responses)
@@ -1143,9 +1175,19 @@ static int messages_stream_native_relay(const char *url, const char *auth, const
    anthropic_backend_stream_state_init(&relay.ir_bst);
    relay.emit = emit;
    relay.emit_ctx = ctx;
-   stream_status =
-       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, anthropic_relay_chunk_cb,
-                                    &relay, ag->timeout_ms, extra[0] ? extra : NULL);
+   stream_status = wire_fence_post_stream(
+       url, auth, prov_body, prov_body_len, anthropic_relay_chunk_cb, &relay, ag->timeout_ms,
+       extra[0] ? extra : NULL, ag->provider, ag->model, WIRE_FENCE_ANTHROPIC_MESSAGES);
+   if (stream_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      messages_stream_pipeline_error(emit, ctx);
+      sse_parser_free(&relay.parser);
+      free(relay.data);
+      free(relay.reasoning);
+      if (invalid_frame_out)
+         *invalid_frame_out = 0;
+      return stream_status;
+   }
    relay_flush(&relay);
    if (stream_status != 200)
    {
@@ -1199,9 +1241,15 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
    pc.emit_ctx = ctx;
    pc.msg_id = msg_id;
    pc.model = model;
-   int ir_status = agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb,
-                                                &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   int ir_status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, prov_chunk_cb, &pc,
+                                          ag->timeout_ms, extra[0] ? extra : NULL, ag->provider,
+                                          ag->model, WIRE_FENCE_OPENAI_CHAT);
    sse_parser_free(&pc.parser);
+   if (ir_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      messages_stream_pipeline_error(emit, ctx);
+      return ir_status;
+   }
    /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
     * TURN_STOP was produced), synthesize the closing sequence so the client's
     * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
@@ -1255,10 +1303,16 @@ static int messages_stream_xlate(const char *url, const char *auth, const void *
 
    sse_parser_init(&pc.parser);
    pc.xl = xl;
-   int xlate_status =
-       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb, &pc,
-                                    ag->timeout_ms, extra[0] ? extra : NULL);
+   int xlate_status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, prov_chunk_cb,
+                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL,
+                                             ag->provider, ag->model, WIRE_FENCE_OPENAI_CHAT);
    sse_parser_free(&pc.parser);
+   if (xlate_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      messages_stream_pipeline_error(emit, ctx);
+      anthropic_stream_free(xl);
+      return xlate_status;
+   }
 
    anthropic_stream_finish(xl);
 
@@ -1489,12 +1543,13 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                          &wire_snapshot, &wire_body) != 0)
    {
-      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
-      if (xl)
-      {
-         anthropic_stream_finish(xl);
-         anthropic_stream_free(xl);
-      }
+      const char *error = wire_fence_last_error();
+      char frame[256];
+      snprintf(frame, sizeof(frame),
+               "{\"type\":\"error\",\"error\":{\"type\":\"%s\",\"message\":\"%s\"}}",
+               wire_fence_error_type(error), error);
+      emit(ctx, "error", frame);
+      stream_status = wire_fence_error_http_status(error);
       goto cleanup;
    }
    wire_prov_body = (const char *)wire_body.data;

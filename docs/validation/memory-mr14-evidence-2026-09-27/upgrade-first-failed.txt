@@ -1,0 +1,6 @@
+owned topology rolled back
+Traceback (most recent call last):
+  File "/opt/pr2990-mr14-upgrade.py", line 54, in <module>
+    else:raise RuntimeError(key+' candidate health timeout')
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: kb candidate health timeout

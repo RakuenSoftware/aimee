@@ -15,7 +15,7 @@ import (
 // The Go recall owner combines reciprocal ranks (k=60), not the retired C
 // ranker's text-score units. Convert the bounded kernel bonus to one rank arm's
 // units. This policy is opt-in and is not a claim of historical rank-order parity.
-const pageRankRecallPolicy = "rrf60-pagerank-v1"
+const pageRankRecallPolicy = nativePriorPolicy
 const recallRankK = 60.0
 
 type pageRankConfig struct {
@@ -121,18 +121,22 @@ func (s *postgresDataStore) planRecall(req DataRequest) (DataRequest, error) {
 // One hop over eligible endpoints only. Relation filtering and endpoint
 // visibility precede the work cap, so hidden links cannot spend its budget.
 func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
-	if len(base) == 0 || len(base) >= pageRankCandidateCap {
+	if len(base) == 0 {
 		return base, nil
 	}
 	ids := make([]int64, 0, len(base))
 	seen := map[int64]bool{}
 	for _, r := range base {
-		ids = append(ids, r.ID)
+		if len(ids) < pageRankCandidateCap {
+			ids = append(ids, r.ID)
+		}
 		seen[r.ID] = true
 	}
+	neighbors := []Record{}
 	relations, _ := json.Marshal(req.pageRankConfig.request.Relations)
-	rows, err := s.db.Query(ctx, `WITH visible AS NOT MATERIALIZED (`+graphVisible+`)
- SELECT n.id,n.scope_type,n.scope_value,n.tier,n.kind,n.key,n.content,n.confidence
+	rows, err := s.db.Query(ctx, `WITH visible AS NOT MATERIALIZED (`+graphVisibleSQL(true)+`)
+ SELECT n.id,n.scope_type,n.scope_value,n.tier,n.kind,n.key,n.content,n.confidence,
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),n.record_revision::text
  FROM memory_links l JOIN visible a ON a.id=l.source_id JOIN visible b ON b.id=l.target_id
  JOIN visible n ON n.id=CASE WHEN l.source_id=ANY($9::text::bigint[]) THEN l.target_id ELSE l.source_id END
  WHERE (l.source_id=ANY($9::text::bigint[]) OR l.target_id=ANY($9::text::bigint[]))
@@ -152,17 +156,27 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 			return nil, errors.New("memory: PageRank neighbor graph exceeds work budget")
 		}
 		var r Record
-		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence); err != nil {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		r.currentRead = true
+		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			return nil, err
 		}
-		if !seen[r.ID] && len(base) < pageRankCandidateCap {
+		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
+		if !r.Version.validFor(r.ID) {
+			return nil, errors.New("memory: invalid PageRank neighbor version")
+		}
+		if !seen[r.ID] && len(neighbors) < pageRankCandidateCap/2 {
 			seen[r.ID] = true
 			// A link-only candidate has no lexical or semantic rank-arm contribution.
-			base = append(base, r)
+			neighbors = append(neighbors, r)
 			req.lanes.add([]Record{r}, laneGraph)
 		}
 	}
-	return base, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	recordRetrievalArm(ctx, "graph", retrievalArmObservation{State: "available", Reason: "independent_pagerank_neighbor_pool", Candidates: len(neighbors), Quota: pageRankCandidateCap / 2, IndexReadiness: "eligible_current_endpoints"})
+	return fairPageRankPool(ctx, base, neighbors), nil
 }
 
 func (s *postgresDataStore) rerankPageRank(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
@@ -205,15 +219,33 @@ func (s *postgresDataStore) rerankPageRank(ctx context.Context, req DataRequest,
 		r.retrievalScore += r.pageRankBonus
 		out = append(out, r)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if !exact {
-			a, b := recallScopeRank(out[i], req), recallScopeRank(out[j], req)
-			if a != b {
-				return a < b
-			}
+	// Scope priority remains the existing hard ordering stratum. Priors cannot
+	// move a global candidate into a higher-priority project stratum.
+	if !exact {
+		sort.SliceStable(out, func(i, j int) bool { return recallScopeRank(out[i], req) < recallScopeRank(out[j], req) })
+	}
+	ranked := make([]Record, 0, len(out))
+	for start := 0; start < len(out); {
+		end := start + 1
+		for end < len(out) && (exact || recallScopeRank(out[start], req) == recallScopeRank(out[end], req)) {
+			end++
 		}
-		return out[i].retrievalScore > out[j].retrievalScore
-	})
+		ranked = append(ranked, boundedPriorOrder(out[start:end], nativePriorRankDisplacement)...)
+		start = end
+	}
+	out = ranked
+	for i := range out {
+		if rankingTraceEnabled(ctx) {
+			r := &out[i]
+			recordRankingStep(ctx, r, "pagerank", rankingContribution{Arm: "retrieval_base", Value: r.retrievalBase}, rankingContribution{Arm: "pagerank", Value: r.pageRankBonus})
+			step := &r.rankingSteps[len(r.rankingSteps)-1]
+			step.PriorPolicy = nativePriorPolicy
+			step.BaseRank = r.priorBaseRank
+			step.FinalRank = r.priorFinalRank
+			step.MaxRankDisplacement = nativePriorRankDisplacement
+			captureRankingCandidate(ctx, *r, "candidate")
+		}
+	}
 	measured.ElapsedMS = float64(time.Since(start)) / float64(time.Millisecond)
 	measured.recall = true
 	s.recordPageRankSample(measured)

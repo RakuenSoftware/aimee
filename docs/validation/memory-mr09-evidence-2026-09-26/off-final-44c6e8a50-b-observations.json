@@ -1,0 +1,134 @@
+[
+  {
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 4.325442171015311,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "a602633a-e582-3d98-ba49-b0585a5b19f4"
+  },
+  {
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 4.102804674010258,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "57bdeff7-14cc-5322-cb03-aec06432ad52"
+  },
+  {
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 4.048948554031085,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "deb11325-b16a-e23c-3526-d51a8fd59938"
+  },
+  {
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 4.163845300965477,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "15a45c5c-625e-a1f2-baf7-496f56d77054"
+  },
+  {
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.9193259210442193,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "6d4d156b-df3b-f339-188d-7159c4cf61d9"
+  },
+  {
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 4.08201504900353,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "fd108760-6c9f-dce3-9534-e68eec25726b"
+  },
+  {
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 4.268606377998367,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "1f3eaa08-02cd-b4ec-2c8b-9a78e5dba30a"
+  },
+  {
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 4.155466197989881,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "f2f93fce-e6cd-b410-58cb-d2ee463e4e60"
+  },
+  {
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 4.271875716978684,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "06e587f5-4852-5c60-efc7-69abb05a50e3"
+  },
+  {
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 4.140174522995949,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "21899489-0379-de33-5f47-343e692228e7"
+  },
+  {
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 4.052282092976384,
+    "completed": true,
+    "provider_calls": 1,
+    "provider": {
+      "bytes": 33440,
+      "messages": 2
+    },
+    "session": "ffecc636-1014-11d7-c39a-e0693bc2b866"
+  }
+]

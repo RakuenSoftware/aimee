@@ -1,0 +1,41 @@
+PASS Legacy query current eligibility before limits: top_l2_facts
+PASS Legacy query current eligibility before limits: list_session_scope_priority
+PASS Legacy query current eligibility before limits: list_session_scope_priority_like
+PASS Legacy query current eligibility before limits: search_facts_patterns_by_keyword
+PASS Legacy query current eligibility before limits: load_eval_corpus
+PASS Historical eligibility and explicit scope before limit 64
+PASS Historical eligibility and explicit scope before limit 3
+PASS History treats wildcard characters as literal identity
+Iteration 0
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback
+Iteration 1
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+FAIL Preview preserves large summary ID and canonical parent revision
+{"http_status": 200, "status": "ok", "kind": null, "memories": [{"source_version": {"record_kind": "memory_summary", "version": {"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "9007199516763458", "record_revision": "2"}, "memory_parents": [{"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "21", "record_revision": "1"}], "memory_parent_state": "observed"}, "id": "21", "key": "preview-source-fc2af8a4a9bd4e8c8eb65ffccc8f2d86-headline", "tier": "L2", "kind": "fact", "headline": "canonical content", "content": "canonical content", "score": 1, "score_text": "1.000", "preview": "canonical content"}, {"source_version": {"record_kind": "memory_record", "version": {"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "22", "record_revision": "1"}, "memory_parent_state": "observed"}, "id": "22", "key": "preview-source-fc2af8a4a9bd4e8c8eb65ffccc8f2d86-fallback", "tier": "L2", "kind": "fact", "headline": "", "content": "fallback content", "score": 1, "score_text": "1.000", "preview": "fallback content"}], "projection": {"schema_version": 1, "projection_digest": "sha256:a8066b1c52624bd10c59cb1d515736249641b38d15c3a80b397e2e8c5d131bb9", "selection_digest": "sha256:7c47824429b5a991155316305b958229f1d23087befb8cefc5a255ac1bb59105", "rendered_bytes": 278, "retained_items": [{"channel": "memory_previews", "stable_id": "9007199516763458", "source_version": {"record_kind": "memory_summary", "version": {"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "9007199516763458", "record_revision": "2"}, "memory_parents": [{"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "21", "record_revision": "1"}], "memory_parent_state": "observed"}}, {"channel": "memory_previews", "stable_id": "22", "source_version": {"record_kind": "memory_record", "version": {"schema_version": 1, "owner_id": "1ec86e36-2573-4a0d-bbbe-ae6fe111cf1d", "record_id": "22", "record_revision": "1"}, "memory_parent_state": "observed"}}], "source_version_state": "record_versions_observed"}}
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+  File "/opt/pr2990-literal-history/tests/e2e/deployment-matrix.py", line 235, in preview_source_version_gate
+    check('Preview preserves large summary ID and canonical parent revision', summary.get('record_kind') == 'memory_summary' and
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          summary.get('version') == dict(schema_version=1, owner_id=fixture['owner_id'], record_id=str(summary_id), record_revision='1') and
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          summary.get('memory_parents') == [dict(schema_version=1, owner_id=fixture['owner_id'], record_id=fixture['parent_id'], record_revision=fixture['parent_revision'])])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<stdin>", line 16, in check
+RuntimeError: Preview preserves large summary ID and canonical parent revision

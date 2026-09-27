@@ -982,11 +982,20 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       hooks_ensure_cwd_worktree(&state, sid, target_cwd);
    int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
                                             target_cwd, msg, sizeof(msg), client_non_git);
+   session_state_save(&state, sid);
+
+   if (rc != 2 && hook_identity == 1)
+   {
+      const char *attempt =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool_use_id"));
+      if (!attempt || !attempt[0])
+         attempt = request_id;
+      if (policy_check_session_tool(sid, tool_name, tool_input, attempt, msg, sizeof(msg)) != 0)
+         rc = 2;
+   }
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
    workspace_turn_unbind_active();
    cJSON_Delete(input);
-
-   session_state_save(&state, sid);
 
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent

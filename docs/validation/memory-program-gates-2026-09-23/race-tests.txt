@@ -1,0 +1,4 @@
+ok  	github.com/JBailes/aimee/server-go/modules/memory	133.639s
+?   	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-bus-probe	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-eval	1.092s
+?   	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-seed	[no test files]

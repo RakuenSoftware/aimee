@@ -1,0 +1,14 @@
+[
+  {
+    "name": "owned retry session created",
+    "passed": true
+  },
+  {
+    "name": "before controlled native provider selected",
+    "passed": true
+  },
+  {
+    "name": "before host emits durable attempt identity",
+    "passed": false
+  }
+]

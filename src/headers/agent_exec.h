@@ -120,12 +120,17 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
  * provider-health fault. */
 #define AGENT_RC_AT_LIMIT (-2)
 
+/* Context assembly refused before the next provider request. Terminal for
+ * routing/fallback and not a provider-health failure. */
+#define AGENT_RC_CONTEXT_REFUSED (-3)
+
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.
  * Acquires the agent's slot, runs the turn (use_tools -> the tool loop
  * agent_execute_with_tools_for_role, else a plain completion agent_execute),
  * releases, and records success/failure health. Returns 0 on success,
- * AGENT_RC_AT_LIMIT if the agent was at its ceiling (NO health recorded), or -1 on
+ * AGENT_RC_AT_LIMIT at its ceiling or AGENT_RC_CONTEXT_REFUSED on a context
+ * refusal (neither records a provider health failure), or -1 on
  * a run failure (health recorded). Agent RESOLUTION (by name/role/route),
  * retry/fallback loops, write_capable, and outcome/feedback/cache logging stay in
  * the callers — only the model turn itself goes through here.
@@ -214,6 +219,13 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context);
 
+/* Returns NULL on refusal and copies the owner diagnostic into error.
+ * Callers must stop dispatch; neither the original prompt nor stale context
+ * is an admissible replacement. The caller owns the returned text. */
+char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
+                                       const char *role, const char *custom_prompt,
+                                       int skip_kb_context, char *error, size_t error_len);
+
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context);
 void agent_print_context(const agent_config_t *cfg);
@@ -235,7 +247,28 @@ void agent_trace_log(int plan_id, int turn, const char *direction, const char *c
 int agent_estimate_confidence(const char *response_text);
 int policy_check_tool(const char *tool_name, const char *side_effect, const char *args_json,
                       char *reason_out, size_t reason_len);
+int policy_check_tool_attempt(const char *tool_name, const char *side_effect, const char *args_json,
+                              const char *attempt_id, char *reason_out, size_t reason_len);
+int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
+                              const char *attempt, char *reason, size_t reason_len);
+char *policy_observe_indexed(const char *tool, const char *arguments, const char *attempt,
+                             const char *result);
+char *policy_expand_exploration(const char *reason, const char *gap, const char *outcome);
+void policy_complete_exploration_turn(int turn);
+int policy_bind_session_exploration(const char *session);
+char *policy_annotate_indexed(const char *tool, const char *arguments, const char *attempt,
+                              char *result);
 int policy_load(void);
+void policy_action_attempt(const char *attempt);
+int policy_action_inherit(const char *session);
+int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
+                               char *reason, size_t reason_len);
+int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
+                        int authorized);
+char *policy_action_finish(const char *verdict, char *result);
+struct cJSON;
+int policy_prepare_exploration(const struct cJSON *offer, const char *session,
+                               const char *workspace, const char *project);
 
 /* Metrics, introspection, manifests, contract */
 void agent_write_metrics(void);
@@ -386,6 +419,22 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
 int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
                           size_t body_len, char **response_buf, int timeout_ms,
                           const char *extra_headers);
+/* Per-call send guard. Acquisition runs after connection setup and request
+ * construction, immediately before the first request write. Release runs on
+ * both refusal and write completion, before reading a provider response. Nested
+ * ordinary HTTP requests never inherit this guard. */
+typedef struct agent_http_send_guard
+{
+   void *context;
+   int (*acquire)(void *context);
+   void (*release)(void *context, int write_status);
+   /* Optional acquisition + write budget, starting before acquire. The
+    * response retains the caller's original request deadline. */
+   int send_timeout_ms;
+} agent_http_send_guard_t;
+int agent_http_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, const agent_http_send_guard_t *guard);
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
@@ -407,6 +456,10 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
 int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
                                  size_t body_len, agent_http_stream_cb callback, void *userdata,
                                  int timeout_ms, const char *extra_headers);
+int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                         size_t body_len, agent_http_stream_cb callback,
+                                         void *userdata, int timeout_ms, const char *extra_headers,
+                                         const agent_http_send_guard_t *guard);
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms);
 void agent_http_init(void);
 void agent_http_cleanup(void);

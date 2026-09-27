@@ -1,0 +1,42 @@
+[
+  {
+    "name": "scoped dry run covers duplicate and expired assertion",
+    "passed": true
+  },
+  {
+    "name": "dry run has no canonical proposal or job writes",
+    "passed": true
+  },
+  {
+    "name": "hidden and expired peers excluded from duplicate cluster",
+    "passed": true
+  },
+  {
+    "name": "bounded first page exposes resume",
+    "passed": true
+  },
+  {
+    "name": "resume completes remaining retained records",
+    "passed": true
+  },
+  {
+    "name": "unknown model actions rejected",
+    "passed": true
+  },
+  {
+    "name": "normal run only admits version-bound review proposals",
+    "passed": true
+  },
+  {
+    "name": "retry reuses job and proposal identities",
+    "passed": true
+  },
+  {
+    "name": "rejected finding is suppressed without canonical changes",
+    "passed": true
+  },
+  {
+    "name": "compiled CLI dry-run parity",
+    "passed": false
+  }
+]

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -61,6 +63,21 @@ class CompareTargetsTest(unittest.TestCase):
         path = self.dir / name
         path.write_text(json.dumps(payload))
         return path
+
+    def test_verifier_preserves_undefined_derived_metrics(self) -> None:
+        payload = _payload("aimee", ["CORRECT"])
+        payload["summary"]["derived"] = {
+            "factoid_recall": 1.0,
+            "abstention_precision": None,
+            "false_abstention_rate": 0.0,
+        }
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            report = verify_file(self._file("null-metric.json", payload))
+        self.assertIn("factoid_recall=1.000", output.getvalue())
+        self.assertIn("abstention_precision=undefined", output.getvalue())
+        self.assertIn("false_abstention_rate=0.000", output.getvalue())
+        self.assertIsNone(report["payload"]["summary"]["derived"]["abstention_precision"])
 
     def test_groups_targets_and_sorts_by_accuracy(self) -> None:
         f_lo = self._file("msc_model_only.json", _payload("model_only", ["WRONG", "WRONG", "CORRECT"]))

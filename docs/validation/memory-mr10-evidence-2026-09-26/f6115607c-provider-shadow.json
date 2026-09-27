@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "name": "provider fixture session created",
+      "passed": true
+    },
+    {
+      "name": "provider fixture route selected",
+      "passed": true
+    },
+    {
+      "name": "shadow positive control delivers transient identity context",
+      "passed": false
+    },
+    {
+      "name": "native turn completes through the actual provider boundary",
+      "passed": false
+    }
+  ],
+  "captures": [],
+  "observations": [
+    {
+      "payload_sha256": "3480a9416c3f1a115caecf992b644db51e72acb1157d37df21f909303d5ad379",
+      "payload_bytes": 32026,
+      "fixture_presence": {
+        "user/task_state": false,
+        "user/constraint": false,
+        "user/transient_probe": false,
+        "user/durable_probe": true,
+        "kb/task_state": false,
+        "kb/constraint": false,
+        "kb/transient_probe": false,
+        "kb/durable_probe": false
+      }
+    }
+  ],
+  "measurement": "synthetic functional provider; not a quality or billing measurement"
+}

@@ -515,3 +515,52 @@ func (s *postgresDataStore) replaceDerivedText(ctx context.Context, id int64, d 
 	}
 	return nil
 }
+
+// A read of a newer parent cannot certify an older generated summary. Only the
+// deterministic producer records this observation, while holding the parent
+// lock from reading its source through finishing the derived replacement.
+func (s *postgresDataStore) pinDerivedSummaryInputs(ctx context.Context, id int64) error {
+	_, err := s.db.Exec(ctx, `UPDATE derived_memory_dependencies d
+ SET input_version=m.record_revision::text,extractor_version='go-derived-text-v1',
+ derivation_policy_version='summary-input-v1'
+ FROM memory_summaries summary,memories m
+ WHERE d.derived_kind='summary' AND d.derived_memory_id=summary.id::text
+ AND d.input_kind='memory' AND d.input_id=m.id::text
+ AND summary.memory_id=m.id AND m.id=$1 AND summary.scope IN ('headline','signals')`, id)
+	if err != nil {
+		return err
+	}
+	// Only these rebuilt summaries acquired new observations. Source mutations
+	// already reconcile descendants; walking that graph again per index row is
+	// both redundant and quadratic during a full rebuild.
+	_, err = s.db.Exec(ctx, `WITH evaluated AS MATERIALIZED (
+ SELECT d.*,knowledge_input_moved(d.input_kind,d.input_id,d.input_version,d.source_hash,
+ d.derivation_policy_version,d.derived_kind) AS moved
+ FROM derived_memory_dependencies d JOIN memory_summaries summary ON d.derived_kind='summary'
+ AND d.derived_memory_id=summary.id::text WHERE summary.memory_id=$1 AND summary.scope IN ('headline','signals')
+ ), fresh AS (
+ SELECT derived_kind,derived_memory_id,
+ CASE WHEN bool_or(moved AND contribution='essential') THEN 'unsupported'
+ WHEN bool_or(moved) THEN 'stale' ELSE 'fresh' END AS status,
+ COALESCE((array_agg(input_kind ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_kind,
+ COALESCE((array_agg(input_id ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_id
+ FROM evaluated GROUP BY derived_kind,derived_memory_id
+ ) UPDATE derived_memory_registry r SET current_status=f.status,stale_cause_kind=f.cause_kind,
+ stale_cause_id=f.cause_id,updated_at=pg_now_text() FROM fresh f
+ WHERE r.derived_kind=f.derived_kind AND r.derived_memory_id=f.derived_memory_id`, id)
+	return err
+}
+
+// Unknown or additional input contracts cannot be treated as a fresh one-parent
+// summary. Consumers may still use the independently eligible canonical text.
+func summaryCurrentInputsSQL(summary, parent string) string {
+	return `EXISTS(SELECT 1 FROM derived_memory_dependencies summary_input
+ WHERE summary_input.derived_kind='summary' AND summary_input.derived_memory_id=` + summary + `.id::text
+ AND summary_input.input_kind='memory' AND summary_input.input_id=` + parent + `.id::text
+ AND summary_input.input_version=` + parent + `.record_revision::text
+ AND summary_input.extractor_version='go-derived-text-v1'
+ AND summary_input.derivation_policy_version='summary-input-v1')
+ AND NOT EXISTS(SELECT 1 FROM derived_memory_dependencies other_input
+ WHERE other_input.derived_kind='summary' AND other_input.derived_memory_id=` + summary + `.id::text
+ AND (other_input.input_kind<>'memory' OR other_input.input_id<>` + parent + `.id::text))`
+}

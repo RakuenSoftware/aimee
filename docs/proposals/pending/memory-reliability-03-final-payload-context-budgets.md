@@ -1,16 +1,30 @@
 # MR-03: Final-payload context budgets and protected projections
 
-- **State:** Proposed
+- **State:** Complete — implementation and acceptance validated 2026-09-24
 - **Priority:** P0: context correctness
 - **Owner:** Go memory projection, with host/provider assembly and economizer accounting
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for eligible candidates
 - **Delivery:** Three implementation slices
 
-## Problem and intended result
+## Problem and implemented result
 
-Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
+Go owns minimal typed projection, complete byte accounting, whole-row outer
+packing and retained-source coverage. Reviewed procedures render once with their
+trust class. Hard rules reserve space before optional evidence. Final provider
+requests obey caller/operator byte ceilings after serialization and on fallback;
+unsupported token accounting refuses explicitly rather than claiming compliance.
 
-Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
+User/system/developer messages survive folding unchanged. Generated history
+remains assistant evidence, with safe tail placement and exact protected-content
+validation. Native candidates pass shrink and tool-pair admission before use.
+Automatic observations cannot create hard rules or overwrite their content.
+External CLI backends refuse declared hard limits when final serialization is
+unobservable. Native HTTP adapters retain normal complete-body admission.
+
+The [final closeout](../../validation/memory-mr03-closeout-2026-09-24.md) and
+[six-gate checklist](memory-reliability-03-closeout.md) record passing acceptance
+and capability boundaries. The original contract below remains unchanged; exact
+provider tokenization and priced transform authorization are not claimed.
 
 ## Existing integration points
 
@@ -38,6 +52,12 @@ No implicit “always include the first result” exception is permitted. Missin
 ## Protected-content transformation
 
 Preserve user constraints, negation, numerical bounds, deadlines, required identifiers and authority-bearing instructions through any condensation step. Bind transformed bytes to the request/attempt and require existing economizer admission before applying a cost-saving transform. Heuristic commitment extraction is a check, not proof of semantic equivalence. Failed validation falls back only if the original still fits; otherwise return an explicit overflow outcome.
+
+[Native refusal propagation](../../validation/memory-context-refusals-2026-09-21.md)
+now stops initial native dispatch and refresh on explicit Go recall refusal and
+preserves that result through routing/fallback. MCP retains non-success statuses
+before guidance. HTTP ingress omission paths and full protected-context rendering
+remain acceptance work.
 
 ## Implementation slices
 

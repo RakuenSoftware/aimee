@@ -1,0 +1,5 @@
+--- FAIL: TestMutationMaintenanceAuthority (0.08s)
+    mutation_maintenance_test.go:58: automatic maintenance altered 14 protected rows: <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.086s
+FAIL

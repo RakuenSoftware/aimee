@@ -1,0 +1,6 @@
+{
+  "log_sha256": "698069a1c799639d74cb46e8287d246c3979a20ef47256d9a2107016ca9d4d11",
+  "outcomes": [
+    "test_cli_v1_subcommands: all passed"
+  ]
+}

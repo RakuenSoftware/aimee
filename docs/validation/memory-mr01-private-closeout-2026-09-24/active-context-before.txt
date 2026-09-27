@@ -1,0 +1,9 @@
+--- FAIL: TestPersonalVectorPrivacyAndMutationRegression (0.30s)
+    personal_vectors_test.go:207: private active context lacks observed version: {Version:1 Text:# Recall
+        ## Active Context
+        - unrelated astronomy — unrelated
+        
+         Bytes:64 Limit:32768 Digest:sha256:a5f838e57127f8936057298115505d9509f4c453295ebba953b5b240cfead142 SourceDigest: Reminders:[] Sources:[] SelectionDigest:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945} <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.315s
+FAIL

@@ -97,6 +97,24 @@ var schemaHistory = []struct {
 	// cosmetic edits and blocker substitution cannot reset the progress budget.
 	{24, "schema_convergence_blocker_sets.sql"},
 	{25, "schema_client_devices.sql"},
+	{26, "schema_personal_memory_changes.sql"},
+	{27, "schema_personal_memory_versions.sql"},
+	{28, "schema_personal_memory_acl.sql"},
+	{29, "schema_personal_memory_authority.sql"},
+	{30, "schema_personal_memory_proposals.sql"},
+	{31, "schema_personal_memory_retries.sql"},
+	{32, "schema_personal_memory_retirement_retries.sql"},
+	{33, "schema_personal_memory_creation_retries.sql"},
+	{34, "schema_personal_memory_send_guards.sql"},
+	{35, "schema_personal_memory_send_guard_completion.sql"},
+	{36, "schema_personal_memory_erasure.sql"},
+	{37, "schema_subject_erasure_receipts.sql"},
+	{38, "schema_session_exploration.sql"},
+	{39, "schema_personal_memory_horizon_index.sql"},
+	{40, "schema_personal_embedding_cutover.sql"},
+	{41, "schema_task_projection.sql"},
+	{42, "schema_governed_actions.sql"},
+	{43, "schema_clean_retry.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

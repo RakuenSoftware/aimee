@@ -1,0 +1,150 @@
+== 1. wire vectors: C codec ==
+build/obj/tests/unit-test-bus-wire
+test_bus_wire:
+  vectors: 28 rows (16 negative), both directions, 9 geometry-checked,
+           all 8 shapes covered
+  pattern matrix: 24 cases + payload bound both sides
+  combination matrix: 72 accepted, 696 refused across 5 validator axes
+  unconstrained fields: kind/handles/seq/ts pass through by design
+  rejections: 17 malformed shapes + 64 truncations, encoder agrees
+  placement bounds: slot, arena, header overlap, and 64-bit wrap
+  checked decode: refuses out-of-bounds frames and null arguments
+test_bus_wire: OK
+== 1. wire vectors: Go codec ==
+ok  	github.com/JBailes/aimee/server-go/bus	(cached)
+== 1. migrated Go module handlers ==
+ok  	github.com/JBailes/aimee/server-go/modules/aimee	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/cmd/peerprobe	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/families	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/peer	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/peerwire	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/process	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/audit	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/benchmarks	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/control-web	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/control-web/policy	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/db2	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/delegates	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/delegates/cmd/aimee-delegate-egress	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/economizer	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/economizer/cmd/aimee-economizer-probe	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/egress	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/execution-policy	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/git	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/governance	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/kb	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/kb-synthesis	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/learning	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/mcp	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/memory	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-bus-probe	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-eval	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/memory/cmd/aimee-memory-seed	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/module-runtime/identity	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/module-runtime/supervisor	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/observability	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/postgres	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/postgres/storage	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/postgres/storage/cmd/aimee-postgres-storage	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/providers	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/providers/vaultresource	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/response-composition	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/roundtable	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/roundtable/panel	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/routing	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/runtime-web	(cached)
+?   	github.com/JBailes/aimee/server-go/modules/runtime-web/policy	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/sandbox	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/server	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/skills	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/tools	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/workflows	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/workspace	(cached)
+ok  	github.com/JBailes/aimee/server-go/cmd/aimee-module	(cached)
+check_go_module_runtime_bundle: ok (26 Go, 1 C)
+== 2. cross-language interop: C host <-> Go client ==
+make: Nothing to be done for 'bus-conformance-host'.
+=== RUN   TestCrossLanguageConformance
+    conformance_test.go:81: attached: handle=1 slot=256 cap=16
+    conformance_test.go:112: notification round-trip Go->C->Go ok
+    conformance_test.go:125: echo request/reply Go<->C ok
+    conformance_test.go:138: capability_absent ok
+    conformance_test.go:150: cancel delivered to the server ok
+    conformance_test.go:209: reaped-client recovery ok: a fresh client works after the first was reaped
+--- PASS: TestCrossLanguageConformance (0.02s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/bus	(cached)
+== 2. module runtime interop: C host/core caller <-> Go module process ==
+make: 'build/obj/tests/unit-test-module-runtime' is up to date.
+module runtime (Go process): dispatch, fragmented payloads, deadline, and cancellation passed
+== 2. migrated module interop: C core caller <-> shipped Go processes ==
+2026/09/27 08:57:34 memory egress unavailable: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+2026/09/27 08:57:34 memory module: placement=server storage=postgres
+2026/09/27 08:57:34 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:34 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:34 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:34 module stage 6 (kind 5894) failed with status 4: no detail
+memory: Go caller/Go process decision parity passed
+2026/09/27 08:57:39 memory egress unavailable: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+2026/09/27 08:57:39 memory module: placement=server storage=postgres
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 6 (kind 5894) failed with status 4: no detail
+memory: Go caller/Go process decision parity passed
+memory: authenticated host/Go process gateway plans and ingress policy passed
+memory: authenticated host/Go process gateway plans and ingress policy passed
+memory: terminated provider unavailable; restarted Go owner passed host/client parity
+module runtime (memory): Go caller/Go handler wire parity passed
+2026/09/27 08:57:39 memory egress unavailable: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+2026/09/27 08:57:39 memory module: placement=kb storage=postgres
+2026/09/27 08:57:39 shared relation invalidation pending: aimee: the postgres module is not answering: module call failed with status 1
+2026/09/27 08:57:39 shared memory indexing pending: aimee: the postgres module is not answering: module call failed with status 1
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:39 module stage 6 (kind 5894) failed with status 4: no detail
+memory: Go caller/Go process decision parity passed
+2026/09/27 08:57:44 memory egress unavailable: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+2026/09/27 08:57:44 memory module: placement=kb storage=postgres
+2026/09/27 08:57:44 shared relation invalidation pending: aimee: the postgres module is not answering: module call failed with status 1
+2026/09/27 08:57:44 shared memory indexing pending: aimee: the postgres module is not answering: module call failed with status 1
+2026/09/27 08:57:44 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:44 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:44 module stage 8 (kind 5896) failed with status 4: no detail
+2026/09/27 08:57:44 module stage 6 (kind 5894) failed with status 4: no detail
+memory: Go caller/Go process decision parity passed
+memory: authenticated host/Go process gateway plans and ingress policy passed
+memory: authenticated host/Go process gateway plans and ingress policy passed
+memory: terminated provider unavailable; restarted Go owner passed host/client parity
+module runtime (memory): Go caller/Go handler wire parity passed
+module runtime (learning): C caller/Go handler wire parity passed
+module runtime (routing): C caller/Go handler wire parity passed
+2026/09/27 08:57:44 delegate execution unavailable: stat agent registry: stat /tmp/aimee-module-runtime-C7spo6/agents.json: no such file or directory
+module runtime (delegates): C caller/Go handler wire parity passed
+module runtime (tools): C caller/Go handler wire parity passed
+module runtime (workspace): C caller/Go handler wire parity passed
+2026/09/27 08:57:44 egress: could not attach outbound principal 71: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+module runtime (git): C caller/Go handler wire parity passed
+module runtime (skills): C caller/Go handler wire parity passed
+module runtime (response-composition): C caller/Go handler wire parity passed
+module runtime (execution-policy): C caller/Go handler wire parity passed
+module runtime (governance): C caller/Go handler wire parity passed
+2026/09/27 08:57:44 roundtable review stage unavailable: bus: attach denied: denied by grant policy: no grant admits this principal, or the grant's executable= does not match the running binary
+module runtime (roundtable): C caller/Go handler wire parity passed
+module runtime (kb-synthesis): C caller/Go handler wire parity passed
+module runtime (runtime-web): C caller/Go handler wire parity passed
+module runtime (control-web): C caller/Go handler wire parity passed
+module runtime (benchmarks): C caller/Go handler wire parity passed
+module runtime (sandbox): C caller/Go handler wire parity passed
+module runtime (economizer): C caller/Go handler wire parity passed
+2026/09/27 08:57:45 postgres: health probe failed: postgres: AIMEE_STORE_URL is unset
+2026/09/27 08:57:45 module stage 1 (kind 11265) failed with status 5: no detail
+module runtime (postgres): C caller/Go handler wire parity passed
+module runtime (egress): C caller/Go handler wire parity passed
+module runtime (providers): C caller/Go handler wire parity passed
+module runtime (server): C caller/Go handler wire parity passed
+module runtime (kb): C caller/Go handler wire parity passed
+== 3. single-host (D8) ==
+check_bus_single_host: ok — one host_create, memfd only in the host, Go is client-only
+test_bus_conformance: ok

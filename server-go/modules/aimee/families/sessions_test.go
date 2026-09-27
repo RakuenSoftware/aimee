@@ -73,6 +73,7 @@ type sessDB struct {
 	// ownership probe; those have their own fields so a test can set them
 	// independently.
 	row          []any
+	receiptRow   []any
 	rows         [][]any
 	personaState *int
 	ownedByOther bool
@@ -99,6 +100,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
+		return sessRow{db: d, sql: sql, values: d.receiptRow}
 	case strings.Contains(sql, "SELECT persona_delivery_state"):
 		if d.personaState == nil {
 			return sessRow{db: d, sql: sql}
@@ -314,6 +317,7 @@ func TestSubjectErasureIsBoundAndContentComplete(t *testing.T) {
 
 	db = newSessDB()
 	db.execRows = 2
+	db.receiptRow = []any{`[]`, int64(2)}
 	status, cells = sessCall(t, db, opServerSessionEraseSubject,
 		[]string{"erase-request-0123456789", "person@example.test"})
 	if status != store.StatusOK || len(cells) != 1 || cells[0] != "2" {

@@ -1,0 +1,310 @@
+[
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.8705278980196454,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.821851118002087,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.813625544018578,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.754182641976513,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.6875136219896376,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.622021590010263,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.8377561770030297,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.682220952992793,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.507486831047572,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.643984908994753,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-a",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.936183524027001,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 4.097450543020386,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.8617844770196825,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.716317215003073,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.7183559039840475,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.7383436940144747,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.7496163939940743,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.9199391690199263,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.8842791150091216,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.80461476003984,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.740059812029358,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-a",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.7398439570097253,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.9110225749900565,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.8309577939799055,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.7555116919684224,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.782055160962045,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.700286482984666,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.8585775480023585,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.722690290014725,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.7910221950151026,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.965752186952159,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.8180018350249156,
+    "completed": true
+  },
+  {
+    "label": "on-final-4d0870c70-b",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.6919304390321486,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 0,
+    "warmup": true,
+    "latency_seconds": 3.9878960169735365,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 1,
+    "warmup": true,
+    "latency_seconds": 3.7585855789948255,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 2,
+    "warmup": true,
+    "latency_seconds": 3.730506587016862,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 3,
+    "warmup": false,
+    "latency_seconds": 3.7937736060121097,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 4,
+    "warmup": false,
+    "latency_seconds": 3.8583259240258485,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 5,
+    "warmup": false,
+    "latency_seconds": 3.6183187479618937,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 6,
+    "warmup": false,
+    "latency_seconds": 3.71992688102182,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 7,
+    "warmup": false,
+    "latency_seconds": 3.813989052956458,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 8,
+    "warmup": false,
+    "latency_seconds": 3.6206729729892686,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 9,
+    "warmup": false,
+    "latency_seconds": 3.9101645550108515,
+    "completed": true
+  },
+  {
+    "label": "off-final-4d0870c70-b",
+    "ordinal": 10,
+    "warmup": false,
+    "latency_seconds": 3.672774628037587,
+    "completed": true
+  }
+]

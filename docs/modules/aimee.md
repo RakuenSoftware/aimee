@@ -46,6 +46,9 @@ arbitrary SQL, supplies a database path, or selects an unregistered family name.
 DB1 is PostgreSQL. Domain schemas and migrations live in `server-go/modules/aimee/families`, including
 session, workflow, identity, audit-attribution, and working-memory rows. Migrations are ordered,
 checksummed, owner-scoped, and applied through `postgres`; operators back up DB1 with `pg_dump`.
+The descriptor lists embedded SQL in `go_assets`, separate from JSON event `contracts`.
+Independent module exports copy these files and track them as CMake build dependencies;
+complete ownership validation rejects missing assets and paths outside the module Go directory.
 
 ## Security and privacy
 

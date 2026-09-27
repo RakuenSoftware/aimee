@@ -1,3 +1,4 @@
+#include "wire_fence.h"
 /* server_compute.c: compute-layer handlers (tool.execute, delegate, chat.send_stream) */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -1000,6 +1001,11 @@ void delegate_worker(void *arg)
                   cli_cost_failed = 1;
                }
             }
+            if (!cli_cost_failed && wire_fence_external_backend() != 0)
+            {
+               snprintf(result.error, sizeof(result.error), "%s", wire_fence_last_error());
+               cli_cost_failed = 1;
+            }
             int rc = cli_cost_failed
                          ? -1
                          : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
@@ -1979,7 +1985,7 @@ void delegate_worker(void *arg)
    if (target_agent && leased_cred_name[0])
    {
       failover_reason_t reason = FAILOVER_NONE;
-      if (!result.success)
+      if (rc != AGENT_RC_CONTEXT_REFUSED && !result.success)
          reason = delegate_credentials_classify_failure(target_agent->provider, result.error);
       if (reason != FAILOVER_NONE)
          delegate_credentials_report_failure(leased_principal, target_agent->name, leased_cred_name,

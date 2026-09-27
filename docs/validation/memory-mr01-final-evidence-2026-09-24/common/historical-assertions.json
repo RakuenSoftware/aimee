@@ -1,0 +1,163 @@
+{
+  "active_context_missing": false,
+  "assertions": [
+    {
+      "assertion_id": 50,
+      "version": 1,
+      "subject": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history",
+      "relation": "uses",
+      "object": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-superseded",
+      "assertion_kind": "world_fact",
+      "lifecycle_state": "persistent",
+      "authority_rank": 80,
+      "confidence_class": "A",
+      "confidence": 0.9,
+      "valid_from": "2020-01-01T00:00:00Z",
+      "valid_until": "2020-04-01T00:00:00Z",
+      "asserted_at": "2020-01-01T00:00:00Z",
+      "superseded_at": "",
+      "historical": true,
+      "support_count": 1,
+      "contradiction_count": 0,
+      "evidence": [
+        {
+          "source_kind": "memory",
+          "source_id": "memory:73",
+          "source_span": "",
+          "observed_at": "",
+          "stance": "supports"
+        }
+      ],
+      "retrieval": [
+        {
+          "channel": "lexical",
+          "raw_score": 5.7,
+          "fused_score": 0.032266458495966696,
+          "rank": 1
+        },
+        {
+          "channel": "vector",
+          "raw_score": 0.8290201178485153,
+          "fused_score": 0.032266458495966696,
+          "rank": 3
+        }
+      ],
+      "hop_depth": 0,
+      "inclusion_reason": "lexical semantic match after lifecycle, authority, and temporal filters",
+      "stable_id": "50",
+      "rendered": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history uses mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-superseded [HISTORICAL]"
+    },
+    {
+      "assertion_id": 45,
+      "version": 1,
+      "subject": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history",
+      "relation": "uses",
+      "object": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-archived",
+      "assertion_kind": "world_fact",
+      "lifecycle_state": "persistent",
+      "authority_rank": 80,
+      "confidence_class": "A",
+      "confidence": 0.9,
+      "valid_from": "2020-01-01T00:00:00Z",
+      "valid_until": "2020-04-01T00:00:00Z",
+      "asserted_at": "2020-01-01T00:00:00Z",
+      "superseded_at": "",
+      "historical": true,
+      "support_count": 1,
+      "contradiction_count": 0,
+      "evidence": [
+        {
+          "source_kind": "memory",
+          "source_id": "memory:74",
+          "source_span": "",
+          "observed_at": "",
+          "stance": "supports"
+        }
+      ],
+      "retrieval": [
+        {
+          "channel": "lexical",
+          "raw_score": 5.7,
+          "fused_score": 0.032266458495966696,
+          "rank": 3
+        },
+        {
+          "channel": "vector",
+          "raw_score": 0.858922771151231,
+          "fused_score": 0.032266458495966696,
+          "rank": 1
+        }
+      ],
+      "hop_depth": 0,
+      "inclusion_reason": "lexical semantic match after lifecycle, authority, and temporal filters",
+      "stable_id": "45",
+      "rendered": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history uses mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-archived [HISTORICAL]"
+    },
+    {
+      "assertion_id": 46,
+      "version": 1,
+      "subject": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history",
+      "relation": "uses",
+      "object": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-current",
+      "assertion_kind": "world_fact",
+      "lifecycle_state": "persistent",
+      "authority_rank": 80,
+      "confidence_class": "A",
+      "confidence": 0.9,
+      "valid_from": "2020-01-01T00:00:00Z",
+      "valid_until": "2020-04-01T00:00:00Z",
+      "asserted_at": "2020-01-01T00:00:00Z",
+      "superseded_at": "",
+      "historical": true,
+      "support_count": 1,
+      "contradiction_count": 0,
+      "evidence": [
+        {
+          "source_kind": "memory",
+          "source_id": "memory:69",
+          "source_span": "",
+          "observed_at": "",
+          "stance": "supports"
+        }
+      ],
+      "retrieval": [
+        {
+          "channel": "lexical",
+          "raw_score": 5.7,
+          "fused_score": 0.03225806451612903,
+          "rank": 2
+        },
+        {
+          "channel": "vector",
+          "raw_score": 0.831642294873068,
+          "fused_score": 0.03225806451612903,
+          "rank": 2
+        }
+      ],
+      "hop_depth": 0,
+      "inclusion_reason": "lexical semantic match after lifecycle, authority, and temporal filters",
+      "stable_id": "46",
+      "rendered": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-history uses mr01-lanes-d98d7a7f809242f39d600cffa228e254-history-current [HISTORICAL]"
+    }
+  ],
+  "believed_at": "",
+  "candidate_count": 3,
+  "candidate_policy": "assertion-arm-union-v1",
+  "candidate_scope": "independent_arm_union",
+  "channel": "semantic_assertion",
+  "channel_status": "ok",
+  "graph_budget_exhausted": false,
+  "graph_candidates": 0,
+  "graph_expansions": 0,
+  "include_historical": false,
+  "indexed_assertions": 3,
+  "max_hops": 0,
+  "mode": "hybrid_shadow",
+  "shadow_delta": {
+    "lexical_only": 0,
+    "overlap": 3,
+    "vector_only": 0
+  },
+  "status": "ok",
+  "valid_at": "2020-02-01T00:00:00Z"
+}

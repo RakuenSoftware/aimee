@@ -259,8 +259,27 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
       mcp_add_memory_store_property(p);
       cJSON *id = cJSON_AddObjectToObject(p, "id");
-      cJSON_AddStringToObject(id, "type", "integer");
-      cJSON_AddStringToObject(id, "description", "Memory row id to fetch");
+      cJSON_AddItemToObject(id, "oneOf",
+                            cJSON_Parse("[{\"type\":\"integer\",\"minimum\":1},{\"type\":"
+                                        "\"string\",\"pattern\":\"^[1-9][0-9]*$\"}]"));
+      cJSON_AddStringToObject(id, "description",
+                              "Memory row id; use a decimal string to preserve large IDs exactly");
+      cJSON *version = cJSON_AddObjectToObject(p, "include_version");
+      cJSON_AddStringToObject(version, "type", "boolean");
+      cJSON_AddStringToObject(
+          version, "description",
+          "Include the owner/record/revision precondition for corrections in the selected store.");
+      cJSON_AddItemToObject(
+          p, "at_version",
+          cJSON_Parse(
+              "{\"type\":\"object\",\"additionalProperties\":false,"
+              "\"description\":\"For store=user, inspect an exact retained revision. "
+              "Historical content is labelled and still requires a permitted parent.\","
+              "\"properties\":{\"schema_version\":{\"type\":\"integer\",\"const\":1},"
+              "\"owner_id\":{\"type\":\"string\",\"format\":\"uuid\"},"
+              "\"record_id\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"},"
+              "\"record_revision\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}},"
+              "\"required\":[\"schema_version\",\"owner_id\",\"record_id\",\"record_revision\"]}"));
       cJSON *h = cJSON_AddObjectToObject(p, "handle");
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
@@ -295,6 +314,94 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               "List personal local memories by default. Select store=kb for "
                               "active-project, workspace, and shared/global L2 facts.",
                               s));
+   }
+
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      const char *strings[] = {"operation", "session_id",     "task_id", "expected_revision",
+                               "target_id", "preview_digest", NULL};
+      for (int i = 0; strings[i]; i++)
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, strings[i]), "type", "string");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "binding"), "type", "object");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "items"), "type", "array");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "events"), "type", "array");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "claim_index"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "ttl_seconds"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_context_bytes"), "type",
+                              "integer");
+      cJSON *required = cJSON_AddArrayToObject(schema, "required");
+      for (int i = 0; i < 3; i++)
+         cJSON_AddItemToArray(required, cJSON_CreateString(strings[i]));
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new(
+              "task_projection",
+              "Rebuild, get, describe, discard, cleanup_expired, promotion_preview or promote "
+              "disposable state for the active task and owned session. "
+              "Requires expected_revision for changes; hypotheses and plans remain "
+              "non-authoritative.",
+              schema));
+   }
+
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "scope"), "type", "object");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "dry_run"), "type", "boolean");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "cursor"), "type", "string");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_rows"), "type", "integer");
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "max_content_bytes"), "type",
+                              "integer");
+      cJSON_AddItemToArray(cJSON_AddArrayToObject(schema, "required"), cJSON_CreateString("scope"));
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("memory_hygiene",
+                                        "Inspect bounded findings in one explicit shared scope. "
+                                        "Dry runs are read-only; normal runs queue version-bound "
+                                        "review proposals and never auto-apply canonical changes.",
+                                        schema));
+   }
+
+   /* Explicit served views and canonical claim cards share the HTTP/CLI owner. */
+   for (int card = 0; card < 2; card++)
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      cJSON *required = cJSON_AddArrayToObject(schema, "required");
+      if (card)
+      {
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "id"), "type", "string");
+         cJSON_AddItemToArray(required, cJSON_CreateString("id"));
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "expand_evidence"), "type",
+                                 "boolean");
+      }
+      else
+      {
+         const char *strings[] = {"view", "task", "valid_at", "believed_at", NULL};
+         for (int i = 0; strings[i]; i++)
+            cJSON_AddStringToObject(cJSON_AddObjectToObject(props, strings[i]), "type", "string");
+         cJSON_AddItemToArray(required, cJSON_CreateString("view"));
+         cJSON_AddItemToArray(required, cJSON_CreateString("task"));
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "limit"), "type", "integer");
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "context_limits"), "type",
+                                 "object");
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "evidence_requirements"), "type",
+                                 "object");
+      }
+      mcp_add_memory_scope_properties(props);
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new(card ? "memory_claim_card" : "memory_serve",
+                       card ? "Inspect a versioned canonical claim, authorized evidence and "
+                              "governed correction."
+                            : "Serve briefing, active_constraints, current_state, "
+                              "recent_decisions, relevant_context, known_failures, "
+                              "reviewed_procedures, open_contradictions or historical_context for "
+                              "a task. Returns exact projection accounting and explicit gaps.",
+                       schema));
    }
 
    /* memory_briefing */
@@ -1943,7 +2050,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"Personal local memory by default; explicitly select kb for shared knowledge.\"},"
                "\"verb\":{\"type\":\"string\","
                "\"description\":\"Mutation verb: store|update|supersede|forget|affirm|reject\"},"
-               "\"id\":{\"type\":\"integer\","
+               "\"id\":{\"oneOf\":[{\"type\":\"integer\",\"minimum\":1},"
+               "{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}],"
                "\"description\":\"Memory id (required for "
                "update/supersede/forget/affirm/reject)\"},"
                "\"key\":{\"type\":\"string\","
@@ -1956,6 +2064,20 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"description\":\"Kind: fact|rule|decision|preference|... (store, default fact)\"},"
                "\"confidence\":{\"type\":\"number\","
                "\"description\":\"Confidence 0.0-1.0 (store/supersede, default 1.0)\"},"
+               "\"expected_version\":{\"type\":\"object\","
+               "\"description\":\"Exact version from memory_get for update/supersede or "
+               "forget.\","
+               "\"additionalProperties\":false,\"properties\":{"
+               "\"schema_version\":{\"type\":\"integer\",\"const\":1},"
+               "\"owner_id\":{\"type\":\"string\",\"format\":\"uuid\"},"
+               "\"record_id\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"},"
+               "\"record_revision\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}},"
+               "\"required\":[\"schema_version\",\"owner_id\",\"record_id\",\"record_revision\"]},"
+               "\"idempotency_key\":{\"type\":\"string\",\"minLength\":16,\"maxLength\":128,"
+               "\"pattern\":\"^[!-~]+$\",\"description\":\"For user or KB store (without "
+               "expected_version), or update/supersede/forget with expected_version, "
+               "reuse the key for the same admitted request. Returns a durable "
+               "commit receipt without repeating the mutation.\"},"
                "\"reason\":{\"type\":\"string\","
                "\"description\":\"Reason string (reject)\"}},"
                "\"required\":[\"verb\"]}")));

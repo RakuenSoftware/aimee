@@ -9,4 +9,8 @@ typedef int (*server_error_http_status_provider_fn)(const char *kind, uint32_t *
 
 void server_error_kind_register_http_status_provider(server_error_http_status_provider_fn provider);
 
+/* Ask the registered Go status owner. Zero means unavailable/invalid; callers
+ * retain their existing transport-failure fallback. */
+int server_error_kind_http_status(const char *kind);
+
 #endif

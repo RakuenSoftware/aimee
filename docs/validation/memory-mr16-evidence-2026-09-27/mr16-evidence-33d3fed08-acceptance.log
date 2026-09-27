@@ -1,0 +1,14 @@
+PASS owned evidence action session created
+MR16_SESSION d9d1937e-940a-ef16-21ec-2610c9208157
+PASS controlled provider selected
+PASS fresh actual provider request has a durable receipt
+PASS fresh exact provider payload retained controlled procedure
+FAIL memory-bound native read is acknowledged
+FAIL fresh governed model turn completes
+Traceback (most recent call last):
+  File "/tmp/mr16-evidence.py", line 67, in <module>
+    check('fresh governed model turn completes',status==200 and not errors and ordinal==3 and target.read_text()=='fresh-'+head and action)
+  File "/tmp/mr16-evidence.py", line 11, in check
+    if not ok:raise RuntimeError(name)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: fresh governed model turn completes

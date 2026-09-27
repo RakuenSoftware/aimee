@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 func TestRuntimePublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
+		{"assemble_context", `{"budget_bytes":null}`}, {"assemble_context", `{"budget_bytes":-1}`},
+		{"assemble_context", `{"budget_bytes":1.5}`}, {"facts", `{"query":"x","budget_bytes":0}`},
 		{"assemble_context", `{"explain":"yes"}`}, {"assemble_context", `{"explain":null}`}, {"query_edges", `{}`}, {"query_edges", `{"entity":""}`}, {"check_drift", `{"task_id":0}`},
 	} {
 		if r := runPublicCommand(t, client, tt.verb, tt.args); r["kind"] != "invalid_argument" {
@@ -45,15 +48,26 @@ func TestRuntimePublicPostgres(t *testing.T) {
 CREATE FUNCTION runtime_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 CREATE FUNCTION runtime_command_test.aimee_utc_text_timestamptz(t text) RETURNS timestamptz LANGUAGE sql AS $$ SELECT t::timestamptz $$;
 SET LOCAL search_path TO pg_temp,runtime_command_test,public;
-CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
  sensitivity text DEFAULT 'normal',evidence_strength double precision DEFAULT 0.5,observation_count int DEFAULT 1,last_used_at text,
  created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),valid_from text DEFAULT '',valid_until text DEFAULT '');
-CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
-CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE memory_links(id bigint,source_id bigint,target_id bigint,relation text);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
+CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE tasks(id bigint PRIMARY KEY,parent_id bigint,title text);
 INSERT INTO memories(id,key,content) VALUES (1,'release','release the app');
 INSERT INTO memories(id,key,content,scope_type,scope_value) VALUES (2,'common','common conventions','global','_global'),(3,'private','secret project plan','project','private');
@@ -62,8 +76,9 @@ INSERT INTO memory_entities(memory_id,entity) VALUES (1,'app'),(3,'secret');
 INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) SELECT 1,'app','uses','tool-'||i FROM generate_series(1,280) i;
 INSERT INTO tasks(id,parent_id,title) VALUES (1,0,'release app'),(2,1,'update changelog');
 CREATE ROLE memory_runtime_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_runtime_test;
 GRANT USAGE ON SCHEMA runtime_command_test TO memory_runtime_test;
-GRANT SELECT ON memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
+GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies,memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR
@@ -92,6 +107,33 @@ SET LOCAL ROLE memory_runtime_test;`)
 	block := run("assemble_context", `{"scope_context":true,"project":"app"}`)["context"].(string)
 	if !strings.Contains(block, "release the app") || !strings.Contains(block, "common conventions") || strings.Contains(block, "secret") {
 		t.Fatal(block)
+	}
+	for _, cap := range []int{0, len(block) - 1, len(block)} {
+		got := run("assemble_context", fmt.Sprintf(`{"scope_context":true,"project":"app","explain":true,"budget_bytes":%d}`, cap))
+		text := got["context"].(string)
+		plain := run("assemble_context", fmt.Sprintf(`{"scope_context":true,"project":"app","budget_bytes":%d}`, cap))
+		if plain["context"] != text {
+			t.Fatal("diagnostics changed selection", plain, got)
+		}
+		projection := got["native_context"].(map[string]any)
+		if len(text) > cap || projection["text"] != text || projection["max_context_bytes"] != float64(cap) {
+			t.Fatal(got)
+		}
+		selected := 0
+		for _, v := range got["candidates"].([]any) {
+			if v.(map[string]any)["selected"] == true {
+				selected++
+			}
+		}
+		if cap == 0 && (text != "" || selected != 0) {
+			t.Fatal(got)
+		}
+		if cap == len(block) && (text != block || selected != 2) {
+			t.Fatal(got)
+		}
+		if cap == len(block)-1 && selected != 1 {
+			t.Fatal(got)
+		}
 	}
 	explained := run("assemble_context", `{"scope_context":true,"project":"app","explain":true}`)
 	if explained["context"] != block || explained["candidate_scope"] != "returned_rows" || strings.Contains(explained["explain_text"].(string), "secret") {
@@ -129,6 +171,31 @@ SET LOCAL ROLE memory_runtime_test;`)
 				t.Fatal(r)
 			}
 		}
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT legacy_edge_scope; RESET ROLE;
+ INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) VALUES
+ (1,'legacy-scope','uses','allowed-app'),(3,'legacy-scope','uses','private-project');
+ SET LOCAL ROLE memory_runtime_test`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args   string
+		target string
+	}{
+		{`{"entity":"legacy-scope","project":"app"}`, "allowed-app"},
+		{`{"entity":"legacy-scope","project":"app","scope_context":true}`, "allowed-app"},
+		{`{"entity":"legacy-scope","project":"private"}`, "private-project"},
+	} {
+		rows := run("query_edges", tc.args)["edges"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["target"] != tc.target {
+			t.Fatal("legacy graph audience ignored", tc.args, rows)
+		}
+	}
+	if rows := run("query_edges", `{"entity":"legacy-scope","include_all":false}`)["edges"].([]any); len(rows) != 0 {
+		t.Fatal("legacy graph shared audience ignored", rows)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT legacy_edge_scope; RELEASE SAVEPOINT legacy_edge_scope"); err != nil {
+		t.Fatal(err)
 	}
 	for _, tt := range []struct {
 		args    string

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-server-1",
+    "image": "aimee-pr2990:1fac4f35c",
+    "image_id": "sha256:4128001946cc046bac7159e65c856eff6e199c7324e5de386ce8931c28c3281d",
+    "health": "healthy",
+    "optional_flags": [],
+    "clean_retry_enabled": false
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-kb-1",
+    "image": "aimee-pr2990:1fac4f35c",
+    "image_id": "sha256:4128001946cc046bac7159e65c856eff6e199c7324e5de386ce8931c28c3281d",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "image_id": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-store-db-1",
+    "image": "aimee-pr2990-postgres:d0e3c5752",
+    "image_id": "sha256:23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b37fa9db5",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "image_id": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-store-db-1",
+    "image": "aimee-pr2990-postgres:d0e3c5752",
+    "image_id": "sha256:23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b37fa9db5",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-pr2990-test-pg",
+    "image": "aimee-pr2990-postgres:686b99ea0",
+    "image_id": "sha256:8927f0f4ab4b0cf7f4a5f1d4590f1324fc95da5722fe70e4317e228d37dc8f64",
+    "health": null,
+    "optional_flags": []
+  }
+]

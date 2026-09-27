@@ -1,0 +1,5 @@
+--- FAIL: TestCollectionEmptyRecallInvalidatedPostgres (0.44s)
+    collection_source_test.go:177: collection revalidation true false <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.449s
+FAIL

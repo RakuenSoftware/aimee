@@ -123,9 +123,8 @@ func (s *postgresDataStore) cssConventions(ctx context.Context, project string) 
  COALESCE((SELECT f.source_id FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' ORDER BY f.id DESC LIMIT 1),''),e.asserted_at
  FROM entity_edges e WHERE e.source=$1 AND e.edge_class='semantic'
  AND e.lifecycle_state IN ('persistent','promoted') AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0
- AND NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at='' AND m.id IS NULL)
+ AND `+memoryValiditySQL("e.")+` AND `+memoryStartedAtSQL("e.asserted_at", "CURRENT_TIMESTAMP")+`
+ AND `+currentMemoryEvidenceSQL("e", "", true)+`
  ORDER BY e.relation,e.id LIMIT 64`, project)
 	if err != nil {
 		return nil, err

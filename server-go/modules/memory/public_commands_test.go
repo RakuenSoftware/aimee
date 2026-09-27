@@ -95,6 +95,17 @@ func testPrivateCommandsPreserveEnvelopesAndScope(t *testing.T, named bool) {
 		{"delete", `{"id":41}`, `{"status":"ok","store":"user","id":41,"deleted":true,"destroyed":false}`},
 	} {
 		got := run(test.verb, test.args)
+		if test.verb == "search" {
+			caps, ok := got["retrieval_capabilities"].(map[string]any)
+			if !ok || caps["placement"] != "server" || caps["endpoint"] != "search" {
+				t.Fatal("private capability envelope lost", got)
+			}
+			arms, ok := caps["declared_arms"].(map[string]any)
+			if !ok || arms["graph"] != false || arms["code"] != false {
+				t.Fatal("private scope advertises shared arms", caps)
+			}
+			delete(got, "retrieval_capabilities")
+		}
 		var want map[string]any
 		json.Unmarshal([]byte(test.want), &want)
 		if !reflect.DeepEqual(got, want) {

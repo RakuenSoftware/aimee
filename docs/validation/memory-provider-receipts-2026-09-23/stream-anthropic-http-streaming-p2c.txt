@@ -1,0 +1,12 @@
+test_anthropic_http_streaming_p2c:
+  PASS: streaming_anthropic_police_drops_subagent_tool_use
+  PASS: streaming_anthropic_police_on_no_tool_use_passthrough
+  PASS: streaming_anthropic_policy_on_upstream_error_returns_error
+  PASS: streaming_anthropic_policy_off_is_byte_neutral
+  PASS: streaming_anthropic_partial_drop_preserves_max_tokens
+  PASS: streaming_openai_police_drops_subagent_tool_use
+  PASS: streaming_openai_police_on_no_tool_use_passthrough
+  PASS: streaming_openai_policy_off_is_byte_neutral
+  PASS: streaming_armed_completion_is_provider_neutral
+  PASS: native_completion_followup_reaches_provider_system
+anthropic_http_streaming_p2c: OK

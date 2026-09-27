@@ -223,7 +223,79 @@ static void capture_request_body(int client, int output)
 
 /* The bytes API must reuse the caller's exact pointer+length on every retry.
  * Embedded NUL makes an accidental strlen wrapper observable. */
-static void test_exact_length_body_is_identical_across_retries(void)
+static int retry_admissions;
+static int retry_refused;
+static int64_t first_attempt_finished_ms;
+static int admit_test_retry(void)
+{
+   struct timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   int64_t elapsed = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 - first_attempt_finished_ms;
+   assert(elapsed >= 20); /* gate runs after backoff, not before the source can change */
+   assert(g_progress_calls == 1);
+   retry_admissions++;
+   return retry_refused;
+}
+static void record_first_attempt(void)
+{
+   struct timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   first_attempt_finished_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   g_progress_calls++;
+}
+
+typedef struct
+{
+   int before, after, refuse, guard_acquires, guard_releases;
+} observed_attempts_t;
+static int observed_send_acquire(void *context)
+{
+   observed_attempts_t *state = context;
+   assert(state->before == state->after + 1);
+   assert(state->guard_acquires == state->guard_releases);
+   state->guard_acquires++;
+   return 0;
+}
+static void observed_send_release(void *context, int status)
+{
+   observed_attempts_t *state = context;
+   assert(status == 0 && state->guard_acquires == state->guard_releases + 1);
+   assert(state->before == state->after + 1);
+   state->guard_releases++;
+}
+static int observe_before(void *context, const void *body, size_t length)
+{
+   observed_attempts_t *state = context;
+   assert(body && length > 0);
+   assert(state->before == state->after);
+   state->before++;
+   return state->refuse;
+}
+static void observe_after(void *context, int status, const char *response, size_t length)
+{
+   observed_attempts_t *state = context;
+   assert(state->before == state->after + 1);
+   assert(status == (state->after == 0 ? 500 : 200));
+   assert(response && length == 2 && memcmp(response, "{}", 2) == 0);
+   state->after++;
+}
+static void test_observer_refuses_initial_dispatch(void)
+{
+   observed_attempts_t state = {.refuse = 1};
+   http_retry_observer_t observer = {
+       .context = &state, .before = observe_before, .after = observe_after};
+   char *response = NULL;
+   g_progress_calls = 0;
+   http_set_progress_cb(count_progress);
+   assert(http_retry_post_observed_bytes("http://127.0.0.1:1/x", NULL, "{}", 2, &response, 1000,
+                                         NULL, 3, 1, 1, "test", "model", NULL, NULL,
+                                         &observer) == HTTP_RETRY_ADMISSION_REFUSED);
+   http_set_progress_cb(NULL);
+   assert(state.before == 1 && state.after == 0 && g_progress_calls == 0 && !response);
+   puts("  PASS: missing durable admission refuses the first transport attempt");
+}
+
+static void test_exact_length_body_is_identical_across_retries(int refused)
 {
    int srv = socket(AF_INET, SOCK_STREAM, 0);
    assert(srv >= 0);
@@ -244,7 +316,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
    if (child == 0)
    {
       close(captured[0]);
-      for (int attempt = 0; attempt < 2; attempt++)
+      for (int attempt = 0; attempt < (refused ? 1 : 2); attempt++)
       {
          int client = accept(srv, NULL, NULL);
          assert(client >= 0);
@@ -267,12 +339,31 @@ static void test_exact_length_body_is_identical_across_retries(void)
    snprintf(url, sizeof(url), "http://127.0.0.1:%d/x", ntohs(addr.sin_port));
    const unsigned char expected[] = {'{', '"', 'x', '"', ':', '"', 'a', 0, 'b', '"', '}'};
    char *resp = NULL;
-   assert(http_retry_post_context_bytes(url, NULL, expected, sizeof(expected), &resp, 1000, NULL, 2,
-                                        1, 1, "test", "test-model", NULL) == 200);
+   g_progress_calls = retry_admissions = 0;
+   retry_refused = refused;
+   http_set_progress_cb(record_first_attempt);
+   observed_attempts_t state = {0};
+   agent_http_send_guard_t guard = {.context = &state,
+                                    .acquire = observed_send_acquire,
+                                    .release = observed_send_release,
+                                    .send_timeout_ms = 500};
+   http_retry_observer_t observer = {
+       .context = &state, .before = observe_before, .after = observe_after, .send_guard = &guard};
+   int result = http_retry_post_observed_bytes(url, NULL, expected, sizeof(expected), &resp, 1000,
+                                               NULL, 2, 20, 20, "test", "test-model", NULL,
+                                               admit_test_retry, &observer);
+   assert(state.before == (refused ? 1 : 2) && state.after == state.before);
+   assert(state.guard_acquires == state.before && state.guard_releases == state.before);
+   http_set_progress_cb(NULL);
+   assert(result == (refused ? HTTP_RETRY_ADMISSION_REFUSED : 200));
+   assert(retry_admissions == 1);
+   assert(g_progress_calls == (refused ? 1 : 2));
+   if (refused)
+      assert(resp == NULL); /* previous provider failure cannot masquerade as the refusal */
    free(resp);
    close(srv);
 
-   for (int attempt = 0; attempt < 2; attempt++)
+   for (int attempt = 0; attempt < (refused ? 1 : 2); attempt++)
    {
       uint32_t body_len = 0;
       unsigned char body[sizeof(expected)];
@@ -285,7 +376,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
    int status = 0;
    assert(waitpid(child, &status, 0) == child);
    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-   printf("  PASS: test_exact_length_body_is_identical_across_retries\n");
+   printf("  PASS: frozen retry body and post-backoff admission (refused=%d)\n", refused);
 }
 
 /* --- http_should_retry tests --- */
@@ -293,6 +384,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
 static void test_retryable_status_codes(void)
 {
    /* Network errors are always retryable */
+   assert(http_should_retry(HTTP_RETRY_ADMISSION_REFUSED) == 0);
    assert(http_should_retry(-1) == 1);
    assert(http_should_retry(-999) == 1);
 
@@ -491,7 +583,9 @@ int main(void)
    test_provider_specific_failover_classification();
    test_progress_cb_fires_per_attempt();
    test_stall_caps_retries();
-   test_exact_length_body_is_identical_across_retries();
+   test_observer_refuses_initial_dispatch();
+   test_exact_length_body_is_identical_across_retries(0);
+   test_exact_length_body_is_identical_across_retries(1);
    test_inflight_http_observes_parallel_cancel();
 
    printf("all http_retry tests passed.\n");

@@ -242,7 +242,8 @@ def consumers(path: str) -> frozenset[str]:
     if path == "Dockerfile":
         return KB
     if path == "Dockerfile.postgres" or path in (
-        "scripts/postgres-secure-entrypoint.sh", "scripts/postgres-store-init.sh"
+        "scripts/postgres-secure-entrypoint.sh", "scripts/postgres-store-init.sh",
+        "scripts/postgres-hygiene-role.sql"
     ):
         return POSTGRES
     if path.startswith("server-go/modules/postgres/storage/"):

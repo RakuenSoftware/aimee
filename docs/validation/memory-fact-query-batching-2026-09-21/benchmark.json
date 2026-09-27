@@ -1,0 +1,35 @@
+{
+  "baseline_revision": "f055d212f581abcb8cd8f0d0bd225ccd3bdd36b4",
+  "benchmark": "BenchmarkVersionedFactRecall",
+  "fixture": {
+    "entities": 9,
+    "mentioned_entities": 8,
+    "assertions": 36,
+    "memory_parents": 36,
+    "fact_capacity_bytes": 2048,
+    "non_owner_rls": true
+  },
+  "runs": 3,
+  "before_ns_per_op": [
+    2928344,
+    2999778,
+    2874147
+  ],
+  "after_ns_per_op": [
+    2432698,
+    2543736,
+    2454631
+  ],
+  "before_queries_per_op": 11,
+  "after_queries_per_op": 3,
+  "median_time_reduction_percent": 16.17682212199113,
+  "median_allocated_bytes_before": 207271,
+  "median_allocated_bytes_after": 127438,
+  "allocation_reduction_percent": 38.516242021315094,
+  "scope": "Local Go/PostgreSQL query benchmark; not provider request P95",
+  "implementation_sha256": {
+    "server-go/modules/memory/fact_projection_query.go": "aa2fc9fd767b776654a3e128cd10e96ac4217ce56b90a62071ce212cee0e5c90",
+    "server-go/modules/memory/fact_recall.go": "3995c2aa783aa4b19f679ddca15aca666f8d4d7e13ab907f3259fe98a8b8e6cd",
+    "server-go/modules/memory/fact_recall_test.go": "cb07ffe15b4d1217d5efdf82183baf01a75f72d9cc48389a34d4adf695a1f6b6"
+  }
+}

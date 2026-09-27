@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "events": [
+    {
+      "status": "error",
+      "message": "clean retry requires a native primary turn; compaction and external CLI backends are unsupported"
+    }
+  ]
+}

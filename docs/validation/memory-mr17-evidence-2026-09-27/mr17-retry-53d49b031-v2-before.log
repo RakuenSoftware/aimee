@@ -1,0 +1,11 @@
+PASS owned retry session created
+MR17_SESSION 085982f1-21d4-24cd-a259-8c8223d0013a
+PASS before controlled native provider selected
+FAIL before host emits durable attempt identity
+Traceback (most recent call last):
+  File "/tmp/mr17-live.py", line 75, in <module>
+    check(phase+' host emits durable attempt identity',len(attempts)==1 and len(attempts[0])==64)
+  File "/tmp/mr17-live.py", line 11, in check
+    if not ok:raise RuntimeError(name)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: before host emits durable attempt identity

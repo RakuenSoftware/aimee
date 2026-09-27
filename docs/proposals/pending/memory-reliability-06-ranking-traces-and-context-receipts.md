@@ -1,6 +1,6 @@
 # MR-06: Actual ranking traces, context receipts and evidence states
 
-- **State:** Proposed
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
 - **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
@@ -9,6 +9,24 @@
 ## Problem and intended result
 
 Post-hoc diagnostic scores need not explain actual SQL/dense/graph ordering. A retrieval event emitted before final packing can include records the model never received. A digest proves correspondence when bytes are available; it cannot reconstruct missing content by itself.
+
+Legacy automatic ingress now records only Go-retained ordinary memory/code items
+after host integrity acceptance. Outcome feedback receives the exact clipped
+memory preview. Failed assembly and rejected/empty envelopes emit no such evidence.
+[Validation](../../validation/memory-ingress-evidence-2026-09-20.md) covers these
+boundaries; complete channel coverage, durable stage receipts, dispatch observation
+and crash recovery remain open.
+
+The [typed outer assembler](../../validation/memory-typed-outer-packing-2026-09-20.md)
+now returns retained typed IDs and source/final projection and selection digests
+after row-level repacking. This is an assembly response before host integrity
+acceptance. The host now also [emits Go-retained typed projection references](../../validation/memory-typed-assembly-evidence-2026-09-20.md)
+after integrity acceptance, preserving final selection identity without inventing
+source versions. The [plain-text facts block](../../validation/memory-fact-source-versions-2026-09-21.md)
+now also binds exact assertion and direct-parent revisions, validates their byte
+commitments in Go assembly, and emits only retained references after host integrity
+acceptance. The durable host/provider receipt pipeline and final source revalidation
+remain open. Bounded trace reads now refuse partial payloads.
 
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 
@@ -19,6 +37,20 @@ Carry a request-scoped trace object through the call chain. Avoid process-global
 Each candidate includes stable ID/version, arm ranks and native score semantics, actual fusion contribution, prior effects, eligibility decision, source-family projection and final disposition. Dispositions include selected, duplicate, insufficient relevance, scope/lifecycle/policy exclusion, type/coverage displacement, caller limit, budget drop and unavailable evidence. Record the candidate-universe bounds and trace truncation; a bounded trace is not proof that the entire database was searched.
 
 `memory explain` reads this trace. It must not reconstruct lexical/dense scores from content substring checks after the search.
+
+The [observed diagnostic ranking slice](../../validation/memory-program-gates-2026-09-23.md)
+captures the actual deduplicated RRF arm ranks/contributions, candidate-order
+resets, negation boost and optional PageRank addition for returned candidates.
+Each stage describes its resulting score; prior stage scores are not summed as
+extra votes. Public diagnostic parts expose the steps, and existing trace
+feature JSON retains their numeric evidence. Ordinary recall and automatic
+preview packing do not enable diagnostic capture or change their score contract.
+
+This remains a bounded returned-candidate trace, not the full candidate universe.
+Native lexical/dense scores, excluded-candidate dispositions, source versions and
+durable provider stages are not certified by these rank observations. Exact-ID
+explain_match text matching is explicitly labeled text_match_estimate; it does
+not pretend to replay a retrieval decision.
 
 ## Receipt contract
 
@@ -43,6 +75,12 @@ Persist `dispatch_admitted` before handing bytes to the transport, with one host
 Transport handoff and network effects are not atomic with the receipt store. Do not rename durable intent as observed dispatch to hide that gap. Retry decisions preserve the unresolved attempt, allocate a distinct attempt identity and account for potentially executed work under the existing budget policy. Governed external effects additionally follow [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md)'s reconciliation/idempotency rules.
 
 ## Verification and retention
+
+The [provider handoff source check](../../validation/memory-source-revalidation-2026-09-21.md)
+now revalidates retained assertion/episode and direct-parent versions under the
+authenticated KB scope. Its process-local handles and attempt challenges refuse
+stale or unavailable sources; they are not durable prepared/dispatch receipts and
+do not bind the final body or eliminate mutations after the check's snapshot.
 
 Expose independent evidence dimensions: schema-valid, authenticated producer, source-version available, payload-verifiable, decision-replayed, chain-included, externally-compared and effect-confirmed. Do not collapse them into a single “verified” bit or assume an ordering of strength.
 
@@ -71,3 +109,10 @@ Support two explicit retention modes. `commitment_only` allows verification agai
 Add trace fields compatibly, then switch final-selection events and governed preparation by surface. Cap candidate metadata and measure overhead. Preserve required durable receipts on rollback; disable optional detailed diagnostics separately.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Final acceptance — 2026-09-25
+
+All eight acceptance clauses are validated in the
+[MR-06 closeout and evidence](../../validation/memory-mr06-closeout-2026-09-25.md).
+Earlier slice notes above preserve their historical scope. The final closeout
+records the completed work and explicit unavailable-evidence/retention bounds.

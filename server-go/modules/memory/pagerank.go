@@ -147,7 +147,7 @@ func (s *postgresDataStore) pageRank(ctx context.Context, req DataRequest, exact
 		return result, errors.New("memory: invalid PageRank request")
 	}
 	args := append(graphScopeArgs(req, exact), memoryIDsParameter(req.PageRank.IDs))
-	rows, err := s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible+` AND id=ANY($9::text::bigint[]))
+	rows, err := s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible()+` AND id=ANY($9::text::bigint[]))
  SELECT id FROM visible
  ORDER BY array_position($9::text::bigint[],id)`, args...)
 	if err != nil {

@@ -1,0 +1,30 @@
+{
+  "application_commit": "b1e707c83",
+  "harness_commits": {
+    "T2": "52cd371b0",
+    "T3": "b1e707c83"
+  },
+  "image": "sha256:b86c7c9c64bf5aadcf44b87165d5f47025cd94cdace998c089a16c60da2fa2ba",
+  "process_exits": {
+    "T2": 0,
+    "T3": 0
+  },
+  "passed_process_checks": {
+    "T2": 1221,
+    "T3": 677
+  },
+  "repository_checks": 77,
+  "shared_schema": 43,
+  "private_schema": 37,
+  "acceptance_inventory_sha256": "e1df9571cb91222e78e276e17410e89ff8f04a9506b82a409fba0f450d175e2d",
+  "frozen_cases_sha256": "a649ded23fb403b836439946e34b157258ef1378f40fc17990970068aef709bc",
+  "coverage_evaluation": {
+    "false_complete": 0,
+    "intentionally_incomplete": 9,
+    "reader_correct": 6,
+    "reader_cases": 11,
+    "reader": "deterministic_retained_current_assertion_objects_v1",
+    "model_answer_quality": "not_measured"
+  },
+  "production_release": "0.4.5"
+}

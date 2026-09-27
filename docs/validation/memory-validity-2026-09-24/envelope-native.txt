@@ -1,0 +1,1 @@
+server memory get: local privacy, explicit KB routing, temporal verdicts, and failures passed

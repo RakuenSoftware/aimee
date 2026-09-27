@@ -29,11 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 def main() -> int:
     args = build_parser().parse_args()
+    cases = load_cases(args.dataset, args.max_samples)
     harness = AimeeHarness()
     results = []
 
     samples_run = 0
-    for sample in load_cases(args.dataset, args.max_samples):
+    for sample in cases:
         samples_run += 1
         tmp, home = harness.prepare_home()
         try:
@@ -51,6 +52,7 @@ def main() -> int:
                     home,
                     question=row["question"],
                     gold_answer=row["gold_answer"],
+                    answerable=row["answerable"],
                     candidate=answer_exec.response,
                 )
                 costs = llm_cost_breakdown(harness, answer_exec, judge_in, judge_out)
@@ -63,6 +65,7 @@ def main() -> int:
                         "category": row["category"],
                         "question": row["question"],
                         "gold_answer": row["gold_answer"],
+                    "answerable": row["answerable"],
                         "generated_answer": answer_exec.response,
                         "judge_votes": votes,
                         "verdict": verdict,
@@ -86,6 +89,7 @@ def main() -> int:
 
     summary = build_summary(results, label_field="category", include_llm=True)
     payload = {
+        "dataset_inventory": cases.inventory,
         "dataset": "locomo",
         "system": "aimee",
         "track": "llm",

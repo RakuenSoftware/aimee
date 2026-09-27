@@ -7668,6 +7668,35 @@ BEGIN
   RETURN v_count;
 END; $$;
 
+-- A receipt is durable verified coverage from one retained owner, not a health
+-- check or delivery acknowledgement. Offline and revoked servers remain required.
+ALTER TABLE kb_subject_erasure_request ADD COLUMN IF NOT EXISTS coverage_policy TEXT NOT NULL DEFAULT 'legacy';
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
+ request_id TEXT NOT NULL REFERENCES kb_subject_erasure_request(request_id),
+ owner_id TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','verified')),
+ policy_revision TEXT NOT NULL DEFAULT 'memory-erasure-v2',
+ deleted_count BIGINT NOT NULL DEFAULT 0 CHECK(deleted_count>=0),
+ verified_at TIMESTAMPTZ,
+ PRIMARY KEY(request_id,owner_id)
+);
+REVOKE ALL ON kb_subject_erasure_owner_coverage FROM PUBLIC;
+
+-- Called under the request row lock; a newly registered retained owner cannot
+-- disappear from coverage merely because another owner has already replied.
+CREATE OR REPLACE FUNCTION kb_subject_erasure_require_owners(p_request_id TEXT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+ INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id)
+ SELECT p_request_id,'server:'||server_id FROM kb_server_registry WHERE status<>'pending'
+ ON CONFLICT DO NOTHING;
+ IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) THEN
+  INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id) VALUES(p_request_id,'standalone');
+ END IF;
+END $$;
+REVOKE ALL ON FUNCTION kb_subject_erasure_require_owners(TEXT) FROM PUBLIC;
+
+
 CREATE OR REPLACE FUNCTION kb_subject_erasure_begin(
   p_request_id TEXT, p_subject TEXT, p_session_ids JSONB
 ) RETURNS TABLE(deleted_memories BIGINT, deleted_documents BIGINT, already_done BOOLEAN)
@@ -7689,26 +7718,72 @@ BEGIN
      jsonb_typeof(COALESCE(p_session_ids,'[]'::JSONB)) <> 'array' THEN
     RAISE EXCEPTION 'invalid subject-erasure request' USING ERRCODE='22023';
   END IF;
+  IF jsonb_array_length(p_session_ids)>4096 OR EXISTS(
+   SELECT 1 FROM jsonb_array_elements(p_session_ids) value
+   WHERE jsonb_typeof(value)<>'string' OR length(value#>>'{}') NOT BETWEEN 1 AND 1024) THEN
+    RAISE EXCEPTION 'invalid subject-erasure session set' USING ERRCODE='22023';
+  END IF;
   v_digest := encode(sha256(convert_to(p_subject,'UTF8')),'hex');
-  INSERT INTO kb_subject_erasure_request(request_id,subject_digest)
-    VALUES(p_request_id,v_digest) ON CONFLICT(request_id) DO NOTHING;
+  INSERT INTO kb_subject_erasure_request(request_id,subject_digest,coverage_policy)
+    VALUES(p_request_id,v_digest,'memory-erasure-v2') ON CONFLICT(request_id) DO NOTHING;
   SELECT * INTO v_row FROM kb_subject_erasure_request
     WHERE request_id=p_request_id FOR UPDATE;
   IF v_row.subject_digest<>v_digest THEN
     RAISE EXCEPTION 'request id belongs to another subject' USING ERRCODE='22023';
   END IF;
-  IF v_row.state IN ('db2_done','completed') THEN
+  IF v_row.state='completed' THEN
     RETURN QUERY SELECT v_row.memory_count,v_row.document_count,true;
     RETURN;
   END IF;
 
-  SELECT COALESCE(array_agg(value),'{}'::TEXT[]) INTO v_sessions
+  PERFORM kb_subject_erasure_require_owners(p_request_id);
+  SELECT COALESCE(array_agg(CASE WHEN value ~ '^sha256:[0-9a-f]{64}$' THEN substring(value FROM 8)
+ ELSE encode(sha256(convert_to(value,'UTF8')),'hex') END),'{}'::TEXT[]) INTO v_sessions
     FROM jsonb_array_elements_text(p_session_ids);
+  -- Freeze canonical writers before traversing; late queued producers also
+  -- encounter the durable dependency guard after these locks are released.
+  LOCK TABLE memories,memory_lineage,memory_units,derived_memory_dependencies,
+    artifacts,artifact_citations IN SHARE ROW EXCLUSIVE MODE;
+  UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
+  INSERT INTO memory_erasure_sessions(session_digest) SELECT unnest(v_sessions) ON CONFLICT DO NOTHING;
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_memories FROM memories
-    WHERE owner_principal=p_subject OR source_session=ANY(v_sessions);
+    WHERE owner_principal=p_subject OR encode(sha256(convert_to(COALESCE(source_session,''),'UTF8')),'hex')=ANY(v_sessions);
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_documents FROM kb_documents
     WHERE owner_principal=p_subject;
-  v_memory_count := cardinality(v_memories);
+  -- Follow declared derivation, never generic related links. UNION terminates
+  -- cycles. Exhausting the bound aborts the transaction instead of certifying
+  -- a partially erased subject. The privacy definer sees every required scope.
+  WITH RECURSIVE edges(child,parent) AS MATERIALIZED (
+    SELECT object_id,substring(source_ref FROM 8)::bigint FROM memory_lineage
+      WHERE object_type='memory' AND source_kind='memory' AND source_ref ~ '^memory:-?[0-9]+$'
+    UNION
+    SELECT object_id,(source_ref::jsonb->>'record_id')::bigint FROM memory_lineage
+      WHERE object_type='memory' AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
+    UNION
+    SELECT u.memory_id,(input->>'record_id')::bigint FROM memory_units u
+      JOIN memory_lineage l ON l.object_type='memory_unit' AND l.object_id=u.id
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN l.source_kind='episode-card-input-v1'
+        THEN l.source_ref::jsonb->'inputs' ELSE '[]'::jsonb END) input
+      WHERE u.is_episode_card=1 AND l.source_kind='episode-card-input-v1'
+    UNION
+    SELECT derived_memory_id::bigint,input_id::bigint FROM derived_memory_dependencies
+      WHERE derived_kind IN ('memory','cognified_memory','episode_card') AND input_kind='memory'
+  ), closure(id) AS (
+    SELECT unnest(v_memories)
+    UNION SELECT e.child FROM edges e JOIN closure c ON e.parent=c.id
+  ) SELECT COALESCE(array_agg(id),'{}'::bigint[]) INTO v_memories
+    FROM (SELECT id FROM closure LIMIT 10001) bounded;
+  IF cardinality(v_memories)>10000 THEN
+    RAISE EXCEPTION 'subject erasure dependency closure exceeds bound';
+  END IF;
+  INSERT INTO memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
+    SELECT id,scope_type,scope_value,COALESCE((SELECT l.source_ref::jsonb->>'payload_digest'
+ FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=memories.id
+ AND l.source_kind='memory-compaction-origin-v1' LIMIT 1),encode(sha256(convert_to(content,'UTF8')),'hex'))
+    FROM memories WHERE id=ANY(v_memories) ON CONFLICT(memory_id) DO NOTHING;
+  -- Only retained payloads contribute to the reported deletion count.
+  SELECT count(*) INTO v_memory_count FROM memories WHERE id=ANY(v_memories);
+
   v_document_count := cardinality(v_documents);
 
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_units
@@ -7745,9 +7820,31 @@ BEGIN
        OR (object_kind IN ('document','document_version') AND object_id IN
              (SELECT x::TEXT FROM unnest(v_documents) AS x))
        OR source_document_id IN (SELECT x::TEXT FROM unnest(v_documents) AS x);
-  DELETE FROM prospective_memories WHERE source_session=ANY(v_sessions);
-  DELETE FROM epistemic_directives WHERE source_session=ANY(v_sessions);
-  DELETE FROM learning_signals WHERE source_session=ANY(v_sessions);
+  DELETE FROM prospective_memories WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM epistemic_directives WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM learning_signals WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM tasks WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM learning_proposals WHERE target_memory_id=ANY(v_memories);
+  DELETE FROM learning_signals WHERE target_memory_id=ANY(v_memories);
+  DELETE FROM learning_observations WHERE observation_id IN (
+    SELECT e.observation_id FROM learning_observation_evidence e
+      JOIN interaction_event_embeddings i ON i.source_event_id=e.source_event_id
+      WHERE encode(sha256(convert_to(i.session_id,'UTF8')),'hex')=ANY(v_sessions));
+  DELETE FROM interaction_event_embeddings WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
+  -- FK-backed units, summaries, episodes, history and embedding versions cascade.
+  -- Copied relations and profiles can instead belong to a different root.
+  DELETE FROM entity_profiles WHERE entity_id IN (
+    SELECT entity FROM memory_entities WHERE memory_id=ANY(v_memories));
+  DELETE FROM memory_relations WHERE id IN (
+    SELECT object_id FROM memory_lineage WHERE object_type='relation'
+      AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+      AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)));
+  DELETE FROM rules WHERE id IN (
+    SELECT object_id FROM memory_lineage WHERE object_type='rule' AND (
+      (source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
+      OR (source_kind='metadata' AND source_ref=ANY(ARRAY(SELECT 'memory-cognify-rule-v1:'||id::text FROM unnest(v_memories) id)))));
+  DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
+    OR encode(sha256(convert_to(payload->>'session_id','UTF8')),'hex')=ANY(v_sessions);
   DELETE FROM memories WHERE id=ANY(v_memories);
 
   DELETE FROM artifacts a WHERE EXISTS (
@@ -7768,9 +7865,11 @@ BEGIN
   DELETE FROM kb_file_index WHERE owner_principal=p_subject;
   DELETE FROM kb_documents WHERE id=ANY(v_documents);
 
+  v_memory_count:=v_memory_count+v_row.memory_count;
+  v_document_count:=v_document_count+v_row.document_count;
   UPDATE kb_subject_erasure_request SET state='db2_done',memory_count=v_memory_count,
     document_count=v_document_count WHERE request_id=p_request_id;
-  RETURN QUERY SELECT v_memory_count,v_document_count,false;
+  RETURN QUERY SELECT v_memory_count,v_document_count,(v_row.state='db2_done');
 END; $$;
 
 CREATE OR REPLACE FUNCTION kb_subject_erasure_complete(
@@ -7786,11 +7885,17 @@ BEGIN
   IF v_row.request_id IS NULL OR v_row.state='pending' OR p_actor='' OR p_db1_count<0 THEN
     RAISE EXCEPTION 'subject erasure is not ready to complete' USING ERRCODE='22023';
   END IF;
+  IF v_row.coverage_policy<>'memory-erasure-v2' OR NOT EXISTS(
+   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) OR EXISTS(
+   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified') THEN
+    RETURN false;
+  END IF;
   IF v_row.state='completed' THEN RETURN false; END IF;
   v_detail := jsonb_build_object(
     'request_id',p_request_id,'subject_digest',v_row.subject_digest,
     'stores',jsonb_build_object('db1',p_db1_count,'memory',v_row.memory_count,
-      'documents',v_row.document_count),'policy_revision','data-governance-v1',
+      'documents',v_row.document_count),'policy_revision','memory-erasure-v2','coverage_scope','managed_application_stores',
+    'verified_owners',(SELECT count(*) FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state='verified'),
     'outcome','completed')::TEXT;
   PERFORM kb_audit_worm_append('privacy-admin',p_actor,'subject.erase.completed',
     p_request_id,'allow',v_detail);
@@ -7798,6 +7903,40 @@ BEGIN
     completed_at=pg_now_text() WHERE request_id=p_request_id;
   RETURN true;
 END; $$;
+
+CREATE OR REPLACE FUNCTION kb_subject_erasure_ack(
+ p_request_id TEXT,p_actor TEXT,p_transport TEXT,p_db1_count BIGINT
+) RETURNS TABLE(event_created BOOLEAN,coverage_complete BOOLEAN,pending_owners BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE request kb_subject_erasure_request%ROWTYPE; owner_key TEXT; remaining BIGINT; emitted BOOLEAN:=FALSE;
+BEGIN
+ SELECT * INTO request FROM kb_subject_erasure_request WHERE request_id=p_request_id FOR UPDATE;
+ IF request.request_id IS NULL OR request.state='pending' OR request.coverage_policy<>'memory-erasure-v2'
+ OR p_actor='' OR p_db1_count<0 THEN RAISE EXCEPTION 'erasure coverage is not ready'; END IF;
+ SELECT CASE WHEN count(*)=1 THEN min('server:'||server_id) END INTO owner_key FROM kb_server_registry
+ WHERE status='active' AND p_transport='cert:'||client_issuer||':'||client_serial_norm;
+ IF owner_key IS NULL AND NOT EXISTS(SELECT 1 FROM kb_server_registry WHERE status<>'pending')
+ AND EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id='standalone') THEN
+  owner_key:='standalone';
+ END IF;
+ IF owner_key IS NULL THEN RAISE EXCEPTION 'authenticated retained owner receipt required'; END IF;
+ IF request.state='completed' THEN
+  IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id=owner_key AND state='verified') THEN
+   RAISE EXCEPTION 'owner is outside this completed erasure manifest';
+  END IF;
+  RETURN QUERY SELECT FALSE,TRUE,0::bigint; RETURN;
+ END IF;
+ PERFORM kb_subject_erasure_require_owners(p_request_id);
+ UPDATE kb_subject_erasure_owner_coverage SET state='verified',deleted_count=p_db1_count,verified_at=clock_timestamp()
+ WHERE request_id=p_request_id AND owner_id=owner_key AND state='pending';
+ SELECT count(*) INTO remaining FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified';
+ IF remaining=0 THEN
+  emitted:=kb_subject_erasure_complete(p_request_id,p_actor,
+   (SELECT COALESCE(sum(deleted_count),0)::bigint FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id));
+ END IF;
+ RETURN QUERY SELECT emitted,remaining=0,remaining;
+END $$;
+REVOKE ALL ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION kb_memory_retention_reap(INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER) FROM PUBLIC;
@@ -15624,7 +15763,7 @@ CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   derived_kind TEXT NOT NULL,
   derived_memory_id TEXT NOT NULL,
   input_kind TEXT NOT NULL CHECK(input_kind IN
-    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+    ('document','document_version','assertion','memory','code_unit','outcome','entity','rule')),
   input_id TEXT NOT NULL,
   input_version TEXT NOT NULL DEFAULT '',
   source_hash TEXT NOT NULL DEFAULT '',
@@ -15635,6 +15774,8 @@ CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   created_at TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE(derived_kind,derived_memory_id,input_kind,input_id)
 );
+ALTER TABLE derived_memory_dependencies DROP CONSTRAINT IF EXISTS derived_memory_dependencies_input_kind_check;
+ALTER TABLE derived_memory_dependencies ADD CONSTRAINT derived_memory_dependencies_input_kind_check CHECK(input_kind IN ('document','document_version','assertion','memory','code_unit','outcome','entity','rule'));
 CREATE INDEX IF NOT EXISTS idx_derived_dep_forward
   ON derived_memory_dependencies(derived_kind,derived_memory_id);
 CREATE INDEX IF NOT EXISTS idx_derived_dep_reverse
@@ -15642,6 +15783,8 @@ CREATE INDEX IF NOT EXISTS idx_derived_dep_reverse
 CREATE TABLE IF NOT EXISTS derivation_policy_versions (
   derived_kind TEXT PRIMARY KEY, current_version TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+INSERT INTO derivation_policy_versions(derived_kind,current_version,updated_at)
+ VALUES('summary','summary-input-v1',pg_now_text()) ON CONFLICT(derived_kind) DO NOTHING;
 CREATE TABLE IF NOT EXISTS derived_rederivation_queue (
   derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL, cause TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
@@ -15672,9 +15815,26 @@ BEGIN
      COALESCE(dep->>'contribution','supporting'));
    n:=n+1;
  END LOOP;
- UPDATE derived_memory_registry SET current_status=CASE WHEN n=0 THEN 'dependencies:not-recorded'
-      ELSE 'fresh' END,updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
-   WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id;
+ -- Registration is an observation, not proof that a delayed producer still
+ -- has current inputs. Reuse the same evaluator as transactional invalidation.
+ UPDATE derived_memory_registry r SET current_status=f.status,
+   stale_cause_kind=f.cause_kind,stale_cause_id=f.cause_id,
+   updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
+ FROM (SELECT
+ CASE WHEN count(*)=0 THEN 'dependencies:not-recorded'
+ WHEN bool_or(moved AND contribution='essential') THEN 'unsupported'
+ WHEN bool_or(moved) THEN 'stale' ELSE 'fresh' END AS status,
+ COALESCE((array_agg(input_kind ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_kind,
+ COALESCE((array_agg(input_id ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_id
+ FROM (SELECT d.*,knowledge_input_moved(input_kind,input_id,input_version,source_hash,
+ derivation_policy_version,derived_kind) AS moved FROM derived_memory_dependencies d
+ WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id) inputs) f
+ WHERE r.derived_kind=p_derived_kind AND r.derived_memory_id=p_derived_id;
+ INSERT INTO derived_rederivation_queue(derived_kind,derived_memory_id,cause)
+ SELECT derived_kind,derived_memory_id,'registered inputs unavailable'
+ FROM derived_memory_registry WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id
+   AND current_status IN ('stale','unsupported')
+ ON CONFLICT(derived_kind,derived_memory_id) DO UPDATE SET cause=EXCLUDED.cause,state='pending';
  RETURN n;
 END $$;
 
@@ -15990,7 +16150,7 @@ CREATE OR REPLACE VIEW operator_review_items AS
         'computed','computed',priority
    FROM epistemic_directives WHERE state='open'
  UNION ALL
- SELECT 'learning_proposal:'||id,'learning_proposal','memory',target_memory_id::text,
+ SELECT 'learning_proposal:'||id,'learning_proposal',CASE WHEN sink='memory_hygiene' THEN 'derived' ELSE 'memory' END,target_memory_id::text,
         COALESCE((SELECT epistemic_kind FROM memories WHERE id=target_memory_id),'world_fact'),
         state,CASE WHEN evidence_refs<>'[]' THEN 'computed' ELSE 'not-computed' END,
         'computed','not-computed',LEAST(100,corroboration_count*5)::bigint
@@ -16117,6 +16277,10 @@ CREATE TRIGGER memory_governance_promotion_guard BEFORE INSERT OR UPDATE OF gove
 CREATE OR REPLACE FUNCTION memory_epistemic_mutation_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+ IF NEW.epistemic_kind IS DISTINCT FROM OLD.epistemic_kind AND
+    OLD.epistemic_kind IN ('episode','experience','instruction','policy') THEN
+   RAISE EXCEPTION '% protection cannot be removed in place; annotate or revoke and replace',OLD.epistemic_kind;
+ END IF;
  IF NEW.content IS DISTINCT FROM OLD.content AND
     OLD.epistemic_kind IN ('episode','experience') THEN
    RAISE EXCEPTION '% memories are immutable; add an annotation',OLD.epistemic_kind;
@@ -16190,6 +16354,7 @@ LANGUAGE sql IMMUTABLE AS $$
    'lifecycle_state',j->>'lifecycle_state','state',j->>'state','status',j->>'status',
    'authority_rank',j->>'authority_rank','confidence',j->>'confidence',
    'confidence_class',j->>'confidence_class','version',j->>'version',
+   'record_revision',j->>'record_revision',
    'lifecycle_version',j->>'lifecycle_version','version_no',j->>'version_no',
    'valid_from',j->>'valid_from','valid_until',j->>'valid_until',
    'superseded_at',j->>'superseded_at','invalidated_at',j->>'invalidated_at',
@@ -16197,7 +16362,12 @@ LANGUAGE sql IMMUTABLE AS $$
    'governance_promoted',j->>'governance_promoted','support_status',j->>'support_status',
    'reverify_needed',j->>'reverify_needed','actor_principal',j->>'actor_principal',
    'review_needed',j->>'review_needed','review_reason',j->>'review_reason',
-   'archive_reason',j->>'archive_reason','is_current',j->>'is_current'))
+   'archive_reason',j->>'archive_reason','is_current',j->>'is_current',
+   'provenance_category',j->>'provenance_category','confidence_ceiling',j->>'confidence_ceiling',
+   'payload_digest',j->>'payload_digest','owner_id',j->>'owner_id',
+   'target_id',j->>'target_id','target_revision',j->>'target_revision',
+   'reviewer_principal',j->>'reviewer_principal','decision_id',j->>'decision_id',
+   'result_id',j->>'result_id','result_revision',j->>'result_revision'))
 $$;
 
 CREATE OR REPLACE FUNCTION memory_mutation_worm_append(
@@ -16214,7 +16384,7 @@ DECLARE oldj JSONB := CASE WHEN TG_OP='INSERT' THEN '{}'::JSONB ELSE to_jsonb(OL
         newj JSONB := CASE WHEN TG_OP='DELETE' THEN '{}'::JSONB ELSE to_jsonb(NEW) END;
         rowj JSONB; oid TEXT; cid TEXT; action TEXT; op TEXT; actor TEXT;
         authority TEXT; transport TEXT; correlation TEXT; reversible BIGINT := 1;
-        owns_changeset BOOLEAN := true;
+        owns_changeset BOOLEAN := true; emitted_change BIGINT;
         old_state TEXT; new_state TEXT; old_version BIGINT; new_version BIGINT;
 BEGIN
   rowj := CASE WHEN TG_OP='DELETE' THEN oldj ELSE newj END;
@@ -16225,10 +16395,12 @@ BEGIN
   IF oid='' THEN RAISE EXCEPTION 'evidence object id is required for %.%',TG_TABLE_NAME,TG_OP; END IF;
   old_state := COALESCE(oldj->>'lifecycle_state',oldj->>'state',oldj->>'status','');
   new_state := COALESCE(newj->>'lifecycle_state',newj->>'state',newj->>'status','');
-  old_version := COALESCE(NULLIF(oldj->>'version','')::BIGINT,
+  old_version := COALESCE(NULLIF(oldj->>'record_revision','')::BIGINT,
+                          NULLIF(oldj->>'version','')::BIGINT,
                           NULLIF(oldj->>'lifecycle_version','')::BIGINT,
                           NULLIF(oldj->>'version_no','')::BIGINT,0);
-  new_version := COALESCE(NULLIF(newj->>'version','')::BIGINT,
+  new_version := COALESCE(NULLIF(newj->>'record_revision','')::BIGINT,
+                          NULLIF(newj->>'version','')::BIGINT,
                           NULLIF(newj->>'lifecycle_version','')::BIGINT,
                           NULLIF(newj->>'version_no','')::BIGINT,0);
   IF TG_OP='INSERT' THEN action:='insert'; op:='assert';
@@ -16276,15 +16448,18 @@ BEGIN
     COALESCE(NULLIF(newj->>'confidence','')::DOUBLE PRECISION,0),
     COALESCE(NULLIF(oldj->>'authority_rank','')::BIGINT,0),
     COALESCE(NULLIF(newj->>'authority_rank','')::BIGINT,0),old_version,new_version,
-    TG_TABLE_NAME||' '||lower(TG_OP));
+    TG_TABLE_NAME||' '||lower(TG_OP)) RETURNING id INTO emitted_change;
   -- Rewrite the event's transport proof and content-free typed references while
-  -- the trigger still has both row images.  Purge deliberately retains neither.
+  -- the trigger still has both row images. Purge deliberately retains neither.
+  -- A staged changeset may contain many objects, including cascaded purges;
+  -- never rewrite another item's references with this row's hashes.
   UPDATE memory_evidence_events SET transport_identity=transport,
     before_ref=CASE WHEN op='purge' OR TG_OP='INSERT' THEN '' ELSE
       TG_ARGV[0]||':'||oid||':h='||md5(oldj::TEXT) END,
     after_ref=CASE WHEN op='purge' OR TG_OP='DELETE' THEN '' ELSE
       TG_ARGV[0]||':'||oid||':h='||md5(newj::TEXT) END,
-    correlation_id=correlation WHERE changeset_id=cid;
+    correlation_id=correlation WHERE changeset_id=cid AND event_id=(
+      SELECT event_id FROM fact_graph_changes WHERE id=emitted_change);
   IF owns_changeset THEN
     UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
      WHERE commit_id=cid;
@@ -16823,6 +16998,40 @@ CREATE OR REPLACE VIEW fact_assertions_current AS
 
 -- Shared P4/P5 staleness predicate.  Outcome projection and dependency
 -- projection call this exact function so their answers cannot drift.
+-- Registry freshness is an advisory projection of recorded producer versions.
+-- Go remains the current-release authority, including audience and validity.
+CREATE OR REPLACE FUNCTION knowledge_memory_input_moved(p_id TEXT,p_version TEXT,p_hash TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE moved BOOLEAN;
+BEGIN
+ WITH RECURSIVE walk(id,version,hash,path,depth,cycle) AS (
+  SELECT p_id,p_version,p_hash,ARRAY[p_id],0,false
+  UNION ALL
+  SELECT d.input_id,d.input_version,d.source_hash,w.path||d.input_id,w.depth+1,d.input_id=ANY(w.path)
+  FROM walk w JOIN derived_memory_dependencies d ON d.derived_kind='memory'
+   AND d.derived_memory_id=w.id AND d.input_kind='memory'
+  WHERE NOT w.cycle AND w.depth<16
+ ), bounded AS MATERIALIZED(SELECT * FROM walk LIMIT 257)
+ SELECT (SELECT count(*) FROM bounded)>256 OR EXISTS(
+ SELECT 1 FROM bounded w LEFT JOIN memories m ON m.id::text=w.id
+ WHERE m.id IS NULL OR w.cycle OR EXISTS(SELECT 1 FROM derived_memory_dependencies nonmemory WHERE nonmemory.derived_kind='memory' AND nonmemory.derived_memory_id=w.id AND nonmemory.input_kind<>'memory' AND knowledge_input_moved(nonmemory.input_kind,nonmemory.input_id,nonmemory.input_version,nonmemory.source_hash,nonmemory.derivation_policy_version,'memory')) OR
+ (w.depth=16 AND EXISTS(SELECT 1 FROM derived_memory_dependencies d
+  WHERE d.derived_kind='memory' AND d.derived_memory_id=w.id)) OR
+ EXISTS(SELECT 1 FROM derived_memory_registry r WHERE r.derived_kind='memory' AND r.derived_memory_id=w.id
+  AND NOT EXISTS(SELECT 1 FROM derived_memory_dependencies d WHERE d.derived_kind=r.derived_kind AND d.derived_memory_id=r.derived_memory_id)) OR
+ NOT ((m.lifecycle_state='active' AND (w.version='' OR to_jsonb(m)->>'record_revision'=w.version)
+       AND (w.hash='' OR m.content_hash=w.hash)) OR
+  (m.lifecycle_state='archived' AND m.activation_suppressed=0 AND EXISTS(
+   SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=m.id
+   AND l.source_kind='memory-compaction-origin-v1'
+   AND l.source_ref::jsonb->>'schema_version'='1'
+   AND l.source_ref::jsonb->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+   AND l.source_ref::jsonb->>'compacted_revision'=to_jsonb(m)->>'record_revision'
+   AND l.source_ref::jsonb->>'record_revision'=w.version AND w.hash='')))
+ ) INTO moved;
+ RETURN moved;
+END $$;
+
 CREATE OR REPLACE FUNCTION knowledge_input_moved(p_kind TEXT,p_id TEXT,p_version TEXT,
   p_hash TEXT,p_policy_version TEXT DEFAULT '',p_derived_kind TEXT DEFAULT '')
 RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
@@ -16834,8 +17043,8 @@ RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
   WHEN p_kind='assertion' THEN NOT EXISTS(SELECT 1 FROM entity_edges x WHERE x.id::TEXT=p_id
        AND x.invalidated_at='' AND x.superseded_at='' AND
        (p_version='' OR x.version::TEXT=p_version))
-  WHEN p_kind='memory' THEN NOT EXISTS(SELECT 1 FROM memories x WHERE x.id::TEXT=p_id
-       AND x.lifecycle_state='active' AND (p_hash='' OR x.content_hash=p_hash))
+  WHEN p_kind='memory' THEN knowledge_memory_input_moved(p_id,p_version,p_hash)
+  WHEN p_kind='rule' THEN NOT EXISTS(SELECT 1 FROM rules x WHERE x.id::text=p_id AND (p_version='' OR to_jsonb(x)->>'record_revision'=p_version))
   WHEN p_kind='code_unit' THEN NOT EXISTS(SELECT 1 FROM files x WHERE x.id::TEXT=p_id
        AND (p_hash='' OR x.hash=p_hash) AND (p_version='' OR x.generation::TEXT=p_version))
   WHEN p_kind='entity' THEN NOT EXISTS(SELECT 1 FROM entity_registry x
@@ -16849,13 +17058,16 @@ $$;
 CREATE OR REPLACE FUNCTION derived_memory_freshness_for(p_kind TEXT DEFAULT '',p_id TEXT DEFAULT '')
 RETURNS TABLE(derived_kind TEXT,derived_memory_id TEXT,status TEXT,cause_kind TEXT,cause_id TEXT)
 LANGUAGE sql STABLE AS $$
-WITH targets AS (
+WITH RECURSIVE affected(derived_kind,derived_memory_id) AS (
+ SELECT derived_kind,derived_memory_id FROM derived_memory_dependencies WHERE input_kind=p_kind AND input_id=p_id
+ UNION
+ SELECT d.derived_kind,d.derived_memory_id FROM derived_memory_dependencies d JOIN affected a
+ ON a.derived_kind='memory' AND d.input_kind='memory' AND d.input_id=a.derived_memory_id
+), targets AS (
  SELECT r.derived_kind,r.derived_memory_id
  FROM derived_memory_registry r
- WHERE p_kind='' OR EXISTS(SELECT 1 FROM derived_memory_dependencies x
-   WHERE x.input_kind=p_kind AND x.input_id=p_id
-     AND x.derived_kind=r.derived_kind AND x.derived_memory_id=r.derived_memory_id)),
-evaluated AS (
+ WHERE p_kind='' OR EXISTS(SELECT 1 FROM affected x WHERE x.derived_kind=r.derived_kind AND x.derived_memory_id=r.derived_memory_id)),
+evaluated AS MATERIALIZED (
  SELECT d.*,knowledge_input_moved(d.input_kind,d.input_id,d.input_version,d.source_hash,
           d.derivation_policy_version,d.derived_kind) AS moved
  FROM derived_memory_dependencies d JOIN targets t
@@ -16972,7 +17184,8 @@ WITH per_workflow AS (
    count(*) FILTER(WHERE outcome<>'useful') AS negative_n,
    count(DISTINCT authenticated_evaluator) AS evaluators,
    count(DISTINCT NULLIF(task_label,'')) AS tasks,
-   bool_or(knowledge_input_moved(subject_kind,subject_id,code_generation_at_eval::TEXT,
+   bool_or(knowledge_input_moved(subject_kind,subject_id,
+                                CASE WHEN subject_kind='code_unit' THEN code_generation_at_eval::TEXT ELSE '' END,
                                 source_hash_at_eval,'','')) AS stale
  FROM work_outcomes GROUP BY subject_kind,subject_id,scope_kind,scope_id,workflow),
 base AS (
@@ -17583,6 +17796,9 @@ BEGIN
  RETURN ontology_package_migrate(prior_package,dry->>'preview_token');
 END $$;
 
+-- Bounded invocation trace; no payload or excluded-scope identities.
+ALTER TABLE recall_traces ADD COLUMN IF NOT EXISTS candidate_metadata TEXT NOT NULL DEFAULT '{}';
+
 CREATE OR REPLACE FUNCTION recall_trace_prune() RETURNS BIGINT LANGUAGE plpgsql AS $$
 DECLARE n BIGINT:=0; step_n BIGINT:=0; max_rows BIGINT;max_days BIGINT;
 BEGIN
@@ -17736,10 +17952,898 @@ CREATE POLICY memory_embedding_versions_parent ON memory_embedding_versions
  WITH CHECK(EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
 
 
+CREATE TABLE IF NOT EXISTS memory_assertion_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version),
+ assertion_id BIGINT NOT NULL REFERENCES entity_edges(id) ON DELETE CASCADE,
+ assertion_revision BIGINT NOT NULL CHECK(assertion_revision>0),
+ input_hash TEXT NOT NULL, embedding vector, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT pg_now_text(),
+ PRIMARY KEY(version,assertion_id)
+);
+ALTER TABLE memory_assertion_embedding_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_assertion_embedding_parents ON memory_assertion_embedding_versions;
+CREATE POLICY memory_assertion_embedding_parents ON memory_assertion_embedding_versions
+ USING(NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m ON f.source_id='memory:'||m.id::text
+ WHERE f.assertion_id=memory_assertion_embedding_versions.assertion_id AND f.source_kind='memory'
+ AND f.invalidated_at='' AND m.id IS NULL))
+ WITH CHECK(COALESCE(current_setting('aimee.memory_scope_all',true),'')='1');
+
+
+-- BEGIN memory change journal
+-- Durable storage guards for the Go memory owner. No content is copied here.
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
+  CHECK (record_revision > 0);
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS dependency_revision BIGINT NOT NULL DEFAULT 0
+  CHECK (dependency_revision >= 0);
+CREATE TABLE IF NOT EXISTS memory_collection_owner (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  owner_id UUID NOT NULL DEFAULT gen_random_uuid()
+);
+INSERT INTO memory_collection_owner(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS memory_collection_generations (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK (generation > 0),
+  PRIMARY KEY(scope_type,scope_value)
+);
+CREATE TABLE IF NOT EXISTS memory_invalidation_outbox (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK (generation > 0),
+  memory_id BIGINT NOT NULL, record_revision BIGINT NOT NULL CHECK (record_revision > 0),
+  operation TEXT NOT NULL CHECK (operation IN ('insert','update','delete')),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(scope_type,scope_value,generation)
+);
+ALTER TABLE memory_collection_generations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_collection_scope ON memory_collection_generations;
+CREATE POLICY memory_collection_scope ON memory_collection_generations
+  USING (memory_row_scope_visible(scope_type,scope_value));
+ALTER TABLE memory_invalidation_outbox ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_invalidation_scope ON memory_invalidation_outbox;
+CREATE POLICY memory_invalidation_scope ON memory_invalidation_outbox
+  USING (memory_row_scope_visible(scope_type,scope_value));
+
+CREATE OR REPLACE FUNCTION memory_assign_record_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+  IF TG_OP='INSERT' THEN
+    NEW.record_revision:=1;
+  ELSE
+    IF NEW.id<>OLD.id THEN RAISE EXCEPTION 'memory identity is immutable'; END IF;
+    IF (to_jsonb(OLD)-(ARRAY['record_revision','use_count','last_used_at','updated_at']||TG_ARGV[0]::TEXT[]))
+       IS NOT DISTINCT FROM
+       (to_jsonb(NEW)-(ARRAY['record_revision','use_count','last_used_at','updated_at']||TG_ARGV[0]::TEXT[])) THEN
+      NEW.record_revision:=OLD.record_revision;
+    ELSE
+      NEW.record_revision:=OLD.record_revision+1;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION memory_capture_record_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE old_type TEXT; old_value TEXT; new_type TEXT; new_value TEXT;
+        affected RECORD; position BIGINT; target BIGINT; revision BIGINT;
+BEGIN
+  IF TG_OP='UPDATE' AND NEW.record_revision=OLD.record_revision THEN RETURN NEW; END IF;
+  IF TG_OP<>'INSERT' THEN old_type:=OLD.scope_type; old_value:=OLD.scope_value; END IF;
+  IF TG_OP<>'DELETE' THEN new_type:=NEW.scope_type; new_value:=NEW.scope_value; END IF;
+  target:=CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END;
+  revision:=CASE WHEN TG_OP='DELETE' THEN OLD.record_revision+1 ELSE NEW.record_revision END;
+  -- Scope moves invalidate both collections. Lock in a stable order; unrelated
+  -- collections have separate counters and do not contend on a global row.
+  FOR affected IN SELECT DISTINCT t,v FROM (VALUES(old_type,old_value),(new_type,new_value)) AS scopes(t,v)
+    WHERE t IS NOT NULL ORDER BY t,v
+  LOOP
+    EXECUTE format('INSERT INTO %I.memory_collection_generations(scope_type,scope_value,generation)
+      VALUES($1,$2,1) ON CONFLICT(scope_type,scope_value) DO UPDATE
+      SET generation=memory_collection_generations.generation+1 RETURNING generation',TG_TABLE_SCHEMA)
+      INTO STRICT position USING affected.t,affected.v;
+    EXECUTE format('INSERT INTO %I.memory_invalidation_outbox
+      (scope_type,scope_value,generation,memory_id,record_revision,operation) VALUES($1,$2,$3,$4,$5,$6)',TG_TABLE_SCHEMA)
+      USING affected.t,affected.v,position,target,revision,lower(TG_OP);
+  END LOOP;
+  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+
+-- Generate attribute-specific triggers after all memory columns are installed.
+-- Counter-only reads avoid both content serialization and generation locking.
+DO $memory_change_triggers$
+DECLARE attributes TEXT; generated TEXT[];
+BEGIN
+  SELECT string_agg(quote_ident(attname),',' ORDER BY attnum) INTO attributes
+    FROM pg_attribute WHERE attrelid='memories'::regclass AND attnum>0 AND NOT attisdropped
+      AND attgenerated='' AND attname NOT IN ('use_count','last_used_at','updated_at');
+  -- Generated values are unset in BEFORE triggers. Listing them as UPDATE OF
+  -- targets can also fire on counter writes when another BEFORE trigger exists.
+  -- Their canonical inputs are already covered; never compare or target outputs.
+  SELECT COALESCE(array_agg(attname::TEXT),ARRAY[]::TEXT[]) INTO generated
+    FROM pg_attribute WHERE attrelid='memories'::regclass AND attnum>0
+      AND NOT attisdropped AND attgenerated<>'';
+  DROP TRIGGER IF EXISTS memory_assign_record_revision ON memories;
+  DROP TRIGGER IF EXISTS memory_capture_record_change ON memories;
+  EXECUTE format('CREATE TRIGGER memory_assign_record_revision BEFORE INSERT OR UPDATE OF %s ON memories
+    FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision(%L)',attributes,generated::TEXT);
+  EXECUTE format('CREATE TRIGGER memory_capture_record_change AFTER INSERT OR DELETE OR UPDATE OF %s ON memories
+    FOR EACH ROW EXECUTE FUNCTION memory_capture_record_change()',attributes);
+END
+$memory_change_triggers$;
+
+-- Secondary scope tags affect ranking under the primary row's audience. A tag
+-- cannot grant visibility to a hidden parent or expose its identity in another
+-- scope's journal. Tag changes advance the primary row's governed revision.
+ALTER TABLE memory_scopes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_scopes_parent_visible ON memory_scopes;
+CREATE POLICY memory_scopes_parent_visible ON memory_scopes
+  USING (EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
+CREATE OR REPLACE FUNCTION memory_capture_scope_change() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE target BIGINT; changed TEXT;
+BEGIN
+  -- The parent update invokes the existing audit triggers, whose relations
+  -- live in this same owner schema. Pin their lookup ahead of temporary tables;
+  -- the function's SET scope restores the caller's path on return.
+  PERFORM set_config('search_path',format('pg_catalog,%I,pg_temp',TG_TABLE_SCHEMA),true);
+  changed:=CASE TG_OP
+    WHEN 'INSERT' THEN 'SELECT * FROM new_memory_scope_rows'
+    WHEN 'DELETE' THEN 'SELECT * FROM old_memory_scope_rows'
+    ELSE '(SELECT * FROM new_memory_scope_rows EXCEPT SELECT * FROM old_memory_scope_rows)
+          UNION (SELECT * FROM old_memory_scope_rows EXCEPT SELECT * FROM new_memory_scope_rows)' END;
+  -- The primary scope is already canonical on memories. Derived indexing may
+  -- materialize that same tag later; it adds no scope and must not invalidate
+  -- a pending correction or retry receipt. Compare both sides of real tag
+  -- updates so replacing a secondary tag with the primary still invalidates.
+  FOR target IN EXECUTE format('SELECT DISTINCT memory_id FROM (%s) r ORDER BY memory_id',changed)
+  LOOP
+    -- Batch tags by parent: copying many tags must not repeatedly rewrite and
+    -- audit the same parent. Invoker privileges preserve parent RLS. A cascade
+    -- has no parent left to touch; its DELETE event already invalidated it.
+    -- Lock before classifying redundancy: a concurrent primary-scope move
+    -- may turn an apparently redundant old tag into a secondary tag.
+    EXECUTE format('WITH locked AS MATERIALIZED (
+      SELECT id,scope_type,scope_value FROM %I.memories WHERE id=$1 FOR NO KEY UPDATE
+    ) UPDATE %I.memories m SET dependency_revision=m.dependency_revision+1
+      FROM locked WHERE m.id=locked.id AND EXISTS (
+        SELECT 1 FROM (%s) r WHERE r.memory_id=locked.id
+          AND (r.scope_type,r.scope_value) IS DISTINCT FROM (locked.scope_type,locked.scope_value)
+      )',TG_TABLE_SCHEMA,TG_TABLE_SCHEMA,changed)
+      USING target;
+  END LOOP;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_capture_scope_insert ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_insert AFTER INSERT ON memory_scopes
+  REFERENCING NEW TABLE AS new_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+DROP TRIGGER IF EXISTS memory_capture_scope_update ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_update AFTER UPDATE ON memory_scopes
+  REFERENCING OLD TABLE AS old_memory_scope_rows NEW TABLE AS new_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+DROP TRIGGER IF EXISTS memory_capture_scope_delete ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_delete AFTER DELETE ON memory_scopes
+  REFERENCING OLD TABLE AS old_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+
+-- Reconcile default grants as well as PUBLIC. Runtime callers can read the
+-- journal through scope RLS, but cannot forge progress or attach owner functions.
+DO $memory_change_acl$
+DECLARE recipient RECORD; target RECORD; role_name TEXT;
+BEGIN
+  FOR recipient IN SELECT DISTINCT acl.grantee,routine.proname FROM pg_proc AS routine,
+    LATERAL aclexplode(COALESCE(routine.proacl,acldefault('f',routine.proowner))) AS acl
+    WHERE routine.oid IN ('memory_assign_record_revision()'::regprocedure,
+                          'memory_capture_record_change()'::regprocedure,
+                          'memory_capture_scope_change()'::regprocedure)
+      AND acl.grantee<>routine.proowner
+  LOOP
+    role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+    EXECUTE format('REVOKE ALL ON FUNCTION %I() FROM %s',recipient.proname,role_name);
+  END LOOP;
+  FOR target IN SELECT oid,relname,relowner FROM pg_class WHERE oid IN
+    ('memory_collection_owner'::regclass,'memory_collection_generations'::regclass,'memory_invalidation_outbox'::regclass)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+      LATERAL aclexplode(relation.relacl) AS acl
+      WHERE relation.oid=target.oid AND acl.grantee<>target.relowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON TABLE %I FROM %s',target.relname,role_name);
+      IF recipient.grantee<>0 THEN EXECUTE format('GRANT SELECT ON TABLE %I TO %s',target.relname,role_name); END IF;
+    END LOOP;
+  END LOOP;
+END
+$memory_change_acl$;
+-- END memory change journal
+
+-- BEGIN memory lineage collection revisions
+-- Projection writes change query results without changing canonical payloads.
+-- Keep their durable scoped head separate from the canonical outbox cursor:
+-- rebuilding an index must not enqueue itself forever or manufacture feed gaps.
+CREATE TABLE IF NOT EXISTS memory_projection_generations (
+ scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,memory_id BIGINT NOT NULL,
+ generation BIGINT NOT NULL CHECK(generation>0),
+ PRIMARY KEY(scope_type,scope_value,memory_id)
+);
+ALTER TABLE memory_projection_generations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_projection_generation_visible ON memory_projection_generations;
+CREATE POLICY memory_projection_generation_visible ON memory_projection_generations
+ USING(memory_row_scope_visible(scope_type,scope_value));
+REVOKE ALL ON memory_projection_generations FROM PUBLIC;
+DO $projection_generation_acl$
+DECLARE recipient RECORD;role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class c,
+   LATERAL aclexplode(c.relacl) acl WHERE c.oid='memory_projection_generations'::regclass
+   AND acl.grantee<>c.relowner AND acl.grantee<>0
+ LOOP
+   role_name:=quote_ident(pg_get_userbyid(recipient.grantee));
+   EXECUTE format('REVOKE ALL ON memory_projection_generations FROM %s',role_name);
+   EXECUTE format('GRANT SELECT ON memory_projection_generations TO %s',role_name);
+ END LOOP;
+END $projection_generation_acl$;
+CREATE OR REPLACE FUNCTION memory_capture_projection_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE roots TEXT; changes TEXT; changed JSONB; affected RECORD; rule_changed BOOLEAN;
+BEGIN
+ IF TG_OP='UPDATE' AND to_jsonb(OLD) IS NOT DISTINCT FROM to_jsonb(NEW) THEN RETURN NEW; END IF;
+ IF TG_OP='TRUNCATE' THEN
+   IF TG_TABLE_NAME='memory_lineage' THEN
+     changes:=format('SELECT jsonb_build_object(''object_type'',object_type,''object_id'',object_id) AS x FROM %I.%I',TG_TABLE_SCHEMA,TG_TABLE_NAME);
+   ELSE
+     changes:=format('SELECT jsonb_build_object(''memory_id'',memory_id) AS x FROM %I.%I',TG_TABLE_SCHEMA,TG_TABLE_NAME);
+   END IF;
+ ELSE
+   changed:=jsonb_build_array(CASE WHEN TG_OP<>'INSERT' THEN to_jsonb(OLD) END,
+                             CASE WHEN TG_OP<>'DELETE' THEN to_jsonb(NEW) END);
+   changes:='SELECT x FROM jsonb_array_elements($1) x';
+ END IF;
+ IF TG_TABLE_NAME='memory_lineage' THEN
+   EXECUTE format('WITH projection_changes AS MATERIALIZED(%s)
+     SELECT EXISTS(SELECT 1 FROM projection_changes WHERE x->>''object_type''=''rule'')',changes)
+     INTO rule_changed USING changed;
+   IF rule_changed THEN
+     EXECUTE format('UPDATE %I.memory_collection_owner SET rules_revision=rules_revision+1 WHERE id=1',TG_TABLE_SCHEMA);
+   END IF;
+   roots:=format($q$
+     SELECT (x->>'object_id')::bigint AS id FROM projection_changes WHERE x->>'object_type'='memory'
+     UNION SELECT u.memory_id FROM projection_changes JOIN %1$I.memory_units u
+       ON u.id=(x->>'object_id')::bigint WHERE x->>'object_type'='memory_unit'
+     UNION SELECT e.memory_id FROM projection_changes JOIN %1$I.memory_episodes e
+       ON e.id=(x->>'object_id')::bigint WHERE x->>'object_type'='episode'
+     UNION SELECT r.memory_id FROM projection_changes JOIN %1$I.memory_relations r
+       ON r.id=(x->>'object_id')::bigint WHERE x->>'object_type'='relation'
+   $q$,TG_TABLE_SCHEMA);
+ ELSE
+   roots:='SELECT DISTINCT (x->>''memory_id'')::bigint AS id FROM projection_changes';
+ END IF;
+ FOR affected IN EXECUTE format('WITH projection_changes AS MATERIALIZED(%s) SELECT DISTINCT m.id,m.scope_type,m.scope_value FROM %I.memories m
+   JOIN (%s) roots ON roots.id=m.id ORDER BY m.scope_type,m.scope_value,m.id',changes,TG_TABLE_SCHEMA,roots) USING changed
+ LOOP
+   EXECUTE format('INSERT INTO %I.memory_projection_generations(scope_type,scope_value,memory_id,generation)
+     VALUES($1,$2,$3,1) ON CONFLICT(scope_type,scope_value,memory_id) DO UPDATE
+     SET generation=memory_projection_generations.generation+1',TG_TABLE_SCHEMA)
+     USING affected.scope_type,affected.scope_value,affected.id;
+ END LOOP;
+ IF TG_OP='TRUNCATE' THEN RETURN NULL; END IF;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+REVOKE ALL ON FUNCTION memory_capture_projection_change() FROM PUBLIC;
+DO $memory_projection_triggers$
+DECLARE target TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['memory_lineage','memory_units','memory_summaries','memory_chunks','memory_episodes','memory_relations'] LOOP
+   EXECUTE format('DROP TRIGGER IF EXISTS memory_projection_collection_revision ON %I',target);
+   EXECUTE format('CREATE TRIGGER memory_projection_collection_revision AFTER INSERT OR UPDATE OR DELETE ON %I
+     FOR EACH ROW EXECUTE FUNCTION memory_capture_projection_change()',target);
+   EXECUTE format('DROP TRIGGER IF EXISTS memory_projection_collection_truncate ON %I',target);
+   EXECUTE format('CREATE TRIGGER memory_projection_collection_truncate BEFORE TRUNCATE ON %I
+     FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_projection_change()',target);
+ END LOOP;
+END $memory_projection_triggers$;
+-- END memory lineage collection revisions
+
+-- BEGIN memory relation invalidation consumer
+-- Progress is private to this projection. Applying a page queues canonical
+-- rebuilding and advances its cursor in the SAME transaction. Neither progress
+-- nor queue completion certifies serving freshness; readers check source inputs.
+CREATE TABLE IF NOT EXISTS memory_relation_consumer_state (
+  id INTEGER PRIMARY KEY CHECK(id=1), owner_id UUID NOT NULL,
+  phase TEXT NOT NULL CHECK(phase IN ('snapshot','replay')),
+  snapshot_after_id BIGINT NOT NULL DEFAULT 0 CHECK(snapshot_after_id>=0),
+  snapshot_max_id BIGINT NOT NULL DEFAULT 0 CHECK(snapshot_max_id>=0)
+);
+CREATE TABLE IF NOT EXISTS memory_relation_consumer_positions (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK(generation>=0),
+  target_after_id BIGINT NOT NULL DEFAULT 0 CHECK(target_after_id>=0),
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+  PRIMARY KEY(scope_type,scope_value)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target_source ON memory_links(target_id,source_id);
+CREATE INDEX IF NOT EXISTS idx_memory_relation_input_record ON memory_lineage
+ ((CASE WHEN source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+   THEN source_ref::jsonb->>'record_id' END),object_id)
+ WHERE object_type='relation' AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2');
+
+CREATE OR REPLACE FUNCTION memory_reset_relation_consumer() RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE owner UUID; maximum BIGINT; heads JSONB;
+BEGIN
+  -- Capture the collection frontier and snapshot extent in one statement.
+  SELECT o.owner_id,COALESCE((SELECT max(id) FROM public.memories),0),
+    COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM public.memory_collection_generations g),'[]'::jsonb)
+  INTO STRICT owner,maximum,heads FROM public.memory_collection_owner o WHERE o.id=1;
+  DELETE FROM public.memory_relation_consumer_positions;
+  INSERT INTO public.memory_relation_consumer_positions(scope_type,scope_value,generation)
+    SELECT x.scope_type,x.scope_value,x.generation FROM jsonb_to_recordset(heads)
+      AS x(scope_type TEXT,scope_value TEXT,generation BIGINT);
+  INSERT INTO public.memory_relation_consumer_state(id,owner_id,phase,snapshot_after_id,snapshot_max_id)
+    VALUES(1,owner,'snapshot',0,maximum)
+    ON CONFLICT(id) DO UPDATE SET owner_id=EXCLUDED.owner_id,phase='snapshot',
+      snapshot_after_id=0,snapshot_max_id=EXCLUDED.snapshot_max_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION memory_apply_relation_invalidations(p_limit INTEGER) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE owner UUID; state public.memory_relation_consumer_state%ROWTYPE;
+        position RECORD; inputs BIGINT[]; targets BIGINT[];
+        first_generation BIGINT; last_generation BIGINT; event_count BIGINT; next_id BIGINT; more_targets BOOLEAN:=false;
+BEGIN
+  IF p_limit IS NULL OR p_limit<1 OR p_limit>256 THEN
+    RAISE EXCEPTION 'invalid relation invalidation batch limit' USING ERRCODE='22023';
+  END IF;
+  -- One durable consumer may have several Go workers. Serialize only its short
+  -- application transaction; canonical writers do not take this advisory lock.
+  PERFORM pg_advisory_xact_lock(741901620110046301::bigint);
+  SELECT owner_id INTO STRICT owner FROM public.memory_collection_owner WHERE id=1;
+  SELECT * INTO state FROM public.memory_relation_consumer_state WHERE id=1;
+  IF NOT FOUND OR state.owner_id<>owner THEN
+    PERFORM public.memory_reset_relation_consumer();
+    SELECT * INTO STRICT state FROM public.memory_relation_consumer_state WHERE id=1;
+  END IF;
+  IF state.phase='snapshot' THEN
+    SELECT COALESCE(array_agg(id ORDER BY id),'{}'::bigint[]),max(id) INTO targets,next_id
+    FROM (SELECT id FROM public.memories WHERE id>state.snapshot_after_id AND id<=state.snapshot_max_id
+          ORDER BY id LIMIT p_limit) roots;
+    IF cardinality(targets)=0 THEN
+      UPDATE public.memory_relation_consumer_state SET phase='replay',snapshot_after_id=snapshot_max_id WHERE id=1;
+      RETURN;
+    END IF;
+  ELSE
+    -- Collections created after the captured frontier start at zero. Existing
+    -- collections retain their cursor across process/database restarts.
+    INSERT INTO public.memory_relation_consumer_positions(scope_type,scope_value,generation)
+      SELECT scope_type,scope_value,0 FROM public.memory_collection_generations ON CONFLICT DO NOTHING;
+    SELECT g.scope_type,g.scope_value,g.generation AS head,c.generation AS after_generation,c.target_after_id INTO position
+    FROM public.memory_collection_generations g JOIN public.memory_relation_consumer_positions c
+      USING(scope_type,scope_value) WHERE g.generation<>c.generation
+    ORDER BY c.applied_at,g.scope_type,g.scope_value LIMIT 1;
+    IF NOT FOUND THEN RETURN; END IF;
+    SELECT COALESCE(array_agg(memory_id),'{}'::bigint[]),count(*),min(generation),max(generation)
+      INTO inputs,event_count,first_generation,last_generation
+    FROM (SELECT generation,memory_id FROM public.memory_invalidation_outbox
+      WHERE scope_type=position.scope_type AND scope_value=position.scope_value
+        AND generation>position.after_generation AND generation<=position.head
+      ORDER BY generation LIMIT 1) page;
+    IF position.after_generation>position.head OR event_count=0 OR
+       first_generation<>position.after_generation+1 OR
+       last_generation<>position.after_generation+event_count THEN
+      -- A retention gap cannot be acknowledged as applied. Capture a new
+      -- frontier and restart bounded canonical rebuilding of all roots.
+      PERFORM public.memory_reset_relation_consumer();
+      RETURN;
+    END IF;
+    SELECT COALESCE(array_agg(id ORDER BY id),'{}'::bigint[]) INTO targets FROM (
+ SELECT id FROM (
+      SELECT unnest(inputs) AS id
+      UNION SELECT l.source_id FROM public.memory_links l WHERE l.target_id=ANY(inputs)
+      UNION SELECT r.memory_id FROM public.memory_lineage dep JOIN public.memory_relations r
+        ON r.id=dep.object_id WHERE dep.object_type='relation'
+        AND dep.source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+        AND (CASE WHEN dep.source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+             THEN dep.source_ref::jsonb->>'record_id' END)=ANY(
+               ARRAY(SELECT i::text FROM unnest(inputs) i))
+    ) affected WHERE id>position.target_after_id ORDER BY id LIMIT p_limit+1) bounded;
+    more_targets:=cardinality(targets)>p_limit;
+    IF more_targets THEN targets:=targets[1:p_limit]; END IF;
+  END IF;
+  -- Coalesce already-pending work. An in-flight worker holds its job row until
+  -- commit; if it finishes first, this upsert leaves a new pending generation.
+  INSERT INTO public.kb_async_jobs(kind,document_id,project,status,updated_at)
+    SELECT 'memory_index',id,'memory','pending',clock_timestamp()::text FROM unnest(targets) id ORDER BY id
+    ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,
+      last_error='',claimed_by='',claimed_at='',next_attempt_at='',
+      generation=kb_async_jobs.generation+1,updated_at=EXCLUDED.updated_at
+    WHERE kb_async_jobs.status<>'pending' OR kb_async_jobs.attempts<>0;
+  IF state.phase='snapshot' THEN
+    UPDATE public.memory_relation_consumer_state SET snapshot_after_id=next_id,
+      phase=CASE WHEN next_id>=snapshot_max_id THEN 'replay' ELSE 'snapshot' END WHERE id=1;
+  ELSE
+    UPDATE public.memory_relation_consumer_positions SET generation=CASE WHEN more_targets THEN generation ELSE last_generation END,
+      target_after_id=CASE WHEN more_targets THEN targets[cardinality(targets)] ELSE 0 END,applied_at=clock_timestamp()
+      WHERE scope_type=position.scope_type AND scope_value=position.scope_value;
+  END IF;
+END $$;
+
+-- The runtime can apply authoritative pages, never supply a cursor or mutate
+-- progress. No IDs, counts or cross-scope state are returned by the helper.
+DO $relation_consumer_acl$
+DECLARE item RECORD; recipient RECORD; role_name TEXT;
+BEGIN
+  FOR item IN SELECT oid,relname,relowner FROM pg_class WHERE oid IN
+    ('memory_relation_consumer_state'::regclass,'memory_relation_consumer_positions'::regclass)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class r,
+      LATERAL aclexplode(COALESCE(r.relacl,acldefault('r',r.relowner))) acl
+      WHERE r.oid=item.oid AND acl.grantee<>item.relowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON TABLE %I FROM %s',item.relname,role_name);
+    END LOOP;
+  END LOOP;
+  FOR item IN SELECT oid,proname,proowner,pg_get_function_identity_arguments(oid) AS args FROM pg_proc
+    WHERE oid IN ('memory_reset_relation_consumer()'::regprocedure,'memory_apply_relation_invalidations(integer)'::regprocedure)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc p,
+      LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+      WHERE p.oid=item.oid AND acl.grantee<>item.proowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON FUNCTION %I(%s) FROM %s',item.proname,item.args,role_name);
+    END LOOP;
+  END LOOP;
+END $relation_consumer_acl$;
+-- END memory relation invalidation consumer
+
+-- BEGIN memory link revisions
+-- Link-only edits change the source's derived view. Publish their dependency
+-- revision through the same canonical journal, once per parent per statement.
+CREATE OR REPLACE FUNCTION memory_capture_link_change() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE target BIGINT; changed TEXT;
+BEGIN
+  PERFORM set_config('search_path',format('pg_catalog,%I,pg_temp',TG_TABLE_SCHEMA),true);
+  changed:=CASE TG_OP
+    WHEN 'INSERT' THEN 'SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows'
+    WHEN 'DELETE' THEN 'SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows'
+    ELSE '(SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows EXCEPT
+           SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows)
+          UNION (SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows EXCEPT
+                 SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows)' END;
+  FOR target IN EXECUTE format('SELECT DISTINCT source_id FROM (%s) changed ORDER BY source_id',changed)
+  LOOP
+    -- Invoker RLS remains in force. Deleted parents already have a canonical
+    -- deletion event; its consumer also follows retained copied-input lineage.
+    EXECUTE format('UPDATE %I.memories SET dependency_revision=dependency_revision+1 WHERE id=$1',TG_TABLE_SCHEMA)
+      USING target;
+  END LOOP;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_capture_link_insert ON memory_links;
+CREATE TRIGGER memory_capture_link_insert AFTER INSERT ON memory_links
+  REFERENCING NEW TABLE AS new_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+DROP TRIGGER IF EXISTS memory_capture_link_update ON memory_links;
+CREATE TRIGGER memory_capture_link_update AFTER UPDATE ON memory_links
+  REFERENCING OLD TABLE AS old_memory_link_rows NEW TABLE AS new_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+DROP TRIGGER IF EXISTS memory_capture_link_delete ON memory_links;
+CREATE TRIGGER memory_capture_link_delete AFTER DELETE ON memory_links
+  REFERENCING OLD TABLE AS old_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+-- END memory link revisions
+
+-- BEGIN structured recall revisions
+-- Structured native recall revisions change for semantic edits, not usage counters.
+ALTER TABLE epistemic_directives ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK (record_revision > 0);
+DROP TRIGGER IF EXISTS memory_directive_record_revision ON epistemic_directives;
+CREATE TRIGGER memory_directive_record_revision BEFORE INSERT OR UPDATE ON epistemic_directives
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{surfaced_count,last_surfaced_at,epistemic_directives_fts_tsv}');
+ALTER TABLE prospective_memories ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK (record_revision > 0);
+-- Native assembly acknowledges its selected one-shot reminder before dispatch.
+-- That usage transition is not a semantic edit of the retained action. Every
+-- other state transition, and every text/policy edit, advances the revision.
+CREATE OR REPLACE FUNCTION memory_assign_reminder_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE previous jsonb; next_value jsonb;
+BEGIN
+ IF TG_OP='INSERT' THEN NEW.record_revision:=1; RETURN NEW; END IF;
+ IF NEW.id<>OLD.id THEN RAISE EXCEPTION 'reminder identity is immutable'; END IF;
+ previous:=to_jsonb(OLD)-ARRAY['record_revision','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv'];
+ next_value:=to_jsonb(NEW)-ARRAY['record_revision','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv'];
+ IF previous IS NOT DISTINCT FROM next_value OR
+   (OLD.state='armed' AND NEW.state='triggered' AND OLD.recurrence='once'
+    AND NEW.trigger_count=OLD.trigger_count+1
+    AND (previous-'state') IS NOT DISTINCT FROM (next_value-'state')) THEN
+   NEW.record_revision:=OLD.record_revision;
+ ELSE NEW.record_revision:=OLD.record_revision+1;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_reminder_record_revision ON prospective_memories;
+CREATE TRIGGER memory_reminder_record_revision BEFORE INSERT OR UPDATE ON prospective_memories
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_reminder_revision();
+
+-- END structured recall revisions
+
+-- BEGIN memory episode revisions
+-- Episode text and provenance can change independently of the canonical parent.
+-- Keep an owner revision for typed selection/release identities. No-op refreshes
+-- preserve it; clients cannot force or rewind the counter by assigning it.
+ALTER TABLE memory_episodes ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
+  CHECK (record_revision > 0);
+DROP TRIGGER IF EXISTS memory_episode_record_revision ON memory_episodes;
+CREATE TRIGGER memory_episode_record_revision BEFORE INSERT OR UPDATE ON memory_episodes
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{}');
+-- END memory episode revisions
+
+-- BEGIN memory summary revisions
+-- A rendered headline can change without changing its canonical memory parent.
+ALTER TABLE memory_summaries ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
+  CHECK (record_revision > 0);
+DROP TRIGGER IF EXISTS memory_summary_record_revision ON memory_summaries;
+CREATE TRIGGER memory_summary_record_revision BEFORE INSERT OR UPDATE ON memory_summaries
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{}');
+-- END memory summary revisions
+
+-- BEGIN memory mutation receipts
+-- Content-free, immutable retry references into the existing canonical audit.
+-- No foreign key to memories: erasure must not permit a retry to repeat a write.
+CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
+ owner_id UUID NOT NULL,
+ actor_principal TEXT NOT NULL CHECK(length(actor_principal) BETWEEN 1 AND 1024),
+ key_hash TEXT NOT NULL CHECK(key_hash ~ '^[0-9a-f]{64}$'),
+ request_hash TEXT NOT NULL CHECK(request_hash ~ '^[0-9a-f]{64}$'),
+ commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
+ result_id BIGINT NOT NULL CHECK(result_id>0),
+ result_revision BIGINT NOT NULL CHECK(result_revision>0),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(owner_id,actor_principal,key_hash)
+);
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS proposal_id UUID;
+-- Zero is deliberately impossible for a canonical record revision. A schema-24
+-- reader which does not know proposal_id therefore refuses this receipt instead
+-- of reporting the unchanged target as a completed correction.
+ALTER TABLE memory_mutation_receipts DROP CONSTRAINT IF EXISTS memory_mutation_receipts_result_revision_check;
+ALTER TABLE memory_mutation_receipts ADD CONSTRAINT memory_mutation_receipts_result_revision_check
+ CHECK((proposal_id IS NULL AND result_revision>0) OR (proposal_id IS NOT NULL AND result_revision=0));
+ALTER TABLE memory_mutation_receipts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_mutation_receipt_actor ON memory_mutation_receipts;
+CREATE POLICY memory_mutation_receipt_actor ON memory_mutation_receipts
+ USING(actor_principal=current_setting('aimee.principal',true))
+ WITH CHECK(actor_principal=current_setting('aimee.principal',true));
+REVOKE ALL ON memory_mutation_receipts FROM PUBLIC;
+DO $memory_receipt_grants$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+  LATERAL aclexplode(relation.relacl) AS acl
+  WHERE relation.oid='memory_mutation_receipts'::regclass AND acl.grantee<>relation.relowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON TABLE memory_mutation_receipts FROM %s',role_name);
+ END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  -- Reconcile broad historical default grants on upgrades, too.
+  REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
+ END IF;
+END
+$memory_receipt_grants$;
+-- Shared conditional retirement/destruction use the same actor/key namespace.
+-- A destroyed result has no current record version; result_revision retains the
+-- admitted target revision and operation distinguishes it from a live result.
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS operation TEXT NOT NULL DEFAULT 'correction'
+ CHECK(operation IN ('correction','retired','destroyed'));
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS target_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS scope_value TEXT NOT NULL DEFAULT '';
+CREATE OR REPLACE FUNCTION memory_deletion_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE valid_result BOOLEAN;
+BEGIN
+ IF NEW.operation NOT IN ('retired','destroyed') THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NEW.target_revision<=0 OR NEW.proposal_id IS NOT NULL OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) OR
+    NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c JOIN public.fact_graph_changes f ON f.commit_id=c.commit_id
+     WHERE c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=NEW.actor_principal
+      AND c.operation=CASE WHEN NEW.operation='destroyed' THEN 'memory.delete' ELSE 'memory.retire' END
+      AND (NEW.operation<>'destroyed' OR c.authority_rank>=30)
+      AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+      AND f.before_version=NEW.target_revision
+      AND (NEW.operation<>'retired' OR f.after_version=NEW.result_revision)
+      AND (NEW.operation<>'destroyed' OR c.reversible=0)
+      AND f.action=CASE WHEN NEW.operation='destroyed' THEN 'purge' ELSE 'update' END) THEN
+   RAISE EXCEPTION 'memory deletion receipt requires its admitted canonical audit';
+ END IF;
+ IF NEW.operation='destroyed' THEN
+   valid_result:=NEW.result_revision=NEW.target_revision AND NOT EXISTS(
+    SELECT 1 FROM public.memories WHERE id=NEW.result_id);
+ ELSE
+   valid_result:=NEW.result_revision>NEW.target_revision AND EXISTS(SELECT 1 FROM public.memories m
+    WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision AND m.lifecycle_state='superseded'
+     AND m.archive_reason='retired by model' AND m.activation_suppressed=1
+     AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value);
+ END IF;
+ IF NOT valid_result THEN RAISE EXCEPTION 'memory deletion receipt has no canonical outcome'; END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_deletion_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_deletion_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_deletion_receipt_guard();
+REVOKE ALL ON FUNCTION memory_deletion_receipt_guard() FROM PUBLIC;
+-- A scoped caller cannot infer destruction merely because RLS hides a restored
+-- ID. This bounded verifier inspects only the caller's own receipt, checks its
+-- current scope, and returns no record data or unrestricted existence oracle.
+CREATE OR REPLACE FUNCTION memory_deletion_replay_current(p_owner UUID,p_key TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT EXISTS(SELECT 1 FROM public.memory_mutation_receipts r,public.memory_collection_owner o
+  WHERE o.id=1 AND o.owner_id=p_owner AND r.owner_id=o.owner_id AND r.key_hash=p_key
+   AND r.actor_principal=COALESCE(current_setting('aimee.principal',true),'')
+   AND public.memory_row_scope_visible(r.scope_type,r.scope_value)
+   AND ((r.operation='destroyed' AND NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=r.result_id))
+    OR (r.operation='retired' AND EXISTS(SELECT 1 FROM public.memories m WHERE m.id=r.result_id
+      AND m.record_revision=r.result_revision AND m.lifecycle_state='superseded'
+      AND m.archive_reason='retired by model' AND m.activation_suppressed=1
+      AND m.scope_type=r.scope_type AND m.scope_value=r.scope_value))))
+$$;
+REVOKE ALL ON FUNCTION memory_deletion_replay_current(UUID,TEXT) FROM PUBLIC;
+-- Creation shares the existing actor/key namespace. Reapplication must accept
+-- already committed creation receipts while preserving all older receipts.
+ALTER TABLE memory_mutation_receipts DROP CONSTRAINT IF EXISTS memory_mutation_receipts_operation_check;
+ALTER TABLE memory_mutation_receipts ADD CONSTRAINT memory_mutation_receipts_operation_check
+ CHECK(operation IN ('correction','retired','destroyed','store','store_noop','rejected','restored'));
+CREATE OR REPLACE FUNCTION memory_store_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF NEW.operation NOT IN ('store','store_noop') THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) THEN
+   RAISE EXCEPTION 'memory store receipt requires its admitted owner and scope';
+ END IF;
+ IF NEW.proposal_id IS NOT NULL THEN
+   IF NEW.operation<>'store' OR NOT EXISTS(
+    SELECT 1 FROM public.memory_correction_proposals p
+     JOIN public.memories m ON m.id=p.target_id
+     JOIN public.fact_graph_changes f ON f.object_kind='review' AND f.object_key=p.proposal_id::text AND f.action='insert'
+     JOIN public.fact_graph_commits c ON c.commit_id=f.commit_id
+    WHERE p.proposal_id=NEW.proposal_id AND p.owner_id=NEW.owner_id
+     AND p.target_id=NEW.result_id AND p.target_revision=NEW.target_revision
+     -- Admission deduplicates identical drafts across actors and terminal decisions.
+     -- Preserve the original author's audit; the retry actor owns only its receipt.
+     AND m.record_revision=p.target_revision AND m.lifecycle_state='active'
+     AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value
+     AND c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=p.actor_principal) THEN
+    RAISE EXCEPTION 'memory store receipt requires its admitted review proposal';
+   END IF;
+ ELSE
+   IF NEW.target_revision<>0 OR NOT EXISTS(SELECT 1 FROM public.memories m
+     WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision AND m.lifecycle_state='active'
+      AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value) OR
+     NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c
+     WHERE c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=NEW.actor_principal
+      AND c.operation='memory.'||NEW.operation
+      AND ((NEW.operation='store' AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+         WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.action='insert') AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+         WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.after_version=NEW.result_revision))
+       OR (NEW.operation='store_noop' AND c.origin_ref='memory:'||NEW.result_id::text||':'||NEW.result_revision::text
+         AND NOT EXISTS(SELECT 1 FROM public.fact_graph_changes f WHERE f.commit_id=c.commit_id)))) THEN
+    RAISE EXCEPTION 'memory store receipt requires its admitted canonical audit';
+   END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_store_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_store_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_store_receipt_guard();
+REVOKE ALL ON FUNCTION memory_store_receipt_guard() FROM PUBLIC;
+-- Lifecycle receipts bind an admitted canonical outcome to its sealed audit.
+CREATE OR REPLACE FUNCTION memory_lifecycle_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF NEW.operation NOT IN ('rejected','restored') THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NEW.target_revision<=0 OR NEW.proposal_id IS NOT NULL OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) OR
+    NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision
+      AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value
+      AND ((NEW.operation='rejected' AND m.lifecycle_state='archived' AND m.activation_suppressed=1
+        AND EXISTS(SELECT 1 FROM public.memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
+          AND t.memory_key=m.key AND t.memory_content=m.content AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value
+          AND t.reason=m.archive_reason))
+       OR (NEW.operation='restored' AND m.lifecycle_state='active' AND m.activation_suppressed=0 AND m.archive_reason=''
+        AND NOT EXISTS(SELECT 1 FROM public.memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
+          AND t.memory_key=m.key AND t.memory_content=m.content AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value)))) OR
+    NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c WHERE c.commit_id=NEW.commit_id AND c.status='applied'
+      AND c.actor_principal=NEW.actor_principal
+      AND c.operation=CASE NEW.operation WHEN 'rejected' THEN 'memory.reject' ELSE 'memory.restore' END
+      AND ((NEW.result_revision>NEW.target_revision AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+        WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.action=CASE NEW.operation WHEN 'rejected' THEN 'update' ELSE 'restore' END
+          AND f.before_version=NEW.target_revision AND f.after_version=NEW.result_revision))
+       OR (NEW.operation='rejected' AND NEW.result_revision=NEW.target_revision
+        AND c.origin_ref='memory:'||NEW.result_id::text||':'||NEW.result_revision::text
+        AND NOT EXISTS(SELECT 1 FROM public.fact_graph_changes f
+          WHERE f.commit_id=c.commit_id AND f.object_kind='memory')))) THEN
+  RAISE EXCEPTION 'memory lifecycle receipt requires its admitted canonical audit';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_lifecycle_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_lifecycle_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_lifecycle_receipt_guard();
+REVOKE ALL ON FUNCTION memory_lifecycle_receipt_guard() FROM PUBLIC;
+-- END memory mutation receipts
+
+-- BEGIN memory correction proposals
+-- Draft text never enters memories, its indexes, or extraction queues. Parent
+-- erasure cascades to drafts; the existing audit retains only typed references.
+CREATE TABLE IF NOT EXISTS memory_correction_proposals (
+ proposal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ owner_id UUID NOT NULL,
+ target_id BIGINT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ target_revision BIGINT NOT NULL CHECK(target_revision>0),
+ actor_principal TEXT NOT NULL CHECK(length(actor_principal) BETWEEN 1 AND 1024),
+ payload TEXT NOT NULL CHECK(length(payload)>0),
+ payload_digest TEXT NOT NULL CHECK(payload_digest ~ '^[0-9a-f]{64}$'),
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),
+ reviewer_principal TEXT NOT NULL DEFAULT '',
+ decision_id TEXT NOT NULL DEFAULT '',
+ review_commit_id TEXT REFERENCES fact_graph_commits(commit_id),
+ result_id BIGINT NOT NULL DEFAULT 0,
+ result_revision BIGINT NOT NULL DEFAULT 0,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(owner_id,target_id,target_revision,payload_digest),
+ CHECK((state='pending' AND reviewer_principal='' AND decision_id='' AND review_commit_id IS NULL AND result_id=0 AND result_revision=0)
+    OR (state='rejected' AND reviewer_principal<>'' AND decision_id<>'' AND review_commit_id IS NOT NULL AND result_id=0 AND result_revision=0)
+    OR (state='approved' AND reviewer_principal<>'' AND decision_id<>'' AND review_commit_id IS NOT NULL AND result_id>0 AND result_revision>0))
+);
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_pending
+ ON memory_correction_proposals(target_id,created_at,proposal_id) WHERE state='pending';
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_parent ON memory_correction_proposals(target_id);
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_recent ON memory_correction_proposals(created_at DESC,proposal_id);
+ALTER TABLE memory_correction_proposals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_correction_parent ON memory_correction_proposals;
+CREATE POLICY memory_correction_parent ON memory_correction_proposals
+ USING(owner_id=(SELECT owner_id FROM memory_collection_owner WHERE id=1)
+   AND EXISTS(SELECT 1 FROM memories m WHERE m.id=target_id))
+ WITH CHECK(owner_id=(SELECT owner_id FROM memory_collection_owner WHERE id=1)
+   AND EXISTS(SELECT 1 FROM memories m WHERE m.id=target_id));
+CREATE OR REPLACE FUNCTION memory_correction_proposal_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+ IF TG_OP='INSERT' THEN
+   IF NEW.state<>'pending' OR NEW.actor_principal<>COALESCE(NULLIF(current_setting('aimee.principal',true),''),'system:model-inference')
+      OR NOT EXISTS(SELECT 1 FROM memories WHERE id=NEW.target_id AND record_revision=NEW.target_revision AND lifecycle_state='active')
+      OR NEW.payload_digest<>encode(sha256(convert_to(NEW.payload,'UTF8')),'hex') THEN
+     RAISE EXCEPTION 'invalid memory correction proposal';
+   END IF;
+ ELSIF ROW(NEW.proposal_id,NEW.owner_id,NEW.target_id,NEW.target_revision,NEW.actor_principal,NEW.payload,NEW.payload_digest,NEW.created_at)
+     IS DISTINCT FROM ROW(OLD.proposal_id,OLD.owner_id,OLD.target_id,OLD.target_revision,OLD.actor_principal,OLD.payload,OLD.payload_digest,OLD.created_at)
+     OR OLD.state<>'pending' OR NEW.state NOT IN ('approved','rejected')
+     OR COALESCE(current_setting('aimee.authority',true),'') NOT IN ('user','operator')
+     OR NEW.reviewer_principal<>COALESCE(current_setting('aimee.principal',true),'') THEN
+   RAISE EXCEPTION 'memory correction payload and decisions are immutable';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_correction_proposal_guard ON memory_correction_proposals;
+CREATE TRIGGER memory_correction_proposal_guard BEFORE INSERT OR UPDATE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION memory_correction_proposal_guard();
+DROP TRIGGER IF EXISTS evidence_memory_correction ON memory_correction_proposals;
+CREATE TRIGGER evidence_memory_correction AFTER INSERT OR UPDATE OR DELETE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION evidence_object_mutation('review','proposal_id');
+DROP TRIGGER IF EXISTS evidence_guard_memory_correction ON memory_correction_proposals;
+CREATE TRIGGER evidence_guard_memory_correction BEFORE INSERT OR UPDATE OR DELETE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION evidence_emitter_guard('evidence_memory_correction');
+ALTER TABLE knowledge_review_decisions DROP CONSTRAINT IF EXISTS knowledge_review_decisions_decision_check;
+ALTER TABLE knowledge_review_decisions ADD CONSTRAINT knowledge_review_decisions_decision_check
+ CHECK(decision IN ('accept','reject','correct','retire','restore','promote','invalidate_source','purge',
+ 'request_evidence','annotate','revoke','resolve'));
+REVOKE ALL ON memory_correction_proposals FROM PUBLIC;
+DO $memory_proposal_grants$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+ LATERAL aclexplode(relation.relacl) AS acl
+ WHERE relation.oid='memory_correction_proposals'::regclass AND acl.grantee<>relation.relowner LOOP
+   role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+   EXECUTE format('REVOKE ALL ON TABLE memory_correction_proposals FROM %s',role_name);
+ END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+   GRANT SELECT,INSERT ON memory_correction_proposals TO aimee_store_runtime;
+   GRANT UPDATE(state,reviewer_principal,decision_id,review_commit_id,result_id,result_revision)
+     ON memory_correction_proposals TO aimee_store_runtime;
+   GRANT INSERT(decision_id,item_id,source_queue,decision,authenticated_actor,requested_value,
+     evidence_snapshot,resulting_authority,changeset_id,preview_token,head_at_decision,created_at)
+     ON knowledge_review_decisions TO aimee_store_runtime;
+ END IF;
+END
+$memory_proposal_grants$;
+-- END memory correction proposals
+
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or
 -- WORM ledgers; RLS remains enabled and DDL stays with the schema owner.
+-- BEGIN typed auxiliary source revisions
+ALTER TABLE learning_observations ADD COLUMN IF NOT EXISTS memory_record_id BIGINT GENERATED ALWAYS AS IDENTITY;
+CREATE UNIQUE INDEX IF NOT EXISTS learning_observation_memory_record_id ON learning_observations(memory_record_id);
+ALTER TABLE learning_observations ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+CREATE OR REPLACE FUNCTION memory_assign_observation_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN NEW.record_revision:=1; RETURN NEW; END IF;
+ IF NEW.memory_record_id<>OLD.memory_record_id THEN RAISE EXCEPTION 'observation source identity is immutable'; END IF;
+ IF (to_jsonb(NEW)-ARRAY['record_revision','refreshed_at','learning_observations_fts_tsv']) IS DISTINCT FROM
+    (to_jsonb(OLD)-ARRAY['record_revision','refreshed_at','learning_observations_fts_tsv']) THEN
+  NEW.record_revision:=OLD.record_revision+1;
+ ELSE NEW.record_revision:=OLD.record_revision;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_observation_record_revision ON learning_observations;
+CREATE TRIGGER memory_observation_record_revision BEFORE INSERT OR UPDATE ON learning_observations
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_observation_revision();
+ALTER TABLE learning_proposals ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_procedure_record_revision ON learning_proposals;
+CREATE TRIGGER memory_procedure_record_revision BEFORE INSERT OR UPDATE ON learning_proposals
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{learning_proposals_fts_tsv}');
+ALTER TABLE memory_relations ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_relation_record_revision ON memory_relations;
+CREATE TRIGGER memory_relation_record_revision BEFORE INSERT OR UPDATE ON memory_relations
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{memory_relations_fts_tsv}');
+-- END typed auxiliary source revisions
+
+-- Go admits and locks the bounded source set. This storage helper performs the
+-- same child cleanup as deleting the canonical row, while retaining its identity
+-- for revocation. Catalog enumeration includes future FK-owned payload stores;
+-- an unfamiliar FK action refuses the transaction instead of retaining a copy.
+CREATE OR REPLACE FUNCTION memory_compact_source_children(p_id BIGINT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE child RECORD;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=p_id
+ AND public.memory_row_scope_visible(m.scope_type,m.scope_value)) THEN
+  RAISE EXCEPTION 'compaction source unavailable';
+ END IF;
+ PERFORM 1 FROM public.memories WHERE id=p_id FOR UPDATE;
+ DELETE FROM public.memory_lineage l WHERE
+ (l.object_type='memory_unit' AND l.object_id IN(SELECT id FROM public.memory_units WHERE memory_id=p_id)) OR
+ (l.object_type='episode' AND l.object_id IN(SELECT id FROM public.memory_episodes WHERE memory_id=p_id)) OR
+ (l.object_type='relation' AND l.object_id IN(SELECT id FROM public.memory_relations WHERE memory_id=p_id));
+ FOR child IN SELECT c.conrelid::regclass AS relation,a.attname AS column_name,c.confdeltype,
+ cardinality(c.conkey) AS arity FROM pg_constraint c
+ JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1]
+ WHERE c.contype='f' AND c.confrelid='public.memories'::regclass ORDER BY c.oid
+ LOOP
+  IF child.arity<>1 OR child.confdeltype<>'c' THEN
+   RAISE EXCEPTION 'unclassified compaction child constraint on %',child.relation;
+  END IF;
+  EXECUTE format('DELETE FROM %s WHERE %I=$1',child.relation,child.column_name) USING p_id;
+ END LOOP;
+END $$;
+REVOKE ALL ON FUNCTION memory_compact_source_children(BIGINT) FROM PUBLIC;
+
+
+-- A narrow storage lock, without granting the index owner canonical write
+-- privileges. NOWAIT avoids lock-order deadlocks with mutation/index workers.
+CREATE OR REPLACE FUNCTION kb_memory_index_cutover_lock() RETURNS void
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+BEGIN
+ IF COALESCE(current_setting('aimee.memory_scope_all',true),'')<>'1' THEN
+  RAISE EXCEPTION 'embedding cutover requires all-scope owner' USING ERRCODE='42501';
+ END IF;
+ PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE NOWAIT;
+ IF NOT FOUND THEN RAISE EXCEPTION 'embedding cutover barrier unavailable'; END IF;
+END $$;
+REVOKE ALL ON FUNCTION kb_memory_index_cutover_lock() FROM PUBLIC;
+
 DO $memory_store_grants$
 DECLARE
   relation_name TEXT;
@@ -17754,7 +18858,7 @@ BEGIN
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
     'memory_aliases','memory_chunks','memory_coref_audit','memory_event_frames','memory_temporal_refs',
-    'memory_embedder_versions','memory_embedding_versions','memory_active_embedder','memory_reembed_progress',
+    'memory_embedder_versions','memory_embedding_versions','memory_assertion_embedding_versions','memory_active_embedder','memory_reembed_progress',
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
@@ -17773,6 +18877,8 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
+  GRANT EXECUTE ON FUNCTION memory_compact_source_children(BIGINT) TO aimee_store_runtime;
+  GRANT EXECUTE ON FUNCTION kb_memory_index_cutover_lock() TO aimee_store_runtime;
   -- Dependency freshness checks run as the caller. They need identity/version
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation,project_id) ON files TO aimee_store_runtime;
@@ -17799,8 +18905,11 @@ BEGIN
   GRANT USAGE, SELECT ON SEQUENCE fact_evidence_id_seq, rel_types_id_seq, ontology_evaluations_id_seq TO aimee_store_runtime;
   -- Typed memory context reads reviewed learning outputs; it cannot mutate or approve them.
   GRANT SELECT(observation_id,scope_kind,scope_id,observation_type,title,summary,status,
-    confidence,evidence_count,refreshed_at) ON learning_observations TO aimee_store_runtime;
-  GRANT SELECT(id,sink,state,target_key,action_json) ON learning_proposals TO aimee_store_runtime;
+    confidence,evidence_count,refreshed_at,memory_record_id,record_revision) ON learning_observations TO aimee_store_runtime;
+  GRANT SELECT(id,sink,state,target_key,action_json,record_revision) ON learning_proposals TO aimee_store_runtime;
+  IF to_regprocedure('learning_procedure_experience(text,text,text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) TO aimee_store_runtime;
+  END IF;
   GRANT SELECT(id,from_id,into_id,undone), INSERT(from_id,into_id), UPDATE(undone) ON entity_merges TO aimee_store_runtime;
   GRANT USAGE,SELECT ON SEQUENCE entity_merges_id_seq TO aimee_store_runtime;
   GRANT SELECT(id,name_norm,status,priority), INSERT(name_norm,status,priority), UPDATE(status,priority) ON entity_name_conflicts TO aimee_store_runtime;
@@ -17808,13 +18917,453 @@ BEGIN
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
+  GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_projection_generations, memory_invalidation_outbox TO aimee_store_runtime;
+  REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_correction_proposals TO aimee_store_runtime;
+  GRANT UPDATE(state,reviewer_principal,decision_id,review_commit_id,result_id,result_revision)
+    ON memory_correction_proposals TO aimee_store_runtime;
+  GRANT INSERT(decision_id,item_id,source_queue,decision,authenticated_actor,requested_value,
+    evidence_snapshot,resulting_authority,changeset_id,preview_token,head_at_decision,created_at)
+    ON knowledge_review_decisions TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
-    kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;
+    kb_fact_commit_worm_seal(TEXT,TEXT), memory_deletion_replay_current(UUID,TEXT),
+    memory_apply_relation_invalidations(INTEGER) TO aimee_store_runtime;
 END
 $memory_store_grants$;
+
+-- BEGIN recall rule revisions
+ALTER TABLE rules ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_rule_record_revision ON rules;
+CREATE TRIGGER memory_rule_record_revision BEFORE INSERT OR UPDATE ON rules
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{last_reinforced_at,rules_fts_tsv}');
+ALTER TABLE memory_collection_owner ADD COLUMN IF NOT EXISTS rules_revision BIGINT NOT NULL DEFAULT 1 CHECK(rules_revision>0);
+DO $install_rule_revision$
+DECLARE schema_name TEXT:=current_schema();
+BEGIN
+ EXECUTE format($ddl$
+ CREATE OR REPLACE FUNCTION %1$I.memory_capture_rule_change() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,%1$I,pg_temp AS $body$
+ BEGIN
+  UPDATE memory_collection_owner SET rules_revision=rules_revision+1 WHERE id=1;
+  IF NOT FOUND THEN RAISE EXCEPTION 'memory rule owner unavailable'; END IF;
+  IF EXISTS(SELECT 1 FROM derived_memory_dependencies WHERE input_kind='rule') THEN PERFORM derived_memory_apply_status('',''); END IF;
+  RETURN NULL;
+ END $body$;
+ $ddl$,schema_name);
+ REVOKE ALL ON FUNCTION memory_capture_rule_change() FROM PUBLIC;
+END $install_rule_revision$;
+DROP TRIGGER IF EXISTS memory_rule_collection_revision ON rules;
+CREATE TRIGGER memory_rule_collection_revision AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON rules
+ FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_rule_change();
+-- END recall rule revisions
+
+
+
+-- BEGIN memory send guards
+-- A durable send guard survives owner/connection loss. Mutations take a shared
+-- row lock; acquisition takes an exclusive row lock before its source checks.
+-- The deadline bounds the host write, NOT storage protection: a paused sender
+-- can resume after a deadline, so only explicit completion releases its guard.
+CREATE TABLE IF NOT EXISTS memory_send_barrier (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ blocked_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity'
+);
+INSERT INTO memory_send_barrier(id) VALUES(1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS memory_send_leases (
+ token TEXT PRIMARY KEY CHECK(token ~ '^[a-f0-9]{32}$'),
+ expires_at TIMESTAMPTZ NOT NULL
+);
+ALTER TABLE memory_send_leases ADD COLUMN IF NOT EXISTS sender_identity TEXT NOT NULL DEFAULT '';
+DO $install_send_guard$
+DECLARE schema_name TEXT:=current_schema(); recipient record; role_name TEXT;
+BEGIN
+ EXECUTE format($ddl$
+ CREATE OR REPLACE FUNCTION %1$I.memory_send_guard_begin(p_token TEXT,p_duration_ms INTEGER)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,%1$I,pg_temp AS $body$
+ DECLARE lease_until TIMESTAMPTZ;
+ BEGIN
+  IF p_token IS NULL OR p_token !~ '^[a-f0-9]{32}$' OR p_duration_ms IS DISTINCT FROM 5000 THEN
+   RAISE EXCEPTION 'invalid memory send guard' USING ERRCODE='22023';
+  END IF;
+  PERFORM set_config('synchronous_commit','on',true);
+  PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'memory send guard unavailable'; END IF;
+  IF (SELECT count(*) FROM memory_send_leases)>=64 THEN
+   RAISE EXCEPTION 'memory send guard capacity' USING ERRCODE='55P03';
+  END IF;
+  lease_until:=clock_timestamp()+interval '5 seconds';
+  INSERT INTO memory_send_leases(token,expires_at,sender_identity) VALUES(p_token,lease_until,
+   COALESCE(current_setting('aimee.transport_identity',true),''));
+  UPDATE memory_send_barrier SET blocked_until=greatest(blocked_until,lease_until) WHERE id=1;
+ END $body$;
+ $ddl$,schema_name);
+ EXECUTE format($ddl$
+ CREATE OR REPLACE FUNCTION %1$I.memory_send_guard_end(p_token TEXT)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,%1$I,pg_temp AS $body$
+ BEGIN
+  IF p_token IS NULL OR p_token !~ '^[a-f0-9]{32}$' THEN
+   RAISE EXCEPTION 'invalid memory send guard' USING ERRCODE='22023';
+  END IF;
+  PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'memory send guard unavailable'; END IF;
+  DELETE FROM memory_send_leases WHERE token=p_token;
+  UPDATE memory_send_barrier SET blocked_until=coalesce(
+   (SELECT max(expires_at) FROM memory_send_leases),'-infinity'::timestamptz) WHERE id=1;
+ END $body$;
+ $ddl$,schema_name);
+ EXECUTE format($ddl$
+ CREATE OR REPLACE FUNCTION %1$I.memory_send_mutation_guard()
+ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,%1$I,pg_temp AS $body$
+ DECLARE until_at TIMESTAMPTZ;
+ BEGIN
+  -- Usage counters do not alter source versions or eligibility. Keep ordinary
+  -- recall accounting available while a provider write is guarded.
+  IF TG_OP='UPDATE' AND
+   (to_jsonb(NEW)-ARRAY['use_count','last_used_at','updated_at','surfaced_count','last_surfaced_at','trigger_count','last_triggered_at',TG_TABLE_NAME||'_fts_tsv']) =
+   (to_jsonb(OLD)-ARRAY['use_count','last_used_at','updated_at','surfaced_count','last_surfaced_at','trigger_count','last_triggered_at',TG_TABLE_NAME||'_fts_tsv']) THEN
+   RETURN NEW;
+  END IF;
+  -- Acknowledging an already-selected once-only reminder preserves its
+  -- revision and retained-read policy. It cannot edit or rearm the action.
+  IF TG_OP='UPDATE' AND TG_TABLE_NAME='prospective_memories'
+   AND to_jsonb(OLD)->>'state'='armed' AND to_jsonb(NEW)->>'state'='triggered'
+   AND to_jsonb(OLD)->>'recurrence'='once'
+   AND (to_jsonb(NEW)->>'trigger_count')::bigint=(to_jsonb(OLD)->>'trigger_count')::bigint+1
+   AND (to_jsonb(NEW)-ARRAY['state','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv']) =
+       (to_jsonb(OLD)-ARRAY['state','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv']) THEN
+   RETURN NEW;
+  END IF;
+  -- FOR SHARE also detects an obsolete REPEATABLE READ snapshot through a
+  -- serialization error after an acquisition changes this singleton row.
+  SELECT blocked_until INTO until_at FROM memory_send_barrier WHERE id=1 FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'memory send guard unavailable'; END IF;
+  IF EXISTS(SELECT 1 FROM memory_send_leases) THEN
+   RAISE EXCEPTION 'memory provider send in progress; retry mutation' USING ERRCODE='55P03';
+  END IF;
+  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+  IF TG_OP='TRUNCATE' THEN RETURN NULL; END IF;
+  RETURN NEW;
+ END $body$;
+ $ddl$,schema_name);
+ -- Default grants must not expose another request's opaque release token or
+ -- permit clients to shorten the barrier directly.
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+  LATERAL aclexplode(relation.relacl) AS acl
+  WHERE relation.oid IN ('memory_send_barrier'::regclass,'memory_send_leases'::regclass)
+   AND acl.grantee<>relation.relowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC'
+   ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON TABLE memory_send_barrier,memory_send_leases FROM %s',role_name);
+  IF recipient.grantee<>0 THEN
+   EXECUTE format('GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO %s',role_name);
+  END IF;
+ END LOOP;
+ REVOKE ALL ON TABLE memory_send_barrier,memory_send_leases FROM PUBLIC;
+ REVOKE ALL ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT),memory_send_mutation_guard() FROM PUBLIC;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO aimee_store_runtime;
+ END IF;
+END $install_send_guard$;
+DROP TRIGGER IF EXISTS memory_send_guard ON memories;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memories FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memories;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memories FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_collection_owner;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_collection_owner FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_collection_owner;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_collection_owner FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_units;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_units FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_units;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_units FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_lineage;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_lineage FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_lineage;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_lineage FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_episodes;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_episodes FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_episodes;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_episodes FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_summaries;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_summaries FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_summaries;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_summaries FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON derived_memory_dependencies;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON derived_memory_dependencies FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON derived_memory_dependencies;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON derived_memory_dependencies FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON entity_edges;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON entity_edges FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON entity_edges;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON entity_edges FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON fact_evidence;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON fact_evidence FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON fact_evidence;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON fact_evidence FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON epistemic_directives;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON epistemic_directives FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON epistemic_directives;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON epistemic_directives FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON prospective_memories;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON prospective_memories FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON prospective_memories;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON prospective_memories FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON rules;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON rules FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON rules;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON rules FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON learning_observations;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON learning_observations FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_observations;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_observations FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON learning_proposals;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON learning_proposals FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_proposals;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_proposals FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_relations;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_relations FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_relations;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_relations FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_links;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_links FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_links;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_links FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_scopes;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_scopes FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_scopes;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_scopes FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+-- END memory send guards
+
+-- BEGIN memory erasure intents
+-- Control metadata is independent of content snapshots. No payload or raw
+-- principal is retained. Content restoration must retain this table and run the
+-- replay below before readers start; runtime roles cannot clear the intent log.
+CREATE TABLE IF NOT EXISTS memory_erasure_epoch (
+ id INTEGER PRIMARY KEY CHECK(id=1), generation BIGINT NOT NULL DEFAULT 0
+);
+INSERT INTO memory_erasure_epoch(id) VALUES(1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS memory_erasure_intents (
+ memory_id BIGINT PRIMARY KEY,
+ scope_type TEXT NOT NULL,
+ scope_value TEXT NOT NULL,
+ payload_digest TEXT NOT NULL CHECK(payload_digest ~ '^[0-9a-f]{64}$'),
+ erased_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx
+ ON memory_erasure_intents(scope_type,scope_value,payload_digest);
+
+CREATE TABLE IF NOT EXISTS memory_erasure_sessions (
+ session_digest TEXT PRIMARY KEY CHECK(session_digest ~ '^[0-9a-f]{64}$')
+);
+CREATE OR REPLACE FUNCTION memory_erasure_restore_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_intents
+ WHERE memory_id=$1 OR (scope_type=$2 AND scope_value=$3 AND payload_digest=$4)) OR EXISTS(
+ SELECT 1 FROM %I.memory_erasure_sessions WHERE session_digest=$5)',TG_TABLE_SCHEMA,TG_TABLE_SCHEMA)
+ INTO prohibited USING NEW.id,NEW.scope_type,NEW.scope_value,
+   encode(sha256(convert_to(NEW.content,'UTF8')),'hex'),
+   encode(sha256(convert_to(COALESCE(NEW.source_session,''),'UTF8')),'hex');
+ IF prohibited THEN RAISE EXCEPTION 'memory restoration prohibited by surviving erasure intent'
+   USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM PUBLIC;
+REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM PUBLIC;
+DO $memory_erasure_acl$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class relation,
+   LATERAL aclexplode(relation.relacl) acl
+   WHERE relation.oid IN ('memory_erasure_intents'::regclass,'memory_erasure_sessions'::regclass,'memory_erasure_epoch'::regclass) AND acl.grantee<>relation.relowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM %s',role_name);
+ END LOOP;
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc routine,
+   LATERAL aclexplode(routine.proacl) acl
+   WHERE routine.oid='memory_erasure_restore_guard()'::regprocedure AND acl.grantee<>routine.proowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM %s',role_name);
+ END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_privacy_erasure') THEN
+  GRANT SELECT,INSERT ON memory_erasure_intents,memory_erasure_sessions TO aimee_kb_privacy_erasure;
+  GRANT SELECT,UPDATE ON memory_erasure_epoch TO aimee_kb_privacy_erasure;
+ END IF;
+END $memory_erasure_acl$;
+DROP TRIGGER IF EXISTS memory_erasure_restore_guard ON memories;
+CREATE TRIGGER memory_erasure_restore_guard BEFORE INSERT OR UPDATE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_erasure_restore_guard();
+-- A producer that was offline during erasure cannot later attach a new copy to
+-- a deleted input. This is a storage integrity fence, not freshness inference.
+CREATE OR REPLACE FUNCTION memory_erasure_dependency_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE parents TEXT[]:='{}'::text[]; prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ IF TG_TABLE_NAME='memory_lineage' THEN
+  IF NEW.source_kind='memory' AND NEW.source_ref LIKE 'memory:%' THEN
+   parents:=ARRAY[substring(NEW.source_ref FROM 8)];
+  ELSIF NEW.source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1','memory-relation-input-v1','memory-relation-input-v2') THEN
+   parents:=ARRAY[NEW.source_ref::jsonb->>'record_id'];
+  ELSIF NEW.source_kind='episode-card-input-v1' THEN
+   SELECT COALESCE(array_agg(x->>'record_id'),'{}'::text[]) INTO parents
+     FROM jsonb_array_elements(NEW.source_ref::jsonb->'inputs') x;
+  END IF;
+ ELSIF TG_TABLE_NAME='derived_memory_dependencies' THEN
+  IF NEW.input_kind='memory' THEN parents:=ARRAY[NEW.input_id]; END IF;
+ ELSIF TG_TABLE_NAME='artifact_citations' THEN
+  IF NEW.source_kind='memory' THEN parents:=ARRAY[NEW.source_id]; END IF;
+ ELSIF TG_TABLE_NAME='artifacts' THEN
+  parents:=ARRAY[NEW.payload->>'memory_id'];
+ END IF;
+ IF cardinality(parents)=0 THEN RETURN NEW; END IF;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_intents WHERE memory_id::text=ANY($1))',TG_TABLE_SCHEMA)
+ INTO prohibited USING parents;
+ IF prohibited THEN RAISE EXCEPTION 'derived input prohibited by surviving erasure intent'
+   USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION memory_erasure_dependency_guard() FROM PUBLIC;
+-- Go arms this marker only around an admitted explicit user deletion. Retention
+-- and compaction keep their existing semantics and do not silently mint erasure.
+CREATE OR REPLACE FUNCTION memory_explicit_erasure_capture() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE original_digest TEXT;
+BEGIN
+ IF current_setting('aimee.memory_explicit_erasure',true) IS DISTINCT FROM '1' THEN RETURN OLD; END IF;
+ EXECUTE format('UPDATE %I.memory_erasure_epoch SET generation=generation+1 WHERE id=1',TG_TABLE_SCHEMA);
+ EXECUTE format('SELECT source_ref::jsonb->>''payload_digest'' FROM %I.memory_lineage
+ WHERE object_type=''memory'' AND object_id=$1 AND source_kind=''memory-compaction-origin-v1'' LIMIT 1',TG_TABLE_SCHEMA) INTO original_digest USING OLD.id;
+ EXECUTE format('INSERT INTO %I.memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
+ VALUES($1,$2,$3,$4) ON CONFLICT(memory_id) DO NOTHING',TG_TABLE_SCHEMA)
+ USING OLD.id,OLD.scope_type,OLD.scope_value,COALESCE(original_digest,encode(sha256(convert_to(OLD.content,'UTF8')),'hex'));
+ RETURN OLD;
+END $$;
+REVOKE ALL ON FUNCTION memory_explicit_erasure_capture() FROM PUBLIC;
+DROP TRIGGER IF EXISTS memory_explicit_erasure_capture ON memories;
+CREATE TRIGGER memory_explicit_erasure_capture BEFORE DELETE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_explicit_erasure_capture();
+
+DO $erasure_dependency_triggers$
+DECLARE target TEXT; recipient RECORD; role_name TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['memory_lineage','derived_memory_dependencies','artifact_citations','artifacts'] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS memory_erasure_dependency_guard ON %I',target);
+  EXECUTE format('CREATE TRIGGER memory_erasure_dependency_guard BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION memory_erasure_dependency_guard()',target);
+ END LOOP;
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc routine,
+   LATERAL aclexplode(routine.proacl) acl
+   WHERE routine.oid IN ('memory_erasure_dependency_guard()'::regprocedure,'memory_explicit_erasure_capture()'::regprocedure) AND acl.grantee<>routine.proowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON FUNCTION memory_erasure_dependency_guard(),memory_explicit_erasure_capture() FROM %s',role_name);
+ END LOOP;
+END $erasure_dependency_triggers$;
+
+-- Replay after a content-only restore, before recording reader readiness.
+UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
+DELETE FROM memories m USING memory_erasure_intents i
+ WHERE m.id=i.memory_id OR (m.scope_type=i.scope_type AND m.scope_value=i.scope_value
+ AND encode(sha256(convert_to(m.content,'UTF8')),'hex')=i.payload_digest);
+DELETE FROM memories m WHERE EXISTS(SELECT 1 FROM memory_erasure_sessions i
+ WHERE i.session_digest=encode(sha256(convert_to(COALESCE(m.source_session,''),'UTF8')),'hex'));
+DELETE FROM artifacts a WHERE a.payload->>'memory_id' IN (SELECT memory_id::text FROM memory_erasure_intents)
+ OR EXISTS(SELECT 1 FROM artifact_citations c JOIN memory_erasure_intents i
+ ON c.source_kind='memory' AND c.source_id=i.memory_id::text WHERE c.artifact_id=a.id);
+-- Auxiliary session payloads use the same durable session receipt as memory.
+CREATE OR REPLACE FUNCTION memory_session_erasure_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE sessions TEXT[]; row_value JSONB:=to_jsonb(NEW); prior JSONB:='{}'; prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ IF TG_OP='UPDATE' THEN prior:=to_jsonb(OLD); END IF;
+ sessions:=ARRAY[row_value->>'session_id',row_value->>'source_session',row_value#>>'{payload,session_id}',
+                 prior->>'session_id',prior->>'source_session',prior#>>'{payload,session_id}'];
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_sessions WHERE session_digest IN
+  (SELECT encode(sha256(convert_to(x,''UTF8'')),''hex'') FROM unnest($1::text[]) x))',TG_TABLE_SCHEMA)
+ INTO prohibited USING sessions;
+ IF prohibited THEN RAISE EXCEPTION 'session payload prohibited by surviving erasure intent' USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION memory_session_erasure_guard() FROM PUBLIC;
+DO $session_erasure_payloads$
+DECLARE target TEXT; field TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['prospective_memories','epistemic_directives','learning_signals','tasks','interaction_event_embeddings','artifacts'] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS memory_session_erasure_guard ON %I',target);
+  EXECUTE format('CREATE TRIGGER memory_session_erasure_guard BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION memory_session_erasure_guard()',target);
+  field:=CASE WHEN target='artifacts' THEN 'payload->>''session_id''' WHEN target IN ('tasks','interaction_event_embeddings') THEN 'session_id' ELSE 'source_session' END;
+  EXECUTE format('DELETE FROM %I WHERE encode(sha256(convert_to(%s,''UTF8'')),''hex'') IN (SELECT session_digest FROM memory_erasure_sessions)',target,field);
+ END LOOP;
+END $session_erasure_payloads$;
+-- END memory erasure intents
+
+-- Deterministic backfill copies existing producer observations, never today's
+-- source revision. Unobserved generated records remain dependencies:not-recorded.
+DO $memory_producer_registry_backfill$
+DECLARE target RECORD; dependencies JSONB;
+BEGIN
+ FOR target IN SELECT DISTINCT m.id FROM memories m WHERE m.cognified_memory_kind IN ('session_checkpoint','compaction_origin','rule_style')
+ OR EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=m.id
+  AND (l.source_kind IN ('memory','memory-cognify-input-v1','memory-fold-input-v1','legacy-rule-input-v1')
+  OR (l.source_kind='metadata' AND l.source_ref LIKE 'memory-cognify-v1:%')))
+ OR EXISTS(SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
+ LOOP
+  WITH observations AS (
+   SELECT 'memory' AS kind,source_ref::jsonb AS input,source_kind AS producer FROM memory_lineage
+   WHERE object_type='memory' AND object_id=target.id AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
+   UNION ALL SELECT 'rule',source_ref::jsonb,source_kind FROM memory_lineage
+   WHERE object_type='memory' AND object_id=target.id AND source_kind='legacy-rule-input-v1'
+   UNION ALL SELECT 'memory',input,'episode-card-input-v1' FROM memory_units u JOIN memory_lineage l
+   ON l.object_type='memory_unit' AND l.object_id=u.id AND l.source_kind='episode-card-input-v1'
+   CROSS JOIN LATERAL jsonb_array_elements(l.source_ref::jsonb->'inputs') input
+   WHERE u.memory_id=target.id AND u.is_episode_card=1 AND u.unit_type='episode_card'
+  ), grouped AS (
+   SELECT kind,input->>'record_id' AS id,min(input->>'record_revision') AS revision,
+    min(producer) AS producer,count(DISTINCT input->>'record_revision') AS versions FROM observations GROUP BY kind,input->>'record_id'
+  ) SELECT COALESCE(jsonb_agg(jsonb_build_object('input_kind',kind,'input_id',id,
+    'input_version',CASE WHEN versions=1 THEN revision ELSE 'conflicting-observations' END,
+    'extractor_version',producer,'contribution','essential')),'[]'::jsonb) INTO dependencies FROM grouped;
+  -- A content-free original is an origin certificate, not a generated record
+  -- unless it itself retains derivation observations.
+  IF dependencies='[]'::jsonb AND EXISTS(SELECT 1 FROM memories WHERE id=target.id AND cognified_memory_kind='compaction_origin') THEN CONTINUE; END IF;
+  PERFORM derived_memory_declare('memory',target.id::text,dependencies,'suppress');
+ END LOOP;
+END $memory_producer_registry_backfill$;
+
+-- MR-05 content-free recovery reservations survive cancelled outer reads and
+-- process crashes. A pending attempt is never silently replayed. Principal RLS
+-- isolates task metadata; no evidence payload or user query is retained here.
+CREATE TABLE IF NOT EXISTS memory_evidence_recovery (
+ actor_principal TEXT NOT NULL,
+ task_hash TEXT NOT NULL CHECK(task_hash ~ '^[0-9a-f]{64}$'),
+ requirement_hash TEXT NOT NULL,
+ admitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+ duplicate_attempts BIGINT NOT NULL DEFAULT 0,
+ outcome JSONB NOT NULL DEFAULT '{"state":"pending"}'::jsonb,
+ PRIMARY KEY(actor_principal,task_hash)
+);
+ALTER TABLE memory_evidence_recovery ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_evidence_recovery_actor ON memory_evidence_recovery;
+CREATE POLICY memory_evidence_recovery_actor ON memory_evidence_recovery
+ USING(actor_principal=current_setting('aimee.principal',true))
+ WITH CHECK(actor_principal=current_setting('aimee.principal',true));
+REVOKE ALL ON memory_evidence_recovery FROM PUBLIC;
+DO $memory_recovery_grants$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT SELECT,INSERT,UPDATE ON memory_evidence_recovery TO aimee_store_runtime;
+ END IF;
+END $memory_recovery_grants$;
 
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
@@ -17838,5 +19387,420 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '21')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '44')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+-- Utility horizon anchors are protected change events. Exact per-record probes
+-- must not scan the collection journal on each candidate eligibility check.
+CREATE INDEX IF NOT EXISTS memory_invalidation_anchor
+ ON memory_invalidation_outbox(memory_id,operation,record_revision,generation)
+ INCLUDE(recorded_at,scope_type,scope_value);
+
+-- MR-11: Go-owned embedding generation metadata and durable assertion work.
+-- Old serving IDs remain explicit legacy identities; migration never certifies
+-- an unknown vector space or marks its retained temporal coverage complete.
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS generation_state TEXT NOT NULL DEFAULT 'created'
+ CHECK(generation_state IN ('created','backfilling','catching_up','validating','active','retired','failed','cancelled'));
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS identity_state TEXT NOT NULL DEFAULT 'legacy_unknown'
+ CHECK(identity_state IN ('legacy_unknown','verified'));
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS generation_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS embedding_identity JSONB;
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS snapshot_watermark JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS validated_watermark JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS coverage JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE memory_embedding_versions ADD COLUMN IF NOT EXISTS source_revision BIGINT NOT NULL DEFAULT 0 CHECK(source_revision>=0);
+UPDATE memory_embedder_versions v SET generation_state='active'
+ WHERE generation_state='created' AND EXISTS(SELECT 1 FROM memory_active_embedder a WHERE a.version=v.version);
+
+CREATE OR REPLACE FUNCTION memory_assertion_index_enqueue() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE target BIGINT;
+BEGIN
+ target:=CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END;
+ DELETE FROM memory_assertion_embedding_versions WHERE assertion_id=target;
+ INSERT INTO public.kb_async_jobs(kind,document_id,project,status,generation)
+ VALUES('memory_assertion_index',target,'memory','pending',1)
+ ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+ generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END $$;
+DROP TRIGGER IF EXISTS memory_assertion_index_enqueue ON entity_edges;
+CREATE TRIGGER memory_assertion_index_enqueue AFTER INSERT OR UPDATE OR DELETE ON entity_edges
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_index_enqueue();
+INSERT INTO kb_async_jobs(kind,document_id,project,status)
+ SELECT 'memory_assertion_index',id,'memory','pending' FROM entity_edges WHERE edge_class='semantic'
+ ON CONFLICT(kind,document_id) DO NOTHING;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT SELECT,INSERT,UPDATE,DELETE ON memory_assertion_embedding_versions TO aimee_store_runtime;
+ END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION memory_assertion_dependency_enqueue() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE before_id BIGINT; after_id BIGINT;
+BEGIN
+ IF TG_TABLE_NAME='memories' THEN
+  IF TG_OP='UPDATE' AND NEW.record_revision=OLD.record_revision THEN RETURN NULL; END IF;
+  before_id:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.id END;
+  after_id:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.id END;
+  -- Invalidate derived vectors in every retained generation in the canonical
+  -- transaction. A rollback generation cannot retain a removed parent's copy.
+  DELETE FROM memory_assertion_embedding_versions v USING fact_evidence f
+   WHERE v.assertion_id=f.assertion_id AND f.source_kind='memory'
+    AND f.source_id IN ('memory:'||before_id::text,'memory:'||after_id::text);
+  INSERT INTO kb_async_jobs(kind,document_id,project,status,generation)
+   SELECT DISTINCT 'memory_assertion_index',f.assertion_id,'memory','pending',1 FROM fact_evidence f
+   WHERE f.source_kind='memory' AND f.source_id IN ('memory:'||before_id::text,'memory:'||after_id::text)
+   ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+    generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ ELSE
+  before_id:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.assertion_id END;
+  after_id:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.assertion_id END;
+  DELETE FROM memory_assertion_embedding_versions WHERE assertion_id IN (before_id,after_id);
+  INSERT INTO kb_async_jobs(kind,document_id,project,status,generation)
+   SELECT DISTINCT 'memory_assertion_index',id,'memory','pending',1 FROM unnest(ARRAY[before_id,after_id]) ids(id) WHERE id IS NOT NULL
+   ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,last_error='',next_attempt_at='',
+    generation=kb_async_jobs.generation+1,updated_at=clock_timestamp()::text;
+ END IF;
+ RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_assertion_dependency_enqueue ON memories;
+CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DELETE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_dependency_enqueue();
+DROP TRIGGER IF EXISTS memory_assertion_dependency_enqueue ON fact_evidence;
+CREATE TRIGGER memory_assertion_dependency_enqueue AFTER INSERT OR UPDATE OR DELETE ON fact_evidence
+ FOR EACH ROW EXECUTE FUNCTION memory_assertion_dependency_enqueue();
+
+-- MR14: a proposal-only worker and the existing learning owner's narrow inbox.
+-- This role can inspect the same RLS-bound evidence as memory, but has no direct
+-- canonical writes or learning review privileges.
+DO $hygiene_worker$
+DECLARE r RECORD; cols TEXT;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene') THEN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+   RAISE EXCEPTION 'PostgreSQL administrator must provision postgres-hygiene-role.sql before migration';
+  END IF;
+  -- Standalone administrator-owned fixtures may apply the schema directly.
+  CREATE ROLE aimee_memory_hygiene NOLOGIN NOINHERIT NOBYPASSRLS;
+ END IF;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_memory_hygiene' AND
+   (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolcanlogin)) THEN
+  RAISE EXCEPTION 'unsafe hygiene worker role';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN RETURN; END IF;
+ GRANT USAGE ON SCHEMA public TO aimee_memory_hygiene;
+ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_memory_hygiene;
+ FOR r IN SELECT c.oid,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname='public' AND c.relkind IN ('r','p','v') LOOP
+  IF has_table_privilege('aimee_store_runtime',r.oid,'SELECT') THEN
+   EXECUTE format('GRANT SELECT ON public.%I TO aimee_memory_hygiene',r.relname);
+  ELSE
+   SELECT string_agg(quote_ident(a.attname),',') INTO cols FROM pg_attribute a
+    WHERE a.attrelid=r.oid AND a.attnum>0 AND NOT a.attisdropped
+    AND has_column_privilege('aimee_store_runtime',r.oid,a.attnum,'SELECT');
+   IF cols IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT(%s) ON public.%I TO aimee_memory_hygiene',cols,r.relname);
+   END IF;
+  END IF;
+ END LOOP;
+ IF NOT pg_has_role('aimee_store_runtime','aimee_memory_hygiene','MEMBER') THEN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
+   RAISE EXCEPTION 'PostgreSQL administrator must provision hygiene worker membership';
+  END IF;
+  GRANT aimee_memory_hygiene TO aimee_store_runtime WITH INHERIT FALSE;
+ END IF;
+END $hygiene_worker$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS learning_hygiene_finding_identity
+ ON learning_proposals(target_key) WHERE sink='memory_hygiene';
+
+CREATE OR REPLACE FUNCTION learning_hygiene_check_versions(p JSONB) RETURNS VOID
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+DECLARE v JSONB; m RECORD; seen BIGINT[]='{}'; identity BIGINT;
+BEGIN
+ IF p->>'policy' IS DISTINCT FROM 'bounded-proposal-hygiene-v1' OR
+    p->>'owner_id' IS DISTINCT FROM (SELECT owner_id::text FROM memory_collection_owner WHERE id=1) OR
+    jsonb_typeof(p->'finding'->'expected_versions') IS DISTINCT FROM 'array' OR
+    jsonb_array_length(p->'finding'->'expected_versions') NOT BETWEEN 1 AND 128 THEN
+  RAISE EXCEPTION 'invalid hygiene proof';
+ END IF;
+ FOR v IN SELECT value FROM jsonb_array_elements(p->'finding'->'expected_versions') LOOP
+  IF v->>'schema_version' IS DISTINCT FROM '1' OR v->>'owner_id' IS DISTINCT FROM p->>'owner_id' OR
+     COALESCE(v->>'record_id','') !~ '^[1-9][0-9]{0,18}$' OR
+     COALESCE(v->>'record_revision','') !~ '^[1-9][0-9]{0,18}$' THEN
+   RAISE EXCEPTION 'invalid hygiene source version';
+  END IF;
+  identity:=(v->>'record_id')::bigint;
+  IF identity=ANY(seen) THEN RAISE EXCEPTION 'duplicate hygiene source version'; END IF;
+  seen:=array_append(seen,identity);
+  SELECT record_revision,scope_type,scope_value,lifecycle_state INTO m FROM memories
+   WHERE id=identity FOR SHARE;
+  IF NOT FOUND OR m.record_revision::text<>v->>'record_revision' OR
+     m.scope_type IS DISTINCT FROM p->'scope'->>'type' OR
+     m.scope_value IS DISTINCT FROM p->'scope'->>'value' OR
+     m.lifecycle_state NOT IN ('active','archived','retired','superseded') THEN
+   RAISE EXCEPTION 'hygiene source changed; recompute and review';
+  END IF;
+ END LOOP;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_check_versions(JSONB) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION learning_hygiene_queue(p JSONB) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE existing RECORD; signal BIGINT; proposed BIGINT; f JSONB; key TEXT; actor TEXT;
+BEGIN
+ f:=p->'finding'; key:=f->>'finding_id';
+ actor:=NULLIF(current_setting('aimee.principal',true),'');
+ IF octet_length(p::text)>65536 OR actor IS NULL OR
+    p->'scope'->>'type' IS DISTINCT FROM current_setting('aimee.memory_scope_type',true) OR
+    p->'scope'->>'value' IS DISTINCT FROM current_setting('aimee.memory_scope_value',true) OR
+    NOT memory_row_scope_visible(p->'scope'->>'type',p->'scope'->>'value') OR
+    COALESCE(key,'') !~ '^[a-f0-9]{64}$' OR
+    COALESCE(f->>'type','') NOT IN ('possible_duplicate_cluster','possible_contradiction',
+      'obsolete_assertion_candidate','broken_correction_chain','missing_dependency',
+      'unreferenced_observation','over_exposed_memory','low_trust_high_fanout') OR
+    COALESCE(f->>'proposed_action','') NOT IN ('review_duplicate','review_evidence','review_lifecycle') THEN
+  RAISE EXCEPTION 'invalid scoped hygiene admission';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('learning-hygiene:'||key,0));
+ PERFORM learning_hygiene_check_versions(p);
+ SELECT id,state INTO existing FROM learning_proposals WHERE sink='memory_hygiene' AND target_key=key;
+ IF FOUND THEN
+  RETURN jsonb_build_object('proposal_id',existing.id::text,'state',existing.state,'created',false);
+ END IF;
+ INSERT INTO learning_signals(signal_type,title,target_key,target_memory_id,evidence_refs,source_session)
+ VALUES('memory_hygiene',f->>'type',key,(f->'expected_versions'->0->>'record_id')::bigint,
+  (f->'expected_versions')::text,actor) RETURNING id INTO signal;
+ INSERT INTO learning_proposals(signal_id,sink,target_key,target_memory_id,action_json,evidence_refs,expires_at)
+ VALUES(signal,'memory_hygiene',key,(f->'expected_versions'->0->>'record_id')::bigint,p::text,
+  (f->'expected_versions')::text,(CURRENT_TIMESTAMP+interval '30 days')::text) RETURNING id INTO proposed;
+ RETURN jsonb_build_object('proposal_id',proposed::text,'state','pending','created',true);
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_queue(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_queue(JSONB) TO aimee_memory_hygiene;
+
+CREATE OR REPLACE FUNCTION learning_hygiene_review_guard() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF OLD.sink<>'memory_hygiene' THEN RETURN NEW; END IF;
+ IF (NEW.sink,NEW.target_key,NEW.target_memory_id,NEW.action_json,NEW.evidence_refs,NEW.signal_id)
+    IS DISTINCT FROM (OLD.sink,OLD.target_key,OLD.target_memory_id,OLD.action_json,OLD.evidence_refs,OLD.signal_id) THEN
+  RAISE EXCEPTION 'hygiene proposal preview is immutable';
+ END IF;
+ IF OLD.state IN ('archived','rejected','committed') AND NEW.state<>OLD.state THEN
+  RAISE EXCEPTION 'settled hygiene proposal cannot reopen';
+ END IF;
+ IF NEW.state='committed' AND OLD.state<>'committed' THEN
+  IF NULLIF(OLD.expires_at,'')::timestamptz<=CURRENT_TIMESTAMP THEN RAISE EXCEPTION 'hygiene proposal expired'; END IF;
+  PERFORM learning_hygiene_check_versions(OLD.action_json::jsonb);
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_review_guard() FROM PUBLIC;
+DROP TRIGGER IF EXISTS learning_hygiene_review_guard ON learning_proposals;
+CREATE TRIGGER learning_hygiene_review_guard BEFORE UPDATE ON learning_proposals
+ FOR EACH ROW EXECUTE FUNCTION learning_hygiene_review_guard();
+
+-- Equality lookup supports bounded cross-page duplicate clusters.
+CREATE INDEX IF NOT EXISTS memory_hygiene_content_lookup ON memories(scope_type,scope_value,md5(content),id);
+
+-- One bounded hygiene page is an idempotent job in the existing work queue.
+-- Only metadata is retained here; review payloads remain in learning_proposals.
+CREATE TABLE IF NOT EXISTS memory_hygiene_runs (
+ id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+ run_key TEXT NOT NULL UNIQUE,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,
+ owner_id TEXT NOT NULL,generation TEXT NOT NULL,policy TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('running','complete','partial')),
+ resume_cursor TEXT NOT NULL DEFAULT '',rows_inspected BIGINT NOT NULL DEFAULT 0,
+ proposal_writes BIGINT NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+ finished_at TIMESTAMPTZ
+);
+REVOKE ALL ON memory_hygiene_runs FROM PUBLIC,aimee_memory_hygiene;
+ALTER TABLE memory_hygiene_runs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_hygiene_run_visible ON memory_hygiene_runs;
+CREATE POLICY memory_hygiene_run_visible ON memory_hygiene_runs
+ USING(memory_row_scope_visible(scope_type,scope_value));
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  REVOKE ALL ON memory_hygiene_runs FROM aimee_store_runtime;
+  GRANT SELECT ON memory_hygiene_runs TO aimee_store_runtime;
+ END IF;
+END $$;
+CREATE OR REPLACE FUNCTION learning_hygiene_job(p JSONB) RETURNS TEXT
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE run BIGINT; v_scope_type TEXT; v_scope_value TEXT; key TEXT;
+BEGIN
+ v_scope_type:=p->'scope'->>'type';v_scope_value:=p->'scope'->>'value';key:=p->>'run_key';
+ IF octet_length(p::text)>8192 OR COALESCE(key,'') !~ '^[a-f0-9]{64}$'
+ OR NULLIF(current_setting('aimee.principal',true),'') IS NULL
+ OR v_scope_type IS DISTINCT FROM current_setting('aimee.memory_scope_type',true)
+ OR v_scope_value IS DISTINCT FROM current_setting('aimee.memory_scope_value',true)
+ OR NOT memory_row_scope_visible(v_scope_type,v_scope_value)
+ OR p->>'policy' IS DISTINCT FROM 'bounded-proposal-hygiene-v1'
+ OR p->>'owner_id' IS DISTINCT FROM (SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+ OR p->>'generation' IS DISTINCT FROM (SELECT COALESCE((SELECT g.generation FROM memory_collection_generations g
+   WHERE g.scope_type=v_scope_type AND g.scope_value=v_scope_value),0)::text)
+ THEN RAISE EXCEPTION 'invalid hygiene job binding'; END IF;
+ IF NOT pg_try_advisory_xact_lock(hashtextextended('hygiene-run:'||key,0)) THEN
+  RAISE EXCEPTION 'hygiene job already claimed';
+ END IF;
+ INSERT INTO memory_hygiene_runs(run_key,scope_type,scope_value,owner_id,generation,policy,state)
+ VALUES(key,v_scope_type,v_scope_value,p->>'owner_id',p->>'generation',p->>'policy','running')
+ ON CONFLICT(run_key) DO NOTHING;
+ SELECT id INTO run FROM memory_hygiene_runs r WHERE r.run_key=key AND r.scope_type=v_scope_type
+ AND r.scope_value=v_scope_value FOR UPDATE;
+ IF run IS NULL THEN RAISE EXCEPTION 'hygiene job identity collision'; END IF;
+ INSERT INTO kb_async_jobs(kind,document_id,project,status,claimed_by,claimed_at)
+ VALUES('memory_hygiene',run,v_scope_type||':'||v_scope_value,'running',current_setting('aimee.principal',true),clock_timestamp()::text)
+ ON CONFLICT(kind,document_id) DO UPDATE SET status='running',claimed_by=EXCLUDED.claimed_by,claimed_at=EXCLUDED.claimed_at;
+ RETURN run::text;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_job(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_job(JSONB) TO aimee_memory_hygiene;
+CREATE OR REPLACE FUNCTION learning_hygiene_finish(p_id BIGINT,p_partial BOOLEAN,p_cursor TEXT,p_rows BIGINT,p_writes BIGINT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF p_partial IS NULL OR octet_length(p_cursor)>4096 OR p_rows NOT BETWEEN 0 AND 128
+ OR p_writes NOT BETWEEN 0 AND 2048 THEN RAISE EXCEPTION 'invalid hygiene completion'; END IF;
+ UPDATE memory_hygiene_runs SET state=CASE WHEN p_partial THEN 'partial' ELSE 'complete' END,
+ resume_cursor=p_cursor,rows_inspected=p_rows,proposal_writes=p_writes,finished_at=clock_timestamp()
+ WHERE id=p_id AND scope_type=current_setting('aimee.memory_scope_type',true)
+ AND scope_value=current_setting('aimee.memory_scope_value',true)
+ AND EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_hygiene' AND j.document_id=p_id
+  AND j.status='running' AND j.claimed_by=current_setting('aimee.principal',true));
+ IF NOT FOUND THEN RAISE EXCEPTION 'hygiene claim unavailable'; END IF;
+ UPDATE kb_async_jobs SET status='done',updated_at=clock_timestamp()::text,claimed_by='',claimed_at=''
+ WHERE kind='memory_hygiene' AND document_id=p_id;
+END $$;
+REVOKE ALL ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) TO aimee_memory_hygiene;
+
+-- MR15: retain availability features without manufacturing a task reward.
+ALTER TABLE bandit_decisions ADD COLUMN IF NOT EXISTS result_count BIGINT;
+ALTER TABLE bandit_decisions ADD COLUMN IF NOT EXISTS result_truncated BOOLEAN;
+
+-- MR-15: governed procedure observations reuse the learning application ledger.
+-- Legacy mining observations remain unverified; they are never part of these
+-- projections. Source-event IDs are optional only for receipt-backed v2 rows.
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS governed_event JSONB;
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS experience_projection JSONB;
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS governed_sequence BIGINT;
+ALTER TABLE learning_application_events ALTER COLUMN source_event_id DROP NOT NULL;
+CREATE SEQUENCE IF NOT EXISTS learning_procedure_event_sequence;
+CREATE INDEX IF NOT EXISTS learning_procedure_experience_lookup ON learning_application_events
+ ((governed_event->>'actor'),(governed_event->'procedure'->>'owner_id'),
+ (governed_event->'procedure'->>'procedure_id'),(governed_event->'procedure'->>'revision'),governed_sequence DESC)
+ WHERE governed_event IS NOT NULL;
+CREATE OR REPLACE FUNCTION learning_procedure_immutable_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='UPDATE' AND OLD.governed_event IS NOT NULL AND NEW IS DISTINCT FROM OLD
+ AND NOT (NEW.experience_projection IS NULL AND (to_jsonb(NEW)-'experience_projection')=(to_jsonb(OLD)-'experience_projection')) THEN
+  RAISE EXCEPTION 'governed application events are immutable';
+ END IF;
+ IF NEW.source_event_id IS NULL AND NEW.governed_event IS NULL THEN
+  RAISE EXCEPTION 'application requires mining or governed receipt evidence';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS learning_procedure_immutable ON learning_application_events;
+CREATE TRIGGER learning_procedure_immutable BEFORE INSERT OR UPDATE ON learning_application_events
+ FOR EACH ROW EXECUTE FUNCTION learning_procedure_immutable_guard();
+
+-- Learning owns persistence. Caller context is supplied by the verified host
+-- adapter, independently of public event arguments. The host holds a cohort
+-- advisory transaction lock across reading, Go-owner projection and admission.
+CREATE OR REPLACE FUNCTION learning_procedure_admit(p_event JSONB,p_projection JSONB,p_scope_kind TEXT,p_scope_id TEXT)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+DECLARE actor TEXT:=current_setting('aimee.principal',true); event_key TEXT; old_event JSONB;
+BEGIN
+ IF actor IS NULL OR actor='' OR actor IS DISTINCT FROM p_event->>'actor'
+ OR p_event->>'schema_version' IS DISTINCT FROM '1' OR COALESCE(p_event->>'event_id','')=''
+ OR COALESCE(p_event->>'receipt_ref','')='' OR COALESCE(p_event->>'trial_id','')=''
+ OR jsonb_typeof(p_projection) IS DISTINCT FROM 'array'
+ OR p_scope_kind NOT IN ('project','workspace','global') OR (p_scope_kind<>'global' AND p_scope_id='') THEN
+  RAISE EXCEPTION 'invalid governed procedure admission';
+ END IF;
+ event_key:='mr15:'||encode(sha256(convert_to(jsonb_build_array(actor,p_event->>'event_id')::text,'UTF8')),'hex');
+ SELECT governed_event INTO old_event FROM learning_application_events WHERE application_id=event_key;
+ IF FOUND THEN
+  IF old_event IS DISTINCT FROM p_event THEN RAISE EXCEPTION 'conflicting immutable application'; END IF;
+  RETURN jsonb_build_object('status','ok','event_ref',event_key,'duplicate',true);
+ END IF;
+ INSERT INTO learning_application_events(application_id,source_event_id,scope_kind,scope_id,
+  procedure_artifact_id,governed_event,experience_projection,governed_sequence)
+ VALUES(event_key,NULL,p_scope_kind,p_scope_id,p_event->'procedure'->>'procedure_id',p_event,p_projection,
+  nextval('learning_procedure_event_sequence'));
+ RETURN jsonb_build_object('status','ok','event_ref',event_key,'duplicate',false);
+END $$;
+
+-- The native learning adapter reads only the authenticated actor's cohort.
+CREATE OR REPLACE FUNCTION learning_procedure_events(p_procedure JSONB)
+RETURNS SETOF JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ SELECT governed_event FROM learning_application_events
+ WHERE governed_event->>'actor'=NULLIF(current_setting('aimee.principal',true),'')
+ AND governed_event->'procedure'=p_procedure
+ ORDER BY governed_sequence LIMIT 4097
+$$;
+ALTER FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) SECURITY DEFINER;
+ALTER FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) SET search_path=pg_catalog,public;
+REVOKE ALL ON FUNCTION learning_procedure_events(JSONB) FROM PUBLIC;
+
+-- This read does not blend procedure versions or principals. Memory may expose
+-- the learning-owned projection, but cannot rewrite or fit it.
+CREATE OR REPLACE FUNCTION learning_procedure_experience(p_owner TEXT,p_procedure TEXT,p_revision TEXT)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+ SELECT jsonb_build_object('revision',governed_sequence::text||CASE WHEN experience_projection IS NULL THEN ':erased' ELSE '' END,
+  'cohorts',COALESCE(experience_projection,'[]'::jsonb),
+  'state',CASE WHEN experience_projection IS NULL THEN 'invalidated_by_erasure' ELSE 'observed' END)
+ FROM learning_application_events
+ WHERE governed_event->>'actor'=current_setting('aimee.principal',true)
+ AND governed_event->'procedure'->>'owner_id'=p_owner
+ AND governed_event->'procedure'->>'procedure_id'=p_procedure
+ AND governed_event->'procedure'->>'revision'=p_revision
+ ORDER BY governed_sequence DESC LIMIT 1
+$$;
+
+-- Erasure invalidates cached projections that could retain the removed evidence.
+CREATE OR REPLACE FUNCTION learning_procedure_erase_projection() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.governed_event IS NOT NULL THEN
+  PERFORM pg_advisory_xact_lock(hashtextextended((OLD.governed_event->>'actor') || (OLD.governed_event->'procedure')::text,15));
+  UPDATE learning_application_events SET experience_projection=NULL
+  WHERE governed_event->>'actor'=OLD.governed_event->>'actor'
+  AND governed_event->'procedure'=OLD.governed_event->'procedure';
+ END IF;
+ RETURN OLD;
+END $$;
+DROP TRIGGER IF EXISTS learning_procedure_erase ON learning_application_events;
+CREATE TRIGGER learning_procedure_erase AFTER DELETE ON learning_application_events
+ FOR EACH ROW EXECUTE FUNCTION learning_procedure_erase_projection();
+ALTER FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) SECURITY DEFINER;
+ALTER FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) SET search_path=pg_catalog,public;
+REVOKE ALL ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) FROM PUBLIC;
+DO $procedure_experience_grants$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT EXECUTE ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT),
+   learning_procedure_events(JSONB),learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) TO aimee_store_runtime;
+ END IF;
+END $procedure_experience_grants$;
+-- Experience metadata is part of the rendered source snapshot. Its writes and
+-- erasures participate in the same final-send barrier as canonical versions.
+DROP TRIGGER IF EXISTS memory_send_governed_insert ON learning_application_events;
+CREATE TRIGGER memory_send_governed_insert BEFORE INSERT ON learning_application_events
+ FOR EACH ROW WHEN (NEW.governed_event IS NOT NULL) EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_governed_update ON learning_application_events;
+CREATE TRIGGER memory_send_governed_update BEFORE UPDATE ON learning_application_events
+ FOR EACH ROW WHEN (NEW.governed_event IS NOT NULL OR OLD.governed_event IS NOT NULL)
+ EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_governed_delete ON learning_application_events;
+CREATE TRIGGER memory_send_governed_delete BEFORE DELETE ON learning_application_events
+ FOR EACH ROW WHEN (OLD.governed_event IS NOT NULL) EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_application_events;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_application_events
+ FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();

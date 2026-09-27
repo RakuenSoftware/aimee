@@ -64,6 +64,11 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
  * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
+typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
+                                          int);
+typedef char *(*agent_tool_action_finish_fn)(const char *, char *);
+void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
+                                       agent_tool_action_finish_fn finish);
 
 /* Bind a successful execution-policy decision to the next dispatch on this
  * thread. External mutations and unknown remote tools refuse execution without

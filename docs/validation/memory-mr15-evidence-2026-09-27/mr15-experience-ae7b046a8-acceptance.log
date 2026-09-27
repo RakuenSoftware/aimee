@@ -1,0 +1,14 @@
+PASS fixture session created
+PASS controlled provider selected
+PASS actual provider bytes have a durable prepared receipt
+PASS reviewed procedure retained in the exact final request
+PASS native turn completes with a bound final request
+PASS principal receipt reader attests acknowledged procedure delivery
+FAIL explicit feedback produces governed experience
+Traceback (most recent call last):
+  File "/tmp/mr15-live.py", line 59, in <module>
+    check('explicit feedback produces governed experience',d.get('status')=='ok' and d['experience'][0]['verified_success']==1)
+  File "/tmp/mr15-live.py", line 10, in check
+    if not ok:raise RuntimeError(name)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: explicit feedback produces governed experience

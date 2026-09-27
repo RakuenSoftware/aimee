@@ -1,0 +1,50 @@
+[
+  {
+    "name": "owned evidence action session created",
+    "passed": true
+  },
+  {
+    "name": "controlled provider selected",
+    "passed": true
+  },
+  {
+    "name": "fresh actual provider request has a durable receipt",
+    "passed": true
+  },
+  {
+    "name": "fresh exact provider payload retained controlled procedure",
+    "passed": true
+  },
+  {
+    "name": "memory-bound native read is acknowledged",
+    "passed": true
+  },
+  {
+    "name": "receipt names rewritten owned worktree object",
+    "passed": true
+  },
+  {
+    "name": "memory-bound write reports exact verified effect",
+    "passed": true
+  },
+  {
+    "name": "fresh governed model turn completes",
+    "passed": true
+  },
+  {
+    "name": "durable action binds exact memory receipt and guarded evidence",
+    "passed": true
+  },
+  {
+    "name": "stale actual provider request has a durable receipt",
+    "passed": true
+  },
+  {
+    "name": "stale exact provider payload retained controlled procedure",
+    "passed": true
+  },
+  {
+    "name": "committed procedure correction prevents stale external effect",
+    "passed": true
+  }
+]

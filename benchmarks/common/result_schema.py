@@ -133,7 +133,7 @@ RETRIEVAL_ASSESSMENT_FIELDS: dict[str, Any] = {
     "channel_metrics": dict,
 }
 
-_VALID_CONTEXT_SUFFICIENCY = {"COMPLETE", "PARTIAL", "INSUFFICIENT"}
+_VALID_CONTEXT_SUFFICIENCY = {"COMPLETE", "PARTIAL", "INSUFFICIENT", "UNKNOWN"}
 
 _VALID_ENVIRONMENTS = {"container", "native"}
 _VALID_JUDGE_PROFILES = {"open70b", "frontier", "small"}
@@ -202,14 +202,19 @@ def validate_retrieval_assessment(row: dict[str, Any]) -> None:
 
 
 def retrieval_outcome_bucket(row: dict[str, Any]) -> str:
-    """Return one of the four sufficiency x answer-correctness report buckets."""
+    """Keep unassessed coverage separate from assessed missing evidence."""
     validate_retrieval_assessment(row)
     _ensure("context_sufficiency" in row, "missing retrieval assessment")
     _ensure(row.get("verdict") in {"CORRECT", "WRONG"}, "invalid verdict")
-    sufficient = row["context_sufficiency"] == "COMPLETE"
+    coverage = {
+        "COMPLETE": "complete",
+        "PARTIAL": "partial_or_insufficient",
+        "INSUFFICIENT": "partial_or_insufficient",
+        "UNKNOWN": "unknown",
+    }[row["context_sufficiency"]]
     correct = row["verdict"] == "CORRECT"
     return (
-        f"{'complete' if sufficient else 'partial_or_insufficient'}_context__"
+        f"{coverage}_context__"
         f"{'correct' if correct else 'wrong'}_answer"
     )
 
@@ -283,7 +288,12 @@ def validate_coverage(block: dict[str, Any]) -> None:
         _ensure(field in block["counts"], f"missing coverage.counts.{field}")
         _ensure(isinstance(block["counts"][field], int), f"coverage.counts.{field} must be an int")
         _ensure(block["counts"][field] >= 0, f"coverage.counts.{field} must be non-negative")
-    capped = block["limits"]["max_samples"] != 0 or block["limits"]["max_questions"] != 0
+    for field in ("excluded_questions", "failed_questions"):
+        value = block["counts"].get(field, 0)
+        _ensure(type(value) is int and value >= 0, f"invalid coverage.counts.{field}")
+    capped = (block["limits"]["max_samples"] != 0 or block["limits"]["max_questions"] != 0
+              or block["counts"].get("excluded_questions", 0) != 0
+              or block["counts"].get("failed_questions", 0) != 0)
     _ensure(
         block["complete"] is not capped,
         "coverage.complete contradicts coverage.limits",
@@ -307,6 +317,11 @@ def run_is_complete(payload: dict[str, Any]) -> bool | None:
     silently assert either way.
     """
     block = run_coverage(payload)
+    if "dataset_inventory" in payload:
+        from benchmarks.common.dataset_inventory import validate_inventory_results
+        validate_inventory_results(payload["dataset_inventory"], payload.get("results", []))
+        if any(r["disposition"] != "included" for r in payload["dataset_inventory"]["cases"]) or any(r.get("run_status", "ok") != "ok" for r in payload.get("results", [])):
+            return False
     return None if block is None else bool(block["complete"])
 
 
@@ -327,7 +342,7 @@ def require_complete_run(payload: dict[str, Any], purpose: str, *, source: str =
         limits = payload["coverage"]["limits"]
         counts = payload["coverage"]["counts"]
         raise ValueError(
-            f"{where}{purpose} requires a complete run, but this result file was capped "
+            f"{where}{purpose} requires a complete run, but this result file was capped or incomplete "
             f"(max_samples={limits['max_samples']}, max_questions={limits['max_questions']}; "
             f"ran {counts['samples_run']} samples / {counts['questions_run']} questions)"
         )

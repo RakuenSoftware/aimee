@@ -1,0 +1,10 @@
+--- FAIL: TestFoldPreservesProtectedMessages (0.00s)
+    --- FAIL: TestFoldPreservesProtectedMessages/user (0.00s)
+        protected_context_test.go:21: protected user message preserved 0 times, want exactly once
+    --- FAIL: TestFoldPreservesProtectedMessages/system (0.00s)
+        protected_context_test.go:21: protected system message preserved 0 times, want exactly once
+    --- FAIL: TestFoldPreservesProtectedMessages/developer (0.00s)
+        protected_context_test.go:21: protected developer message preserved 0 times, want exactly once
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/economizer	0.002s
+FAIL

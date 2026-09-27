@@ -1,6 +1,6 @@
 # MR-08: Retrieval health telemetry with defined metrics
 
-- **State:** Proposed
+- **State:** Complete — implementation and acceptance validated 2026-09-26; optional collection remains off by default
 - **Priority:** P1; instrument and establish baseline during the foundation wave
 - **Owner:** Go memory diagnostics and existing observability
 - **Depends on:** [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) for actual final selection; [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for family metrics
@@ -17,6 +17,12 @@ Extend existing memory metrics with bounded selection-derived events and scope-a
 Join final selection to request/task/turn IDs, a keyed query fingerprint, query class, scope/purpose, policy versions, arm states and trace/contract IDs. For each delivered record retain only authorized metadata needed for analysis: record/version, kind/state, family reference, provenance/trust class, applicable time, final rank, actual arm contribution and omission/displacement reason.
 
 Use a keyed, namespace-specific fingerprint for low-entropy queries rather than publishing a plain hash. Raw query and memory text are not required. Record IDs/family links remain access-controlled. High-cardinality identities belong in bounded event storage, not metric labels. Deduplicate by request/attempt and record/version.
+
+Final positions are one-based within a named, digest-bound rendered projection.
+Separate projections have no shared ranking scale. Preserve multiple positions
+when a record appears more than once, while concentration still counts that
+record only once per invocation. Native row positions include unversioned rows;
+source-fence deduplication is not a substitute for the renderer's ordering.
 
 Sample at the invocation level and retain sampling probability, policy and window. Do not independently sample individual records and then pretend the reconstructed list is complete. Keep required audit/invariant-violation counters separate from optional sampled health events; expose telemetry loss and incomplete windows.
 
@@ -58,3 +64,19 @@ Health-report access uses the same scoped identity as recall. Cross-scope admini
 Hand-calculated populations pin top-k/HHI/entropy, empty/single-record behavior, repeats and sample handling. Historical recalls do not trigger stale-current alerts. Retries do not inflate exposure. Unauthorized users cannot discover record/family IDs through health queries. An event overflow produces visible loss rather than a reassuring zero. Measure overhead and retention growth before widening collection; rollback disables optional collection without dropping required receipts.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+The initial Go-only calculator and bounded journal foundation have
+[hand-calculated and reconciliation tests](../../validation/memory-mr08-health-2026-09-26.md).
+The journal has a tested PostgreSQL owner foundation and receipt-derived importer.
+The initial authenticated collector passed deployed T2/T3 migration, isolation and
+restart checks. Candidate `2efe810ff` also passed all T2/T3 native and health
+checks, including serving metadata, trace access, and restart recovery. Candidate
+`71208d807` additionally passed 15 deployed final-position checks and a quiet
+32-request serving-overhead comparison. Candidate `be3f2577c` passed 23 deployed checks for retained typed
+assertion kind, lifecycle, confidence class and actual arm contributions.
+Candidate `4d0870c70` completed the remaining serving-evidence producers and
+passed all 34 deployed checks plus the quiet 32-request overhead comparison.
+[Final acceptance evidence](../../validation/memory-mr08-final-evidence-2026-09-26/README.md)
+records the dispatch-proof correction, bounded retention, measured overhead and
+successful restoration to collection disabled. Semantic labels and insufficient
+production baselines remain explicitly unmeasured; no ranking promotion follows.

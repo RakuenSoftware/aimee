@@ -160,6 +160,13 @@
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "procedure-experience",
+          "event_kind": 6146,
+          "durability": "capture",
+          "durability_reason": "bounded owner admission and projection RPC; accepted observations persist in the immutable learning application ledger"
         }
       ]
     },
@@ -393,6 +400,13 @@
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "action-resource",
+          "event_kind": 6914,
+          "durability": "capture",
+          "durability_reason": "host-only exact resource resolution; commitments persist at durable action admission"
         }
       ]
     },
@@ -847,6 +861,20 @@
           "event_kind": 11015,
           "durability": "capture",
           "durability_reason": "diagnostic economizer statistics"
+        },
+        {
+          "id": 8,
+          "name": "economizer-request-budget",
+          "event_kind": 11016,
+          "durability": "capture",
+          "durability_reason": "final request byte admission; bounded digest and limits only, no prompt body"
+        },
+        {
+          "id": 9,
+          "name": "task-cost",
+          "event_kind": 11017,
+          "durability": "capture",
+          "durability_reason": "observe-only exact task-cost and frozen paired-report projection; no routing promotion"
         }
       ]
     },

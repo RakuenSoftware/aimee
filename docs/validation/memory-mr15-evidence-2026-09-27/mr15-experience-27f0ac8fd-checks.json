@@ -1,0 +1,114 @@
+[
+  {
+    "name": "fixture session created",
+    "passed": true
+  },
+  {
+    "name": "controlled provider selected",
+    "passed": true
+  },
+  {
+    "name": "actual provider bytes have a durable prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "reviewed procedure retained in the exact final request",
+    "passed": true
+  },
+  {
+    "name": "native turn completes with a bound final request",
+    "passed": true
+  },
+  {
+    "name": "principal receipt reader attests acknowledged procedure delivery",
+    "passed": true
+  },
+  {
+    "name": "explicit feedback produces governed experience",
+    "passed": true
+  },
+  {
+    "name": "duplicate event reuses immutable identity",
+    "passed": true
+  },
+  {
+    "name": "conflicting replacement rejected",
+    "passed": true
+  },
+  {
+    "name": "model self-reward rejected",
+    "passed": true
+  },
+  {
+    "name": "omitted procedure cannot gain success",
+    "passed": true
+  },
+  {
+    "name": "unused procedure cannot gain success",
+    "passed": true
+  },
+  {
+    "name": "distinct conflicting evidence is preserved",
+    "passed": true
+  },
+  {
+    "name": "actual provider bytes have a durable prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "reviewed procedure retained in the exact final request",
+    "passed": true
+  },
+  {
+    "name": "native turn completes with a bound final request",
+    "passed": true
+  },
+  {
+    "name": "principal receipt reader attests acknowledged procedure delivery",
+    "passed": true
+  },
+  {
+    "name": "compiled CLI records a separate repair attempt",
+    "passed": true
+  },
+  {
+    "name": "actual provider bytes have a durable prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "reviewed procedure retained in the exact final request",
+    "passed": true
+  },
+  {
+    "name": "native turn completes with a bound final request",
+    "passed": true
+  },
+  {
+    "name": "principal receipt reader attests acknowledged procedure delivery",
+    "passed": true
+  },
+  {
+    "name": "procedure edit creates a new canonical version",
+    "passed": true
+  },
+  {
+    "name": "new version starts an unknown cohort",
+    "passed": true
+  },
+  {
+    "name": "native cost owner preserves exact integers duplicates and unknown coverage",
+    "passed": true
+  },
+  {
+    "name": "compiled CLI cost parity",
+    "passed": true
+  },
+  {
+    "name": "paired cost remains unqualified with unknown pricing",
+    "passed": true
+  },
+  {
+    "name": "missing paired failures cannot be silently excluded",
+    "passed": true
+  }
+]

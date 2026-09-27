@@ -1,0 +1,14 @@
+{
+  "application_source": "686b99ea05df4387326e30ac171e96bce01780e8",
+  "harness_source": "2cae9dec4158f0d8d3df8c298127414573e3cceb",
+  "validation_container": 109,
+  "production_container": 100,
+  "application_image": "aimee-pr2990:686b99ea0",
+  "postgres_image": "aimee-pr2990-postgres:686b99ea0",
+  "embedder_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+  "notes": [
+    "Candidate application uses source VERSION 0.3.0 default; image revision identifies draft code. It is not the installed 0.4.5 binary.",
+    "CT109 required lxc.prlimit.memlock: unlimited for the shipped Compose configuration.",
+    "CT100 released 0.4.5 is unchanged."
+  ]
+}

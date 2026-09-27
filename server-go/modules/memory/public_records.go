@@ -11,8 +11,12 @@ import (
 )
 
 // Public records retain the KB response shape, without the former native
-// fixed-size content buffer. Metadata is read inside the same scoped transaction.
+// fixed-size content buffer. Enrichment refuses changed payloads and mismatched
+// observed versions; a scoped READ COMMITTED transaction alone is not a snapshot.
 type publicMemoryRecord struct {
+	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
+	Version        *MemoryRecordVersion `json:"version,omitempty"`
+
 	ID                 int64   `json:"id"`
 	Tier               string  `json:"tier"`
 	Kind               string  `json:"kind"`
@@ -43,17 +47,27 @@ func (s *postgresDataStore) publicRecords(ctx context.Context, records []Record)
 	rows, err := s.db.Query(ctx, `SELECT m.id,COALESCE(m.use_cases,''),m.use_count,
 COALESCE(m.last_used_at,''),m.created_at,m.updated_at,COALESCE(m.source_session,''),
 COALESCE(m.provenance_category,''),COALESCE((SELECT summary FROM
- (SELECT id,scope,summary FROM memory_summaries WHERE memory_id=m.id ORDER BY id LIMIT 4) summaries
- ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),'')
+ (SELECT id,scope,summary FROM memory_summaries summary WHERE summary.memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 4) summaries
+ ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),''),
+m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,
+m.record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+(`+currentMemorySQL("m.")+`),(`+historicalMemoryInspectionSQL("m.")+`)
 FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	metadata := make(map[int64]publicMemoryRecord, len(records))
+	type observedMetadata struct {
+		publicMemoryRecord
+		scope           Scope
+		revision, owner string
+		current         bool
+		historical      bool
+	}
+	metadata := make(map[int64]observedMetadata, len(records))
 	for rows.Next() {
-		var r publicMemoryRecord
-		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline); err != nil {
+		var r observedMetadata
+		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline, &r.scope.Type, &r.scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.revision, &r.owner, &r.current, &r.historical); err != nil {
 			return nil, err
 		}
 		metadata[r.ID] = r
@@ -66,8 +80,26 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if !ok {
 			return nil, fmt.Errorf("memory: metadata missing for record %d", record.ID)
 		}
+		if r.scope != record.Scope || r.Tier != record.Tier || r.Kind != record.Kind || r.Key != record.Key || r.Content != record.Content || r.Confidence != record.Confidence {
+			return nil, fmt.Errorf("memory: record %d changed during public enrichment", record.ID)
+		}
+		if record.currentRead && !r.current {
+			return nil, fmt.Errorf("memory: record %d is no longer current during public enrichment", record.ID)
+		}
+		if record.historicalRead && !r.historical {
+			return nil, fmt.Errorf("memory: record %d is no longer inspectable during public enrichment", record.ID)
+		}
+		v := record.Version
+		if v == nil {
+			v = record.observedVersion
+		}
+		if v != nil && (!v.validFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
+			return nil, fmt.Errorf("memory: record %d version changed during public enrichment", record.ID)
+		}
+		r.Version = record.Version
+		r.UtilityHorizon = record.UtilityHorizon
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
-		result = append(result, r)
+		result = append(result, r.publicMemoryRecord)
 	}
 	return result, nil
 }
@@ -134,7 +166,19 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 	case "get":
+		if raw, exists := args["include_version"]; exists {
+			if string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil {
+				return invalid("include_version must be boolean")
+			}
+		}
 		var ok bool
+		if request.IncludeVersion && (args.stringOr("view", "") == "session" || (args.stringOr("view", "") == "console" && args.stringOr("format", "json") != "json")) {
+			return commandResult(commandError("unsupported_mode", "include_version requires a JSON record view"))
+		}
+		request.ReadPolicy, ok = commandReadPolicy(args)
+		if !ok {
+			return invalid("read_policy must be a versioned object with recognized fields")
+		}
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory.get requires a positive integer id")
@@ -154,6 +198,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return invalid("memory.fact_history requires key")
 		}
 		request.Operation, request.Limit = "fact-history", args.limit("max", 16, 64)
+		scoped = commandScope(args, &request)
 	case "top_l2_facts", "load_eval_corpus", "list_session_scope_priority", "list_session_scope_priority_like", "search_facts_patterns_by_keyword":
 		request.Operation = "query-records"
 		switch verb {
@@ -184,9 +229,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 				request.Pattern = sessionSearchKeyword(request.Pattern)
 			}
 		}
-		if verb != "load_eval_corpus" {
-			scoped = commandScope(args, &request)
-		}
+		scoped = commandScope(args, &request)
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -204,6 +247,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if response.Read != nil && response.Read.ErrorCode != "" {
+		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
 	}
 	if args.stringOr("view", "") == "session" {
 		return sessionMemoryView(options, invocation, args, request, response.PublicRecords)
@@ -252,9 +298,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	if verb == "find_facts_visible" && args.stringOr("format", "") == "mcp" {
 		missing := scoped && !request.IncludeAll && request.Workspace == "" && request.Project == ""
-		return commandResult(map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing})
+		result := map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing}
+		if response.RetrievalCapabilities != nil {
+			result["retrieval_capabilities"] = response.RetrievalCapabilities
+		}
+		return commandResult(result)
 	}
 	result := map[string]any{"status": "ok"}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	if args.stringOr("view", "") == "server" {
 		result["store"] = "kb"
 	}
@@ -263,6 +316,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return commandResult(commandError("not_found", "memory not found"))
 		}
 		result["memory"] = response.PublicRecords[0]
+		if response.Read != nil {
+			result["read"] = response.Read
+		}
 		if request.AsOf != "" {
 			result["as_of"] = request.AsOf
 			result["valid_at"] = "unknown"
@@ -298,12 +354,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 // Preserve the native console's record schema while keeping its contents and
 // integer IDs in the owner. The host transports the rendered output as a string.
 func consoleMemoryRecord(r publicMemoryRecord) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"id": r.ID, "tier": r.Tier, "kind": r.Kind, "key": r.Key, "content": r.Content,
 		"confidence": r.Confidence, "use_count": r.UseCount, "last_used_at": r.LastUsedAt,
 		"created_at": r.CreatedAt, "updated_at": r.UpdatedAt, "source_session": r.SourceSession,
 		"provenance_category": r.ProvenanceCategory,
 	}
+	if r.Version != nil {
+		result["version"] = r.Version
+	}
+	return result
 }
 
 func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "private generation adapter migrated on native upgrade",
+    "passed": true
+  },
+  {
+    "name": "code generation adapter migrated on native upgrade",
+    "passed": true
+  },
+  {
+    "name": "native private create succeeds after migration",
+    "passed": true
+  },
+  {
+    "name": "background owner publishes exact private revision",
+    "passed": true
+  },
+  {
+    "name": "native private search survives upgrade",
+    "passed": true
+  },
+  {
+    "name": "verified migration40 installed",
+    "passed": true
+  },
+  {
+    "name": "private retirement excludes current read",
+    "passed": true
+  },
+  {
+    "name": "private fixture destruction clears all generation vectors",
+    "passed": true
+  },
+  {
+    "name": "server healthy on requested image",
+    "passed": true
+  },
+  {
+    "name": "server optional policies unset",
+    "passed": true
+  },
+  {
+    "name": "kb healthy on requested image",
+    "passed": true
+  },
+  {
+    "name": "kb optional policies unset",
+    "passed": true
+  }
+]

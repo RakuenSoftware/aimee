@@ -1,0 +1,16 @@
+--- FAIL: TestAlertParentEligibilityPostgres (0.14s)
+    --- FAIL: TestAlertParentEligibilityPostgres/suppressed (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+    --- FAIL: TestAlertParentEligibilityPostgres/quarantined (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+    --- FAIL: TestAlertParentEligibilityPostgres/deleted (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+    --- FAIL: TestAlertParentEligibilityPostgres/revoked (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+    --- FAIL: TestAlertParentEligibilityPostgres/rejected (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+    --- FAIL: TestAlertParentEligibilityPostgres/unknown (0.00s)
+        alerts_test.go:320: parent 146840: got 1 conflicts; eligible=false
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.149s
+FAIL

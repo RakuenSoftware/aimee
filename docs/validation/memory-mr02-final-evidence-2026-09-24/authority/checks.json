@@ -1,0 +1,182 @@
+[
+  {
+    "name": "automatic maintenance executes through Go owner",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission agent_message/world_fact",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission agent_message/episode",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source agent_message/episode",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission agent_message/experience",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source agent_message/experience",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission agent_message/instruction",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source agent_message/instruction",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission agent_message/policy",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source agent_message/policy",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission user_stated/world_fact",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source user_stated/world_fact",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission user_stated/episode",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source user_stated/episode",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission user_stated/experience",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source user_stated/experience",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission user_stated/instruction",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source user_stated/instruction",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission user_stated/policy",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source user_stated/policy",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission unknown/world_fact",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source unknown/world_fact",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission unknown/episode",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source unknown/episode",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission unknown/experience",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source unknown/experience",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission unknown/instruction",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source unknown/instruction",
+    "passed": true
+  },
+  {
+    "name": "maintenance preserves admission unknown/policy",
+    "passed": true
+  },
+  {
+    "name": "fold refuses protected source unknown/policy",
+    "passed": true
+  },
+  {
+    "name": "bulk import accepts episode",
+    "passed": true
+  },
+  {
+    "name": "bulk import preserves kind without forging authority episode",
+    "passed": true
+  },
+  {
+    "name": "bulk import cannot overwrite episode",
+    "passed": true
+  },
+  {
+    "name": "database blocks two-step protection downgrade episode",
+    "passed": true
+  },
+  {
+    "name": "bulk import accepts policy",
+    "passed": true
+  },
+  {
+    "name": "bulk import preserves kind without forging authority policy",
+    "passed": true
+  },
+  {
+    "name": "bulk import cannot overwrite policy",
+    "passed": true
+  },
+  {
+    "name": "database blocks two-step protection downgrade policy",
+    "passed": true
+  },
+  {
+    "name": "export retains protected kinds for subsequent import",
+    "passed": true
+  },
+  {
+    "name": "export excludes unrelated scopes",
+    "passed": true
+  },
+  {
+    "name": "invalid imported kind is refused None",
+    "passed": true
+  },
+  {
+    "name": "invalid imported kind is refused 42",
+    "passed": true
+  },
+  {
+    "name": "invalid imported kind is refused {}",
+    "passed": true
+  },
+  {
+    "name": "invalid imported kind is refused ''",
+    "passed": true
+  },
+  {
+    "name": "invalid imported kind is refused 'invented'",
+    "passed": true
+  }
+]

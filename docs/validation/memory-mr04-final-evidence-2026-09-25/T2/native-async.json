@@ -1,0 +1,3417 @@
+{
+  "checks": [
+    {
+      "name": "native fixture explicitly enables automatic recall",
+      "passed": true
+    },
+    {
+      "name": "native fixture stores complete private identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture reads its private source version",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before healthy native run",
+      "passed": true
+    },
+    {
+      "name": "healthy native run queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "healthy native run completes",
+      "passed": true
+    },
+    {
+      "name": "healthy native run dispatches exactly once",
+      "passed": true
+    },
+    {
+      "name": "native provider receives complete Go memory",
+      "passed": true
+    },
+    {
+      "name": "provider arrival sees committed preparation and admission",
+      "passed": true
+    },
+    {
+      "name": "public receipt verification matches real provider bytes",
+      "passed": true
+    },
+    {
+      "name": "native receipt binds the retained private revision and fresh source check",
+      "passed": true
+    },
+    {
+      "name": "native receipt retains the private collection dependency",
+      "passed": true
+    },
+    {
+      "name": "supplied receipt does not claim producer or chain authentication",
+      "passed": true
+    },
+    {
+      "name": "public receipt verification detects changed provider bytes",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before inherited zero byte cap",
+      "passed": true
+    },
+    {
+      "name": "inherited zero byte cap queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "worker preserves inherited byte refusal",
+      "passed": true
+    },
+    {
+      "name": "inherited byte refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "native fixture identifies exactly one Go memory owner",
+      "passed": true
+    },
+    {
+      "name": "paused Go memory owner queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native worker reports memory owner refusal",
+      "passed": true
+    },
+    {
+      "name": "native owner refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "supervised memory restart preserves committed identity",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before recovered native run",
+      "passed": true
+    },
+    {
+      "name": "recovered native run queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "new native worker recovers and dispatches once",
+      "passed": true
+    },
+    {
+      "name": "recovered provider retains complete Go memory",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before native context refresh",
+      "passed": true
+    },
+    {
+      "name": "native context refresh queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native refresh fixture commits its memory update",
+      "passed": true
+    },
+    {
+      "name": "native multi-turn run completes after five tool calls",
+      "passed": true
+    },
+    {
+      "name": "native refresh follows five real file reads",
+      "passed": true
+    },
+    {
+      "name": "initial context predates the new identity",
+      "passed": true
+    },
+    {
+      "name": "refreshed provider context contains the new complete identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture identifies exactly one Go memory owner",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before native refresh owner outage",
+      "passed": true
+    },
+    {
+      "name": "native refresh owner outage queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native refresh intervention succeeds",
+      "passed": true
+    },
+    {
+      "name": "native refresh reports memory owner refusal",
+      "passed": true
+    },
+    {
+      "name": "native refresh refusal prevents a sixth provider request",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before recovered native refresh",
+      "passed": true
+    },
+    {
+      "name": "recovered native refresh queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "worker recovers after refresh refusal",
+      "passed": true
+    },
+    {
+      "name": "refresh recovery retains both committed identities",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before protected native fold",
+      "passed": true
+    },
+    {
+      "name": "protected native fold queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "protected native fold completes through five real tool calls",
+      "passed": true
+    },
+    {
+      "name": "native reduction preserves complete user constraint bytes",
+      "passed": true
+    },
+    {
+      "name": "native provider observes actual optional history reduction",
+      "passed": true
+    },
+    {
+      "name": "native generated history is not promoted to user instructions",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before unobservable tmux-cli",
+      "passed": true
+    },
+    {
+      "name": "unobservable tmux-cli queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "tmux-cli refuses unobservable final request accounting",
+      "passed": true
+    },
+    {
+      "name": "tmux-cli accounting refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before unobservable provider-cli",
+      "passed": true
+    },
+    {
+      "name": "unobservable provider-cli queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider-cli refuses unobservable final request accounting",
+      "passed": true
+    },
+    {
+      "name": "provider-cli accounting refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before native provider error",
+      "passed": true
+    },
+    {
+      "name": "native provider error queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider failure terminates without a successful response",
+      "passed": true
+    },
+    {
+      "name": "provider error events retain complete escaped diagnostics",
+      "passed": true
+    },
+    {
+      "name": "permanent provider error is not retried",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before shared insertion before transport retry",
+      "passed": true
+    },
+    {
+      "name": "shared insertion before transport retry queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider fixture commits a new shared constraint",
+      "passed": true
+    },
+    {
+      "name": "new shared constraint refuses stale native transport retry",
+      "passed": true
+    },
+    {
+      "name": "new shared constraint prevents a second provider send",
+      "passed": true
+    },
+    {
+      "name": "shared projection settled before private correction before transport retry",
+      "passed": true
+    },
+    {
+      "name": "private correction before transport retry queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider fixture commits correction before retryable response",
+      "passed": true
+    },
+    {
+      "name": "private correction refuses stale native transport retry",
+      "passed": true
+    },
+    {
+      "name": "corrected private source prevents a second provider send",
+      "passed": true
+    },
+    {
+      "name": "every actual native send has separate durable admission",
+      "passed": true
+    },
+    {
+      "name": "completed native transports retain durable response observations",
+      "passed": true
+    },
+    {
+      "name": "owner outage leaves admitted transport unresolved without invented acknowledgement",
+      "passed": true
+    },
+    {
+      "name": "native fixture removes its shared constraint",
+      "passed": true
+    },
+    {
+      "name": "native fixture retires its refreshed identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture retires its private identity",
+      "passed": true
+    },
+    {
+      "name": "owned Server recovers after an ungraceful process kill",
+      "passed": true
+    },
+    {
+      "name": "host crash preserves every committed provider stage exactly",
+      "passed": true
+    },
+    {
+      "name": "host recovery does not invent acknowledgement for unresolved transport",
+      "passed": true
+    }
+  ],
+  "runs": [
+    {
+      "name": "healthy native run",
+      "run_id": "run_1790345672_1",
+      "status": "completed",
+      "elapsed_seconds": 1.3158142130123451,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        22794
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "inherited zero byte cap",
+      "run_id": "run_1790345684_2",
+      "status": "failed",
+      "elapsed_seconds": 0.7152842030045576,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_exceeded"
+      ]
+    },
+    {
+      "name": "paused Go memory owner",
+      "run_id": "run_1790345685_3",
+      "status": "failed",
+      "elapsed_seconds": 60.70701469195774,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native run",
+      "run_id": "run_1790345755_4",
+      "status": "completed",
+      "elapsed_seconds": 1.5249901339993812,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24038
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native context refresh",
+      "run_id": "run_1790345765_5",
+      "status": "completed",
+      "elapsed_seconds": 5.4445308079593815,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        23878,
+        24358,
+        24838,
+        25318,
+        25798,
+        26575
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native refresh owner outage",
+      "run_id": "run_1790345780_6",
+      "status": "failed",
+      "elapsed_seconds": 40.40952476201346,
+      "provider_requests": 5,
+      "provider_request_bytes": [
+        24013,
+        24493,
+        24973,
+        25453,
+        25933
+      ],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native refresh",
+      "run_id": "run_1790345829_7",
+      "status": "completed",
+      "elapsed_seconds": 1.3150164510007016,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24077
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "protected native fold",
+      "run_id": "run_1790345839_8",
+      "status": "completed",
+      "elapsed_seconds": 6.6491489699692465,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        25848,
+        27776,
+        29704,
+        30331,
+        31230,
+        30657
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "unobservable tmux-cli",
+      "run_id": "run_1790345855_9",
+      "status": "failed",
+      "elapsed_seconds": 0.21087336499476805,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_unavailable",
+        "unavailable"
+      ]
+    },
+    {
+      "name": "unobservable provider-cli",
+      "run_id": "run_1790345864_10",
+      "status": "failed",
+      "elapsed_seconds": 0.2158558570081368,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_unavailable",
+        "unavailable"
+      ]
+    },
+    {
+      "name": "native provider error",
+      "run_id": "run_1790345871_11",
+      "status": "failed",
+      "elapsed_seconds": 1.322726293001324,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24323
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "shared insertion before transport retry",
+      "run_id": "run_1790345879_12",
+      "status": "failed",
+      "elapsed_seconds": 2.5271758629824035,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24888
+      ],
+      "refusal_kinds": [
+        "stale_context"
+      ]
+    },
+    {
+      "name": "private correction before transport retry",
+      "run_id": "run_1790345890_13",
+      "status": "failed",
+      "elapsed_seconds": 2.424560126964934,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24640
+      ],
+      "refusal_kinds": [
+        "stale_context"
+      ]
+    }
+  ],
+  "source_contracts": [
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "281"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "284"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "473"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "476"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "53"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "569"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "572"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "665"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "668"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "761"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "764"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "901"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "904"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "1001"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "1004"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    [
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "collection_audience": [
+            {
+              "type": "global",
+              "value": "_global"
+            },
+            {
+              "type": "project",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            },
+            {
+              "type": "workspace",
+              "value": "_shared"
+            },
+            {
+              "type": "workspace",
+              "value": "local:9d16a756-cf7c-43a6-9bc9-097e710edfb7"
+            }
+          ],
+          "record_kind": "memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "1133"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_memory_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "user_memory_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "1",
+            "record_revision": "54"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_rule_collection",
+        "stable_id": "1",
+        "source_version": {
+          "record_kind": "memory_rule_collection",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "1",
+            "record_revision": "1136"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "110",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "110",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_identity",
+        "stable_id": "109",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "109",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_preferences",
+        "stable_id": "73",
+        "source_version": {
+          "record_kind": "user_memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "0b97f852-3d39-442a-880a-3a11db705aa4",
+            "record_id": "73",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "84",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "84",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      },
+      {
+        "channel": "native_active_context",
+        "stable_id": "70",
+        "source_version": {
+          "record_kind": "memory_record",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "2e97e7ee-493b-4bd5-b064-9d8ac10bee42",
+            "record_id": "70",
+            "record_revision": "1"
+          },
+          "memory_parent_state": "observed"
+        }
+      }
+    ]
+  ],
+  "receipt_attempts": [
+    "dca5a18e4d012a034e903cc3cf90aa16",
+    "57556192a20334788fed4745d8848914",
+    "c047cd1146e9ae6cb016404b78308d24",
+    "91392185bafa0f9349510b1f9f592141",
+    "c173edb2e392368bec8ee2ffe6a20833",
+    "d3c00444a0d5512504975f79bd2e7f55",
+    "090ae8013593a47ca49072cd0cb0bcb4",
+    "f6b5948d5895086a67c532c9a82b861f",
+    "c1c51e64f908dbe4e60a4a70b562cf1d",
+    "863e04fa56f7b7d8b695e0d4900ebd02",
+    "71f2f309d70e952c047e6c468e77727e",
+    "613056a60030fb98e7a02cd2fcebf469",
+    "ef55c95f9532a915abd9fadd06c1b317",
+    "d3dc02d94b413e01aa4f6d9771ae8945",
+    "a67fdf8d0f509481d7709857e4b24351",
+    "bbbf68cfcf97ddee7247a0fa229a646f",
+    "e060347ad83184a6919a034fe9d93662",
+    "771e3961c3c895da9889604061504a90",
+    "7880f45314a050d9bd2442d9f7bc1f19",
+    "7cdbd54fa5e2c07dfeedba9c2ca2e6cc",
+    "ecb343798b4f663ded61f0712f74bb2d",
+    "4cf3a05232bb9aa66e9fd0a0574cefa2",
+    "4bc8872549baf6756c9a1aa7ccd67557"
+  ],
+  "unresolved_attempts": [
+    "ef55c95f9532a915abd9fadd06c1b317"
+  ],
+  "post_crash_receipts": [
+    {
+      "sequence": "31831",
+      "event": "memory.provider.dca5a18e4d012a034e903cc3cf90aa16.prepared",
+      "detail_sha256": "48bebb98eda8f92cfa239b411868b6d6e284e8f0ba6a7ac27675ffaa18603085"
+    },
+    {
+      "sequence": "31832",
+      "event": "memory.provider.dca5a18e4d012a034e903cc3cf90aa16.dispatch_admitted",
+      "detail_sha256": "3000e47921bab2329d39d7dce7e7dd566f1c843031f59745bf69fc22a4039e8d"
+    },
+    {
+      "sequence": "31860",
+      "event": "memory.provider.dca5a18e4d012a034e903cc3cf90aa16.acknowledged",
+      "detail_sha256": "bf58d78055b66e46214f22f5f7722fc915ade4cb7c0cb030abf87c8a58a21b0b"
+    },
+    {
+      "sequence": "36667",
+      "event": "memory.provider.57556192a20334788fed4745d8848914.prepared",
+      "detail_sha256": "0491517627d46cd485e41a43d2c5ff1c81adddf057e7f08bcc4d3bf6be25cf8c"
+    },
+    {
+      "sequence": "36668",
+      "event": "memory.provider.57556192a20334788fed4745d8848914.dispatch_admitted",
+      "detail_sha256": "5cfcb22cbb254c63ef104edde381cefc32806fcfc53b7e8a8f8cc5ad485a2f99"
+    },
+    {
+      "sequence": "36704",
+      "event": "memory.provider.57556192a20334788fed4745d8848914.acknowledged",
+      "detail_sha256": "eecc677bd55e3f7ca4c962d382e45a84c28d878c1107f91f3f52e9c2ca1eb98d"
+    },
+    {
+      "sequence": "37636",
+      "event": "memory.provider.c047cd1146e9ae6cb016404b78308d24.prepared",
+      "detail_sha256": "cc443a516842ceb7e8e2536897ceb7462b40d03933286041a3c3454958ef63e8"
+    },
+    {
+      "sequence": "37637",
+      "event": "memory.provider.c047cd1146e9ae6cb016404b78308d24.dispatch_admitted",
+      "detail_sha256": "679de5e2f09f2a294e59c91f4f2e670787b9b90626e9deadb77eb15f398598e7"
+    },
+    {
+      "sequence": "37648",
+      "event": "memory.provider.c047cd1146e9ae6cb016404b78308d24.acknowledged",
+      "detail_sha256": "226be0f4d2dd2351978a3968248c7ee6f1242310a6c7aa7b03afa5f7a368ff98"
+    },
+    {
+      "sequence": "37724",
+      "event": "memory.provider.91392185bafa0f9349510b1f9f592141.prepared",
+      "detail_sha256": "cafc44d5b270304fdbda977bc7a4ca1016f219cde4ed6c678b766dc6a7aeaac9"
+    },
+    {
+      "sequence": "37725",
+      "event": "memory.provider.91392185bafa0f9349510b1f9f592141.dispatch_admitted",
+      "detail_sha256": "f3ce7560f79ed0b06b47f9426b066e9a5a7cfb3cc03e1e6a26c31e74392d4340"
+    },
+    {
+      "sequence": "37757",
+      "event": "memory.provider.91392185bafa0f9349510b1f9f592141.acknowledged",
+      "detail_sha256": "df67413e843dc76f7f4b48b20c6e25a73699ea6683fcb39e6bc33b4cf6c26925"
+    },
+    {
+      "sequence": "37817",
+      "event": "memory.provider.c173edb2e392368bec8ee2ffe6a20833.prepared",
+      "detail_sha256": "28c15909632573707de2ba567e6e94add8c57640fe557dea3a3743b02f58419d"
+    },
+    {
+      "sequence": "37818",
+      "event": "memory.provider.c173edb2e392368bec8ee2ffe6a20833.dispatch_admitted",
+      "detail_sha256": "0162131d07fa511dc40b2de2ad3cfea297c81d27b560560f528aa21b765156f1"
+    },
+    {
+      "sequence": "37859",
+      "event": "memory.provider.c173edb2e392368bec8ee2ffe6a20833.acknowledged",
+      "detail_sha256": "25bc24089a521d14cf3c763d88e33c1c8e1a0b0c6f36875ae87a71ba28b4ffa5"
+    },
+    {
+      "sequence": "37923",
+      "event": "memory.provider.d3c00444a0d5512504975f79bd2e7f55.prepared",
+      "detail_sha256": "ff7b2bb61c514662a52418a4ca4d5e5d81d552510388d26e5785c872a7f899b5"
+    },
+    {
+      "sequence": "37924",
+      "event": "memory.provider.d3c00444a0d5512504975f79bd2e7f55.dispatch_admitted",
+      "detail_sha256": "37bfba1cff4e6b0a0399b0120ffe1c8a68febd054202e2c481f3031b9e47dc67"
+    },
+    {
+      "sequence": "37937",
+      "event": "memory.provider.d3c00444a0d5512504975f79bd2e7f55.acknowledged",
+      "detail_sha256": "054b5151aee1ee91c9a0b281547b454bc72ee9536f20556b948a6f3ab2d3f11f"
+    },
+    {
+      "sequence": "38032",
+      "event": "memory.provider.090ae8013593a47ca49072cd0cb0bcb4.prepared",
+      "detail_sha256": "b04d5773e56689dc1a8ff11c29041efa060503bc2e1f86523ec444f47f0746f6"
+    },
+    {
+      "sequence": "38033",
+      "event": "memory.provider.090ae8013593a47ca49072cd0cb0bcb4.dispatch_admitted",
+      "detail_sha256": "707f9312c4f0809f1d27c7b3d610691c5969bcb12e1800ecf5a05afe3ffbbc18"
+    },
+    {
+      "sequence": "38046",
+      "event": "memory.provider.090ae8013593a47ca49072cd0cb0bcb4.acknowledged",
+      "detail_sha256": "00d2f78ac8bc1b1b2b31d07c0a5f08c680a62ad667ea754969bd9da83f9b9921"
+    },
+    {
+      "sequence": "38174",
+      "event": "memory.provider.f6b5948d5895086a67c532c9a82b861f.prepared",
+      "detail_sha256": "f30a17fb1f1e36239af97198bbcef444c4ce77ad1a98c82b6082a76aee6936e2"
+    },
+    {
+      "sequence": "38175",
+      "event": "memory.provider.f6b5948d5895086a67c532c9a82b861f.dispatch_admitted",
+      "detail_sha256": "e81145069635902b6083e7624dbd40c6d5f8da2396b469fdb4d08c23983b828c"
+    },
+    {
+      "sequence": "38186",
+      "event": "memory.provider.f6b5948d5895086a67c532c9a82b861f.acknowledged",
+      "detail_sha256": "cffdb03981cbac93151e902d5c71bde6da3dd8e2b52f340e5e96c1d09cfc57c3"
+    },
+    {
+      "sequence": "39209",
+      "event": "memory.provider.c1c51e64f908dbe4e60a4a70b562cf1d.prepared",
+      "detail_sha256": "897ea3e66984794e6372ec4e810ee508e295a7d3576b75bffa5d5f13f340955e"
+    },
+    {
+      "sequence": "39211",
+      "event": "memory.provider.c1c51e64f908dbe4e60a4a70b562cf1d.dispatch_admitted",
+      "detail_sha256": "07333d0fec0311ddac40f3cc8749e7b6423b9ff34d58d2701d4fb2530d1b45c7"
+    },
+    {
+      "sequence": "39226",
+      "event": "memory.provider.c1c51e64f908dbe4e60a4a70b562cf1d.acknowledged",
+      "detail_sha256": "0a001e8f82af5efa4e3b5a3be6f7f22f0c752f0874fe8e4de7dab505c841d95e"
+    },
+    {
+      "sequence": "39277",
+      "event": "memory.provider.863e04fa56f7b7d8b695e0d4900ebd02.prepared",
+      "detail_sha256": "83386b6d510841ec98141b58b01f983654bdbfd42113cac7d667f793fcc6301b"
+    },
+    {
+      "sequence": "39278",
+      "event": "memory.provider.863e04fa56f7b7d8b695e0d4900ebd02.dispatch_admitted",
+      "detail_sha256": "26d5729355d7104a062725110235b9bb8d9bac68dd3e14d16efd57d1f2c3954f"
+    },
+    {
+      "sequence": "39314",
+      "event": "memory.provider.863e04fa56f7b7d8b695e0d4900ebd02.acknowledged",
+      "detail_sha256": "e5957e7c33b82bc98b41b7e63ad0534767e334b262556738d2abfe031d86937f"
+    },
+    {
+      "sequence": "39384",
+      "event": "memory.provider.71f2f309d70e952c047e6c468e77727e.prepared",
+      "detail_sha256": "7cb5a75330ec2961f0495d4ff244a386885ee40f7c5cd123058860946d3dc2d0"
+    },
+    {
+      "sequence": "39385",
+      "event": "memory.provider.71f2f309d70e952c047e6c468e77727e.dispatch_admitted",
+      "detail_sha256": "67eee1db2369cb97f138ee130c286817f96eac188d88faefc9225e48ef02225b"
+    },
+    {
+      "sequence": "39406",
+      "event": "memory.provider.71f2f309d70e952c047e6c468e77727e.acknowledged",
+      "detail_sha256": "e6fe45b8e4daa2c5705ba9fe190eaa780bb7298fae022f3085307a69240d7990"
+    },
+    {
+      "sequence": "39501",
+      "event": "memory.provider.613056a60030fb98e7a02cd2fcebf469.prepared",
+      "detail_sha256": "00309b86e0df60190d45123cc42e1bcdef4913076a9052d22ff6b99963af4952"
+    },
+    {
+      "sequence": "39502",
+      "event": "memory.provider.613056a60030fb98e7a02cd2fcebf469.dispatch_admitted",
+      "detail_sha256": "9f93ebe4093392b6afc959154058ab58e0c4c7f84a4f5d4b71d88752944dbaec"
+    },
+    {
+      "sequence": "39513",
+      "event": "memory.provider.613056a60030fb98e7a02cd2fcebf469.acknowledged",
+      "detail_sha256": "563537544bd87789019bb00af7b6414b2561de95b6c014fe751174a089694213"
+    },
+    {
+      "sequence": "39610",
+      "event": "memory.provider.ef55c95f9532a915abd9fadd06c1b317.prepared",
+      "detail_sha256": "c78841d6896efe9970f996228eb740dd271a108b31b4288b66d7fa725e950c99"
+    },
+    {
+      "sequence": "39611",
+      "event": "memory.provider.ef55c95f9532a915abd9fadd06c1b317.dispatch_admitted",
+      "detail_sha256": "ebfc57301b751a7f2ac65a55ed9e1f96f7ebaa9224efb743672545ff64f73b6b"
+    },
+    {
+      "sequence": "42228",
+      "event": "memory.provider.d3dc02d94b413e01aa4f6d9771ae8945.prepared",
+      "detail_sha256": "c7c4b2d7b0f4dbe3da2ea73d3385551a0a3e4e5384c399eaa26efe9a47e7a9e0"
+    },
+    {
+      "sequence": "42229",
+      "event": "memory.provider.d3dc02d94b413e01aa4f6d9771ae8945.dispatch_admitted",
+      "detail_sha256": "fb6af823d16866c35bd3157210c81ca59a3031c74e3ea5b4062a4463c3f258cb"
+    },
+    {
+      "sequence": "42240",
+      "event": "memory.provider.d3dc02d94b413e01aa4f6d9771ae8945.acknowledged",
+      "detail_sha256": "b54397f64d8f2e2add7c2abc04a5e2f306d8371b5109a0d9a5664de945ade941"
+    },
+    {
+      "sequence": "43333",
+      "event": "memory.provider.a67fdf8d0f509481d7709857e4b24351.prepared",
+      "detail_sha256": "6d6ecce6e86cc4d1597ef55a89d4bd2f089e46f168ab8fa766bc173f0275c413"
+    },
+    {
+      "sequence": "43334",
+      "event": "memory.provider.a67fdf8d0f509481d7709857e4b24351.dispatch_admitted",
+      "detail_sha256": "25b86378887711f9f1c1311e91d5aa1f0166128a4a37805cb62bf5f4f570b34c"
+    },
+    {
+      "sequence": "43366",
+      "event": "memory.provider.a67fdf8d0f509481d7709857e4b24351.acknowledged",
+      "detail_sha256": "15e0108ade28676ab613d40a1804cdcf134a4e4f980fcfca9133abe75854b4ec"
+    },
+    {
+      "sequence": "43452",
+      "event": "memory.provider.bbbf68cfcf97ddee7247a0fa229a646f.prepared",
+      "detail_sha256": "8fc86db04f131b5a7dee0c79ccb59d6dfb9307c081c4cebce921cc93aa3e9861"
+    },
+    {
+      "sequence": "43453",
+      "event": "memory.provider.bbbf68cfcf97ddee7247a0fa229a646f.dispatch_admitted",
+      "detail_sha256": "40f55c4f9575c8118f5db04306646863e8a1be2ce5d783fe749c8194a34a321a"
+    },
+    {
+      "sequence": "43495",
+      "event": "memory.provider.bbbf68cfcf97ddee7247a0fa229a646f.acknowledged",
+      "detail_sha256": "71b5a70e20d9ac796ac0fe22bcc4f290a15c5596425936eea5a4cf0a33d061c0"
+    },
+    {
+      "sequence": "43571",
+      "event": "memory.provider.e060347ad83184a6919a034fe9d93662.prepared",
+      "detail_sha256": "891d9e536258a04cd932d3eae8d924591054af6a23eab76eb084a8ec6812d2cc"
+    },
+    {
+      "sequence": "43572",
+      "event": "memory.provider.e060347ad83184a6919a034fe9d93662.dispatch_admitted",
+      "detail_sha256": "ddb04d0890fd60074b7a322c6cfb3fa1ab269ec5ef7cab1b28da2e421fd2cf51"
+    },
+    {
+      "sequence": "43612",
+      "event": "memory.provider.e060347ad83184a6919a034fe9d93662.acknowledged",
+      "detail_sha256": "98da021c00437318e577e9fceb77ff6da801dc4a248703f6935b874ae828908c"
+    },
+    {
+      "sequence": "43692",
+      "event": "memory.provider.771e3961c3c895da9889604061504a90.prepared",
+      "detail_sha256": "a82574f9b8b33a308a4de4e4022b01c59e08f8c75118d6e2d8be6e17a453bdd8"
+    },
+    {
+      "sequence": "43693",
+      "event": "memory.provider.771e3961c3c895da9889604061504a90.dispatch_admitted",
+      "detail_sha256": "fb652b039803e4782c5ab1de6244478f032c33f8cca45a59f0cf915a2d7242c0"
+    },
+    {
+      "sequence": "43729",
+      "event": "memory.provider.771e3961c3c895da9889604061504a90.acknowledged",
+      "detail_sha256": "84b8f3f3be592c792579f49370b3cef24e948b49bee3ff7e805bc8e4edc1f80c"
+    },
+    {
+      "sequence": "43797",
+      "event": "memory.provider.7880f45314a050d9bd2442d9f7bc1f19.prepared",
+      "detail_sha256": "710312bae78b7da63658fde00b29f0e1ac31e51a685304eacbd906d2ae83c4b0"
+    },
+    {
+      "sequence": "43799",
+      "event": "memory.provider.7880f45314a050d9bd2442d9f7bc1f19.dispatch_admitted",
+      "detail_sha256": "b19ad656308452015350fcf42757f45f8b89db1a53e93909e721e5781fb17784"
+    },
+    {
+      "sequence": "43835",
+      "event": "memory.provider.7880f45314a050d9bd2442d9f7bc1f19.acknowledged",
+      "detail_sha256": "eec9d65e33fd9dd3df30d25b85fe6c0c3d3eb481ecd7b4c2965c754359ce42cd"
+    },
+    {
+      "sequence": "43977",
+      "event": "memory.provider.7cdbd54fa5e2c07dfeedba9c2ca2e6cc.prepared",
+      "detail_sha256": "b15e4fedb13f145853ccf81241bb602aeac485f7d7377cd1600abc121f20009a"
+    },
+    {
+      "sequence": "43978",
+      "event": "memory.provider.7cdbd54fa5e2c07dfeedba9c2ca2e6cc.dispatch_admitted",
+      "detail_sha256": "ea7c230127333c30ffa41fd39d9a4fab38ef4735a7e249b8292679eea1e3042d"
+    },
+    {
+      "sequence": "43990",
+      "event": "memory.provider.7cdbd54fa5e2c07dfeedba9c2ca2e6cc.acknowledged",
+      "detail_sha256": "6f6ddc66c20b6f56e51c93008b7739c8a5243ca7a8ee2dafb04a2f708e4646a8"
+    },
+    {
+      "sequence": "46273",
+      "event": "memory.provider.ecb343798b4f663ded61f0712f74bb2d.prepared",
+      "detail_sha256": "db758582f5ae535f5c6021f0fea222c67a690c2c0e5e7587fce083f72d3d0d83"
+    },
+    {
+      "sequence": "46274",
+      "event": "memory.provider.ecb343798b4f663ded61f0712f74bb2d.dispatch_admitted",
+      "detail_sha256": "bfc5de1d1ee41a0debe2496e4c21d981383a3fee04f625a0dcf3ec382c6b9630"
+    },
+    {
+      "sequence": "46285",
+      "event": "memory.provider.ecb343798b4f663ded61f0712f74bb2d.acknowledged",
+      "detail_sha256": "660b9a4db3cfc959c7461a5c75289b158729ee9ed92755a2ee2f6192444ba093"
+    },
+    {
+      "sequence": "46993",
+      "event": "memory.provider.4cf3a05232bb9aa66e9fd0a0574cefa2.prepared",
+      "detail_sha256": "6192ec68b34f660d3983d90e76421010fa1ffa59bab5e3907998d7bc166e78f4"
+    },
+    {
+      "sequence": "46994",
+      "event": "memory.provider.4cf3a05232bb9aa66e9fd0a0574cefa2.dispatch_admitted",
+      "detail_sha256": "929f3ee2aad2ddd1ce8cac57bbc823d7b39a7ab6f7abd1cea2217951f4de8051"
+    },
+    {
+      "sequence": "47038",
+      "event": "memory.provider.4cf3a05232bb9aa66e9fd0a0574cefa2.acknowledged",
+      "detail_sha256": "f4a0e8289c3a838abffde98a297e504f54580fbe192c454178378459239e4c4a"
+    },
+    {
+      "sequence": "47957",
+      "event": "memory.provider.4bc8872549baf6756c9a1aa7ccd67557.prepared",
+      "detail_sha256": "91ebe75c9851a81ce8f2714b858d0b10ae40cf547a69282e7062c67442f2ba76"
+    },
+    {
+      "sequence": "47958",
+      "event": "memory.provider.4bc8872549baf6756c9a1aa7ccd67557.dispatch_admitted",
+      "detail_sha256": "17d2b742143e28a947a7c450e1ae8a5fee728706b02f7a94d408d55a6abc5b4b"
+    },
+    {
+      "sequence": "47976",
+      "event": "memory.provider.4bc8872549baf6756c9a1aa7ccd67557.acknowledged",
+      "detail_sha256": "ce373282519facae98390ebd4f9fb64430b35fe3301ede48b7c5a0015a407b7b"
+    }
+  ]
+}

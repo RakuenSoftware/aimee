@@ -1,0 +1,4 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+check_aimee_home: ok
+lint: ok (Debian clang-format version 19.1.7 (3+b1))
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

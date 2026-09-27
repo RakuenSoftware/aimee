@@ -1,0 +1,32 @@
+=== RUN   TestMR05FrozenCoverageEvaluation
+=== RUN   TestMR05FrozenCoverageEvaluation/current-state-positive
+=== RUN   TestMR05FrozenCoverageEvaluation/comparison-unrelated-confidence
+=== RUN   TestMR05FrozenCoverageEvaluation/comparison-missing-side
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-positive
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-unrelated-episode
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-missing-date
+=== RUN   TestMR05FrozenCoverageEvaluation/required-update-dropped
+=== RUN   TestMR05FrozenCoverageEvaluation/owner-unavailable
+=== RUN   TestMR05FrozenCoverageEvaluation/revoked-cached-source
+=== RUN   TestMR05FrozenCoverageEvaluation/copies-are-not-independent
+=== RUN   TestMR05FrozenCoverageEvaluation/unresolved-contradiction
+=== NAME  TestMR05FrozenCoverageEvaluation
+    evidence_frozen_eval_test.go:107: false_complete=0/9; deterministic_reader_answer_set_accuracy=6/11; model_answer_quality=not_measured
+--- PASS: TestMR05FrozenCoverageEvaluation (0.02s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/current-state-positive (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/comparison-unrelated-confidence (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/comparison-missing-side (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-positive (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-unrelated-episode (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-missing-date (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/required-update-dropped (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/owner-unavailable (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/revoked-cached-source (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/copies-are-not-independent (0.01s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/unresolved-contradiction (0.00s)
+=== RUN   TestEvidenceTemporalCanonicalOwnerPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestEvidenceTemporalCanonicalOwnerPostgres (0.18s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.256s

@@ -1,0 +1,32 @@
+{
+  "candidate": "f6115607c",
+  "owners": [
+    {
+      "role": "server",
+      "image": "sha256:e45d02817c678a03499c0ca892248ee0e7f32d100d2cb93c2bc8af08f62f9601",
+      "configured_image": "aimee-pr2990:f6115607c",
+      "healthy": true,
+      "selection_flag_present": false,
+      "health_flag_present": false,
+      "horizon_flag_present": false,
+      "native_version": "aimee v0.4.5-pr2990.f6115607c",
+      "native_version_exit": 0
+    },
+    {
+      "role": "kb",
+      "image": "sha256:e45d02817c678a03499c0ca892248ee0e7f32d100d2cb93c2bc8af08f62f9601",
+      "configured_image": "aimee-pr2990:f6115607c",
+      "healthy": true,
+      "selection_flag_present": false,
+      "health_flag_present": false,
+      "horizon_flag_present": false,
+      "native_version": "aimee v0.4.5-pr2990.f6115607c",
+      "native_version_exit": 0
+    }
+  ],
+  "native_checks": 109,
+  "native_passed": 109,
+  "adaptive_promotion": false,
+  "default_selection": "baseline",
+  "health_collection": "disabled"
+}

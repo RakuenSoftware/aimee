@@ -43,12 +43,13 @@ def build_documents(case: dict) -> list[dict[str, str]]:
 
 def main() -> int:
     args = build_parser().parse_args()
+    cases = load_cases(args.dataset, args.max_cases)
     harness = AimeeHarness()
     results = []
     tmp, home = harness.prepare_home()
     try:
         samples_run = 0
-        for case in load_cases(args.dataset, args.max_cases):
+        for case in cases:
             samples_run += 1
             index = BM25Index(build_documents(case))
             started = time.perf_counter()
@@ -63,6 +64,7 @@ def main() -> int:
                 home,
                 question=case["question"],
                 gold_answer=case["gold_answer"],
+                    answerable=case["answerable"],
                 candidate=answer_exec.response,
             )
             costs = llm_cost_breakdown(harness, answer_exec, judge_in, judge_out)
@@ -75,6 +77,7 @@ def main() -> int:
                     "subset": case["subset"],
                     "question": case["question"],
                     "gold_answer": case["gold_answer"],
+                    "answerable": case["answerable"],
                     "generated_answer": answer_exec.response,
                     "judge_votes": votes,
                     "verdict": verdict,
@@ -98,6 +101,7 @@ def main() -> int:
 
     summary = build_summary(results, label_field="subset", include_llm=True)
     payload = {
+        "dataset_inventory": cases.inventory,
         "dataset": "longmemeval",
         "system": "bm25",
         "system_version": "stdlib-bm25",

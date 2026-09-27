@@ -161,18 +161,21 @@ type EmbedRequest struct {
 // as a failure — and it closes an earlier outage, or a half-open breaker would
 // turn the next authorization result back into "unavailable".
 type EmbedResponse struct {
-	Vectors      [][]float32 `json:"vectors,omitempty"`
-	Vector       []float32   `json:"vector,omitempty"`
-	Dim          int         `json:"dim"`
-	Truncated    bool        `json:"truncated,omitempty"`
-	Unavailable  bool        `json:"unavailable,omitempty"`
-	RetryAfterMS int64       `json:"retry_after_ms,omitempty"`
-	Unauthorized bool        `json:"unauthorized,omitempty"`
-	Error        string      `json:"error,omitempty"`
-	ServingID    string      `json:"serving_id,omitempty"`
-	Embedded     bool        `json:"embedded,omitempty"`
-	Repaired     int         `json:"repaired,omitempty"`
-	Failed       int         `json:"failed,omitempty"`
+	Vectors                 [][]float32        `json:"vectors,omitempty"`
+	Vector                  []float32          `json:"vector,omitempty"`
+	Dim                     int                `json:"dim"`
+	Truncated               bool               `json:"truncated,omitempty"`
+	Unavailable             bool               `json:"unavailable,omitempty"`
+	RetryAfterMS            int64              `json:"retry_after_ms,omitempty"`
+	Unauthorized            bool               `json:"unauthorized,omitempty"`
+	Error                   string             `json:"error,omitempty"`
+	ServingID               string             `json:"serving_id,omitempty"`
+	IdentityState           string             `json:"identity_state,omitempty"`
+	EmbeddingIdentity       *EmbeddingIdentity `json:"embedding_identity,omitempty"`
+	EmbeddingIdentityDigest string             `json:"embedding_identity_digest,omitempty"`
+	Embedded                bool               `json:"embedded,omitempty"`
+	Repaired                int                `json:"repaired,omitempty"`
+	Failed                  int                `json:"failed,omitempty"`
 }
 
 // EmbedIsHTTP reports whether a configured embedder command names an HTTP
@@ -320,15 +323,25 @@ func EmbedServingID(ctx context.Context, traceID uint64, executor egress.Executo
 		}
 		body = output
 	}
+	if response, present := embeddingIdentityResponse(body); present {
+		return response
+	}
 	var payload map[string]any
 	if json.Unmarshal(body, &payload) == nil {
 		for _, key := range []string{"serving_id", "model", "version"} {
 			if value, ok := payload[key].(string); ok && value != "" {
-				return EmbedResponse{ServingID: value}
+				if strings.HasPrefix(value, "embedding-v1:") {
+					return EmbedResponse{Error: "embed: reserved identity requires complete commitment", IdentityState: "identity_mismatch"}
+				}
+				return EmbedResponse{ServingID: value, IdentityState: "legacy_unknown"}
 			}
 		}
 	}
-	return EmbedResponse{ServingID: strings.TrimSpace(string(body))}
+	value := strings.TrimSpace(string(body))
+	if strings.HasPrefix(value, "embedding-v1:") {
+		return EmbedResponse{Error: "embed: reserved identity requires complete commitment", IdentityState: "identity_mismatch"}
+	}
+	return EmbedResponse{ServingID: value, IdentityState: "legacy_unknown"}
 }
 
 func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, data DataStore,
@@ -349,6 +362,8 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB && memoryID >= unitPointOffset {
 		return backend.embedUnit(ctx, traceID, executor, memoryID, command, maxDim)
 	}
+	var record Record
+	var err error
 	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
 		if db, ok := backend.db.(store.DB); ok {
 			tx, err := db.Begin(ctx)
@@ -371,12 +386,15 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 		if err := backend.activeEmbeddingGuard(ctx, command, maxDim); err != nil {
 			return EmbedResponse{Error: err.Error()}
 		}
-		var locked int64
-		if err := backend.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, memoryID).Scan(&locked); err != nil {
-			return EmbedResponse{Error: "embed: memory record unavailable"}
-		}
+		// Index admission is independent of current-time serving. Pre-index an
+		// authorized future-valid record without exhausting retries before its
+		// boundary. Hold the same parent lock through model work and persistence.
+		err = backend.db.QueryRow(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+ FROM memories WHERE id=$1 AND `+indexableMemorySQL("")+` FOR UPDATE`, memoryID).Scan(
+			&record.ID, &record.Scope.Type, &record.Scope.Value, &record.Tier, &record.Kind, &record.Key, &record.Content, &record.Confidence)
+	} else {
+		record, err = data.Get(ctx, Scope{}, memoryID)
 	}
-	record, err := data.Get(ctx, Scope{}, memoryID)
 	if err != nil {
 		return EmbedResponse{Error: "embed: memory record unavailable"}
 	}

@@ -2059,14 +2059,10 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 
    *n_out = n_results;
 
-   /* Close the kb_fusion_mode bandit loop with this search's recall sufficiency
-    * (same proxy as kb_memory_retrieval_limit), so the arm posteriors learn from
-    * live traffic. Only runs when an arm was sampled above. */
+   /* A result count is an availability/truncation feature. Leave reward unknown
+    * until delivered evidence has an attributed, verified task outcome. */
    if (fm_dp && fm_decision_id[0] && fm_arm_id[0])
-   {
-      double reward = kb_bandit_recall_sufficiency_reward(n_results, max_results);
-      kb_bandit_reward(fm_dp->id, fm_decision_id, fm_arm_id, reward);
-   }
+      (void)kb_bandit_record_result_count(fm_decision_id, n_results, max_results);
    return NULL;
 }
 

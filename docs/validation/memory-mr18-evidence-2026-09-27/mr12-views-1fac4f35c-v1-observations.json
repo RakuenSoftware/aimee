@@ -1,0 +1,254 @@
+[
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "090d1ec2078d6bd889d7e10f7a310698037ff55e08816218ab4d61c6640d81c3"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "3981aed82851ffa767db5e45e45559051875f225baaebeda4923566c78bb5908"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "999b2d178dca2b36fdd30a7c4f6a254a8f20ad94e62c42ec749a23f0fd3c0597"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "a1363cd5371732bd5245390b6516207356b970851e9e9d2de21b313531b0400d"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "79a0ed1acec07abdea110e3bf2cea3df6c0ac4c2014765c35228c23395593b31"
+  },
+  {
+    "verb": "claim_card",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "2b9849f2c4aefcf9b7129a1784cf729bc5849bc8f09e03817173f9cc0ff40541"
+  },
+  {
+    "verb": "supersede",
+    "http_status": 200,
+    "status": "ok",
+    "kind": "constraint",
+    "response_sha256": "9b6cfadc716ee24f170fd4180e248f26671af1a1230d8495783630d81d512e4c"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "31ae3c0b83622481a47defe4c25a3abe3fc4816c4aa24d039a42e20aff78dddd"
+  },
+  {
+    "verb": "mcp",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "f1e725f6642bf5a4bc6cfcd4db35487b334b1467d3183c1d32d59844cec2db46"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "07e5f60d565a75996848b02602d738195655ca00f00ad33a515258a037ae51d6"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "220485856af344fddf0866bc399533911dada0e347cee8526c18c3bdbe526a70"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "f5653d3f6b6656010995d0130ef335467e7db006f5b201003252a127b8ba6cad"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "6db579fb97a319a78cf2236942b015c28f21d982d9b188b3c4c1bd94940aad64"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "53d703dcfdc023777b49826027e9f2f8c6a8d3e9e130a6faccb521b6fedebad3"
+  },
+  {
+    "verb": "claim_card",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "de56d3fa2498aa4d06054de07d7a832e05dfd555f6f875c7df28eafe067d7470"
+  },
+  {
+    "verb": "supersede",
+    "http_status": 200,
+    "status": "ok",
+    "kind": "constraint",
+    "response_sha256": "a9be75b695c1c092eae091a6f251e40eee81ed6191badcd442223190a5d9cc96"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "59635cc9865fbd783bb0bc5676562a7fa4814d30d2bd3aaeb2383ca76ea08b59"
+  },
+  {
+    "verb": "mcp",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "ec4b1b92bfee47656c2c6a47810da4c51b58eef3d3b0821476908716a3cd3892"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "dcad087c29793b480415364e1958c6abc0092a841482d5f87c684b85d40fb557"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "c962e9e2df55738b8496f6ec7841ed05fd647cdbe36d184a61109ebf3db7aa1c"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "dd874bbade9fad6653993e314ecff003e4bbfe90a608c0b8bd792445c0b5b392"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "2dc2ae7a9968bb31bf39687a2c52c049964436f39568d2d861daa6e0e986fd5b"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "9af205ab81b923e79ae88f75bbf1e1deabfd10149d56b73fdca3e03ac07a406a"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "2ee94733e2246d83cdcf28df63988414e141336f689e5589a178fc48d6e9320a"
+  },
+  {
+    "verb": "store",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "5635caa1f539282610b44b40ccd844598d1599f87dc5bb8598ed9c9b09096c14"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "c6f1cf6e1b548a05c4ea575be2a31ef3149eac2a2244496c6229cc3a4503f092"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "ab46dfe5b63ca32bf921d879165fcaf74a1529a41ff367373a5386dc1ae12c6b"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "2e58061eb8c2e5908c7f653838aac27a560349c863b0fed3b18b0a79fc76ac23"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "6cea17a3c39bfdde6a8463006fe30ebed9e0fb929538701ca818ed9cc39a984b"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "b28d97c05b313d883e3e845eede8a3b906ec74edad5323ef4418881a21195aea"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "35428b3e8eaf452e6340c349c61e25b4774a4958b1c1a6e87e509913789308e9"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "d769dbff9cea0f3c9a682d337cbbdb5b09ec1a7f3854f821638f362f50c41fe3"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "ff11d0aa04d08d84bca549dc05bf66390f2136c827b42616eca9ea914b6b71d1"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "ok",
+    "kind": null,
+    "response_sha256": "0459619f29bcf503fcb46d4e2c5c355cc82c7598467dd9c486c6f9fe50e1ea76"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "f29c4e2cb066d755ea7705bb6a1644b37e05cc4bf4f5adf43c5797eab3f1311f"
+  },
+  {
+    "verb": "serve",
+    "http_status": 200,
+    "status": "degraded",
+    "kind": null,
+    "response_sha256": "b564eceb49e909379ee9d01f25cb054fa3672081dfa7cc5420964432454f5269"
+  }
+]

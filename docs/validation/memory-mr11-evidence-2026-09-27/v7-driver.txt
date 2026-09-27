@@ -1,0 +1,7 @@
+PASS fresh candidate KB healthy
+Traceback (most recent call last):
+  File "<stdin>", line 59, in <module>
+  File "<stdin>", line 45, in search
+  File "<stdin>", line 28, in action
+RuntimeError: owner action failed: search_assertions
+live generations actual exit 1

@@ -7,12 +7,16 @@ import (
 
 // Scope is pinned by handleData on the transaction. Parent RLS is an additional
 // bound; currentness applies even for all-scope and privileged reads.
-const domainVisibleParents = `SELECT id,CASE
+const domainScopeRankSQL = `CASE
  WHEN current_setting('aimee.memory_scope_all',true)='1' THEN 1
  WHEN scope_type='project' AND scope_value=current_setting('aimee.memory_project',true) THEN 3
  WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
- ELSE 1 END AS scope_rank FROM memories
- WHERE lifecycle_state='active' AND activation_suppressed=0`
+ ELSE 1 END`
+
+func domainVisibleParents() string {
+	return `SELECT id,` + domainScopeRankSQL + ` AS scope_rank FROM memories
+ WHERE ` + currentMemorySQL("")
+}
 
 const episodeColumns = `id,memory_id,episode_key,episode_text,source_session,reference_time,created_at`
 
@@ -27,9 +31,9 @@ func (s *postgresDataStore) episodeList(ctx context.Context, query string, limit
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($3='' OR (scope_type=$3 AND scope_value=$4))) SELECT `+episodeColumns+` FROM memory_episodes
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents()+` AND ($3='' OR (scope_type=$3 AND scope_value=$4))) SELECT `+episodeColumns+` FROM memory_episodes e
 WHERE ($1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%')
-AND memory_id IN (SELECT id FROM visible)
+AND memory_id IN (SELECT id FROM visible) AND `+currentEpisodeInputsSQL("e")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit, exact.Type, exact.Value)
 	if err != nil {
 		return nil, err
@@ -51,8 +55,8 @@ func (s *postgresDataStore) EpisodeGet(ctx context.Context, key string) (Episode
 		return Episode{}, err
 	}
 	var item Episode
-	err := scanEpisode(s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+episodeColumns+` FROM memory_episodes
-WHERE episode_key=$1 AND memory_id IN (SELECT id FROM visible) ORDER BY id DESC LIMIT 1`, key), &item)
+	err := scanEpisode(s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents()+`) SELECT `+episodeColumns+` FROM memory_episodes e
+WHERE episode_key=$1 AND memory_id IN (SELECT id FROM visible) AND `+currentEpisodeInputsSQL("e")+` ORDER BY id DESC LIMIT 1`, key), &item)
 	if store.IsNoRows(err) {
 		return Episode{}, ErrMemoryNotFound
 	}
@@ -80,11 +84,16 @@ func (s *postgresDataStore) RelationSearch(ctx context.Context, query, asOf stri
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+relationColumns+` FROM memory_relations
+	parentPolicy := currentMemorySQL("m.")
+	if asOf != "" {
+		parentPolicy = historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", memoryTimeSQL("$2::text"))
+	}
+	visible := `SELECT m.id,` + domainScopeRankSQL + ` AS scope_rank FROM memories m WHERE ` + parentPolicy
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+visible+`) SELECT `+relationColumns+` FROM memory_relations r
 WHERE ($1='' OR src_entity ILIKE '%'||$1||'%' OR relation ILIKE '%'||$1||'%' OR
 dst_entity ILIKE '%'||$1||'%' OR fact_text ILIKE '%'||$1||'%')
-AND memory_id IN (SELECT id FROM visible)
-AND ($2='' OR ((valid_at='' OR valid_at<=$2) AND (invalid_at='' OR invalid_at>$2)))
+AND memory_id IN (SELECT id FROM visible) AND `+relationInputsSQL("r", parentPolicy)+`
+AND `+relationValidityAtSQL("r.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,CASE WHEN valid_at<>'' THEN 1 ELSE 0 END DESC,created_at DESC LIMIT $3`, query, asOf, limit)
 	if err != nil {
 		return nil, err
@@ -96,9 +105,9 @@ func (s *postgresDataStore) EntityEdges(ctx context.Context, entity string, limi
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+relationColumns+` FROM memory_relations
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents()+`) SELECT `+relationColumns+` FROM memory_relations r
 WHERE (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1))
-AND memory_id IN (SELECT id FROM visible)
+AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,created_at DESC LIMIT $2`, entity, limit)
 	if err != nil {
 		return nil, err
@@ -114,8 +123,8 @@ func (s *postgresDataStore) entityProfile(ctx context.Context, entity string, ex
 	if err := s.requireKBDomain(); err != nil {
 		return result, err
 	}
-	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
-visible_relations AS (SELECT * FROM memory_relations WHERE memory_id IN (SELECT id FROM visible))
+	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents()+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
+visible_relations AS (SELECT * FROM memory_relations r WHERE memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`)
 SELECT
 (SELECT COUNT(DISTINCT memory_id) FROM memory_entities
  WHERE lower(entity)=lower($1) AND memory_id IN (SELECT id FROM visible)),
@@ -123,13 +132,14 @@ SELECT
 (SELECT COUNT(*) FROM entity_edges e WHERE (lower(source)=lower($1) OR lower(target)=lower($1))
  AND edge_class='semantic' AND lifecycle_state IN ('persistent','promoted')
  AND suppressed=0 AND superseded_at='' AND invalidated_at=''
- AND (valid_from='' OR valid_from<=pg_now_text()) AND (valid_until='' OR valid_until>pg_now_text())
- AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
- OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN visible v ON fe.source_id='memory:'||v.id::text
-  WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND fe.invalidated_at='' AND fe.stance='supports'))),
+ AND `+memoryValiditySQL("e.")+`
+ AND `+currentMemoryEvidenceSQL("e", `$2='' OR (m.scope_type=$2 AND m.scope_value=$3)`, false)+`
+ AND (NOT EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=e.id AND f.source_kind='memory')
+ OR EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=e.id AND f.source_kind='memory'
+ AND f.invalidated_at='' AND f.stance='supports'))),
 COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN visible_relations mr ON mr.episode_id=me.id
  WHERE (lower(mr.src_entity)=lower($1) OR lower(mr.dst_entity)=lower($1))
- AND me.memory_id IN (SELECT id FROM visible)
+ AND me.memory_id IN (SELECT id FROM visible) AND `+currentEpisodeInputsSQL("me")+`
  ORDER BY (SELECT scope_rank FROM visible WHERE id=me.memory_id) DESC,me.created_at DESC,me.id DESC LIMIT 1),''),
 COALESCE((SELECT fact_text FROM visible_relations
  WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)

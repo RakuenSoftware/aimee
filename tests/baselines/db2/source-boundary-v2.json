@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "b6eac1378e53db1b7b28b9196e93a11005fd37c2",
+  "source_revision": "469e02608b2b0fe751a3061f69f606f63f468ea4",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 115,
     "headers": 125,
     "sql_files": 6,
-    "consumer_files": 269,
-    "production_consumers": 123,
+    "consumer_files": 268,
+    "production_consumers": 122,
     "test_consumers": 146,
-    "include_directives": 776,
-    "outbound_dependency_rows": 144,
-    "outbound_include_directives": 144
+    "include_directives": 775,
+    "outbound_dependency_rows": 146,
+    "outbound_include_directives": 146
   },
   "source_files": {
     "c": [
@@ -434,16 +434,6 @@
         },
         {
           "header": "modules/db2/c/tool_registry.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/kb/db2_adapters/kb_service_backend_export.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "db2_internal.h",
           "count": 1
         }
       ]
@@ -5542,6 +5532,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "json_int64.h",
+      "resolved": "src/headers/json_int64.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/enrollments.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -5630,6 +5627,13 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "json_int64.h",
+      "resolved": "src/headers/json_int64.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -5997,5 +6001,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "9857eda7d4091eba539f4f7919465c25431f551f0ac58bc1021ea4517320a4a4"
+  "fingerprint": "26ac0529e108e2d0e474d4bf93528dca5e04217277b15583b603b752ce2c1b84"
 }

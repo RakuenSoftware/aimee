@@ -1,0 +1,39 @@
+import hashlib,http.client,json,re,socket,subprocess,time
+from pathlib import Path
+head='be3f2577c'
+names=json.loads(Path('/opt/pr2990-evidence/mr07-managed-be46915db/names.json').read_text())
+class Docker(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(90);self.sock.connect('/var/run/docker.sock')
+def api(method,path,body=None):
+ c=Docker('localhost');c.request(method,path,None if body is None else json.dumps(body),{'Content-Type':'application/json'});r=c.getresponse();raw=r.read();c.close()
+ if r.status>=400:raise RuntimeError('Docker action failed '+str(r.status))
+ return json.loads(raw) if raw else None
+server=names['server'];original=api('GET','/containers/'+server+'/json')
+assert re.fullmatch('aimee-e2e-server-[a-f0-9]+',names['project'])
+assert original['Config']['Labels']['com.docker.compose.project']==names['project']
+assert original['Config']['Image']=='aimee-pr2990:'+head
+assert not original['HostConfig'].get('PortBindings')
+original['Config']['Env']=[v for v in original['Config']['Env'] if not v.startswith('AIMEE_MEMORY_HEALTH_ENABLED=')]
+subprocess.run(['docker','exec',server,'test','!','-e','/etc/aimee/exploration-experiment.json'],check=True)
+def replace(enabled):
+ info=api('GET','/containers/'+server+'/json');config=dict(info['Config'])
+ config['Env']=[e for e in config['Env'] if not e.startswith('AIMEE_MEMORY_HEALTH_ENABLED=')]
+ if enabled is not None:config['Env'].append('AIMEE_MEMORY_HEALTH_ENABLED='+('1' if enabled else '0'))
+ else:config['Env'].extend(e for e in original['Config']['Env'] if e.startswith('AIMEE_MEMORY_HEALTH_ENABLED='))
+ config['HostConfig']=info['HostConfig'];config['NetworkingConfig']=dict(EndpointsConfig={k:dict(Aliases=v.get('Aliases',[]),IPAMConfig=v.get('IPAMConfig'),DriverOpts=v.get('DriverOpts')) for k,v in info['NetworkSettings']['Networks'].items()})
+ api('POST','/containers/'+server+'/stop?t=30');api('DELETE','/containers/'+server)
+ api('POST','/containers/create?name='+server,config);api('POST','/containers/'+server+'/start')
+ deadline=time.monotonic()+180
+ while time.monotonic()<deadline:
+  current=api('GET','/containers/'+server+'/json')
+  if current['State'].get('Health',{}).get('Status')=='healthy':return
+  time.sleep(1)
+ raise RuntimeError('owned Server health timeout')
+
+replace(None)
+info=api('GET','/containers/'+server+'/json')
+result=dict(health_enabled_present=any(e.startswith('AIMEE_MEMORY_HEALTH_ENABLED=') for e in info['Config']['Env']),healthy=info['State']['Health']['Status']=='healthy',image=info['Image'],configured_image=info['Config']['Image'])
+assert not result['health_enabled_present'] and result['healthy']
+Path('/opt/pr2990-evidence/mr08-typed-native-be3f2577c/restoration.json').write_text(json.dumps(result,indent=2)+'\n')
+print('health collection disabled; owned Server healthy')

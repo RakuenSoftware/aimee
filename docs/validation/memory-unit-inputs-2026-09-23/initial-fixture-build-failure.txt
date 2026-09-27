@@ -1,0 +1,4 @@
+# github.com/JBailes/aimee/server-go/modules/memory [github.com/JBailes/aimee/server-go/modules/memory.test]
+modules/memory/derived_units_test.go:148:11: hit.PointID undefined (type VectorHit has no field or method PointID)
+FAIL	github.com/JBailes/aimee/server-go/modules/memory [build failed]
+FAIL

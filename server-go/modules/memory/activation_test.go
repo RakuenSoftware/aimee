@@ -60,14 +60,22 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories (
- id bigint PRIMARY KEY,scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memories (
+ id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',
  tier text DEFAULT 'L2',kind text DEFAULT 'preference',key text DEFAULT 'editor',content text DEFAULT 'fixture',
  confidence double precision DEFAULT 0.5,lifecycle_state text DEFAULT 'active',
  valid_from text DEFAULT '',valid_until text DEFAULT '',
  use_count bigint DEFAULT 0,updated_at timestamptz DEFAULT now(),
  activation_sticky_turns bigint DEFAULT 2,activation_cooldown_turns bigint DEFAULT 1,
  activation_delay_turns bigint DEFAULT 0,activation_suppressed bigint DEFAULT 0);
+ CREATE TEMP TABLE memory_collection_generations(scope_type text,scope_value text,generation bigint);
+ CREATE TEMP TABLE memory_projection_generations(scope_type text,scope_value text,memory_id bigint,generation bigint);
+ CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid,rules_revision bigint DEFAULT 1);
+ INSERT INTO memory_collection_owner(id,owner_id) VALUES(1,'00000000-0000-0000-0000-000000000001');
  INSERT INTO memories(id,confidence,activation_cooldown_turns,activation_delay_turns,activation_suppressed) VALUES
  (1,1,3,0,0),(2,0.99,1,3,0),(3,0.98,1,0,1),(4,0.8,1,0,0),(5,0.82,1,0,0);
  INSERT INTO memories(id,kind,key,confidence) VALUES(6,'fact','unrelated',0.7);
@@ -77,15 +85,16 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
  INSERT INTO memories(id,confidence,valid_until) SELECT n,1,now()::text FROM generate_series(20,29) n;
  INSERT INTO memories(id,confidence,lifecycle_state,valid_from) VALUES(30,1,'pending',(now()+interval '1 day')::text);
  INSERT INTO memories(id,confidence,lifecycle_state,valid_until) VALUES(31,1,'pending',now()::text);
- CREATE TEMP TABLE prospective_memories(id bigint,trigger_text text,action_text text,anchor_entity text,
+ CREATE TEMP TABLE prospective_memories(id bigint,record_revision bigint NOT NULL DEFAULT 1,trigger_text text,action_text text,anchor_entity text,
  anchor_file text,recurrence text,state text,valid_until text,source_session text,trigger_count bigint,
  last_triggered_at text,created_at text,updated_at text);
- CREATE TEMP TABLE epistemic_directives(id bigint,question text,topic text,anchor_entity text,anchor_file text,
+ CREATE TEMP TABLE epistemic_directives(id bigint,record_revision bigint NOT NULL DEFAULT 1,question text,topic text,anchor_entity text,anchor_file text,
  cause text,priority bigint,state text,memory_a_id bigint,memory_b_id bigint,resolution_memory_id bigint,
  evidence text,source_session text,surfaced_count bigint,last_surfaced_at text,resolved_at text,
  valid_until text,created_at text,updated_at text);
- CREATE TEMP TABLE rules(id bigint,polarity text,title text,description text,weight bigint,directive_type text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,polarity text,title text,description text,weight bigint,directive_type text,expires_at text,domain text DEFAULT '');
  CREATE SCHEMA activation_test;
+ CREATE FUNCTION activation_test.memory_row_scope_visible(t text,v text) RETURNS boolean LANGUAGE sql AS $$ SELECT t='global' AND v='_global' $$;
  CREATE FUNCTION activation_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,activation_test,public;`)
 	if err != nil {
@@ -103,6 +112,23 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	records, why, held, err := s.recallActivated(ctx, snapshot, "kind='preference'", 2, false, false)
 	if err != nil || !reflect.DeepEqual(ids(records), []int64{4, 5}) || held != 3 || why[4] != "sticky activation" {
 		t.Fatalf("selection=%v why=%v held=%d err=%v", ids(records), why, held, err)
+	}
+	for _, row := range records {
+		if !row.Version.validFor(row.ID) || row.Version.RecordRevision != "1" {
+			t.Fatalf("activated version missing: %+v", row)
+		}
+	}
+	// Content and its exact decimal revision must come from the same selection.
+	if _, err := tx.Exec(ctx, "UPDATE memories SET content='corrected',record_revision=9007199254740993 WHERE id=4"); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := s.recallRecords(ctx, "id=4", 1)
+	if err != nil || len(plain) != 1 || plain[0].Content != "corrected" || plain[0].Version.RecordRevision != "9007199254740993" {
+		t.Fatalf("plain revision: %+v %v", plain, err)
+	}
+	changed, _, _, err := s.recallActivated(ctx, snapshot, "id=4", 1, false, false)
+	if err != nil || len(changed) != 1 || changed[0].Content != "corrected" || *changed[0].Version != *plain[0].Version {
+		t.Fatalf("activated revision: %+v %v", changed, err)
 	}
 	records, _, held, err = s.recallActivated(ctx, snapshot, "id=1", 2, false, false)
 	if err != nil || len(records) != 0 || held != 1 {
@@ -161,6 +187,19 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	metrics := dashboard["metrics"].(map[string]any)
 	if dashboard["session_start"] != true || metrics["assemblies_total"].(float64) != float64(beforeMetrics.Assemblies+1) || metrics["session_start_assemblies"].(float64) != float64(beforeMetrics.Starts+1) || metrics["ms_max"].(float64) < 0 {
 		t.Fatal(dashboard)
+	}
+	if metrics["calls_total"].(float64) != float64(beforeMetrics.Calls+1) || metrics["population"] != "process_recall_bundle_completions" {
+		t.Fatalf("dashboard call population: %v", metrics)
+	}
+	beforeFailure := recallMetrics()
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.RecallBundle(cancelled, "", 0, false); err == nil {
+		t.Fatal("cancelled recall unexpectedly succeeded")
+	}
+	afterFailure := recallMetrics()
+	if afterFailure.Calls != beforeFailure.Calls+1 || afterFailure.Assemblies != beforeFailure.Assemblies || afterFailure.Starts != beforeFailure.Starts {
+		t.Fatalf("failed call must count only as a completion: before=%+v after=%+v", beforeFailure, afterFailure)
 	}
 	client := clientForHandler(t, handler)
 	reply, err := client.Data(ctx, 73, DataRequest{Operation: "recall-bundle", Activation: raw})

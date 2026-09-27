@@ -1,0 +1,17 @@
+--- FAIL: TestValidityServingParityPostgres (0.08s)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    validity_test.go:130: ordinary serving widened verified scope {<nil> [] <nil> <nil>   false <nil> <nil> false <nil> false <nil> <nil> <nil> 0 <nil> map[] <nil> <nil> <nil> <nil> 0 [] <nil> [] [] false false false false false <nil> false [] [] <nil> <nil> <nil>  get { } 10 []      <nil> 0 0 false false  hidden true           0             0 0 0 0      0 0      0 0 0 false  0 0 0 0 0         0 0 0 false false [] [] []   0 0 0} {"records":[{"id":10,"scope":{"type":"project","value":"hidden"},"tier":"L2","kind":"fact","key":"fixture","content":"not returned by diagnostic","confidence":1}],"promoted":0,"demoted":0,"expired":0,"sensitive_status":0,"reviews":null}
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.084s
+FAIL

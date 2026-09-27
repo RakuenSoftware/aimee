@@ -89,6 +89,9 @@ func (s *postgresDataStore) extractConventions(ctx context.Context, request Data
 		}
 		confidence := .6
 		record, err := s.InsertEpistemic(ctx, DataRequest{Scope: Scope{Type: ScopeProject, Value: source.project}, Tier: "L3", Kind: "fact", EpistemicKind: "world_fact", Key: key, Content: sentence, Confidence: &confidence, Authority: AuthorityModel})
+		if proposedCorrection(err) != nil {
+			continue
+		}
 		if err != nil {
 			return 0, err
 		}

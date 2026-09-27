@@ -1,0 +1,9 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+aimee: version changed ( -> v0.4.3-484-gd76306e6e) — cleaned stale objects in build/obj
+gen-api-docs: docs/gen/api-v1.md up to date (no-op)
+gen-reference-docs: wrote docs/gen/cli-commands.md
+gen-reference-docs: wrote docs/gen/configuration.md
+gen-v1-route-descriptor: wrote 408 routes -> docs/gen/v1-route-descriptor.json
+gen-reference-docs: plant-test ok (unparseable source refused)
+docs-gen-check: ok
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

@@ -25,6 +25,16 @@ func TestStorePublicValidation(t *testing.T) {
 			t.Fatal("confidence refusal changed the public contract", r)
 		}
 	}
+	for _, context := range []string{
+		`"project":"__aimee_scope_missing__","workspace":"__aimee_scope_missing__"`,
+		`"workspace":"__aimee_scope_missing__"`,
+		`"project":"  __aimee_scope_missing__  "`,
+	} {
+		r := runPublicCommand(t, client, "store", `{"key":"x","content":"y","scope_context":true,`+context+`}`)
+		if r["kind"] != "invalid_argument" || r["reason"] != "active_context_missing" || r["active_context_missing"] != true {
+			t.Fatal("missing scope must be refused before accessing storage", r)
+		}
+	}
 	if r := runPublicCommand(t, client, "store", `{"key":"x","content":"y"}`); r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
@@ -49,6 +59,12 @@ func TestStorePublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA store_command_test;
 CREATE FUNCTION store_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,store_command_test,public;
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier text,kind text,epistemic_kind text,
  scope_type text,scope_value text,confidence double precision,confidence_ceiling double precision,use_count int DEFAULT 0,
  lifecycle_state text,activation_suppressed int DEFAULT 0,archive_reason text DEFAULT '',use_cases text DEFAULT '',last_used_at text DEFAULT '',source_session text DEFAULT '',provenance_category text DEFAULT '',
@@ -57,12 +73,14 @@ CREATE UNIQUE INDEX memory_key_scope ON memories(kind,key,scope_type,scope_value
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
 CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text);
 CREATE TEMP TABLE memory_rejection_tombstones(object_kind text,memory_key text,memory_content text,scope_type text,scope_value text,active int DEFAULT 1);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
 CREATE TEMP TABLE memory_fact_actors(memory_id bigint PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,actor_principal text,actor_role text,authority_rank int,authenticated int,transport_identity text,captured_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id bigint,project text,status text,updated_at text,generation bigint DEFAULT 1,attempts int DEFAULT 0,claimed_by text DEFAULT '',claimed_at text DEFAULT '',last_error text DEFAULT '',next_attempt_at text DEFAULT '',UNIQUE(kind,document_id));`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	installProposalFixture(t, ctx, tx)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	client := clientForHandler(t, handler)
 	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true, TransportIdentity: "cert:server"}
@@ -76,6 +94,22 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 			t.Fatal(status)
 		}
 		return r
+	}
+	// Canonical store admission also covers Put, workflows and practice writes.
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for _, scope := range []Scope{{Type: ScopeProject, Value: missingScopeValue}, {Type: ScopeWorkspace, Value: missingScopeValue}} {
+		_, err := backend.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("canonical insert accepted missing context", scope, err)
+		}
+		_, err = backend.Put(ctx, scope, Record{Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("Put accepted missing context", scope, err)
+		}
+	}
+	var missingRows int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE key='missing-context'`).Scan(&missingRows); err != nil || missingRows != 0 {
+		t.Fatal(missingRows, err)
 	}
 	r := put(`{"key":"model-note","content":"a useful note","authority":"user","actor":"user:forged","tier":"L2","confidence":1,"session_id":"session","use_cases":"answer questions"}`, false)
 	if r["status"] != "ok" {
@@ -181,6 +215,25 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if low := put(`{"key":"hypothesis","content":"tentative","tier":"L5","authority":"user"}`, true); low["status"] != "ok" || low["memory"].(map[string]any)["confidence"] != 0.5 {
 		t.Fatal(low)
 	}
+	// Supersede has the same host-authorized user correction path as update.
+	supersedeSource := put(`{"key":"verified-supersede","content":"user original","authority":"user"}`, true)
+	supersedeArgs := fmt.Sprintf(`{"old_id":%.0f,"new_content":"user correction","authority":"user"}`, supersedeSource["id"])
+	for _, unverified := range []bus.CommandContext{
+		{}, {Authenticated: true, Principal: "model:host"},
+	} {
+		if got, status := invokeContextCommand(t, handler, 0, unverified, "supersede", supersedeArgs); status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+			t.Fatal("supersede accepted unverified authority", unverified, got, status)
+		}
+	}
+	correction, status := invokeContextCommand(t, handler, 0, caller, "supersede", supersedeArgs)
+	if status != bus.ModuleStatusOK || correction["status"] != "ok" {
+		t.Fatal("verified user correction refused", correction, status)
+	}
+	correctedMemory := correction["memory"].(map[string]any)
+	if correctedMemory["id"] == supersedeSource["id"] || correctedMemory["provenance_category"] != "user_stated" {
+		t.Fatal("verified correction lost version or authority", correction)
+	}
+	checkActor(correctedMemory["id"], "user:alice", 30, 1)
 	// Both failure positions roll back the memory row, actor capture and enqueue.
 	for _, tt := range []struct{ table, check, key string }{
 		{"memory_fact_actors", "authority_rank<0", "capture-failure"}, {"kb_async_jobs", "document_id<0", "enqueue-failure"},
@@ -406,7 +459,9 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_store_test;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;
+GRANT SELECT ON memory_collection_owner,derived_memory_dependencies TO memory_store_test;
 GRANT SELECT,UPDATE,DELETE,INSERT ON memories,memory_rejection_tombstones,memory_links,memory_scopes,memory_summaries,memory_fact_actors,kb_async_jobs TO memory_store_test;
 GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_links_id_seq,kb_async_jobs_id_seq TO memory_store_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
@@ -443,6 +498,15 @@ SET LOCAL ROLE memory_store_test;`)
 	editRaw = fmt.Sprintf(`{"old_id":%.0f,"new_content":"password=replacement"}`, redacted["id"])
 	if r := runPublicCommand(t, client, "supersede", editRaw); r["status"] != "ok" || r["memory"].(map[string]any)["content"] != "[REDACTED]" {
 		t.Fatal(r)
+	}
+
+	global := put(`{"key":"explicit-global","content":"global note","scope_context":true,"include_all":true}`, false)
+	if global["status"] != "ok" {
+		t.Fatal("explicit global store must remain available", global)
+	}
+	var globalScope string
+	if err := tx.QueryRow(ctx, `SELECT scope_type||':'||scope_value FROM memories WHERE id=$1`, int64(global["id"].(float64))).Scan(&globalScope); err != nil || globalScope != "global:_global" {
+		t.Fatal(globalScope, err)
 	}
 
 }

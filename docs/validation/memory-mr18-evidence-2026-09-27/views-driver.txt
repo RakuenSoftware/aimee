@@ -1,0 +1,44 @@
+PASS user active_constraints exact accounting
+PASS user active_constraints exact accounting
+PASS user new constraint invalidates view
+PASS user active_constraints exact accounting
+PASS user cache reuse issues fresh receipt
+PASS user active_constraints exact accounting
+PASS user zero budget retains no text
+PASS user card binds correction and uncertainty
+PASS user active_constraints exact accounting
+PASS user correction recomputes view
+PASS user CLI and HTTP exact projection parity
+PASS user MCP and HTTP exact projection parity
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb new constraint invalidates view
+PASS kb active_constraints exact accounting
+PASS kb cache reuse issues fresh receipt
+PASS kb active_constraints exact accounting
+PASS kb zero budget retains no text
+PASS kb card binds correction and uncertainty
+PASS kb active_constraints exact accounting
+PASS kb correction recomputes view
+PASS kb CLI and HTTP exact projection parity
+PASS kb MCP and HTTP exact projection parity
+PASS kb open_contradictions exact accounting
+PASS kb open_contradictions exact accounting
+PASS contradictions include both visible sides and no hidden side
+PASS kb open_contradictions exact accounting
+PASS revocation removes the whole contradiction bundle
+PASS kb active_constraints exact accounting
+PASS future constraint withheld before boundary
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS kb active_constraints exact accounting
+PASS clock alone refreshes cached current view
+PASS kb historical_context exact accounting
+PASS kb historical_context exact accounting
+PASS explicit historical coordinates bind separate cache identities
+MR12_VIEWS_ACCEPTANCE_COMPLETE 43

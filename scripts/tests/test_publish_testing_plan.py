@@ -62,6 +62,7 @@ def main() -> None:
     failures = 0
     all_images = set(planner.ALL)
     kb = set(planner.KB)
+    failures += expect(["scripts/postgres-hygiene-role.sql"], set(planner.POSTGRES), "worker-role bootstrap rebuilds PostgreSQL")
 
     # The reported incident: a server-side KB client diagnostic and a test must not
     # rebuild any KB image, especially the multi-gigabyte A25M/Nomic variants.

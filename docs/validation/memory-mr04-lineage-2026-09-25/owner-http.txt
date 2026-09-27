@@ -1,0 +1,56 @@
+2026-09-25T11:59:42Z AUDIT console_enrollment_revoke: id=7 fingerprint=abc123 scope=project:web
+2026-09-25T11:59:42Z AUDIT console_oidc_config_put: issuer=https://idp jwks_url=https://idp/jwks
+2026-09-25T11:59:42Z AUDIT console_oidc_config_put: issuer=https://idp jwks_url=https://idp/jwks
+2026-09-25T11:59:42Z AUDIT console_decision_create: id=8 subject=policy:new supersedes=0
+2026-09-25T11:59:42Z AUDIT console_decision_update: id=7 field=outcome
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=401 cert=1 cert_authority=1 bearer=0 bearer_cert_match=0 application=0 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=503 cert=1 cert_authority=1 bearer=0 bearer_cert_match=0 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=401 cert=1 cert_authority=1 bearer=0 bearer_cert_match=0 application=0 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=401 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=0 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=400 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=400 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=400 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=POST path=/v1/search status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=1 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=401 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=0 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=POST path=/v1/write-tier-grants/set status=401 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=POST path=/v1/write-tier-grants/set status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=0 application=1 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/team status=503 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=1
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/team status=401 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=403 cert=1 cert_authority=0 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=POST path=/v1/server/heartbeat status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=401 cert=0 cert_authority=0 bearer=1 bearer_cert_match=0 application=1 application_cert_match=0 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=POST path=/v1/enroll/renew status=503 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z ERROR kb_mtls: mTLS listener requires AIMEE_KB_API_BEARER_TOKEN authority before startup
+2026-09-25T11:59:42Z INFO  kb_mtls: mTLS listening on 0.0.0.0:36933 (host localhost, max connections 8)
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=403 cert=1 cert_authority=0 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/health status=503 cert=1 cert_authority=-1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T11:59:42Z WARN  kb.tls: request rejected: method=GET path=/v1/definitely-not-a-route status=404 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T12:00:13Z INFO  kb_mtls: mTLS listening on 0.0.0.0:36933 (host localhost, max connections 8)
+2026-09-25T12:00:13Z WARN  kb.tls: request rejected: method=GET path=/v1/team status=503 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=1
+2026-09-25T12:00:13Z WARN  kb.tls: request rejected: method=GET path=/v1/team status=401 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T12:00:13Z WARN  kb.tls: request rejected: method=POST path=/v1/enroll/renew status=503 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=1 caller=0
+2026-09-25T12:00:13Z WARN  kb.tls: request rejected: method=POST path=/v1/search status=403 cert=1 cert_authority=1 bearer=1 bearer_cert_match=1 application=1 application_cert_match=1 server_binding=1 caller=0
+2026-09-25T12:00:13Z ERROR kb_client: server-to-KB request missing rotating bearer credential
+2026-09-25T12:00:13Z WARN  kb.tls: request rejected: method=POST path=/v1/enroll/renew status=503 cert=1 cert_authority=1 bearer=0 bearer_cert_match=0 application=1 application_cert_match=1 server_binding=0 caller=0
+2026-09-25T12:00:13Z WARN  kb.http: request_id=1372098-1 method=POST path=/v1/code/scan status=413 (body 999999999999 > 268435456)
+2026-09-25T12:00:13Z INFO  kb_http: listening on 127.0.0.1:52909
+2026-09-25T12:00:13Z INFO  kb.http: request_id=1372098-3 method=GET path=/v1/health status=200
+2026-09-25T12:00:13Z INFO  kb.http: request_id=1372098-2 method=POST path=/v1/health status=405
+2026-09-25T12:00:13Z ERROR kb_http: refusing to bind 0.0.0.0:55725 with no bearer configured; seal AIMEE_KB_API_BEARER_TOKEN through first-boot Vault bootstrap, or unset AIMEE_KB_HTTP_BIND to keep the unauthenticated listener process-local
+2026-09-25T12:00:13Z INFO  kb_http: listening on 127.0.0.1:55725
+2026-09-25T12:00:13Z WARN  kb_http: /v1/maintenance/purge-cancel: fence mismatch for project 'proj-alpha' (presented g1 p1, current '') — no-op
+2026-09-25T12:00:13Z WARN  kb_http: /v1/maintenance/purge-finalize: fence mismatch for project 'proj-alpha' (presented g0 p1, current 'g1 p1') — no-op
+2026-09-25T12:00:13Z WARN  kb_http: /v1/maintenance/purge-cancel: fence mismatch for project 'proj-alpha' (presented g1 p1, current '') — no-op
+kb_http_routes:   PASS: console pipeline (registry + key allowlist)
+  PASS: console memory review (list + reject + restore)
+  PASS: Go fact review transport and verified operator context
+  PASS: ontology owner transport preserves JSON and verified context
+  PASS: console settings (kb-owned key allowlist)
+  PASS: console-admin mint scope restriction (owner/privileged -> 403)
+  PASS: /v1/team HTTP glue (auth -> actor -> tenant scope; 401/503/400)
+  PASS: /v1/implements,/v1/synthesize,/v1/contradictions routes
+  PASS: /v1/invalidations route
+  search scope: absent behaves as current, wrong type rejected
+ok

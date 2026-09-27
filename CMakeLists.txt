@@ -684,6 +684,8 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/primary_cli_ingestor.c
     ${AIMEE_SRC_DIR}/server/agent_policy.c
     ${AIMEE_SRC_DIR}/server/execution_policy_bus.c
+    ${AIMEE_SRC_DIR}/server/server_governed_action.c
+    ${AIMEE_SRC_DIR}/server/server_clean_retry.c
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c

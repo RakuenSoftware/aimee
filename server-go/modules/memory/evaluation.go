@@ -29,10 +29,11 @@ type EvaluationFixture struct {
 	Content string `json:"content"`
 }
 type EvaluationCase struct {
-	ID       string   `json:"id"`
-	Query    string   `json:"query"`
-	Expected []string `json:"expected"`
-	Answer   string   `json:"answer,omitempty"`
+	Answerable *bool    `json:"answerable,omitempty"`
+	ID         string   `json:"id"`
+	Query      string   `json:"query"`
+	Expected   []string `json:"expected"`
+	Answer     string   `json:"answer,omitempty"`
 }
 type EvaluationScores struct {
 	MRR      float64 `json:"mrr"`
@@ -43,13 +44,15 @@ type EvaluationScores struct {
 	Cases    int     `json:"n_cases"`
 }
 type EvaluationResult struct {
-	Manifest      *EvaluationManifest    `json:"manifest,omitempty"`
-	Cases         []EvaluationCaseResult `json:"case_results,omitempty"`
-	Suite         string                 `json:"suite,omitempty"`
-	Samples       int                    `json:"samples,omitempty"`
-	ExcludedCases map[string]int         `json:"excluded_cases,omitempty"`
-	Status        string                 `json:"status"`
-	Scores        EvaluationScores       `json:"metrics"`
+	TotalCases       int                    `json:"total_cases,omitempty"`
+	DatasetInventory any                    `json:"dataset_inventory,omitempty"`
+	Manifest         *EvaluationManifest    `json:"manifest,omitempty"`
+	Cases            []EvaluationCaseResult `json:"case_results,omitempty"`
+	Suite            string                 `json:"suite,omitempty"`
+	Samples          int                    `json:"samples,omitempty"`
+	ExcludedCases    map[string]int         `json:"excluded_cases,omitempty"`
+	Status           string                 `json:"status"`
+	Scores           EvaluationScores       `json:"metrics"`
 	// Owner latency includes retrieval and governed embedding, but excludes
 	// transport to the standalone evaluator. It is not a live KB hop measurement.
 	LatenciesMS []float64 `json:"owner_latency_ms"`
@@ -73,8 +76,8 @@ func (c EvaluationCorpus) Validate() error {
 			return errors.New("evaluation requires unique nonempty case IDs")
 		}
 		caseIDs[row.ID] = true
-		if strings.TrimSpace(row.Query) == "" || len(row.Expected) < 1 || len(row.Expected) > 128 {
-			return errors.New("evaluation case requires a query and 1..128 relevance labels")
+		if strings.TrimSpace(row.Query) == "" || len(row.Expected) > 128 {
+			return errors.New("evaluation case requires a query and at most 128 relevance labels")
 		}
 		seen := make(map[string]bool)
 		for _, fid := range row.Expected {
@@ -143,7 +146,7 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 		}
 		latency := float64(time.Since(start)) / float64(time.Millisecond)
 		result.LatenciesMS = append(result.LatenciesMS, latency)
-		receipt := EvaluationCaseResult{ID: row.ID, Expected: append([]string(nil), row.Expected...), Retrieved: []string{}, LatencyMS: latency,
+		receipt := EvaluationCaseResult{ID: row.ID, Answerable: row.Answerable, Expected: append([]string(nil), row.Expected...), Retrieved: []string{}, LatencyMS: latency,
 			Scores: EvaluationScores{MRR: score.MRR, NDCG5: score.NDCG5, NDCG10: score.NDCG10, Recall5: score.Recall5, Recall10: score.Recall10, Cases: 1}}
 		seen := map[string]bool{}
 		for _, id := range score.IDs {
@@ -154,6 +157,17 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 			seen[id] = true
 			receipt.Retrieved = append(receipt.Retrieved, fid)
 		}
+		result.TotalCases++
+		if len(row.Expected) == 0 || (row.Answerable != nil && !*row.Answerable) {
+			receipt.UnscoredReason = "no_relevance_labels"
+			if row.Answerable != nil && !*row.Answerable {
+				receipt.UnscoredReason = "unanswerable"
+			}
+			receipt.Scores = EvaluationScores{}
+			result.Cases = append(result.Cases, receipt)
+			continue
+		}
+		result.Scores.Cases++
 		result.Cases = append(result.Cases, receipt)
 		result.Scores.MRR += score.MRR
 		result.Scores.NDCG5 += score.NDCG5
@@ -170,13 +184,14 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 	if string(beforeJSON) != string(afterJSON) {
 		return EvaluationResult{}, errors.New("evaluation identity or policy changed during run")
 	}
-	n := float64(len(corpus.Cases))
-	result.Scores.MRR /= n
-	result.Scores.NDCG5 /= n
-	result.Scores.NDCG10 /= n
-	result.Scores.Recall5 /= n
-	result.Scores.Recall10 /= n
-	result.Scores.Cases = len(corpus.Cases)
+	n := float64(result.Scores.Cases)
+	if n > 0 {
+		result.Scores.MRR /= n
+		result.Scores.NDCG5 /= n
+		result.Scores.NDCG10 /= n
+		result.Scores.Recall5 /= n
+		result.Scores.Recall10 /= n
+	}
 	result.Status = "ok"
 	return result, ctx.Err()
 }
@@ -185,7 +200,11 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 // JSON field/profile handling. The latency is measured around this owner's
 // retrieval, not a Server-to-KB network hop.
 func FormatEvaluation(result EvaluationResult, path, format, fields, profile string) ([]byte, error) {
-	if result.Status != "ok" || result.Scores.Cases < 1 || len(result.LatenciesMS) != result.Scores.Cases {
+	total := result.TotalCases
+	if total == 0 {
+		total = result.Scores.Cases
+	}
+	if result.Status != "ok" || total < 1 || result.Scores.Cases < 0 || result.Scores.Cases > total || len(result.LatenciesMS) != total {
 		return nil, errors.New("incomplete evaluation result")
 	}
 	suite := result.Suite
@@ -197,6 +216,9 @@ func FormatEvaluation(result EvaluationResult, path, format, fields, profile str
 	sort.Float64s(latency)
 	percentile := func(p float64) float64 { return latency[int(math.Ceil(float64(len(latency))*p))-1] }
 	timing := map[string]any{"p50_ms": percentile(.5), "p95_ms": percentile(.95), "p99_ms": percentile(.99), "min_ms": latency[0], "max_ms": latency[len(latency)-1], "queries": len(latency)}
+	if format == "text" && s.Cases == 0 {
+		return []byte(fmt.Sprintf("Memory Benchmark — %s: %s\nCases: %d\nScored relevance cases: 0\nRetrieval metrics: undefined (no relevance labels)\n", suite, path, total)), nil
+	}
 	if format == "text" {
 		metadata := ""
 		if result.Suite != "" {
@@ -212,8 +234,17 @@ func FormatEvaluation(result EvaluationResult, path, format, fields, profile str
 		return nil, errors.New("evaluation format must be json or text")
 	}
 	view := map[string]any{"status": "ok", "suite": suite, "dataset": path,
-		"metrics": map[string]any{"mrr": s.MRR, "ndcg_5": s.NDCG5, "ndcg_10": s.NDCG10, "recall_5": s.Recall5, "recall_10": s.Recall10, "cases": s.Cases},
-		"latency": timing, "latency_scope": "owner", "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}}
+		"metrics":     map[string]any{"mrr": s.MRR, "ndcg_5": s.NDCG5, "ndcg_10": s.NDCG10, "recall_5": s.Recall5, "recall_10": s.Recall10, "cases": s.Cases},
+		"total_cases": total, "relevance_scheme": "binary-fixture-membership", "latency": timing, "latency_scope": "owner", "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}}
+	if s.Cases == 0 {
+		view["metrics"] = map[string]any{"mrr": nil, "ndcg_5": nil, "ndcg_10": nil, "recall_5": nil, "recall_10": nil, "cases": 0}
+	}
+	if result.DatasetInventory != nil {
+		view["dataset_inventory"] = result.DatasetInventory
+	}
+	if len(result.Cases) > 0 {
+		view["case_results"] = result.Cases
+	}
 	if result.Manifest != nil {
 		view["manifest"] = result.Manifest
 		view["case_results"] = result.Cases

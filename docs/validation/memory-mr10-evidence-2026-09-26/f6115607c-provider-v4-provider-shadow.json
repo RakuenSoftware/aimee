@@ -1,0 +1,81 @@
+{
+  "checks": [
+    {
+      "name": "read bounded recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "set bounded recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "read bounded recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    },
+    {
+      "name": "set bounded recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    },
+    {
+      "name": "provider fixture session created",
+      "passed": true
+    },
+    {
+      "name": "provider fixture route selected",
+      "passed": true
+    },
+    {
+      "name": "shadow positive control delivers transient identity context",
+      "passed": true
+    },
+    {
+      "name": "exact provider bytes have a committed preparation receipt",
+      "passed": true
+    },
+    {
+      "name": "dispatch preparation binds effective horizon policy on collections",
+      "passed": true
+    },
+    {
+      "name": "native turn completes through the actual provider boundary",
+      "passed": true
+    },
+    {
+      "name": "provider dispatch has a durable started receipt",
+      "passed": true
+    },
+    {
+      "name": "restore recall fixture config memory_recall_limit_tokens_session",
+      "passed": true
+    },
+    {
+      "name": "restore recall fixture config memory_recall_limit_tokens_turn",
+      "passed": true
+    }
+  ],
+  "captures": [
+    {
+      "attempt": "aefe847b76e38d518cfa6655d74a3e79",
+      "payload_sha256": "e96d91a2b1fc937c440223120d518208930fce69979ed9b05f9ecfb38950a815",
+      "payload_bytes": 32392,
+      "binding_sha256": "93caf94fad34a1d95db1c117ef07ee9c04b22198b4fff545ba75341bce72844b"
+    }
+  ],
+  "observations": [
+    {
+      "payload_sha256": "e96d91a2b1fc937c440223120d518208930fce69979ed9b05f9ecfb38950a815",
+      "payload_bytes": 32392,
+      "fixture_presence": {
+        "user/task_state": false,
+        "user/constraint": false,
+        "user/durable_probe": true,
+        "user/transient_probe": true,
+        "kb/task_state": false,
+        "kb/constraint": false,
+        "kb/durable_probe": true,
+        "kb/transient_probe": true
+      }
+    }
+  ],
+  "measurement": "synthetic functional provider at fixed 8192-token recall allocation; not a quality or billing measurement"
+}

@@ -260,6 +260,7 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH 24u
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_BY_SUBJECT         25u
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT           26u
+#define AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT         27u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -409,6 +410,9 @@
 #define AIMEE_DB1_OP_SESSION_STATE_LIST         5u
 #define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
 #define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
+#define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY  8u
+#define AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY 9u
+#define AIMEE_DB1_OP_GOVERNED_ACTION_APPLY         10u
 
 /* Family 10: multi-agent ensemble runs: one table holding a run's state, plus
  * the template interpretation and prompt building that only the run itself

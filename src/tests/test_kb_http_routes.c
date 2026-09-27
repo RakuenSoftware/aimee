@@ -146,6 +146,7 @@ void db2_lease_release_idle(void)
 static int g_erasure_begin_calls;
 static int g_erasure_complete_calls;
 static int g_erasure_reconcile_calls;
+static int g_erasure_pending_owners;
 
 int db2_subject_erasure_begin(const char *request_id, const char *subject,
                               const char *sessions_json, int64_t *memory_count,
@@ -170,6 +171,19 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    g_erasure_complete_calls++;
    *event_created = 1;
    return 0;
+}
+
+int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                            int64_t db1_count, int *event_created, int *coverage_complete,
+                            int64_t *pending_owners)
+{
+   assert(transport != NULL);
+   int rc = db2_subject_erasure_complete(request_id, actor, db1_count, event_created);
+   *pending_owners = g_erasure_pending_owners;
+   *coverage_complete = g_erasure_pending_owners == 0;
+   if (g_erasure_pending_owners)
+      *event_created = 0;
+   return rc;
 }
 
 static const char *g_stub_kb_mode = "";
@@ -2767,7 +2781,8 @@ static void test_console_memories(void)
    assert(status == 200);
    assert(strstr(buf, "\"action\":\"reject\"") != NULL);
 
-   const char *restore = "{\"memory_id\":42,\"action\":\"restore\"}";
+   const char *restore = "{\"memory_id\":42,\"action\":\"restore\",\"expected_version\":{\"record_"
+                         "revision\":\"9007199254740993\"},\"idempotency_key\":null}";
    status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
                              (int)strlen(restore), buf, sizeof(buf));
    assert(status == 200);
@@ -2777,9 +2792,14 @@ static void test_console_memories(void)
                            sizeof(buf)) == 405);
    assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
                            sizeof(buf)) == 405);
-   const char *failures[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"not_found\"}",
-                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
-   const int codes[] = {503, 503, 404, 403};
+   const char *failures[] = {"bad-json",
+                             "{}",
+                             "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}",
+                             "{\"status\":\"error\",\"kind\":\"conflict\"}",
+                             "{\"status\":\"error\",\"kind\":\"invalid_argument\"}",
+                             "{\"status\":\"error\",\"kind\":\"unsupported_mode\"}"};
+   const int codes[] = {503, 503, 404, 403, 409, 400, 400};
    for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
    {
       review_reply = failures[i];
@@ -2969,7 +2989,8 @@ static void test_intelligence_bandit_export(void)
     * kb_fusion_mode is now a registered point, so it appears here (not as a
     * phantom with fabricated arm stats). */
    assert(strstr(buf, "\"registry\":[") != NULL);
-   assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
+   assert(strstr(buf, "\"reward_fn\":\"verified_task_outcome_pending_v1\"") != NULL);
+   assert(strstr(buf, "\"status\":\"observe\"") != NULL);
    assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
 }
 
@@ -3425,16 +3446,16 @@ static void test_mtls_serve(void)
                     resp, sizeof(resp));
    assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
 
-   /* Content reads have no service-only/background bypass. Until the separate
-    * background-reader policy is decided, a fully authenticated service with
-    * an exact server/team binding but no caller still fails closed. */
+   /* This shim fixture has no authoritative PostgreSQL tenant scope. Service
+    * registry lookup therefore refuses before the missing-caller check; it
+    * must not turn an unavailable identity owner into content access. */
    mtls_request_raw(sctx, cctx,
                     "POST /v1/search HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "X-Aimee-Server-ID: srv-a\r\nX-Aimee-Team-ID: 1\r\n"
                     "Content-Length: 2\r\nConnection: close\r\n\r\n{}",
                     resp, sizeof(resp));
-   assert(strstr(resp, "403 Forbidden") &&
-          strstr(resp, "an authenticated content caller is required"));
+   assert(strstr(resp, "503 Service Unavailable") &&
+          strstr(resp, "server identity authority unavailable"));
    assert(!strstr(resp, "results"));
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
@@ -4323,7 +4344,7 @@ static void test_mtls_listener(void)
                                              &managed_team) == 1);
       assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
       r = kb_client_mtls_request("POST", "/v1/search", "{}", &st2);
-      assert(st2 == 403 && r && strstr(r, "an authenticated content caller is required"));
+      assert(st2 == 503 && r && strstr(r, "server identity authority unavailable"));
       free(r);
       g_rotation_test_ca = &ca;
       kb_client_mtls_set_renew_for_test(test_kb_client_renew);
@@ -4658,6 +4679,12 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
    if (!strcmp(method, "memory.runtime"))
       assert(!strcmp(jo_cstr(args, "operation"), "fact-review"));
    assert(jo_i64((cJSON *)args, "id", 0) == 42);
+   if (!strcmp(method, "memory.restore"))
+   {
+      const cJSON *version = cJSON_GetObjectItemCaseSensitive(args, "expected_version");
+      assert(!strcmp(jo_cstr(version, "record_revision"), "9007199254740993"));
+      assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(args, "idempotency_key")));
+   }
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
    assert(strcmp(jo_cstr(context, "principal"), "test:operator") == 0);
@@ -6550,7 +6577,12 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(g_erasure_complete_calls == 0);
    assert(g_erasure_reconcile_calls == 0);
 
-   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   const char *legacy_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        legacy_complete, (int)strlen(legacy_complete), buf, sizeof(buf));
+   assert(s == 409 && g_erasure_complete_calls == 0 && g_erasure_reconcile_calls == 0);
+   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1,\"receipt_"
+                          "policy\":\"memory-erasure-v2\"}";
    s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
                         complete, (int)strlen(complete), buf, sizeof(buf));
    assert(s == 200);
@@ -6558,6 +6590,14 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(g_erasure_reconcile_calls == 1);
    assert(strstr(buf, "\"event_created\":true") != NULL);
    assert(strstr(buf, "\"orphan_blobs_unlinked\":4") != NULL);
+   assert(strstr(buf, "\"coverage_complete\":true") != NULL);
+   g_erasure_pending_owners = 1;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"status\":\"pending_owners\"") != NULL);
+   assert(strstr(buf, "\"coverage_complete\":false") != NULL);
+   assert(strstr(buf, "\"event_created\":false") != NULL);
+   g_erasure_pending_owners = 0;
 }
 
 static void test_maintenance_repair_missing_project(void)
@@ -7717,6 +7757,8 @@ static void test_maintenance_repair_queues_too(void)
 
 static void test_content_read_identity_boundary(void)
 {
+   assert(kb_http_is_content_read("POST", "/v1/actions/learning.record_governed_application"));
+   assert(!kb_http_is_content_read("GET", "/v1/actions/learning.record_governed_application"));
    assert(kb_http_is_content_read("POST", "/v1/search"));
    assert(kb_http_is_content_read("GET", "/v1/artifacts/a"));
    assert(kb_http_is_content_read("GET", "/v1/code/context"));

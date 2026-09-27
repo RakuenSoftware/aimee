@@ -1,0 +1,34 @@
+[
+  {
+    "name": "fresh candidate KB healthy",
+    "passed": true
+  },
+  {
+    "name": "future and historical assertions withheld before boundary",
+    "passed": true
+  },
+  {
+    "name": "superseded historical assertion has semantic trace",
+    "passed": true
+  },
+  {
+    "name": "clock-only activation yields future semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "clock boundary did not mutate canonical versions",
+    "passed": true
+  },
+  {
+    "name": "rollback retains current semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "rollback retains explicit historical semantic assertion",
+    "passed": true
+  },
+  {
+    "name": "erasure cascades every shared memory vector generation",
+    "passed": false
+  }
+]

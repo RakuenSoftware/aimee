@@ -40,7 +40,11 @@ int main(void)
    assert(agent_rc_should_try_another(-1, "provider quota exhausted") == 1);
    assert(agent_rc_should_try_another(-1, NULL) == 0);
    assert(agent_rc_should_try_another(AGENT_RC_AT_LIMIT, NULL) == 1);
-   assert(agent_rc_should_try_another(-3, "quota exhausted") == 0);
+   assert(agent_rc_should_try_another(AGENT_RC_CONTEXT_REFUSED, "quota exhausted") == 0);
+   assert(agent_rc_should_try_another(AGENT_RC_CONTEXT_REFUSED,
+                                      "memory context refused: HTTP 503 unavailable") == 0);
+   assert(agent_rc_should_try_another(AGENT_RC_CONTEXT_REFUSED,
+                                      "memory context refused: protected_context_overflow") == 0);
    /* Bare infrastructure auth statuses and benign prose must not fan out across
     * the provider fleet. */
    assert(agent_rc_should_try_another(-1, "HTTP 401 unauthorized") == 0);

@@ -62,6 +62,7 @@ static void *conn_worker(void *arg)
          request_context_clear();
          server_http_identity_clear();
          handle_conn(j->fd, j->is_tcp, j->is_management);
+         ingress_preinject_finish_sources();
          request_context_clear();
          server_http_identity_clear();
       } while (j->is_tls && server_http_keepalive_take());
@@ -120,6 +121,7 @@ void handle_conn_inline(int fd, int is_tcp)
    request_context_clear();
    server_http_identity_clear();
    handle_conn(fd, is_tcp, 0);
+   ingress_preinject_finish_sources();
    request_context_clear();
    server_http_identity_clear();
 }

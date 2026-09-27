@@ -27,7 +27,13 @@ func StartSharedIndex(ctx context.Context, data DataStore, executor egress.Execu
 		defer ticker.Stop()
 		for ctx.Err() == nil {
 			attempt, cancel := context.WithTimeout(ctx, 60*time.Second)
+			if err := s.reconcileRelationInputs(attempt); err != nil && ctx.Err() == nil {
+				log.Printf("shared relation invalidation pending: %v", err)
+			}
 			err := s.sharedIndexBatch(attempt, executor, 16)
+			if err == nil {
+				err = s.indexAssertionBatch(attempt, executor, 16)
+			}
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				log.Printf("shared memory indexing pending: %v", err)
@@ -214,7 +220,7 @@ func (s *postgresDataStore) indexSharedVector(ctx context.Context, executor egre
  AND (v.status='pending' OR NULLIF(v.updated_at,'')::timestamptz<=clock_timestamp()-interval '30 seconds')
  AND NOT EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_index' AND j.document_id=m.id AND j.status<>'done')`
 	err := s.db.QueryRow(ctx, `SELECT m.id,v.point_id FROM vector_index_ops v JOIN memories m ON m.id=v.memory_id
- WHERE m.lifecycle_state='active' AND `+ready+` ORDER BY v.updated_at,v.point_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, vectorRetryLimit()).Scan(&parent, &point)
+ WHERE `+indexableMemorySQL("m.")+` AND `+ready+` ORDER BY v.updated_at,v.point_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, vectorRetryLimit()).Scan(&parent, &point)
 	if store.IsNoRows(err) {
 		return false, nil
 	}
@@ -224,7 +230,7 @@ func (s *postgresDataStore) indexSharedVector(ctx context.Context, executor egre
 	// Recheck after acquiring the parent lock: another owner may have completed
 	// this point while we waited for the lock's snapshot to advance.
 	err = s.db.QueryRow(ctx, `SELECT v.point_id,v.attempts FROM vector_index_ops v JOIN memories m ON m.id=v.memory_id
- WHERE v.point_id=$2 AND m.lifecycle_state='active' AND `+ready+` FOR UPDATE OF v SKIP LOCKED`, vectorRetryLimit(), point).Scan(&point, &attempts)
+ WHERE v.point_id=$2 AND `+indexableMemorySQL("m.")+` AND `+ready+` FOR UPDATE OF v SKIP LOCKED`, vectorRetryLimit(), point).Scan(&point, &attempts)
 	if store.IsNoRows(err) {
 		return false, nil
 	}

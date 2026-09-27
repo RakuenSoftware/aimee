@@ -1,0 +1,50 @@
+{
+  "allowed": true,
+  "completion_claim": "effect_confirmed",
+  "receipt": {
+    "intent": {
+      "schema_version": 1,
+      "action_id": "170449927da4c4e7cf3ca9e7470a9b8fbccf35f8dc5f25d4953fbf9ae28e2202",
+      "request_id": "745-38",
+      "task_id": "session-task",
+      "attempt_id": "2:mr16-2",
+      "principal": "uid:1000",
+      "root_id": "session:d8f79fba-3175-edfd-a0ea-73ad80f71f13",
+      "tool": "write_file",
+      "action_class": "file_write",
+      "destination": "file:/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/d8f79fba-27c32891c98bdeb7/main/state.c",
+      "payload_sha256": "3043da7bb7604ba4d1521c39a2af824f798bf48ad18e87bd25dae78b54df4181",
+      "purpose": "authorized tool invocation",
+      "evidence_sha256": "1899bbd6bafa36ada2a77546db038b080db29afd2a456b5732fa46b32aef1132",
+      "context_receipt": "da0e70e6360076673bb466fb125c002c490c4beeca2100d11bbe5ddbb0657cb9",
+      "policy_generation": "40dbf870f3946b102325b31af972db485c1cde51a5095192a5ead42cc9abf9c7",
+      "revocation_generation": "1899bbd6bafa36ada2a77546db038b080db29afd2a456b5732fa46b32aef1132",
+      "idempotency_key": "170449927da4c4e7cf3ca9e7470a9b8fbccf35f8dc5f25d4953fbf9ae28e2202",
+      "work_units": "205",
+      "expires_at": "2026-09-27T06:02:22.379782189Z"
+    },
+    "intent_sha256": "8111486d11f5c92eb6ba18543534d5a1fff4df5870c72d2a10fe41d1bb4a4190",
+    "state": "effect_confirmed",
+    "sequence": 8,
+    "at": "2026-09-27T05:47:22.523656877Z",
+    "outcome": {
+      "state": "effect_confirmed",
+      "evidence_ref": "170449927da4c4e7cf3ca9e7470a9b8fbccf35f8dc5f25d4953fbf9ae28e2202",
+      "destination": "file:/var/lib/aimee/mr07-activated-fixture/repository/.aimee/worktrees/d8f79fba-27c32891c98bdeb7/main/state.c",
+      "payload_sha256": "3043da7bb7604ba4d1521c39a2af824f798bf48ad18e87bd25dae78b54df4181",
+      "object_version": "64aa1469d824044efbae6150cc1525ddd3e01f37809666e495b22e2243589efa"
+    },
+    "freshness": {
+      "intent_sha256": "8111486d11f5c92eb6ba18543534d5a1fff4df5870c72d2a10fe41d1bb4a4190",
+      "evidence_sha256": "1899bbd6bafa36ada2a77546db038b080db29afd2a456b5732fa46b32aef1132",
+      "context_receipt": "da0e70e6360076673bb466fb125c002c490c4beeca2100d11bbe5ddbb0657cb9",
+      "policy_generation": "40dbf870f3946b102325b31af972db485c1cde51a5095192a5ead42cc9abf9c7",
+      "revocation_generation": "1899bbd6bafa36ada2a77546db038b080db29afd2a456b5732fa46b32aef1132",
+      "memory_guard": "753226281faab768d387de1f6004c9d70f44e009fbd112aa009a341360c594d1",
+      "checked_at": "2026-09-27T05:47:22.369707523Z",
+      "expires_at": "2026-09-27T05:47:23.369707523Z",
+      "authorized": true,
+      "memory_required": true
+    }
+  }
+}

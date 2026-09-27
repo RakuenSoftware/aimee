@@ -877,6 +877,14 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout_ms, cJSON **result)
 {
+   return aimee_module_commands_dispatch_internal_context_timeout(method, args, NULL, timeout_ms,
+                                                                  result);
+}
+
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
    if (!result)
       return 0;
    *result = NULL;
@@ -904,7 +912,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    pthread_mutex_unlock(&g_collect_lock);
    if (matches != 1 || !kind)
       return matches ? -1 : 0;
-   *result = command_call_timeout(kind, stage, verb, args, NULL, timeout_ms, 0);
+   *result = command_call_timeout(kind, stage, verb, args, context, timeout_ms, 0);
    return *result ? 1 : -1;
 }
 

@@ -141,6 +141,21 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	if n := scalar(`SELECT count(*) FROM memory_relations WHERE memory_id=$1`, source); n != 1 {
 		t.Fatal("duplicate relation", n)
 	}
+	if n := scalar(`SELECT count(*) FROM memory_relations r WHERE memory_id=$1 AND `+currentRelationInputsSQL("r"), source); n != 1 {
+		t.Fatal("fresh cognified relation unavailable", n)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT cognify_relation_source`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET content=content||' changed' WHERE id=$1`, source); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalar(`SELECT count(*) FROM memory_relations r WHERE memory_id=$1 AND `+currentRelationInputsSQL("r"), source); n != 0 {
+		t.Fatal("cognified relation retained stale source", n)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO cognify_relation_source; RELEASE cognify_relation_source`); err != nil {
+		t.Fatal(err)
+	}
 	if n := scalar(`SELECT count(*) FROM memory_lineage WHERE source_kind='memory' AND source_ref=$1`, fmt.Sprintf("memory:%d", source)); n != 3 {
 		t.Fatal("duplicate lineage", n)
 	}
@@ -149,6 +164,18 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	}
 	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor'`); n != 1 {
 		t.Fatal("global behavioral rule missing", n)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE rules SET directive_type='hard',description='Do not erase CASE_7.',weight=91 WHERE title='cognify-alice:editor'`); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("cognify", global, "cognify-visible"); r["status"] != "ok" {
+		t.Fatal(r)
+	}
+	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor' AND directive_type='hard' AND description='Do not erase CASE_7.' AND weight=91`); n != 1 {
+		t.Fatal("model extraction rewrote protected rule", n)
+	}
+	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor'`); n != 1 {
+		t.Fatal("protected collision produced duplicate rule", n)
 	}
 	// Public counts cannot reveal another project's queue.
 	async = true

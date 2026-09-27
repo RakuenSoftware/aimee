@@ -155,10 +155,33 @@ stop_providers_module() {
     fi
 }
 
+# Native tool admission requires the real execution-policy owner, just as in
+# the shipped Server placement. Absence must remain a refusal in production.
+POLICY_MODULE="$AIMEE_HOME/aimee-module-execution-policy"
+POLICY_MODULE_PID=""
+install_policy_module() {
+    cp "$DB1_MODULE_BUILT" "$POLICY_MODULE"
+    chmod 0755 "$POLICY_MODULE"
+    install_generated_grant execution-policy "$POLICY_MODULE"
+}
+start_policy_module() {
+    stop_policy_module
+    "$POLICY_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-policy.log" 2>&1 &
+    POLICY_MODULE_PID=$!
+}
+stop_policy_module() {
+    if [ -n "$POLICY_MODULE_PID" ]; then
+        kill "$POLICY_MODULE_PID" 2>/dev/null || true
+        wait "$POLICY_MODULE_PID" 2>/dev/null || true
+        POLICY_MODULE_PID=""
+    fi
+}
+
 # Memory admission and validation are provided by the same Go process used in
 # production. A missing owner is an outage, not native validation fallback.
 MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
 MEMORY_MODULE_PID=""
+MEMORY_MODULE_ENABLED=0
 install_memory_module() {
     cp "$DB1_MODULE_BUILT" "$MEMORY_MODULE"
     chmod 0755 "$MEMORY_MODULE"
@@ -431,6 +454,7 @@ install_db1_module
 install_config_module
 install_providers_module
 install_memory_module
+install_policy_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -756,7 +780,8 @@ start_server() {
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
-            start_memory_module
+            if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
+            start_policy_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -797,6 +822,7 @@ cleanup() {
     stop_config_module
     stop_providers_module
     stop_memory_module
+    stop_policy_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -1087,6 +1113,18 @@ else
 fi
 check_output "index overview reports KB outage" '"status":"unavailable"' echo "$INDEX_OVERVIEW"
 check_output "index overview maps KB outage to HTTP 503" '"http_status":503' echo "$INDEX_OVERVIEW"
+# Start the real personal-memory owner only after the explicit local-index
+# outage cases. Starting it earlier makes those cases race its registration.
+MEMORY_MODULE_ENABLED=1
+start_memory_module
+for attempt in $(seq 1 100); do
+    RESP=$(srv_auth_req '{"method":"memory.get","store":"user"}') || true
+    case "$RESP" in
+    *'"kind":"invalid_argument"'*) break ;;
+    esac
+    sleep 0.1
+done
+check_output "personal memory owner is ready" '"kind":"invalid_argument"' echo "$RESP"
 
 RESP=$(mcp_framed_req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"integration-test","version":"1"}}}') || true
 check_output "mcp initialize over stdio framing" '"protocolVersion":"2024-11-05"' echo "$RESP"
@@ -1475,9 +1513,18 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.search","store":"user","keywords":["integ-private"],"limit":10}') || true
     check_output "private memory search through Go" 'integ-private' echo "$RESP"
     RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_ID:-missing}\",\"content\":\"private corrected value\"}}}") || true
-    check_output "private memory MCP update through Go" 'private corrected value' echo "$RESP"
+    check_output "private memory MCP cannot rewrite user authorship" 'review_required' echo "$RESP"
     RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
-    check_output "private memory HTTP observes MCP update" 'private corrected value' echo "$RESP"
+    check_output "private memory refused MCP edit preserves content" 'private integration value' echo "$RESP"
+    RESP=$(srv_auth_req "{\"method\":\"memory.supersede\",\"store\":\"user\",\"old_id\":\"${PRIVATE_ID:-missing}\",\"new_content\":\"private corrected value\"}") || true
+    check_output "private memory user correction through Go" 'private corrected value' echo "$RESP"
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"mutate","arguments":{"store":"user","verb":"store","key":"integ-private-model","content":"private model value"}}}') || true
+    PRIVATE_MODEL_ID=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['id'])" 2>/dev/null) || true
+    check_output "private memory MCP creates a model record" 'true' python3 -c 'import sys; value=sys.argv[1]; print("true" if value.isdigit() and int(value)>0 else "false")' "${PRIVATE_MODEL_ID:-missing}"
+    RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\",\"content\":\"private corrected model value\"}}}") || true
+    check_output "private memory MCP corrects model content through Go" 'private corrected model value' echo "$RESP"
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\"}") || true
+    check_output "private memory HTTP observes MCP model correction" 'private corrected model value' echo "$RESP"
     # Kill the owner, assert an explicit outage, then reconnect the same process
     # type and verify that persisted private data remains readable.
     stop_memory_module
@@ -1494,7 +1541,7 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
     check_output "private memory survives Go owner restart" 'private corrected value' echo "$RESP"
 else
     echo "SKIP: private memory persistence/restart (PostgreSQL store unavailable)"
-    SKIP=$((SKIP + 7))
+    SKIP=$((SKIP + 11))
 fi
 
 if [ "$KB_AVAILABLE" -eq 1 ]; then

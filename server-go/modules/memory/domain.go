@@ -516,7 +516,7 @@ func (s *postgresDataStore) LifecycleTransition(ctx context.Context, id int64, s
 		return false, errors.New("memory: invalid lifecycle state")
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE memories SET lifecycle_state=$2,archive_reason=$3,
-updated_at=pg_now_text() WHERE id=$1`, id, state, reason)
+updated_at=pg_now_text() WHERE id=$1 AND lifecycle_state IN ('active','pending') AND (`+automaticMutationSQL("")+`)`, id, state, reason)
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
@@ -525,8 +525,8 @@ func (s *postgresDataStore) LifecyclePending(ctx context.Context, id int64, ttlD
 		return false, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE memories SET lifecycle_state='pending',
-ttl_at=pg_now_text(($2::text||' days')::text),updated_at=pg_now_text()
-WHERE id=$1 AND lifecycle_state='active'`, id, ttlDays)
+ttl_at=pg_now_text(($2::integer::text||' days')::text),updated_at=pg_now_text()
+WHERE id=$1 AND lifecycle_state='active' AND (`+automaticMutationSQL("")+`)`, id, ttlDays)
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
@@ -536,7 +536,7 @@ func (s *postgresDataStore) LifecycleSweep(ctx context.Context) (int, error) {
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE memories SET lifecycle_state='archived',
 archive_reason='pending ttl expired',updated_at=pg_now_text()
-WHERE lifecycle_state='pending' AND ttl_at<>'' AND ttl_at<pg_now_text()`)
+WHERE lifecycle_state='pending' AND ttl_at<>'' AND ttl_at<pg_now_text() AND (`+automaticMutationSQL("")+`)`)
 	if err != nil {
 		return 0, err
 	}
@@ -559,22 +559,16 @@ func (s *postgresDataStore) FactHistory(ctx context.Context, key string, limit i
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM memories WHERE key=$1 OR key LIKE $1||'#v%' ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
+	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`
+FROM memories WHERE (key=$1 OR starts_with(key,$1||'#v')) AND `+historicalMemoryInspectionSQL("")+` ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	items := make([]Record, 0)
-	for rows.Next() {
-		var item Record
-		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records, err := scanRecordRows(rows, false)
+	for i := range records {
+		records[i].historicalRead = true
 	}
-	return items, rows.Err()
+	return records, err
 }
 
 func normalizeMatchText(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

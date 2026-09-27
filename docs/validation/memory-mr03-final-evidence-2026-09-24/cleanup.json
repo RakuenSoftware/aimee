@@ -1,0 +1,17 @@
+[
+  {
+    "project": "aimee-e2e-kb-8debe5258b",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-cd1d19d905",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-d456871f2a",
+    "containers": [],
+    "networks": []
+  }
+]

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "owned retry session created",
+    "passed": true
+  },
+  {
+    "name": "before controlled native provider selected",
+    "passed": true
+  },
+  {
+    "name": "before final provider request has durable receipt",
+    "passed": true
+  },
+  {
+    "name": "before retained exact current controlled procedure",
+    "passed": true
+  },
+  {
+    "name": "initial read is governed",
+    "passed": true
+  },
+  {
+    "name": "failed attempt really completed a verified write",
+    "passed": true
+  },
+  {
+    "name": "before host emits durable attempt identity",
+    "passed": true
+  },
+  {
+    "name": "controlled provider failure is not reported as completion",
+    "passed": true
+  },
+  {
+    "name": "actual file survives server restart",
+    "passed": true
+  },
+  {
+    "name": "after controlled native provider selected",
+    "passed": true
+  },
+  {
+    "name": "after final provider request has durable receipt",
+    "passed": true
+  },
+  {
+    "name": "after retained exact current controlled procedure",
+    "passed": true
+  },
+  {
+    "name": "failed speculation absent from clean provider payload",
+    "passed": true
+  },
+  {
+    "name": "replaced user constraints are absent",
+    "passed": true
+  },
+  {
+    "name": "corrected procedure replaces prior source",
+    "passed": true
+  },
+  {
+    "name": "bounded host summary preserves actual write receipt",
+    "passed": true
+  },
+  {
+    "name": "retry verifies preserved file without repeating write",
+    "passed": true
+  },
+  {
+    "name": "after host emits durable attempt identity",
+    "passed": true
+  },
+  {
+    "name": "clean retry completes with a new attempt",
+    "passed": true
+  },
+  {
+    "name": "clean retry never restores or repeats original write",
+    "passed": true
+  }
+]

@@ -853,6 +853,37 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
    return count;
 }
 
+/* Reuse the scoped generation fence of the existing read-only stats route.
+ * The caller forwards the body to Go; no memory sufficiency policy lives here. */
+char *kb_client_index_generation_check(const char *project, const char *generation, int *status_out)
+{
+   if (status_out)
+      *status_out = 0;
+   if (!project || !project[0] || !generation || !generation[0] || strlen(generation) > 19)
+      return NULL;
+   for (const char *p = generation; *p; p++)
+      if (*p < '0' || *p > '9')
+         return NULL;
+   if (generation[0] == '0' ||
+       (strlen(generation) == 19 && strcmp(generation, "9223372036854775807") > 0))
+      return NULL;
+   char *encoded = kb_client_query_escape(project);
+   if (!encoded)
+      return NULL;
+   size_t cap = strlen(encoded) + strlen(generation) + 64;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(encoded);
+      return NULL;
+   }
+   snprintf(path, cap, "/v1/code/project-stats?project=%s&generation=%s", encoded, generation);
+   free(encoded);
+   char *reply = kb_client_v1_get_json(path, 1000, status_out);
+   free(path);
+   return reply;
+}
+
 int kb_client_index_project_stats(const char *project, int *files_out, int *defs_out)
 {
    if (files_out)

@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_service_agent.c: aimee-kb dispatch handlers for the rules,
  * collab_rules, agent, maintenance, decision_log, and anti_pattern
  * RPC families.  Split out of kb_service.c so the file stays under
@@ -416,13 +417,6 @@ int kb_handle_anti_pattern_bump(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to bump anti-pattern");
 }
 
-int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_dashboard_memory_stats_json();
-   return kb_reply_or_error(fd, resp, "failed to fetch dashboard memory stats");
-}
-
 int kb_handle_dashboard_logs(int fd, cJSON *req)
 {
    (void)req;
@@ -484,11 +478,12 @@ int kb_handle_memory_record_retrieval_outcome(int fd, cJSON *req)
          cJSON *id_j = cJSON_GetObjectItemCaseSensitive(row, "id");
          cJSON *vj = cJSON_GetObjectItemCaseSensitive(row, "verdict");
          cJSON *wj = cJSON_GetObjectItemCaseSensitive(row, "weight");
-         if (!cJSON_IsNumber(id_j) || !cJSON_IsString(vj))
+         int64_t exact_id;
+         if (!jo_read_i64_exact(id_j, &exact_id) || !cJSON_IsString(vj))
             continue;
          double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
-         if (learning_evidence_write_retrieval_attribution(ev_id, (int64_t)id_j->valuedouble,
-                                                           vj->valuestring, w) == 0)
+         if (learning_evidence_write_retrieval_attribution(ev_id, exact_id, vj->valuestring, w) ==
+             0)
             written++;
       }
    }
@@ -498,11 +493,12 @@ int kb_handle_memory_record_retrieval_outcome(int fd, cJSON *req)
       cJSON *rid_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_row_id");
       cJSON *vj = cJSON_GetObjectItemCaseSensitive(req, "verdict");
       cJSON *wj = cJSON_GetObjectItemCaseSensitive(req, "weight");
-      if (cJSON_IsNumber(rid_j) && cJSON_IsString(vj))
+      int64_t exact_id;
+      if (jo_read_i64_exact(rid_j, &exact_id) && cJSON_IsString(vj))
       {
          double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
-         if (learning_evidence_write_retrieval_attribution(ev_id, (int64_t)rid_j->valuedouble,
-                                                           vj->valuestring, w) == 0)
+         if (learning_evidence_write_retrieval_attribution(ev_id, exact_id, vj->valuestring, w) ==
+             0)
             written++;
       }
    }
@@ -536,8 +532,16 @@ int kb_handle_ranker_emit_event(int fd, cJSON *req)
       for (int i = 0; i < n; i++)
       {
          cJSON *e = cJSON_GetArrayItem(ids_j, i);
-         if (cJSON_IsNumber(e) && e->valuedouble > 0)
-            ids[n_ids++] = (int64_t)e->valuedouble;
+         int64_t exact_id;
+         if (!jo_read_i64_exact(e, &exact_id))
+         {
+            free(ids);
+            return kb_send_error(
+                fd,
+                "source ids require exact integers; use decimal strings above the JSON safe range");
+         }
+         if (exact_id > 0)
+            ids[n_ids++] = exact_id;
       }
    }
 
@@ -576,10 +580,11 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
          cJSON *id_j = cJSON_GetObjectItemCaseSensitive(row, "id");
          cJSON *vj = cJSON_GetObjectItemCaseSensitive(row, "verdict");
          cJSON *wj = cJSON_GetObjectItemCaseSensitive(row, "weight");
-         if (!cJSON_IsNumber(id_j) || !cJSON_IsString(vj))
+         int64_t exact_id;
+         if (!jo_read_i64_exact(id_j, &exact_id) || !cJSON_IsString(vj))
             continue;
          double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
-         if (kb_ranker_outcome_write(ev_id, (int64_t)id_j->valuedouble, vj->valuestring, w) == 0)
+         if (kb_ranker_outcome_write(ev_id, exact_id, vj->valuestring, w) == 0)
             written++;
       }
    }
@@ -588,10 +593,11 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
       cJSON *rid_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_row_id");
       cJSON *vj = cJSON_GetObjectItemCaseSensitive(req, "verdict");
       cJSON *wj = cJSON_GetObjectItemCaseSensitive(req, "weight");
-      if (cJSON_IsNumber(rid_j) && cJSON_IsString(vj))
+      int64_t exact_id;
+      if (jo_read_i64_exact(rid_j, &exact_id) && cJSON_IsString(vj))
       {
          double w = cJSON_IsNumber(wj) ? wj->valuedouble : 1.0;
-         if (kb_ranker_outcome_write(ev_id, (int64_t)rid_j->valuedouble, vj->valuestring, w) == 0)
+         if (kb_ranker_outcome_write(ev_id, exact_id, vj->valuestring, w) == 0)
             written++;
       }
    }

@@ -1,0 +1,32 @@
+PASS rebuild binds derived revision and fresh evidence
+PASS fresh get preserves exact rendering
+PASS zero budget omits all working text
+PASS working text remains absent from canonical memory
+PASS stale expected revision rejected
+PASS parallel revisions have exactly one winner
+PASS parallel winner is revision two
+PASS compiled CLI projection parity
+PASS MCP projection parity
+PASS promotion preview identifies exact revision
+PASS stale preview rejected
+PASS promotion uses existing review admission
+PASS promotion cannot directly overwrite canonical target
+PASS identical promotion is idempotent
+PASS explicit review admits exact proposed hypothesis
+PASS reviewed hypothesis retains unknown independence
+PASS parent retirement follows governed owner
+PASS retired parent blocks cached release
+PASS explicit rebuild recovers valid remaining inputs
+PASS execution evidence preserves actual failure label
+PASS changed execution receipt blocks release
+PASS short lived projection rebuilt
+PASS expired projection cannot release text
+PASS expiry drops derived content and declares replay limit
+PASS expiry preserves execution and canonical records
+PASS discard is explicit derived-only transition
+PASS old task access denied after switching
+PASS task switch creates fresh identity
+PASS foreign session principal cannot read task state
+PASS candidate healthy after restart
+PASS restart recovers exact task revision with fresh owner
+MR13_TASK_ACCEPTANCE_COMPLETE 31

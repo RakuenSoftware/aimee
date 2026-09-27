@@ -199,7 +199,7 @@ func TestModuleIdleBackoffCaps(t *testing.T) {
 	want := []time.Duration{2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond,
 		moduleIdleMax, moduleIdleMax}
 	for i, expected := range want {
-		delay = nextModuleIdle(delay)
+		delay = nextModuleIdle(delay, moduleIdleMax)
 		if delay != expected {
 			t.Fatalf("backoff step %d = %v, want %v", i, delay, expected)
 		}
@@ -278,5 +278,22 @@ func TestModuleDetailRendersAnyHandlerBody(t *testing.T) {
 	}
 	if got := moduleDetail([]byte{'o', 'k', 0xff}); got != "ok" {
 		t.Fatalf("invalid utf8 rendered %q", got)
+	}
+}
+
+func TestModulePollCeilingValidation(t *testing.T) {
+	config := ModuleProcessConfig{SocketPath: "/bus", ModuleName: "test", PrincipalClass: 1, PrincipalRef: 7,
+		Stages: []ModuleStage{{EventKind: 5889, StageID: 1}}}
+	for _, interval := range []time.Duration{-time.Nanosecond, time.Microsecond, 11 * time.Millisecond} {
+		config.MaxIdlePollInterval = interval
+		if _, err := validateModuleConfig(config); !errors.Is(err, ErrModuleConfig) {
+			t.Fatalf("invalid interval %v: %v", interval, err)
+		}
+	}
+	for _, interval := range []time.Duration{0, time.Millisecond, 5 * time.Millisecond, 10 * time.Millisecond} {
+		config.MaxIdlePollInterval = interval
+		if _, err := validateModuleConfig(config); err != nil {
+			t.Fatalf("valid interval %v: %v", interval, err)
+		}
 	}
 }

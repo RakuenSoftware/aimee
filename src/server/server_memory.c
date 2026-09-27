@@ -8,6 +8,7 @@
 #include "json_fluent.h"
 #include "log.h"
 #include "integrity.h"
+#include "request_context.h"
 #include <aimee/workspace/workspace.h>
 #include <math.h>
 #include <errno.h>
@@ -117,17 +118,47 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory request unavailable", NULL);
-   static const char *fields[] = {"key",        "content",    "tier",        "kind",
-                                  "confidence", "session_id", "use_cases",   "epistemic_kind",
-                                  "limit",      "old_id",     "new_content", "keywords",
-                                  "id",         "as_of",      NULL};
+   static const char *fields[] = {"expand_evidence",
+                                  "task",
+                                  "valid_at",
+                                  "believed_at",
+                                  "context_limits",
+                                  "evidence_requirements",
+                                  "key",
+                                  "content",
+                                  "tier",
+                                  "kind",
+                                  "confidence",
+                                  "session_id",
+                                  "use_cases",
+                                  "epistemic_kind",
+                                  "limit",
+                                  "old_id",
+                                  "new_content",
+                                  "keywords",
+                                  "id",
+                                  "as_of",
+                                  "read_policy",
+                                  "include_version",
+                                  "at_version",
+                                  "expected_version",
+                                  "idempotency_key",
+                                  "proposal_id",
+                                  "payload_digest",
+                                  "action",
+                                  NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
       if (value)
          cJSON_AddItemToObject(request, fields[i], cJSON_Duplicate(value, 1));
    }
-   cJSON_AddStringToObject(request, "view", "server");
+   int served_view = !strcmp(method, "memory.serve") || !strcmp(method, "memory.claim_card");
+   const cJSON *requested_view = cJSON_GetObjectItemCaseSensitive(req, "view");
+   if (served_view && requested_view)
+      cJSON_AddItemToObject(request, "view", cJSON_Duplicate(requested_view, 1));
+   else if (!served_view)
+      cJSON_AddStringToObject(request, "view", "server");
    if (authority == MEMORY_AUTHORITY_USER)
       cJSON_AddStringToObject(request, "authority", "user");
    server_memory_scope_begin((cJSON *)req);
@@ -139,8 +170,10 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                        : NULL;
    cJSON *reply = NULL;
    const cJSON *field = cJSON_GetObjectItemCaseSensitive(parsed, required);
-   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") && field &&
-       (field->type & 0xff) == expected_type &&
+   if (cJSON_IsObject(parsed) &&
+       (!strcmp(jo_cstr(parsed, "status"), "ok") ||
+        (served_view && !strcmp(jo_cstr(parsed, "status"), "degraded"))) &&
+       field && (field->type & 0xff) == expected_type &&
        (strcmp(method, "memory.search") ||
         cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "windows"))) &&
        (expected_type != cJSON_Number || (isfinite(field->valuedouble) && field->valuedouble > 0 &&
@@ -157,21 +190,102 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                                          "KB memory owner unavailable or invalid response", NULL);
 }
 
+/* Hygiene has an explicit structured scope. Forward its arguments unchanged
+ * for the Go owner to validate; ambient workspace state must not widen it. */
+cJSON *memory_hygiene_command(cJSON *req)
+{
+   cJSON *request = cJSON_Duplicate(req, 1);
+   if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(request);
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "invalid hygiene request", NULL);
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "protocol_version");
+   char *raw = kb_v1_action_request("memory.hygiene", request);
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
+       cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(parsed, "dry_run")) &&
+       cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "findings")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
+            cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
+      reply = memory_owner_error_reply(raw, parsed);
+   cJSON_Delete(parsed);
+   free(raw);
+   return reply ? reply
+                : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                         "KB hygiene owner unavailable or invalid response", NULL);
+}
+
+int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_hygiene_command(req));
+}
+
 /* The runtime envelope quotes the owner's JSON so cJSON never rewrites its
  * integer tokens. Only the Go owner shapes private command results. */
-static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
+static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *req,
+                                           memory_authority_t authority)
 {
-   cJSON *transport = server_invoke_module_operation("memory.runtime", operation, req,
-                                                     "user memory module unavailable");
+   const char *account = server_request_account();
+   const char *principal = request_context_principal();
+   if (!account)
+      account = "";
+   cJSON *context = cJSON_CreateObject();
+   if (!context || !cJSON_AddBoolToObject(context, "authenticated", account[0] || principal[0]) ||
+       !cJSON_AddBoolToObject(context, "user_authority",
+                              account[0] && authority == MEMORY_AUTHORITY_USER) ||
+       !cJSON_AddStringToObject(context, "principal", account[0] ? account : principal) ||
+       !cJSON_AddStringToObject(context, "transport_identity", principal))
+   {
+      cJSON_Delete(context);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                    "user memory caller context unavailable", NULL);
+   }
+   cJSON *request = req ? cJSON_Duplicate(req, 1) : cJSON_CreateObject();
+   cJSON *transport = NULL;
+   int dispatched = -1;
+   if (cJSON_IsObject(request))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "operation");
+      if (cJSON_AddStringToObject(request, "operation", operation))
+         dispatched = aimee_module_commands_dispatch_internal_context_timeout(
+             "memory.runtime", request, context, 60000, &transport);
+   }
+   cJSON_Delete(request);
+   cJSON_Delete(context);
+   if (dispatched <= 0)
+   {
+      cJSON_Delete(transport);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
+   }
    if (transport && !strcmp(jo_cstr(transport, "status"), "error"))
+   {
+      char *kind = strdup(jo_cstr(transport, "kind"));
+      if (!kind)
+      {
+         cJSON_Delete(transport);
+         return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable",
+                                       NULL);
+      }
+      server_error_kind_apply(transport, kind);
+      free(kind);
       return transport;
+   }
    const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(transport, "json"));
    cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
                        : NULL;
    const char *status = jo_cstr(parsed, "status");
    cJSON *reply = NULL;
-   if (cJSON_IsObject(parsed) && !strcmp(status, "ok") &&
+   if (cJSON_IsObject(parsed) &&
+       (!strcmp(status, "ok") ||
+        (!strcmp(operation, "user-serve") && !strcmp(status, "degraded"))) &&
        (!strcmp(operation, "user-search") || !strcmp(jo_cstr(parsed, "store"), "user")))
       reply = cJSON_CreateRaw(raw);
    else if (cJSON_IsObject(parsed) && !strcmp(status, "error") &&
@@ -187,6 +301,51 @@ static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
                                          "user memory owner unavailable or invalid response", NULL);
 }
 
+static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
+{
+   return user_memory_owner_command_as(operation, req, MEMORY_AUTHORITY_MODEL);
+}
+
+cJSON *memory_task_promotion_command(const cJSON *req)
+{
+   return user_memory_owner_command("task-projection-propose", req);
+}
+
+cJSON *memory_user_mcp_supersede_command(const cJSON *req)
+{
+   return user_memory_owner_command_as("user-mcp-supersede", req, MEMORY_AUTHORITY_MODEL);
+}
+
+/* Explicit placement keeps the existing shared command default. The host only
+ * forwards the review envelope and authenticated context; Go admits decisions. */
+static cJSON *memory_correction_command(cJSON *req, int review)
+{
+   int selection = cJSON_HasObjectItem(req, "store") ? server_memory_store_selection(req) : 1;
+   if (selection == 0)
+      return user_memory_owner_command_as(
+          review ? "user-correction-review" : "user-correction-proposals", req,
+          review ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+   if (selection != 1)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "memory store must be user or kb",
+                                    NULL);
+   return kb_memory_owner_command(
+       review ? "memory.review_correction" : "memory.correction_proposals", req,
+       review ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL, review ? "proposal" : "proposals",
+       review ? cJSON_Object : cJSON_Array);
+}
+
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_correction_command(req, 0));
+}
+
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_correction_command(req, 1));
+}
+
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -198,6 +357,48 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                            kb_memory_owner_command("memory.search", req, MEMORY_AUTHORITY_MODEL,
                                                    "facts", cJSON_Array));
    return send_and_free(conn, user_memory_owner_command("user-search", req));
+}
+
+/* Placement selection and opaque transport only; Go owns the diagnostic. */
+int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return send_and_free(conn, memory_bad_store());
+   cJSON *request = cJSON_Duplicate(req, 1);
+   if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(request);
+      return send_and_free(conn, server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                                        "invalid validity request", NULL));
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "store");
+   if (!selection)
+   {
+      cJSON *reply = user_memory_owner_command_as(
+          "user-validity", request, server_account_memory_authority(server_request_account()));
+      cJSON_Delete(request);
+      return send_and_free(conn, reply);
+   }
+   char *raw = kb_v1_action_request("memory.validity", request);
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
+       cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(parsed, "decision")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
+            cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
+      reply = memory_owner_error_reply(raw, parsed);
+   cJSON_Delete(parsed);
+   free(raw);
+   return send_and_free(
+       conn,
+       reply ? reply
+             : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                      "KB validity owner unavailable or invalid response", NULL));
 }
 
 static cJSON *kb_memory_store_command(const cJSON *req, memory_authority_t authority)
@@ -213,15 +414,14 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (selection)
       return kb_memory_store_command(req, authority);
 
-   return user_memory_owner_command("user-store", req);
+   return user_memory_owner_command_as("user-store", req, authority);
 }
 
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   /* The module's server placement is per-appliance-user. The legacy authority
-    * argument remains in the command ABI, but cannot widen the module's user
-    * scope and is not persisted as KB provenance. */
+   /* Carry verified caller identity separately from the request body. Go owns
+    * mutation admission; the host only identifies this authenticated channel. */
    return send_and_free(
        conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
@@ -323,10 +523,14 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (selection < 0)
       return send_and_free(conn, memory_bad_store());
    if (!selection)
-      return send_and_free(conn, user_memory_owner_command("user-supersede", req));
+      return send_and_free(conn, user_memory_owner_command_as(
+                                     "user-supersede", req,
+                                     server_account_memory_authority(server_request_account())));
 
-   return send_and_free(conn, kb_memory_owner_command("memory.supersede", req,
-                                                      MEMORY_AUTHORITY_MODEL, "id", cJSON_Number));
+   return send_and_free(
+       conn, kb_memory_owner_command("memory.supersede", req,
+                                     server_account_memory_authority(server_request_account()),
+                                     "id", cJSON_Number));
 }
 
 /* Retire one user memory by id. Physical deletion and KB provenance are not
@@ -344,7 +548,8 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
       return memory_bad_store();
    if (selection)
       return kb_memory_delete_command(req, account);
-   return user_memory_owner_command("user-delete", req);
+   return user_memory_owner_command_as("user-delete", req,
+                                       server_account_memory_authority(account));
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -375,6 +580,57 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, memory_get_command(req));
 }
 
+static cJSON *memory_served_command(cJSON *req, int card)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (selection)
+      return kb_memory_owner_command(card ? "memory.claim_card" : "memory.serve", req,
+                                     MEMORY_AUTHORITY_MODEL, card ? "claim" : "receipt",
+                                     cJSON_Object);
+   return user_memory_owner_command(card ? "user-claim-card" : "user-serve", req);
+}
+
+cJSON *memory_serve_command(cJSON *req)
+{
+   return memory_served_command(req, 0);
+}
+
+cJSON *memory_claim_card_command(cJSON *req)
+{
+   return memory_served_command(req, 1);
+}
+
+int handle_memory_serve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_serve_command(req));
+}
+
+int handle_memory_claim_card(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_claim_card_command(req));
+}
+
+cJSON *memory_evidence_command(cJSON *req)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (selection)
+      return kb_memory_owner_command("memory.evidence", req, MEMORY_AUTHORITY_MODEL, "evidence",
+                                     cJSON_Array);
+   return user_memory_owner_command("user-evidence", req);
+}
+
+int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_evidence_command(req));
+}
+
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -385,13 +641,16 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Personal recall uses the same memory module as shared recall, with the
  * process's own data grant. No KB request is needed to create its envelope. */
-char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
+static char *user_memory_recall_json(const char *hint, int limit_tokens, int session_start,
+                                     const size_t *native_bytes)
 {
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return NULL;
    cJSON_AddStringToObject(request, "task_hint", hint ? hint : "");
    cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
+   if (native_bytes)
+      cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
    cJSON_AddBoolToObject(request, "session_start", session_start != 0);
    cJSON *response = server_invoke_module_operation("memory.runtime", "personal-recall", request,
                                                     "user memory module unavailable");
@@ -407,4 +666,14 @@ char *server_user_memory_recall_json(const char *hint, int limit_tokens, int ses
                     "\"integrity_verdict\":\"quarantine\"}");
    }
    return json;
+}
+
+char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
+{
+   return user_memory_recall_json(hint, limit_tokens, session_start, NULL);
+}
+char *server_user_memory_recall_native_json(const char *hint, int limit_tokens, int session_start,
+                                            size_t native_bytes)
+{
+   return user_memory_recall_json(hint, limit_tokens, session_start, &native_bytes);
 }

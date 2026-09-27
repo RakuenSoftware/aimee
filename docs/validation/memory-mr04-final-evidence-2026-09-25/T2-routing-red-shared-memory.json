@@ -1,0 +1,386 @@
+[
+  {
+    "name": "bounded hygiene HTTP preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene keeps exact scope and eligible duplicate revisions",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-b419cb378c-hygiene"
+      },
+      "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-25 13:11:42.506862+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "3d0619dde9161e85b3da8603577cb98f9166770af87dc7d04fde9d873b536754",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "af755995ba5ae6b3d9d5b8c59e77b033d63797f76421a93016f8760966003833",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "64",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "65",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene labels candidate-only findings without leaking content",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-b419cb378c-hygiene"
+      },
+      "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-25 13:11:42.506862+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "3d0619dde9161e85b3da8603577cb98f9166770af87dc7d04fde9d873b536754",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "af755995ba5ae6b3d9d5b8c59e77b033d63797f76421a93016f8760966003833",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "64",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "65",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene repeat preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene findings are stable on repeated read",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene bounded partial preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene row limit cannot claim clean full coverage",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-b419cb378c-hygiene"
+      },
+      "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-25 13:11:42.937877+00",
+      "budget": {
+        "max_rows": 1,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 1,
+      "rows_compared": 1,
+      "content_bytes_compared": 52,
+      "partial": true,
+      "unvisited": "remaining_eligible_content_unknown",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": []
+    }
+  },
+  {
+    "name": "hygiene bounded content preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene byte limit reports unvisited content",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-b419cb378c-hygiene"
+      },
+      "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-25 13:11:43.127023+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 1
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 0,
+      "content_bytes_compared": 0,
+      "partial": true,
+      "unvisited": "remaining_eligible_content_unknown",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": []
+    }
+  },
+  {
+    "name": "hygiene refuses apply",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses mutation",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses sql",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses all",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses unbounded",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses private",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "CLI hygiene preserves explicit scope and findings",
+    "passed": true,
+    "detail": {
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-b419cb378c-hygiene"
+      },
+      "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-25 13:11:44.073342+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "3d0619dde9161e85b3da8603577cb98f9166770af87dc7d04fde9d873b536754",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "af755995ba5ae6b3d9d5b8c59e77b033d63797f76421a93016f8760966003833",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "64",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "2b572ea0-8e6e-49fa-a66a-ef22a73714a4",
+              "record_id": "65",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene leaves canonical fixtures unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store leaves KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get returns exact local content for colliding ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get",
+    "passed": false,
+    "detail": [
+      404,
+      {
+        "http_status": 404,
+        "kind": "not_found",
+        "message": "memory not found",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "explicit KB get selects the other record",
+    "passed": false,
+    "detail": null
+  },
+  {
+    "name": "MCP store defaults to user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP personal content stays local",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update uses local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP forget retires local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI default get selects user",
+    "passed": true,
+    "detail": null
+  }
+]

@@ -53,7 +53,7 @@ func TestDiagnosticPublicValidation(t *testing.T) {
 
 func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
 	t.Helper()
-	caller := bus.CommandContext{Authenticated: true, Principal: "user:diagnostic", TransportIdentity: "cert:diagnostic", ScopeKind: "project", ScopeID: "verified-scope"}
+	caller := bus.CommandContext{Authenticated: true, Principal: "user:diagnostic", TransportIdentity: "cert:diagnostic", ScopeKind: "project", ScopeID: "runtime-project-b"}
 	run := func(args string, verified bool) map[string]any {
 		t.Helper()
 		c := bus.CommandContext{}
@@ -67,6 +67,11 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		return r
 	}
 	base := `"query":"runtime-role-probe","scope_type":"project","scope_value":"runtime-project-b"`
+	foreign := caller
+	foreign.ScopeID = "verified-other-scope"
+	if result, status := invokeContextCommand(t, handler, 0, foreign, "diagnose_scoped", `{`+base+`}`); status == bus.ModuleStatusOK && result["status"] == "ok" {
+		t.Fatal("diagnostic admitted scope beyond verified credential", result)
+	}
 	plain := run(`{`+base+`}`, true)
 	traced := run(`{`+base+`,"trace":true,"persist_trace":true,"retrieval_event_id":"runtime-diagnostic","turn_id":"runtime-turn"}`, true)
 	before, _ := json.Marshal(plain["rows"])
@@ -79,8 +84,29 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Fatal(traced)
 	}
 	rows := traced["rows"].([]any)
-	if len(rows) != 1 || len(rows[0].(map[string]any)["memory"].(map[string]any)) != 16 || len(rows[0].(map[string]any)["parts"].(map[string]any)) != 21 {
+	if len(rows) != 1 || len(rows[0].(map[string]any)["memory"].(map[string]any)) != 16 {
 		t.Fatal(rows)
+	}
+	parts := rows[0].(map[string]any)["parts"].(map[string]any)
+	if parts["score_evidence"] != "observed_ranking_steps" || parts["ranking_steps"] == nil {
+		t.Fatal("diagnostic lost actual ranking evidence", parts)
+	}
+	var features string
+	if err := tx.QueryRow(ctx, `SELECT r.feature_values FROM recall_traces t JOIN recall_trace_results r USING(trace_id)
+ WHERE t.retrieval_event_id='runtime-diagnostic' AND t.scope_id='runtime-project-b'`).Scan(&features); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]float64
+	if err := json.Unmarshal([]byte(features), &decoded); err != nil || decoded["ranking_trace_schema"] != 1 || decoded["stage.1.candidate_order.candidate_order.rank"] != 1 || decoded["stage.0.native_pg_ts_rank_cd_exact_key_scope_priority.lexical.rank"] != 1 || decoded["stage.0.native_pg_ts_rank_cd_exact_key_scope_priority.score"] <= 0 {
+		t.Fatal("durable trace omitted observed rank", features, err)
+	}
+	var metadata string
+	if err := tx.QueryRow(ctx, `SELECT candidate_metadata FROM recall_traces WHERE retrieval_event_id='runtime-diagnostic' AND scope_id='runtime-project-b'`).Scan(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	var capture rankingCapture
+	if json.Unmarshal([]byte(metadata), &capture) != nil || len(capture.Candidates) != 1 || capture.Candidates[0].Version == nil || capture.Candidates[0].Disposition != "selected" {
+		t.Fatal("lost durable candidate metadata", metadata)
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM recall_traces t JOIN recall_trace_results r USING(trace_id) WHERE t.retrieval_event_id='runtime-diagnostic' AND t.scope_id='runtime-project-b' AND r.epistemic_kind='world_fact'`).Scan(&count); err != nil || count != 1 {
@@ -93,7 +119,7 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	// Without an explicit retrieval scope, trace metadata comes only from the
 	// separately verified host context, never similarly named request fields.
 	fallback := run(`{"query":"absent","trace":true,"scope_kind":"project","scope_id":"forged"}`, true)
-	if trace, ok := fallback["trace"].(map[string]any); !ok || trace["scope_id"] != "verified-scope" {
+	if trace, ok := fallback["trace"].(map[string]any); !ok || trace["scope_id"] != "runtime-project-b" {
 		t.Fatal(fallback)
 	}
 	// Persistence failure is isolated from the successful read transaction.

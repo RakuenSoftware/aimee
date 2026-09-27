@@ -1,0 +1,10 @@
+[
+  200,
+  {
+    "deleted": true,
+    "destroyed": false,
+    "id": 26,
+    "status": "ok",
+    "store": "user"
+  }
+]

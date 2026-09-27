@@ -1,0 +1,20 @@
+[
+  {
+    "name": "/aimee-aimee-server-1",
+    "image": "aimee-native-core:0.4.5-bridge.2",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-aimee-store-db-1",
+    "image": "ghcr.io/rakuensoftware/aimee-postgres:0.4.5",
+    "health": "healthy",
+    "optional_flags": []
+  }
+]

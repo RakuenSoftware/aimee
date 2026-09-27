@@ -11,12 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestRecallSufficiency(t *testing.T) {
+func TestResultCountAvailability(t *testing.T) {
 	for _, c := range []struct {
 		count, limit int
-		reward       float64
-	}{{0, 20, 0}, {4, 20, 1}, {20, 20, 0.5}, {21, 20, 0.5}} {
-		if got := recallSufficiency(c.count, c.limit); got != c.reward {
+		truncated    bool
+	}{{0, 20, false}, {1, 20, false}, {20, 20, true}, {21, 20, true}} {
+		got := resultCountAvailability(c.count, c.limit)
+		if got.Count != c.count || got.Truncated != c.truncated {
 			t.Fatal(c, got)
 		}
 	}
@@ -113,77 +114,37 @@ func exerciseRetrievalPolicyReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	}
 	command(`{"status":"ok","selected_arm":"20","propensity":0.7}`)
 	values["bandit_live_decision_enabled"], values["bandit_optimize_command"], values["bandit_exploration_fraction"] = true, "'"+strings.ReplaceAll(script, "'", "'\\''")+"'", 1.0
-	run(nil, 20)
-	raw, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatal(err)
+	run(nil, 10)
+	if _, err := os.Stat(capture); !os.IsNotExist(err) {
+		t.Fatal("observe-only point sampled count-trained weights", err)
 	}
-	var request map[string]any
-	if json.Unmarshal(raw, &request) != nil {
-		t.Fatal(string(raw))
+	var decisions int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM bandit_decisions WHERE decision_point=$1`, retrievalDecisionPoint).Scan(&decisions); err != nil || decisions != 0 {
+		t.Fatal(decisions, err)
 	}
-	inputs := request["inputs"].(map[string]any)
-	if request["role"] != "optimize" || inputs["decision_point"] != retrievalDecisionPoint || inputs["allow_explore"] != true || len(inputs["arms"].([]any)) != 2 {
-		t.Fatal(request)
-	}
-	var id string
-	var reward, alpha, beta float64
-	var rewards int
-	if err := tx.QueryRow(ctx, `SELECT id,reward FROM bandit_decisions WHERE decision_point=$1`, retrievalDecisionPoint).Scan(&id, &reward); err != nil || reward != 0.5 {
-		t.Fatal(id, reward, err)
-	}
-	if err := tx.QueryRow(ctx, `SELECT n_rewards,posterior_alpha,posterior_beta FROM bandit_arm_stats WHERE decision_point=$1 AND arm_id='20'`, retrievalDecisionPoint).Scan(&rewards, &alpha, &beta); err != nil || rewards != 1 || alpha != 1.5 || beta != 1.5 {
-		t.Fatal(rewards, alpha, beta, err)
-	}
-	// Idempotent closure must not credit the same response twice.
+	// Even an irrelevant singleton on a previously opened decision is metadata.
+	execSQL(`INSERT INTO bandit_decisions(id,decision_point,arm_id,propensity,decided_at) VALUES('count-only-fixture','kb_memory_retrieval_limit','20',1,pg_now_text())`)
 	direct := bound
 	direct.db = runtimeRoleTx{evalQueryer{tx}, t}
-	if err := direct.rewardRetrieval(ctx, retrievalDecision{limit: 20, id: id, arm: "20"}, 20); err != nil {
+	decision := retrievalDecision{limit: 20, id: "count-only-fixture", arm: "20"}
+	if err := direct.recordRetrievalAvailability(ctx, decision, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.QueryRow(ctx, `SELECT n_rewards FROM bandit_arm_stats WHERE decision_point=$1 AND arm_id='20'`, retrievalDecisionPoint).Scan(&rewards); err != nil || rewards != 1 {
-		t.Fatal(rewards, err)
-	}
-	// An explicit caller limit bypasses the sidecar entirely.
-	if err := os.Remove(capture); err != nil {
+	if err := direct.recordRetrievalAvailability(ctx, decision, 20); err != nil {
 		t.Fatal(err)
+	}
+	var count int
+	var truncated, unrewarded, unclosed bool
+	if err := tx.QueryRow(ctx, `SELECT result_count,result_truncated,reward IS NULL,closed_at='' FROM bandit_decisions WHERE id='count-only-fixture'`).Scan(&count, &truncated, &unrewarded, &unclosed); err != nil || count != 1 || truncated || !unrewarded || !unclosed {
+		t.Fatal(count, truncated, unrewarded, unclosed, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM bandit_arm_stats WHERE decision_point=$1`, retrievalDecisionPoint).Scan(&decisions); err != nil || decisions != 0 {
+		t.Fatal("count updated posterior", decisions, err)
 	}
 	run(map[string]any{"limit": 2}, 2)
-	if _, err := os.Stat(capture); !os.IsNotExist(err) {
-		t.Fatal("explicit limit invoked policy", err)
-	}
-	// Malformed/unknown selection retains the operator's default and logs no decision.
-	command(`{"status":"ok","selected_arm":"999","propensity":0.7}`)
-	run(nil, 10)
-	var decisions int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM bandit_decisions WHERE decision_point=$1`, retrievalDecisionPoint).Scan(&decisions); err != nil || decisions != 1 {
-		t.Fatal(decisions, err)
-	}
-	command(`{"status":"ok","selected_arm":"20","propensity":0.7}`)
-	execSQL(`INSERT INTO bandit_decisions(id,decision_point,arm_id,decided_at,is_exploration)
- SELECT 'policy-budget-'||n,'kb_memory_retrieval_limit','10',pg_now_text(),true FROM generate_series(1,20)n`)
-	run(nil, 20)
-	raw, err = os.ReadFile(capture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	json.Unmarshal(raw, &request)
-	if request["inputs"].(map[string]any)["allow_explore"] != false {
-		t.Fatal("exploration budget ignored", request)
-	}
-	// Optional telemetry must not poison PostgreSQL's retrieval transaction.
-	execSQL(`RESET ROLE; REVOKE INSERT ON bandit_decisions FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	run(nil, 10)
-	execSQL(`RESET ROLE; GRANT INSERT ON bandit_decisions TO aimee_store_runtime; REVOKE INSERT ON bandit_arm_stats FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	run(nil, 20)
-	execSQL(`RESET ROLE; GRANT INSERT ON bandit_arm_stats TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
-	// Zero results still close the learning loop with zero reward.
 	run(map[string]any{"query": "missing-policy-query"}, 0)
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM bandit_decisions WHERE decision_point=$1 AND reward=0`, retrievalDecisionPoint).Scan(&decisions); err != nil || decisions != 1 {
-		t.Fatal(decisions, err)
-	}
-	if err := tx.QueryRow(ctx, `SELECT n_rewards,posterior_alpha,posterior_beta FROM bandit_arm_stats WHERE decision_point=$1 AND arm_id='20'`, retrievalDecisionPoint).Scan(&rewards, &alpha, &beta); err != nil || rewards != 3 || alpha != 2 || beta != 3 {
-		t.Fatal(rewards, alpha, beta, err)
-	}
-
+	// Missing policy metadata does not poison a successful scoped lookup.
+	execSQL(`RESET ROLE; REVOKE SELECT ON bandit_promotions FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
+	run(nil, 20)
+	execSQL(`RESET ROLE; GRANT SELECT ON bandit_promotions TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 }

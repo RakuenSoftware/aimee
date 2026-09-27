@@ -85,6 +85,7 @@ static const struct
     {"memory.list", pt_print_memory_list},
     {"memory.get", pt_print_memory_get},
     {"memory.read", pt_print_memory_read},
+    {"memory.health", pt_print_memory_health},
     {"memory.stats", pt_print_memory_stats},
     {"index.scan", pt_print_index_scan},
     {"index.verify", pt_print_index_verify},

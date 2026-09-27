@@ -1,0 +1,42 @@
+[
+  {
+    "name": "private identity stored through authenticated API",
+    "passed": true
+  },
+  {
+    "name": "private source owner and revision are observed",
+    "passed": true
+  },
+  {
+    "name": "native private search publishes explicit placement and arm capabilities",
+    "passed": true
+  },
+  {
+    "name": "shared identity stored through the authenticated owner API",
+    "passed": true
+  },
+  {
+    "name": "provider bytes match a committed prepared receipt",
+    "passed": true
+  },
+  {
+    "name": "native private identity appears in the actual provider bytes",
+    "passed": true
+  },
+  {
+    "name": "actual retained private version has owner-rendered native positions",
+    "passed": true
+  },
+  {
+    "name": "typed retained source has final ingress positions",
+    "passed": true
+  },
+  {
+    "name": "final ingress retains the versioned selector and disabled exposure state",
+    "passed": false
+  },
+  {
+    "name": "native turn 0 completes with exactly one verified provider request",
+    "passed": false
+  }
+]

@@ -1,0 +1,50 @@
+{
+  "candidate": "533ba7408",
+  "topology": "T2",
+  "acceptance_waived": false,
+  "runs": [
+    {
+      "name": "native context refresh",
+      "status": "completed",
+      "elapsed_seconds": 5.66034253599355,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        25307,
+        25787,
+        26267,
+        26747,
+        27227,
+        27598
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native refresh owner outage",
+      "status": "failed",
+      "elapsed_seconds": 91.42137702403124,
+      "provider_requests": 5,
+      "provider_request_bytes": [
+        25199,
+        25679,
+        26159,
+        26639,
+        27119
+      ],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native refresh",
+      "status": "failed",
+      "elapsed_seconds": 3.2296801970223896,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    }
+  ],
+  "observed_lock": "abandoned idle transaction after memory_send_guard_end; later completions blocked on barrier",
+  "store_idle_reap_seconds": 300
+}

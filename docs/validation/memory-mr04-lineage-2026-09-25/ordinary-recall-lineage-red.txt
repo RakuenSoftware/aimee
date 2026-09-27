@@ -1,0 +1,5 @@
+--- FAIL: TestCollectionEmptyRecallInvalidatedPostgres (0.35s)
+    collection_source_test.go:158: ordinary descendant recall 1 0 <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.368s
+FAIL

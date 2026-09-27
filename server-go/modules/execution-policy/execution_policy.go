@@ -34,8 +34,9 @@ type request struct {
 }
 
 type response struct {
-	Allowed bool   `json:"allowed"`
-	Reason  string `json:"reason"`
+	Allowed     bool                 `json:"allowed"`
+	Reason      string               `json:"reason"`
+	Exploration *explorationDecision `json:"exploration,omitempty"`
 }
 
 type toolRule struct {
@@ -44,9 +45,13 @@ type toolRule struct {
 }
 
 type operatorPolicy struct {
-	ForbiddenCommands []string          `json:"forbidden_commands"`
-	ToolRules         []toolRule        `json:"tool_rules"`
-	ApprovalLevels    map[string]string `json:"approval_levels"`
+	CleanRetry          RetryPolicy             `json:"clean_retry"`
+	Actions             ActionCompositionPolicy `json:"actions"`
+	AdaptiveExploration explorationLimits       `json:"adaptive_exploration"`
+	Exploration         explorationLimits       `json:"exploration"`
+	ForbiddenCommands   []string                `json:"forbidden_commands"`
+	ToolRules           []toolRule              `json:"tool_rules"`
+	ApprovalLevels      map[string]string       `json:"approval_levels"`
 }
 
 type policyLoader func() (*operatorPolicy, error)
@@ -190,11 +195,21 @@ func tokenLooksSpecificFilePath(token string) bool {
 }
 
 func sourceDiscovery(command string) bool {
-	fields := strings.Fields(command)
+	// This is an efficiency classification, not shell authorization. Ambiguous
+	// syntax, substitutions and commands with effects stay under baseline policy.
+	if strings.ContainsAny(command, ";&|<>`$\n\r\\") {
+		return false
+	}
+	// Shell quoting can spell an effectful option as -de"le"te. Strip quote
+	// delimiters only for this conservative classification, never for execution.
+	fields := strings.Fields(strings.NewReplacer("\"", "", "'", "").Replace(command))
 	if len(fields) == 0 {
 		return false
 	}
 	for _, field := range fields {
+		if field == "-delete" || field == "-exec" || field == "-execdir" || field == "-ok" || field == "-okdir" || field == "-fprint" || field == "-fprintf" || field == "-fls" || field == "--pre" || strings.HasPrefix(field, "--pre=") {
+			return false
+		}
 		if strings.HasPrefix(field, "/var/") || strings.HasPrefix(field, "/tmp/") ||
 			strings.HasPrefix(field, "/proc/") || strings.HasPrefix(field, "/sys/") ||
 			strings.HasPrefix(field, "/run/") || strings.HasPrefix(field, "/etc/") || tokenIsDocsPath(field) {
@@ -203,6 +218,11 @@ func sourceDiscovery(command string) bool {
 	}
 	switch fields[0] {
 	case "grep", "rg", "ripgrep":
+		// An argument-free invocation prints tool usage; it has no search target.
+		// Keep it under operator policy without slicing past the token list.
+		if len(fields) < 2 {
+			return false
+		}
 		// A concrete file after the search pattern is a read, not repository discovery.
 		for _, field := range fields[2:] {
 			if tokenLooksSpecificFilePath(field) {
@@ -225,7 +245,41 @@ func sourceDiscovery(command string) bool {
 	return false
 }
 
+func shellTool(tool string) bool {
+	switch strings.ToLower(tool) {
+	case "bash", "terminal", "shell", "exec_command", "execute_command":
+		return true
+	}
+	return false
+}
+
+func discoveryTool(req request, arguments map[string]any) bool {
+	if shellTool(req.Tool) {
+		return sourceDiscovery(textField(arguments, "command", "cmd"))
+	}
+	switch strings.ToLower(req.Tool) {
+	case "grep", "glob":
+		return !tokenLooksSpecificFilePath(textField(arguments, "path", "file_path"))
+	}
+	return false
+}
+
 func evaluate(req request, policy *operatorPolicy) response {
+	decision := evaluateBaseline(req, policy)
+	var arguments map[string]any
+	if json.Unmarshal(req.Arguments, &arguments) == nil && discoveryTool(req, arguments) {
+		// No authenticated final-plan contract is available on this legacy seam.
+		// Never manufacture enforcement eligibility from a tool argument.
+		decision.Exploration = &explorationDecision{Mode: "observe", Reason: "authenticated_contract_unavailable", Alternatives: explorationAlternatives()}
+		if policy != nil {
+			l := policy.Exploration
+			decision.Exploration.AccountingRequired = l.RawScans != nil || l.Files != nil || l.Graph != nil || l.Bytes != nil || l.Tokens != nil
+		}
+	}
+	return decision
+}
+
+func evaluateBaseline(req request, policy *operatorPolicy) response {
 	var arguments map[string]any
 	if err := json.Unmarshal(req.Arguments, &arguments); err != nil || arguments == nil {
 		return response{Reason: "tool arguments are invalid JSON"}
@@ -233,21 +287,18 @@ func evaluate(req request, policy *operatorPolicy) response {
 	if allowed, reason, handled := computerUseDecision(req, arguments); handled && !allowed {
 		return response{Reason: reason}
 	}
-	if req.Tool == "bash" && sourceDiscovery(textField(arguments, "command")) {
-		return response{Reason: "Use `aimee index find <symbol>` or `aimee index overview` for code discovery. Fall back to shell search only if aimee returns nothing."}
-	}
 	if policy == nil {
 		return response{Allowed: true, Reason: "no operator policy restriction matched"}
 	}
-	command := textField(arguments, "command")
-	if req.Tool == "bash" {
+	command := textField(arguments, "command", "cmd")
+	if shellTool(req.Tool) {
 		for _, pattern := range policy.ForbiddenCommands {
 			if pattern != "" && strings.Contains(command, pattern) {
 				return response{Reason: "command matches forbidden pattern: " + pattern}
 			}
 		}
 	}
-	target := textField(arguments, "path", "command")
+	target := textField(arguments, "path", "command", "cmd")
 	for _, rule := range policy.ToolRules {
 		if target == rule.PathPrefix || strings.HasPrefix(target, strings.TrimSuffix(rule.PathPrefix, "/")+"/") {
 			for _, allowed := range rule.AllowedTools {

@@ -15,10 +15,22 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 )
 
+type datasetDisposition struct {
+	ID          string `json:"id"`
+	Answerable  *bool  `json:"answerable"`
+	Disposition string `json:"disposition"`
+	Reason      string `json:"reason,omitempty"`
+}
+type datasetInventory struct {
+	Version       int                  `json:"version"`
+	DatasetSHA256 string               `json:"dataset_sha256"`
+	Cases         []datasetDisposition `json:"cases"`
+}
 type datasetPlan struct {
-	suite    string
-	groups   []memory.EvaluationCorpus
-	excluded map[string]int
+	inventory datasetInventory
+	suite     string
+	groups    []memory.EvaluationCorpus
+	excluded  map[string]int
 }
 
 type datasetTurn struct {
@@ -27,10 +39,12 @@ type datasetTurn struct {
 	Text    string `json:"text"`
 }
 type datasetQuestion struct {
-	ID       string          `json:"question_id"`
-	Question string          `json:"question"`
-	Evidence []string        `json:"evidence"`
-	Answer   json.RawMessage `json:"answer"`
+	Category   int             `json:"category"`
+	Answerable *bool           `json:"answerable"`
+	ID         string          `json:"question_id"`
+	Question   string          `json:"question"`
+	Evidence   []string        `json:"evidence"`
+	Answer     json.RawMessage `json:"answer"`
 }
 type datasetSessionTurn struct {
 	Role    string `json:"role"`
@@ -71,10 +85,8 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 	if len(samples) == 0 {
 		return plan, errors.New("dataset must contain samples")
 	}
+	plan.inventory = datasetInventory{Version: 1, DatasetSHA256: memory.EvaluationDigest(raw)}
 	for index, raw := range samples {
-		if maxCases > 0 && len(plan.groups) >= maxCases {
-			break
-		}
 		corpus := memory.EvaluationCorpus{Version: 1}
 		scopes := map[string]string{}
 		if suite == "locomo" {
@@ -124,12 +136,8 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 				}
 			}
 			for questionIndex, q := range sample.QA {
-				if strings.TrimSpace(q.Question) == "" || (!qaMode && q.Evidence == nil) {
+				if strings.TrimSpace(q.Question) == "" {
 					return plan, fmt.Errorf("sample %d has malformed question", index)
-				}
-				if !qaMode && len(q.Evidence) == 0 {
-					plan.excluded["no_evidence"]++
-					continue
 				}
 				id := q.ID
 				if id == "" {
@@ -151,39 +159,44 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 						}
 					}
 				}
+				label := q.Answerable
+				if label == nil && q.Category >= 1 && q.Category <= 5 {
+					value := q.Category != 5
+					label = &value
+				}
 				answer := ""
-				if qaMode {
+				if qaMode && label != nil && !*label {
+					answer = "Unknown"
+				} else if qaMode {
 					var err error
 					answer, err = datasetAnswer(q.Answer)
 					if err != nil {
 						return plan, err
 					}
 				}
-				corpus.Cases = append(corpus.Cases, memory.EvaluationCase{ID: id, Query: q.Question, Expected: expected, Answer: answer})
+				corpus.Cases = append(corpus.Cases, memory.EvaluationCase{ID: id, Query: q.Question, Expected: expected, Answer: answer, Answerable: label})
 			}
 		} else {
 			var sample struct {
-				ID       string                 `json:"question_id"`
-				Question string                 `json:"question"`
-				IDs      []string               `json:"haystack_session_ids"`
-				Dates    []string               `json:"haystack_dates"`
-				Sessions [][]datasetSessionTurn `json:"haystack_sessions"`
-				Answers  []string               `json:"answer_session_ids"`
-				Answer   json.RawMessage        `json:"answer"`
+				ID         string                 `json:"question_id"`
+				Answerable *bool                  `json:"answerable"`
+				Question   string                 `json:"question"`
+				IDs        []string               `json:"haystack_session_ids"`
+				Dates      []string               `json:"haystack_dates"`
+				Sessions   [][]datasetSessionTurn `json:"haystack_sessions"`
+				Answers    []string               `json:"answer_session_ids"`
+				Answer     json.RawMessage        `json:"answer"`
 			}
 			if err = json.Unmarshal(raw, &sample); err != nil {
 				return plan, err
 			}
-			if strings.TrimSpace(sample.Question) == "" || sample.IDs == nil || sample.Sessions == nil || sample.Answers == nil || len(sample.IDs) != len(sample.Sessions) || (sample.Dates != nil && len(sample.Dates) != len(sample.IDs)) {
+			if strings.TrimSpace(sample.Question) == "" || sample.IDs == nil || sample.Sessions == nil || len(sample.IDs) != len(sample.Sessions) || (sample.Dates != nil && len(sample.Dates) != len(sample.IDs)) {
 				return plan, fmt.Errorf("sample %d has mismatched or missing history", index)
 			}
-			if strings.Contains(sample.ID, "_abs") {
-				plan.excluded["abstention"]++
-				continue
-			}
-			if len(sample.Answers) == 0 {
-				plan.excluded["no_evidence"]++
-				continue
+			label := sample.Answerable
+			if label == nil {
+				value := !strings.Contains(sample.ID, "_abs")
+				label = &value
 			}
 			for i, id := range sample.IDs {
 				var content strings.Builder
@@ -210,33 +223,39 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 				id = strconv.Itoa(index)
 			}
 			answer := ""
-			if qaMode {
+			if qaMode && !*label {
+				answer = "Unknown"
+			} else if qaMode {
 				var err error
 				answer, err = datasetAnswer(sample.Answer)
 				if err != nil {
 					return plan, err
 				}
 			}
-			corpus.Cases = []memory.EvaluationCase{{ID: id, Query: sample.Question, Expected: sample.Answers, Answer: answer}}
+			corpus.Cases = []memory.EvaluationCase{{ID: id, Query: sample.Question, Expected: sample.Answers, Answer: answer, Answerable: label}}
 		}
 		if len(corpus.Cases) == 0 {
 			continue
 		}
-		if qaMode {
-			err = corpus.ValidateFixtures()
-			if len(corpus.Cases) > 4096 {
-				err = errors.New("dataset exceeds 4096 questions per sample")
-			}
-		} else {
-			err = corpus.Validate()
-		}
+		err = corpus.Validate()
 		if err != nil {
 			return plan, fmt.Errorf("sample %d: %w", index, err)
 		}
-		plan.groups = append(plan.groups, corpus)
+		capped := maxCases > 0 && len(plan.groups) >= maxCases
+		for _, row := range corpus.Cases {
+			disposition, reason := "included", ""
+			if capped {
+				disposition, reason = "excluded", "max_cases"
+				plan.excluded[reason]++
+			}
+			plan.inventory.Cases = append(plan.inventory.Cases, datasetDisposition{ID: fmt.Sprintf("%d/%s", index, row.ID), Answerable: row.Answerable, Disposition: disposition, Reason: reason})
+		}
+		if !capped {
+			plan.groups = append(plan.groups, corpus)
+		}
 	}
 	if len(plan.groups) == 0 {
-		return plan, errors.New("dataset has no evidence-labelled retrieval cases")
+		return plan, errors.New("dataset has no evaluation cases")
 	}
 	return plan, nil
 }
@@ -254,7 +273,7 @@ func runDataset(ctx context.Context, schema string, dimension int, path, suite s
 		return err
 	}
 	defer closeExecutor()
-	total := memory.EvaluationResult{Suite: suite, Samples: len(plan.groups), ExcludedCases: plan.excluded}
+	total := memory.EvaluationResult{Suite: suite, Samples: len(plan.groups), ExcludedCases: plan.excluded, DatasetInventory: plan.inventory}
 	for index, corpus := range plan.groups {
 		var result memory.EvaluationResult
 		err = evaluationSession(ctx, schema, dimension, func(db *postgres.EvaluationStore) error {
@@ -265,9 +284,14 @@ func runDataset(ctx context.Context, schema string, dimension int, path, suite s
 		if err != nil {
 			return fmt.Errorf("%s sample %d: %w", suite, index, err)
 		}
-		if result.Status != "ok" || result.Scores.Cases != len(corpus.Cases) || len(result.LatenciesMS) != len(corpus.Cases) {
+		if result.Status != "ok" || result.TotalCases != len(corpus.Cases) || len(result.LatenciesMS) != len(corpus.Cases) {
 			return errors.New("dataset evaluation returned a partial denominator")
 		}
+		for _, row := range result.Cases {
+			row.ID = fmt.Sprintf("%d/%s", index, row.ID)
+			total.Cases = append(total.Cases, row)
+		}
+		total.TotalCases += result.TotalCases
 		n := float64(result.Scores.Cases)
 		total.Scores.MRR += result.Scores.MRR * n
 		total.Scores.NDCG5 += result.Scores.NDCG5 * n
@@ -278,11 +302,13 @@ func runDataset(ctx context.Context, schema string, dimension int, path, suite s
 		total.LatenciesMS = append(total.LatenciesMS, result.LatenciesMS...)
 	}
 	n := float64(total.Scores.Cases)
-	total.Scores.MRR /= n
-	total.Scores.NDCG5 /= n
-	total.Scores.NDCG10 /= n
-	total.Scores.Recall5 /= n
-	total.Scores.Recall10 /= n
+	if n > 0 {
+		total.Scores.MRR /= n
+		total.Scores.NDCG5 /= n
+		total.Scores.NDCG10 /= n
+		total.Scores.Recall5 /= n
+		total.Scores.Recall10 /= n
+	}
 	total.Status = "ok"
 	rendered, err := memory.FormatEvaluation(total, path, format, fields, profile)
 	if err != nil {

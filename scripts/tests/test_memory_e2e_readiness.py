@@ -25,6 +25,31 @@ def contains_fixture(body):
 
 
 class MemoryReadinessTests(unittest.TestCase):
+    def test_direct_stack_users_receive_provider_ceiling_and_preserve_override(self):
+        spec = importlib.util.spec_from_file_location(
+            'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
+        matrix = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(matrix)
+        with tempfile.TemporaryDirectory() as directory:
+            for role in ('kb', 'server'):
+                default = matrix.Stack(role, {}, Path(directory))
+                self.assertEqual(json.loads(default.env['AIMEE_PROVIDER_CONTEXT_LIMITS']),
+                                 dict(schema_version=1, max_request_bytes=65536))
+                cap = json.dumps(dict(schema_version=1, max_request_bytes=0))
+                explicit = matrix.Stack(role, {'AIMEE_PROVIDER_CONTEXT_LIMITS': cap}, Path(directory))
+                self.assertEqual(explicit.env['AIMEE_PROVIDER_CONTEXT_LIMITS'], cap)
+
+    def test_sql_diagnostics_expose_only_fixed_sqlstate(self):
+        spec = importlib.util.spec_from_file_location(
+            'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
+        matrix = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(matrix)
+        failed = subprocess.CompletedProcess([], 1, stdout='private rows',
+                                             stderr='ERROR:  40P01\nprivate credential material\n')
+        with patch.object(matrix.subprocess, 'run', return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, r'^docker exec failed with exit 1 \(sqlstate_40P01\)$'):
+                matrix.command('docker', 'exec', 'private-container', 'psql', '-c', 'private SQL')
+
     def test_wait_requires_success_and_expected_memory(self):
         gate = placement.Gate(SimpleNamespace())
         gate.call = Mock(side_effect=[

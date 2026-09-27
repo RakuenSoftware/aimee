@@ -83,9 +83,9 @@ func prospectiveMetrics() RuntimeMetrics {
 }
 
 func recallMetrics() RuntimeMetrics {
-	_, average, maximum := runtimeMetricState.recallCalls.snapshot()
+	calls, average, maximum := runtimeMetricState.recallCalls.snapshot()
 	return RuntimeMetrics{Assemblies: runtimeMetricState.recallAssemblies.Load(),
-		Starts: runtimeMetricState.recallStarts.Load(), AverageMS: average, MaximumMS: maximum,
+		Starts: runtimeMetricState.recallStarts.Load(), Calls: calls, AverageMS: average, MaximumMS: maximum,
 		LaneCounters: laneMetrics(),
 		AnswerCounters: map[string]int64{
 			"memory.citation.required":   runtimeMetricState.citationRequired.Load(),

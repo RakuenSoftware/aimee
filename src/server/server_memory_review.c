@@ -97,6 +97,15 @@ int handle_memory_reject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddStringToObject(request, "view", "server");
    server_memory_scope_begin(req);
    kb_client_memory_scope_context_apply(request);
+   /* Forward preconditions unchanged; the Go owner validates them. Retain
+    * unsupported retry keys too, so they fail explicitly rather than disappearing. */
+   const char *conditions[] = {"expected_version", "idempotency_key", NULL};
+   for (int i = 0; conditions[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, conditions[i]);
+      if (value)
+         cJSON_AddItemToObject(request, conditions[i], cJSON_Duplicate(value, 1));
+   }
    char *raw = kb_v1_action_request("memory.reject", request);
    kb_client_memory_scope_context_clear();
    cJSON *parsed = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
@@ -139,6 +148,15 @@ cJSON *memory_restore_command(cJSON *req)
    cJSON *request = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(request);
    jo_add_i64(request, "id", id);
+   /* Forward preconditions unchanged; the Go owner validates them. Retain
+    * unsupported retry keys too, so they fail explicitly rather than disappearing. */
+   const char *conditions[] = {"expected_version", "idempotency_key", NULL};
+   for (int i = 0; conditions[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, conditions[i]);
+      if (value)
+         cJSON_AddItemToObject(request, conditions[i], cJSON_Duplicate(value, 1));
+   }
    char *raw = kb_v1_action_request("memory.restore", request);
    kb_client_memory_scope_context_clear();
    return memory_review_response(raw, id);

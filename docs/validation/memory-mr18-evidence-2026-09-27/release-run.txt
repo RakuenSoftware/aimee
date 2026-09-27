@@ -1,0 +1,5 @@
+./modules/memory: 131 required tests passed
+./modules/execution-policy: 17 required tests passed
+./modules/aimee/families: 12 required tests passed
+./cmd/aimee-module: 3 required tests passed
+./modules/memory/cmd/aimee-memory-eval: 10 required tests passed

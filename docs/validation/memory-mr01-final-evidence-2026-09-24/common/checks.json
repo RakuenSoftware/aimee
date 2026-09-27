@@ -1,0 +1,950 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 177.899
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 179.995
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 179.713
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 157.627
+  },
+  {
+    "name": "Common fixture compatibility search and windows",
+    "passed": true,
+    "elapsed_ms": 171.424
+  },
+  {
+    "name": "Common fixture query route top_l2_facts",
+    "passed": true,
+    "elapsed_ms": 145.303
+  },
+  {
+    "name": "Common fixture query route load_eval_corpus",
+    "passed": true,
+    "elapsed_ms": 130.488
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority",
+    "passed": true,
+    "elapsed_ms": 151.642
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority_like",
+    "passed": true,
+    "elapsed_ms": 125.22
+  },
+  {
+    "name": "Common fixture query route search_facts_patterns_by_keyword",
+    "passed": true,
+    "elapsed_ms": 130.453
+  },
+  {
+    "name": "Common fixture diagnostic retrieval",
+    "passed": true,
+    "elapsed_ms": 162.798
+  },
+  {
+    "name": "Answer evidence retains project current parents",
+    "passed": true,
+    "elapsed_ms": 161.181
+  },
+  {
+    "name": "Answer evidence retains workspace current parents",
+    "passed": true,
+    "elapsed_ms": 170.014
+  },
+  {
+    "name": "Common fixture recall bundle with legacy project",
+    "passed": true,
+    "elapsed_ms": 202.224
+  },
+  {
+    "name": "Common fixture assembled project context",
+    "passed": true,
+    "elapsed_ms": 157.846
+  },
+  {
+    "name": "Common fixture assembled workspace context",
+    "passed": true,
+    "elapsed_ms": 163.045
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 173.769
+  },
+  {
+    "name": "Legacy workspace applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 260.998
+  },
+  {
+    "name": "Explicit include_all false restricts to shared audience",
+    "passed": true,
+    "elapsed_ms": 141.895
+  },
+  {
+    "name": "Malformed project cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 108.691
+  },
+  {
+    "name": "Malformed workspace cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 110.307
+  },
+  {
+    "name": "Malformed scope_context cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 116.503
+  },
+  {
+    "name": "Malformed include_all cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 110.366
+  },
+  {
+    "name": "Common fixture graph-only evidence-backed traversal",
+    "passed": true,
+    "elapsed_ms": 152.063
+  },
+  {
+    "name": "Common fixture current current",
+    "passed": true,
+    "elapsed_ms": 131.803
+  },
+  {
+    "name": "Common fixture historical current",
+    "passed": true,
+    "elapsed_ms": 146.334
+  },
+  {
+    "name": "Common fixture current future",
+    "passed": true,
+    "elapsed_ms": 131.737
+  },
+  {
+    "name": "Common fixture historical future",
+    "passed": true,
+    "elapsed_ms": 126.319
+  },
+  {
+    "name": "Common fixture current expired",
+    "passed": true,
+    "elapsed_ms": 139.227
+  },
+  {
+    "name": "Common fixture historical expired",
+    "passed": true,
+    "elapsed_ms": 137.848
+  },
+  {
+    "name": "Common fixture current suppressed",
+    "passed": true,
+    "elapsed_ms": 145.11
+  },
+  {
+    "name": "Common fixture historical suppressed",
+    "passed": true,
+    "elapsed_ms": 143.17
+  },
+  {
+    "name": "Common fixture current superseded",
+    "passed": true,
+    "elapsed_ms": 134.814
+  },
+  {
+    "name": "Common fixture historical superseded",
+    "passed": true,
+    "elapsed_ms": 138.174
+  },
+  {
+    "name": "Common fixture current archived",
+    "passed": true,
+    "elapsed_ms": 127.938
+  },
+  {
+    "name": "Common fixture historical archived",
+    "passed": true,
+    "elapsed_ms": 173.111
+  },
+  {
+    "name": "Common fixture current quarantined",
+    "passed": true,
+    "elapsed_ms": 144.822
+  },
+  {
+    "name": "Common fixture historical quarantined",
+    "passed": true,
+    "elapsed_ms": 133.988
+  },
+  {
+    "name": "Common fixture current deleted",
+    "passed": true,
+    "elapsed_ms": 128.313
+  },
+  {
+    "name": "Common fixture historical deleted",
+    "passed": true,
+    "elapsed_ms": 141.807
+  },
+  {
+    "name": "Common fixture current revoked",
+    "passed": true,
+    "elapsed_ms": 121.087
+  },
+  {
+    "name": "Common fixture historical revoked",
+    "passed": true,
+    "elapsed_ms": 138.892
+  },
+  {
+    "name": "Common fixture current cross-scope",
+    "passed": true,
+    "elapsed_ms": 124.358
+  },
+  {
+    "name": "Common fixture historical cross-scope",
+    "passed": true,
+    "elapsed_ms": 136.738
+  },
+  {
+    "name": "Legacy graph query honors project",
+    "passed": true,
+    "elapsed_ms": 146.181
+  },
+  {
+    "name": "Legacy graph query honors workspace",
+    "passed": true,
+    "elapsed_ms": 144.22
+  },
+  {
+    "name": "Legacy provenance audience current",
+    "passed": true,
+    "elapsed_ms": 138.989
+  },
+  {
+    "name": "Legacy provenance audience cross-scope",
+    "passed": true,
+    "elapsed_ms": 131.197
+  },
+  {
+    "name": "Legacy link audience excludes foreign endpoints",
+    "passed": true,
+    "elapsed_ms": 135.515
+  },
+  {
+    "name": "Legacy conflict audience excludes foreign parents",
+    "passed": true,
+    "elapsed_ms": 126.136
+  },
+  {
+    "name": "Operator statistics honor project without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 135.774
+  },
+  {
+    "name": "Console effectiveness retains project restriction",
+    "passed": true,
+    "elapsed_ms": 183.289
+  },
+  {
+    "name": "Dashboard transport retains project and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Operator statistics honor workspace without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 130.324
+  },
+  {
+    "name": "Console effectiveness retains workspace restriction",
+    "passed": true,
+    "elapsed_ms": 141.929
+  },
+  {
+    "name": "Dashboard transport retains workspace and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Directive matched recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 184.191
+  },
+  {
+    "name": "Directive fallback recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 198.548
+  },
+  {
+    "name": "Session directive briefing retains project parent scope",
+    "passed": true
+  },
+  {
+    "name": "Directive matched recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 166.217
+  },
+  {
+    "name": "Directive fallback recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 208.012
+  },
+  {
+    "name": "Session directive briefing retains workspace parent scope",
+    "passed": true
+  },
+  {
+    "name": "Hard rule collection is observed before insertion",
+    "passed": true
+  },
+  {
+    "name": "New mandatory rule invalidates earlier recall",
+    "passed": true
+  },
+  {
+    "name": "Hard rule rows and collection have current observations",
+    "passed": true
+  },
+  {
+    "name": "Hard rule edit and restoration invalidate earlier selection",
+    "passed": true
+  },
+  {
+    "name": "Structured project recall observes roots and exact parents",
+    "passed": true
+  },
+  {
+    "name": "Structured project recall survives surfacing counters",
+    "passed": true
+  },
+  {
+    "name": "Structured project directive edit refuses earlier selection",
+    "passed": true
+  },
+  {
+    "name": "Structured project directive restore cannot revive earlier revision",
+    "passed": true
+  },
+  {
+    "name": "Structured project directive refresh admits a new decision",
+    "passed": true
+  },
+  {
+    "name": "Structured project reminder edit refuses earlier selection",
+    "passed": true
+  },
+  {
+    "name": "Structured project reminder restore cannot revive earlier revision",
+    "passed": true
+  },
+  {
+    "name": "Structured project reminder refresh admits a new decision",
+    "passed": true
+  },
+  {
+    "name": "Send guard project durably acquires current sources",
+    "passed": true,
+    "elapsed_ms": 162.727
+  },
+  {
+    "name": "Send guard project blocks edit after admission",
+    "passed": true
+  },
+  {
+    "name": "Send guard project preserves recall accounting",
+    "passed": true
+  },
+  {
+    "name": "Send guard project deadline does not unlock an unresolved send",
+    "passed": true
+  },
+  {
+    "name": "Send guard project releases before later work",
+    "passed": true,
+    "elapsed_ms": 135.615
+  },
+  {
+    "name": "Send guard project later edit invalidates earlier decision",
+    "passed": true
+  },
+  {
+    "name": "Send guard project refuses stale reacquisition",
+    "passed": true,
+    "elapsed_ms": 163.631
+  },
+  {
+    "name": "Send guard project refusal rolls back its lease",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace recall observes roots and exact parents",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace recall survives surfacing counters",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace directive edit refuses earlier selection",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace directive restore cannot revive earlier revision",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace directive refresh admits a new decision",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace reminder edit refuses earlier selection",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace reminder restore cannot revive earlier revision",
+    "passed": true
+  },
+  {
+    "name": "Structured workspace reminder refresh admits a new decision",
+    "passed": true
+  },
+  {
+    "name": "Send guard workspace durably acquires current sources",
+    "passed": true,
+    "elapsed_ms": 165.533
+  },
+  {
+    "name": "Send guard workspace blocks edit after admission",
+    "passed": true
+  },
+  {
+    "name": "Send guard workspace preserves recall accounting",
+    "passed": true
+  },
+  {
+    "name": "Send guard workspace deadline does not unlock an unresolved send",
+    "passed": true
+  },
+  {
+    "name": "Unresolved guard survives owner termination and database restart",
+    "passed": true
+  },
+  {
+    "name": "Restart does not admit protected mutation",
+    "passed": true
+  },
+  {
+    "name": "Recovery verifies sending owner is stopped",
+    "passed": true
+  },
+  {
+    "name": "Owner resumes after explicit orphan recovery",
+    "passed": true
+  },
+  {
+    "name": "Send guard workspace releases before later work",
+    "passed": true,
+    "elapsed_ms": 154.275
+  },
+  {
+    "name": "Send guard workspace later edit invalidates earlier decision",
+    "passed": true
+  },
+  {
+    "name": "Send guard workspace refuses stale reacquisition",
+    "passed": true,
+    "elapsed_ms": 165.201
+  },
+  {
+    "name": "Send guard workspace refusal rolls back its lease",
+    "passed": true
+  },
+  {
+    "name": "Derived episode parent current",
+    "passed": true,
+    "elapsed_ms": 146.947
+  },
+  {
+    "name": "Diagnostic match explanation current parent current",
+    "passed": true,
+    "elapsed_ms": 130.206
+  },
+  {
+    "name": "Derived scene members parent current",
+    "passed": true,
+    "elapsed_ms": 126.356
+  },
+  {
+    "name": "Retained fact history audience and erasure current",
+    "passed": true,
+    "elapsed_ms": 145.812
+  },
+  {
+    "name": "Derived episode parent future",
+    "passed": true,
+    "elapsed_ms": 119.517
+  },
+  {
+    "name": "Diagnostic match explanation current parent future",
+    "passed": true,
+    "elapsed_ms": 115.338
+  },
+  {
+    "name": "Derived scene members parent future",
+    "passed": true,
+    "elapsed_ms": 126.126
+  },
+  {
+    "name": "Retained fact history audience and erasure future",
+    "passed": true,
+    "elapsed_ms": 135.792
+  },
+  {
+    "name": "Derived episode parent expired",
+    "passed": true,
+    "elapsed_ms": 130.025
+  },
+  {
+    "name": "Diagnostic match explanation current parent expired",
+    "passed": true,
+    "elapsed_ms": 136.332
+  },
+  {
+    "name": "Derived scene members parent expired",
+    "passed": true,
+    "elapsed_ms": 113.314
+  },
+  {
+    "name": "Retained fact history audience and erasure expired",
+    "passed": true,
+    "elapsed_ms": 151.728
+  },
+  {
+    "name": "Derived episode parent suppressed",
+    "passed": true,
+    "elapsed_ms": 151.104
+  },
+  {
+    "name": "Diagnostic match explanation current parent suppressed",
+    "passed": true,
+    "elapsed_ms": 121.905
+  },
+  {
+    "name": "Derived scene members parent suppressed",
+    "passed": true,
+    "elapsed_ms": 160.11
+  },
+  {
+    "name": "Retained fact history audience and erasure suppressed",
+    "passed": true,
+    "elapsed_ms": 163.597
+  },
+  {
+    "name": "Derived episode parent superseded",
+    "passed": true,
+    "elapsed_ms": 144.592
+  },
+  {
+    "name": "Diagnostic match explanation current parent superseded",
+    "passed": true,
+    "elapsed_ms": 127.578
+  },
+  {
+    "name": "Derived scene members parent superseded",
+    "passed": true,
+    "elapsed_ms": 148.239
+  },
+  {
+    "name": "Retained fact history audience and erasure superseded",
+    "passed": true,
+    "elapsed_ms": 121.255
+  },
+  {
+    "name": "Derived episode parent archived",
+    "passed": true,
+    "elapsed_ms": 145.76
+  },
+  {
+    "name": "Diagnostic match explanation current parent archived",
+    "passed": true,
+    "elapsed_ms": 155.506
+  },
+  {
+    "name": "Derived scene members parent archived",
+    "passed": true,
+    "elapsed_ms": 133.402
+  },
+  {
+    "name": "Retained fact history audience and erasure archived",
+    "passed": true,
+    "elapsed_ms": 131.962
+  },
+  {
+    "name": "Derived episode parent quarantined",
+    "passed": true,
+    "elapsed_ms": 134.288
+  },
+  {
+    "name": "Diagnostic match explanation current parent quarantined",
+    "passed": true,
+    "elapsed_ms": 122.102
+  },
+  {
+    "name": "Derived scene members parent quarantined",
+    "passed": true,
+    "elapsed_ms": 146.867
+  },
+  {
+    "name": "Retained fact history audience and erasure quarantined",
+    "passed": true,
+    "elapsed_ms": 134.149
+  },
+  {
+    "name": "Derived episode parent deleted",
+    "passed": true,
+    "elapsed_ms": 124.419
+  },
+  {
+    "name": "Diagnostic match explanation current parent deleted",
+    "passed": true,
+    "elapsed_ms": 124.097
+  },
+  {
+    "name": "Derived scene members parent deleted",
+    "passed": true,
+    "elapsed_ms": 125.504
+  },
+  {
+    "name": "Retained fact history audience and erasure deleted",
+    "passed": true,
+    "elapsed_ms": 120.947
+  },
+  {
+    "name": "Derived episode parent revoked",
+    "passed": true,
+    "elapsed_ms": 131.671
+  },
+  {
+    "name": "Diagnostic match explanation current parent revoked",
+    "passed": true,
+    "elapsed_ms": 124.58
+  },
+  {
+    "name": "Derived scene members parent revoked",
+    "passed": true,
+    "elapsed_ms": 144.645
+  },
+  {
+    "name": "Retained fact history audience and erasure revoked",
+    "passed": true,
+    "elapsed_ms": 120.035
+  },
+  {
+    "name": "Derived episode parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 121.736
+  },
+  {
+    "name": "Diagnostic match explanation current parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 133.123
+  },
+  {
+    "name": "Derived scene members parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 131.101
+  },
+  {
+    "name": "Retained fact history audience and erasure cross-scope",
+    "passed": true,
+    "elapsed_ms": 118.293
+  },
+  {
+    "name": "Derived entity_edges current project parents",
+    "passed": true,
+    "elapsed_ms": 139.865
+  },
+  {
+    "name": "Derived search_graph current project parents",
+    "passed": true,
+    "elapsed_ms": 143.215
+  },
+  {
+    "name": "Derived scene list current project parents",
+    "passed": true,
+    "elapsed_ms": 138.082
+  },
+  {
+    "name": "Derived entity profile current project aggregates",
+    "passed": true,
+    "elapsed_ms": 144.414
+  },
+  {
+    "name": "Briefing facts activity and entities retain project parents",
+    "passed": true,
+    "elapsed_ms": 171.094
+  },
+  {
+    "name": "Derived entity_edges current workspace parents",
+    "passed": true,
+    "elapsed_ms": 132.021
+  },
+  {
+    "name": "Derived search_graph current workspace parents",
+    "passed": true,
+    "elapsed_ms": 151.697
+  },
+  {
+    "name": "Derived scene list current workspace parents",
+    "passed": true,
+    "elapsed_ms": 137.186
+  },
+  {
+    "name": "Derived entity profile current workspace aggregates",
+    "passed": true,
+    "elapsed_ms": 128.748
+  },
+  {
+    "name": "Briefing facts activity and entities retain workspace parents",
+    "passed": true,
+    "elapsed_ms": 155.126
+  },
+  {
+    "name": "Relation future interval excludes entity_edges",
+    "passed": true,
+    "elapsed_ms": 112.616
+  },
+  {
+    "name": "Relation future interval excludes search_graph",
+    "passed": true,
+    "elapsed_ms": 151.178
+  },
+  {
+    "name": "Relation future interval excludes profile aggregate",
+    "passed": true,
+    "elapsed_ms": 134.021
+  },
+  {
+    "name": "Relation expired interval excludes entity_edges",
+    "passed": true,
+    "elapsed_ms": 154.934
+  },
+  {
+    "name": "Relation expired interval excludes search_graph",
+    "passed": true,
+    "elapsed_ms": 116.345
+  },
+  {
+    "name": "Relation expired interval excludes profile aggregate",
+    "passed": true,
+    "elapsed_ms": 137.798
+  },
+  {
+    "name": "Relation historical offset instant 2020-01-01T00:00:00Z",
+    "passed": true,
+    "elapsed_ms": 139.144
+  },
+  {
+    "name": "Relation historical offset instant 2020-01-02T00:00:00Z",
+    "passed": true,
+    "elapsed_ms": 121.05
+  },
+  {
+    "name": "Relation historical query rejects relative time",
+    "passed": true,
+    "elapsed_ms": 115.171
+  },
+  {
+    "name": "Semantic assertion search retains project parents",
+    "passed": true,
+    "elapsed_ms": 370.219
+  },
+  {
+    "name": "Semantic facts retains project parents",
+    "passed": true,
+    "elapsed_ms": 151.84
+  },
+  {
+    "name": "Fact projection observes only project source versions",
+    "passed": true
+  },
+  {
+    "name": "Semantic context_block retains project parents",
+    "passed": true,
+    "elapsed_ms": 214.972
+  },
+  {
+    "name": "Typed assertion and episode channels retain project parents",
+    "passed": true,
+    "elapsed_ms": 329.661
+  },
+  {
+    "name": "Typed projection observes only project source versions",
+    "passed": true
+  },
+  {
+    "name": "Semantic assertion search retains workspace parents",
+    "passed": true,
+    "elapsed_ms": 319.781
+  },
+  {
+    "name": "Semantic facts retains workspace parents",
+    "passed": true,
+    "elapsed_ms": 137.713
+  },
+  {
+    "name": "Fact projection observes only workspace source versions",
+    "passed": true
+  },
+  {
+    "name": "Semantic context_block retains workspace parents",
+    "passed": true,
+    "elapsed_ms": 191.162
+  },
+  {
+    "name": "Typed assertion and episode channels retain workspace parents",
+    "passed": true,
+    "elapsed_ms": 331.33
+  },
+  {
+    "name": "Typed projection observes only workspace source versions",
+    "passed": true
+  },
+  {
+    "name": "Operator alerts retain project history without erased parents",
+    "passed": true,
+    "elapsed_ms": 156.089
+  },
+  {
+    "name": "Operator alerts retain workspace history without erased parents",
+    "passed": true,
+    "elapsed_ms": 143.234
+  },
+  {
+    "name": "Activated derived card admits observed current input",
+    "passed": true,
+    "elapsed_ms": 181.535
+  },
+  {
+    "name": "Activated derived card refuses revoked input",
+    "passed": true,
+    "elapsed_ms": 171.193
+  },
+  {
+    "name": "Common native identity project lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 163.782
+  },
+  {
+    "name": "Common native identity workspace lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 170.233
+  },
+  {
+    "name": "Common native preferences project lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 166.093
+  },
+  {
+    "name": "Common native preferences workspace lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 181.639
+  },
+  {
+    "name": "Common native open_commitments project lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 171.023
+  },
+  {
+    "name": "Common native open_commitments workspace lifecycle and scope",
+    "passed": true,
+    "elapsed_ms": 150.435
+  },
+  {
+    "name": "All persistent auxiliary channels observe scoped sources",
+    "passed": true
+  },
+  {
+    "name": "Auxiliary typed observations pass release revalidation",
+    "passed": true
+  },
+  {
+    "name": "Observation retirement invalidates release",
+    "passed": true
+  },
+  {
+    "name": "Retired observation is absent from new projection",
+    "passed": true
+  },
+  {
+    "name": "Procedure withdrawal invalidates release",
+    "passed": true
+  },
+  {
+    "name": "Withdrawn procedure is absent from new projection",
+    "passed": true
+  },
+  {
+    "name": "Summary parent revocation invalidates release",
+    "passed": true
+  },
+  {
+    "name": "Revoked summary parent is absent from new projection",
+    "passed": true
+  },
+  {
+    "name": "Auxiliary sources acquire final send protection",
+    "passed": true
+  },
+  {
+    "name": "Guard blocks observation mutation after admission",
+    "passed": true
+  },
+  {
+    "name": "Guard blocks procedure mutation after admission",
+    "passed": true
+  },
+  {
+    "name": "Guard blocks summary mutation after admission",
+    "passed": true
+  },
+  {
+    "name": "Auxiliary send completes explicitly",
+    "passed": true
+  },
+  {
+    "name": "Historical assertions use requested-time parent eligibility",
+    "passed": true,
+    "elapsed_ms": 571.337
+  },
+  {
+    "name": "Historical relations use requested-time parent eligibility",
+    "passed": true,
+    "elapsed_ms": 139.542
+  },
+  {
+    "name": "Historical typed projection retains authorized old parents",
+    "passed": true,
+    "elapsed_ms": 284.224
+  },
+  {
+    "name": "Historical typed release preserves requested-time policy",
+    "passed": true
+  },
+  {
+    "name": "Revocation after historical selection refuses release",
+    "passed": true
+  }
+]

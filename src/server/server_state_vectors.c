@@ -5,6 +5,7 @@
  * server only forwards flags and reports what came back.
  */
 #include "server.h"
+#include "modules/kb_client/kb_client_cache.h"
 #include "server_state_internal.h"
 
 #include "aimee.h"
@@ -183,6 +184,37 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(msg, sizeof(msg), "DB1 erasure failed; retry request_id=%s", request_id);
       return server_send_error(conn, msg, NULL);
    }
+   /* Reconcile exactly the session set committed by DB1, including sessions
+    * created after the initial enumeration. Its durable hashed receipt survives
+    * a crash here, so the same request ID can finish the second shared pass. */
+   char *receipt_json = db1_server_session_erasure_receipt(request_id, js->valuestring);
+   cJSON *receipt = receipt_json ? cJSON_Parse(receipt_json) : NULL;
+   free(receipt_json);
+   if (!cJSON_IsArray(receipt))
+   {
+      cJSON_Delete(receipt);
+      cJSON_Delete(begin);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "DB1 erasure receipt unavailable; retry request_id=%s",
+               request_id);
+      return server_send_error(conn, msg, NULL);
+   }
+   char *replay_json =
+       kb_client_subject_erasure_begin(request_id, js->valuestring, receipt, &status);
+   cJSON_Delete(receipt);
+   cJSON *replayed = replay_json ? cJSON_Parse(replay_json) : NULL;
+   free(replay_json);
+   if (status != 200 || !replayed)
+   {
+      cJSON_Delete(begin);
+      cJSON_Delete(replayed);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "shared receipt replay failed; retry request_id=%s", request_id);
+      return server_send_error(conn, msg, NULL);
+   }
+   cJSON_Delete(begin);
+   begin = replayed;
+   kb_cache_invalidate_all();
    char *complete_json = kb_client_subject_erasure_complete(request_id, db1_count, &status);
    cJSON *complete = complete_json ? cJSON_Parse(complete_json) : NULL;
    free(complete_json);
@@ -205,6 +237,14 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddNumberToObject(resp, "memory_count", cJSON_IsNumber(mc) ? mc->valuedouble : 0);
    cJSON_AddNumberToObject(resp, "document_count", cJSON_IsNumber(dc) ? dc->valuedouble : 0);
    cJSON_AddBoolToObject(resp, "event_created", cJSON_IsTrue(ec));
+   const cJSON *coverage = cJSON_GetObjectItemCaseSensitive(complete, "coverage_complete");
+   const cJSON *pending = cJSON_GetObjectItemCaseSensitive(complete, "pending_owners");
+   cJSON_AddBoolToObject(resp, "coverage_complete", cJSON_IsTrue(coverage));
+   cJSON_AddStringToObject(resp, "erasure_state",
+                           cJSON_IsTrue(coverage) ? "completed" : "pending_owners");
+   cJSON_AddStringToObject(resp, "coverage_scope", "managed_application_stores");
+   if (cJSON_IsNumber(pending))
+      cJSON_AddNumberToObject(resp, "pending_owners", pending->valuedouble);
    cJSON_Delete(begin);
    cJSON_Delete(complete);
    return server_send_ok(conn, resp);

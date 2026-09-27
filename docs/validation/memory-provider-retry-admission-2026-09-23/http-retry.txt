@@ -1,0 +1,45 @@
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: POST http://127.0.0.1:1/x (provider=test model=test-model timeout=500ms)
+2026-09-23T16:02:42Z ERROR agent_http: TCP connect failed: 127.0.0.1:1
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: HTTP -1 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2, retrying in 1ms (status -1)...
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: POST http://127.0.0.1:1/x (provider=test model=test-model timeout=500ms)
+2026-09-23T16:02:42Z ERROR agent_http: TCP connect failed: 127.0.0.1:1
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: HTTP -1 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/1: POST http://127.0.0.1:1/x (provider=test model=test-model timeout=500ms)
+2026-09-23T16:02:42Z ERROR agent_http: TCP connect failed: 127.0.0.1:1
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/1: HTTP -1 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/3: POST http://127.0.0.1:46525/x (provider=test model=test-model timeout=200ms)
+2026-09-23T16:02:42Z ERROR agent_http: read_response failed: 127.0.0.1:46525
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/3: HTTP -1 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: stall on attempt 1 (provider=test, 201ms of 200ms budget); capping to 2 attempts to bound wall-clock
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2, retrying in 1ms (status -1)...
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: POST http://127.0.0.1:46525/x (provider=test model=test-model timeout=200ms)
+2026-09-23T16:02:42Z ERROR agent_http: read_response failed: 127.0.0.1:46525
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: HTTP -1 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: POST http://127.0.0.1:41001/x (provider=test model=test-model timeout=1000ms)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: HTTP 500 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2, retrying in 20ms (status 500)...
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: POST http://127.0.0.1:41001/x (provider=test model=test-model timeout=1000ms)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2: HTTP 200 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: POST http://127.0.0.1:60323/x (provider=test model=test-model timeout=1000ms)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 1/2: HTTP 500 (provider=test model=test-model)
+2026-09-23T16:02:42Z INFO  http_retry: attempt 2/2, retrying in 20ms (status 500)...
+2026-09-23T16:02:42Z ERROR agent_http: read_response failed: 127.0.0.1:50685
+test_http_retry:
+  retryable status codes: ok
+  non-retryable status codes: ok
+  backoff basic doubling: ok
+  backoff clamped to max: ok
+  backoff overflow safety: ok
+  backoff edge cases: ok
+  backoff small values: ok
+  model loading detection: ok
+  failover status classification: ok
+  failover priority and actions: ok
+  provider-specific failover classification: ok
+  PASS: test_progress_cb_fires_per_attempt
+  PASS: test_stall_caps_retries
+  PASS: frozen retry body and post-backoff admission (refused=0)
+  PASS: frozen retry body and post-backoff admission (refused=1)
+  PASS: test_inflight_http_observes_parallel_cancel (101ms)
+all http_retry tests passed.

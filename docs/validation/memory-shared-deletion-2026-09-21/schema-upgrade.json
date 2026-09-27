@@ -1,0 +1,15 @@
+{
+  "old_source_revision": "9cf2d9917ad13a28540663303dfb4d76d845c80a",
+  "old_schema_sha256": "6bfaed326224601d37631e603455eb5a4c1e99fbdde446c5341f55693be35235",
+  "new_schema_sha256": "6af2108db061b1ceb4806c327450c0e61f3dd6c862590b4e6b09faa8e5830c95",
+  "schema_version_before": 26,
+  "schema_version_after": 27,
+  "new_schema_applications": 2,
+  "checks": {
+    "existing_correction_receipt_fields_unchanged": true,
+    "existing_canonical_record_unchanged": true,
+    "verifier_public_execution_revoked": true,
+    "verifier_runtime_execution_granted": true
+  },
+  "result": "PASS schema 26 -> 27 -> 27 preserves exact prior correction receipt and canonical record; verifier ACL remains restricted"
+}

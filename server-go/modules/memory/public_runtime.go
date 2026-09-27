@@ -12,6 +12,15 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
+	if _, present := args["budget_bytes"]; present {
+		if verb != "assemble_context" {
+			return invalid("budget_bytes requires assemble_context")
+		}
+		if _, err := commandByteLimit(args, "budget_bytes"); err != nil {
+			return invalid(err.Error())
+		}
+		request.AssemblyBudgetBytes = args["budget_bytes"]
+	}
 	switch verb {
 	case "fold_session":
 		request.Operation, request.SessionID = "fold-session", args.stringOr("session_id", "")
@@ -131,6 +140,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return invalid("missing query")
 		}
 		request.Operation, request.ContentCapacity = "fact-recall", 2048
+		request.CollectFactSources = verb == "facts"
 		if verb == "context_block" {
 			request.Operation = "context-ingress"
 			request.BlockType, request.Limit = args.stringOr("block_type", "general"), args.limit("limit", 5, 100)
@@ -151,6 +161,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return invalid("missing entity")
 		}
 		request.Operation, request.Limit = "entity-edges", args.limit("max", 128, 256)
+		scoped = commandScope(args, &request)
 	case "check_drift":
 		var ok bool
 		request.ID, ok = args.positiveID("task_id")
@@ -180,6 +191,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return nil, bus.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok"}
+	if response.RetrievalCapabilities != nil {
+		result["retrieval_capabilities"] = response.RetrievalCapabilities
+	}
 	switch verb {
 	case "fold_session":
 		if response.Count == nil {
@@ -256,6 +270,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			field = "facts"
 		}
 		result[field] = *response.Block
+		if verb == "facts" {
+			result["fact_projection"] = response.FactProjection
+		}
 		if response.Reason != "" {
 			result["retraction"] = response.Reason
 		}
@@ -264,6 +281,10 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return nil, bus.ModuleStatusInternal
 		}
 		result["context"] = *response.Block
+		if request.AssemblyBudgetBytes != nil {
+			limit, _ := commandByteLimit(args, "budget_bytes") // validated before retrieval
+			result["native_context"] = nativeProjectionForText(*response.Block, *limit)
+		}
 		if request.Detail {
 			if response.ContextAssembly == nil {
 				return nil, bus.ModuleStatusInternal

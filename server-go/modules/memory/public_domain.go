@@ -36,13 +36,38 @@ func (args commandArgs) decimalID(name string) (int64, bool) {
 	return args.positiveID(name)
 }
 
+func validCommandScopeArgs(args commandArgs) bool {
+	for _, key := range []string{"workspace", "project"} {
+		if raw, exists := args[key]; exists {
+			var value *string
+			if json.Unmarshal(raw, &value) != nil || value == nil {
+				return false
+			}
+		}
+	}
+	for _, key := range []string{"scope_context", "include_all"} {
+		if raw, exists := args[key]; exists {
+			var value *bool
+			if json.Unmarshal(raw, &value) != nil || value == nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func commandScope(args commandArgs, request *DataRequest) bool {
 	var scoped bool
 	_ = json.Unmarshal(args["scope_context"], &scoped)
+	workspace, project := args.stringOr("workspace", ""), args.stringOr("project", "")
+	// Legacy callers may supply an audience without the newer context marker.
+	// Honor those values instead of silently changing the query to all scopes.
+	scoped = scoped || workspace != "" || project != ""
 	request.IncludeAll = !scoped
+	_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
+	scoped = scoped || !request.IncludeAll
 	if scoped {
-		request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
-		_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
+		request.Workspace, request.Project = workspace, project
 	}
 	return scoped
 }
@@ -92,6 +117,9 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			if !ok {
 				return invalid("memory.search_graph_as_of requires as_of")
 			}
+			if _, err := parseMemoryTime(request.AsOf); err != nil {
+				return invalid(err.Error())
+			}
 		}
 		request.Operation, request.Limit = "relation-search", args.limit("limit", 10, 64)
 		scoped = commandScope(args, &request)
@@ -113,6 +141,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		} else {
 			request.Operation, request.Limit = "link-query", args.limit("max", 32, 64)
 		}
+		scoped = commandScope(args, &request)
 	case "link_create":
 		var sourceOK, targetOK bool
 		request.SourceID, sourceOK = args.decimalID("source_id")
@@ -138,12 +167,15 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.Operation = "link-delete"
 	case "list_conflicts":
 		request.Operation, request.Limit = "conflict-list", args.limit("max", 64, 256)
+		scoped = commandScope(args, &request)
 	case "query_health":
 		request.Operation = "health"
 	case "stats_dashboard":
 		request.Operation = "stats-dashboard"
+		scoped = commandScope(args, &request)
 	case "stats":
 		request.Operation = "stats"
+		scoped = commandScope(args, &request)
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -299,7 +331,10 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			var effectiveness bool
 			_ = json.Unmarshal(args["effectiveness"], &effectiveness)
 			if effectiveness {
-				data, status := handleData(options, invocation, []byte(`{"operation":"effectiveness-stats","include_all":true}`))
+				extraRequest := request
+				extraRequest.Operation = "effectiveness-stats"
+				encoded, _ := json.Marshal(extraRequest)
+				data, status := handleData(options, invocation, encoded)
 				var extra DataResponse
 				if status == bus.ModuleStatusOK && json.Unmarshal(data, &extra) == nil && extra.Effectiveness != nil {
 					e := extra.Effectiveness

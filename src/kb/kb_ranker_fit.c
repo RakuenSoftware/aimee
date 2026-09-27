@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_ranker_fit.c: the Calibrate half of the KB-hybrid ranking substrate.
  * Reads the joined feature/outcome training view, runs the fitter sidecar
  * (scripts/rank-fit.py), benchmark-gates the result, and promotes a
@@ -87,7 +88,7 @@ int kb_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_finger
    cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
    cJSON *arr = cJSON_AddArrayToObject(p, "surfaced_doc_ids");
    for (int i = 0; arr && doc_ids && i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)doc_ids[i]));
+      cJSON_AddItemToArray(arr, jo_i64_value_exact(doc_ids[i]));
    char *payload = cJSON_PrintUnformatted(p);
    cJSON_Delete(p);
    if (!payload)
@@ -134,14 +135,22 @@ int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *ve
    char scope_id[32];
    snprintf(scope_id, sizeof(scope_id), "%lld", (long long)doc_id);
 
-   char payload[512];
-   snprintf(payload, sizeof(payload),
-            "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
-            "\"weight\":%.6f,\"subject_kind\":\"kb_document\"}",
-            event_id, (long long)doc_id, verdict, weight);
-
-   return db2_artifact_write(id, "ranker_outcome", "proposed", "kb_hybrid", scope_id, "", 1.0,
-                             payload);
+   cJSON *record = cJSON_CreateObject();
+   if (!record)
+      return -1;
+   cJSON_AddStringToObject(record, "retrieval_event_id", event_id);
+   cJSON_AddItemToObject(record, "surfaced_row_id", jo_i64_value_exact(doc_id));
+   cJSON_AddStringToObject(record, "verdict", verdict);
+   cJSON_AddNumberToObject(record, "weight", weight);
+   cJSON_AddStringToObject(record, "subject_kind", "kb_document");
+   char *payload = cJSON_PrintUnformatted(record);
+   cJSON_Delete(record);
+   if (!payload)
+      return -1;
+   int rc = db2_artifact_write(id, "ranker_outcome", "proposed", "kb_hybrid", scope_id, "", 1.0,
+                               payload);
+   free(payload);
+   return rc;
 }
 
 /* ---- Phase 1: the training view ------------------------------------------ */
@@ -277,8 +286,9 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
       const char *outcome_kind = cJSON_IsString(subject_kind_j) ? subject_kind_j->valuestring : "";
 
       char subject_id[256];
-      if (cJSON_IsNumber(rid))
-         snprintf(subject_id, sizeof(subject_id), "%lld", (long long)rid->valuedouble);
+      int64_t exact_id;
+      if (jo_read_i64_exact(rid, &exact_id))
+         snprintf(subject_id, sizeof(subject_id), "%" PRId64, exact_id);
       else if (cJSON_IsString(rid))
          snprintf(subject_id, sizeof(subject_id), "%s", rid->valuestring);
       else

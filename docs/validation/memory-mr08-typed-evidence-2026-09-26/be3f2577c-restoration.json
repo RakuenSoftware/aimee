@@ -1,0 +1,6 @@
+{
+  "health_enabled_present": false,
+  "healthy": true,
+  "image": "sha256:9a772ef53bc568897cb2816ce607265a4453f7d8482abf6e27b494d6ff966d62",
+  "configured_image": "aimee-pr2990:be3f2577c"
+}

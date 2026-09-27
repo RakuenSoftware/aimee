@@ -29,6 +29,9 @@ int send_and_free(server_conn_t *conn, cJSON *response)
 static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
+static const char *expected_read_policy;
+static const char *expected_version;
+static int expect_include_version;
 
 int workspace_repo_identity(const char *cwd, char *project, size_t project_cap, char *workspace,
                             size_t workspace_cap)
@@ -90,6 +93,18 @@ memory_authority_t server_account_memory_authority(const char *account)
    return account && !strcmp(account, "user") ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
 }
 static int expected_store_authority;
+static const char *request_account;
+const char *server_request_account(void)
+{
+   return request_account;
+}
+
+static const char *request_principal = "";
+static cJSON *observed_private_context;
+const char *request_context_principal(void)
+{
+   return request_principal;
+}
 
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
@@ -168,11 +183,23 @@ void kb_client_memory_scope_context_apply(cJSON *request)
    cJSON_AddBoolToObject(request, "scope_context", 1);
    cJSON_AddStringToObject(request, "project", "test-project");
 }
+static const char *hygiene_reply;
+static cJSON *hygiene_request;
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (!strcmp(method, "memory.serve") || !strcmp(method, "memory.claim_card") ||
+       !strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity") ||
+       !strcmp(method, "memory.evidence"))
+   {
+      cJSON_Delete(hygiene_request);
+      hygiene_request = request;
+      return hygiene_reply ? strdup(hygiene_reply) : NULL;
+   }
    if (!strcmp(method, "memory.get"))
    {
       calls++;
+      if (expect_include_version)
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "include_version")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "actor") && !cJSON_HasObjectItem(request, "authority"));
       if (get_reply)
@@ -185,6 +212,15 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
       const char *as_of = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "as_of"));
       assert(!strcmp(as_of ? as_of : "", expected_time));
+      const cJSON *policy = cJSON_GetObjectItemCaseSensitive(request, "read_policy");
+      if (expected_read_policy)
+      {
+         char *encoded = cJSON_PrintUnformatted(policy);
+         assert(encoded && !strcmp(encoded, expected_read_policy));
+         free(encoded);
+      }
+      else
+         assert(!policy);
       cJSON_Delete(request);
       if (result)
          return strdup(result < 0 ? "{\"status\":\"error\",\"kind\":\"unavailable\"}"
@@ -203,9 +239,20 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       cJSON_Delete(reply);
       return raw;
    }
-   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete"))
+   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete") ||
+       !strcmp(method, "memory.supersede"))
    {
       store_calls++;
+      if (expected_version)
+      {
+         char *encoded =
+             cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
+         assert(encoded && !strcmp(encoded, expected_version));
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "idempotency_key")),
+             "fixture-retry-key-001"));
+         free(encoded);
+      }
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "include_all"));
       assert(!cJSON_HasObjectItem(request, "actor"));
@@ -220,6 +267,14 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    }
 
    assert(strcmp(method, review_method) == 0);
+   if (!strcmp(method, "memory.restore") && expected_version)
+   {
+      char *encoded =
+          cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
+      assert(encoded && !strcmp(encoded, expected_version));
+      free(encoded);
+      assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(request, "idempotency_key")));
+   }
    if (!strcmp(method, "memory.search"))
    {
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "view")->valuestring, "server"));
@@ -328,6 +383,10 @@ static void test_review_transport(void)
       cJSON_Delete(response);
    }
    review_method = "memory.restore";
+   expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
+                      "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
+   cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
+   cJSON_AddNullToObject(request, "idempotency_key");
    cJSON_AddNumberToObject(request, "id", 42);
    cJSON_AddStringToObject(request, "actor", "forged");
    cJSON_AddStringToObject(request, "authority", "user");
@@ -349,6 +408,7 @@ static void test_review_transport(void)
           0);
    cJSON_Delete(response);
    assert(restore_audits == 3 && restore_successes == 1);
+   expected_version = NULL;
    cJSON_Delete(request);
 }
 
@@ -524,6 +584,84 @@ static void test_search_owner_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_private_validity_owner_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"id\":\"42\"}");
+   private_command_operation = "user-validity";
+   private_command_reply =
+       "{\"status\":\"ok\",\"store\":\"user\",\"decision\":{\"eligible\":true}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   private_command_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":true}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   private_command_operation = NULL;
+   private_command_reply = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
+static void test_validity_owner_transport(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"method\":\"memory.validity\",\"protocol_version\":1,"
+                   "\"store\":\"kb\",\"id\":\"9007199254740993\",\"project\":\"example\"}");
+   hygiene_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":false,\"checked_version\":{"
+                   "\"record_id\":\"9007199254740993\"}}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   assert(!cJSON_HasObjectItem(hygiene_request, "store"));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(hygiene_request, "project")->valuestring,
+                  "example"));
+   hygiene_reply = NULL;
+   handle_memory_validity(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
+static void test_hygiene_owner_transport(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"method\":\"memory.hygiene\",\"protocol_version\":1,\"dry_run\":true,"
+                   "\"scope\":{\"type\":\"project\",\"value\":\"explicit\"},\"max_rows\":2,"
+                   "\"max_content_bytes\":128,\"operation\":\"delete\"}");
+   hygiene_reply = "{\"status\":\"ok\",\"dry_run\":true,\"findings\":[{\"id\":9007199254740993}]}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   cJSON *expected = cJSON_Duplicate(request, 1);
+   cJSON_DeleteItemFromObjectCaseSensitive(expected, "method");
+   cJSON_DeleteItemFromObjectCaseSensitive(expected, "protocol_version");
+   assert(cJSON_Compare(expected, hygiene_request, 1));
+   assert(cJSON_HasObjectItem(request, "method"));
+   cJSON_Delete(expected);
+   hygiene_reply = "{\"status\":\"ok\",\"dry_run\":false,\"findings\":[],\"proposal_writes\":1,"
+                   "\"canonical_writes\":0}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   /* Unknown/mutation arguments reach the owner and its refusal reaches HTTP. */
+   hygiene_reply = "{\"status\":\"error\",\"kind\":\"invalid_argument\"}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "\"http_status\":400"));
+   const char *bad[] = {NULL, "{}", "[]", "{\"status\":\"ok\",\"findings\":[]}",
+                        "{\"status\":\"ok\",\"dry_run\":true,\"findings\":[]} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      hygiene_reply = bad[i];
+      handle_memory_hygiene(NULL, NULL, request);
+      assert(strstr(search_wire_reply, "unavailable"));
+   }
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
 static void test_read_owner_refusal(void)
 {
    cJSON *request = cJSON_CreateObject();
@@ -576,6 +714,27 @@ static void test_get_delete_owner_envelopes(void)
 }
 
 extern int handle_memory_supersede(server_ctx_t *, server_conn_t *, cJSON *);
+static void test_shared_supersede_authority(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"old_id\":42,\"new_content\":\"corrected\","
+                                "\"authority\":\"user\",\"actor\":\"forged\"}");
+   expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
+                      "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
+   cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
+   cJSON_AddStringToObject(request, "idempotency_key", "fixture-retry-key-001");
+   store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993}";
+   for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
+   {
+      request_account = expected_store_authority ? "user" : NULL;
+      handle_memory_supersede(NULL, NULL, request);
+      assert(search_wire_reply && !strcmp(search_wire_reply, store_reply));
+   }
+   request_account = NULL;
+   expected_version = NULL;
+   expected_store_authority = 0;
+   store_reply = NULL;
+   cJSON_Delete(request);
+}
 static void test_private_command_envelopes(void)
 {
    const char *operations[] = {"user-store",  "user-get",       "user-list", "user-search",
@@ -682,6 +841,171 @@ static void test_personal_recall_owner_envelope(void)
    assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
 }
 
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(timeout_ms == 60000);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = cJSON_Duplicate(context, 1);
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+   *result =
+       server_invoke_module_operation(method, operation, args, "user memory module unavailable");
+   return *result ? 1 : -1;
+}
+
+static void test_private_verified_context(void)
+{
+   cJSON *request = cJSON_Parse("{\"key\":\"actor\",\"content\":\"content\",\"authority\":\"user\","
+                                "\"principal\":\"forged\",\"operation\":\"forged\"}");
+   private_command_operation = "user-store";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"id\":42}";
+   for (int authenticated = 0; authenticated < 2; ++authenticated)
+      for (int user = 0; user < 2; ++user)
+      {
+         request_account = authenticated ? "user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         cJSON *reply =
+             memory_store_command(request, user ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+         assert(reply);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context,
+                                                              "authenticated")) == authenticated);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (authenticated && user));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "user" : ""));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "transport_identity")),
+                        request_principal));
+         cJSON_Delete(reply);
+      }
+   request_account = "user";
+   request_principal = "verified-device";
+   private_command_operation = "user-mcp-supersede";
+   private_command_reply =
+       "{\"status\":\"ok\",\"store\":\"user\",\"records\":[{\"id\":9007199254740993}]}";
+   cJSON *reply = memory_user_mcp_supersede_command(request);
+   assert(
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context, "authenticated")));
+   assert(
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(observed_private_context, "user_authority")));
+   char *wire = cJSON_PrintUnformatted(reply);
+   assert(wire && strstr(wire, "9007199254740993"));
+   free(wire);
+   cJSON_Delete(reply);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
+static void test_private_correction_review_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"user\",\"proposal_id\":\"fixture\","
+                                "\"action\":\"approve\",\"principal\":\"forged\","
+                                "\"authority\":\"user\"}");
+   for (int review = 0; review < 2; ++review)
+      for (int authenticated = 0; authenticated < 2; ++authenticated)
+      {
+         request_account = authenticated ? "verified-user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         private_command_operation =
+             review ? "user-correction-review" : "user-correction-proposals";
+         private_command_reply = review
+                                     ? "{\"status\":\"ok\",\"store\":\"user\",\"proposal\":{"
+                                       "\"target_version\":{\"record_id\":\"9007199254740993\"}}}"
+                                     : "{\"status\":\"ok\",\"store\":\"user\",\"proposals\":[]}";
+         if (review)
+            handle_memory_review_correction(NULL, NULL, request);
+         else
+            handle_memory_correction_proposals(NULL, NULL, request);
+         assert(search_wire_reply && !strcmp(search_wire_reply, private_command_reply));
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (review && authenticated));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "verified-user" : ""));
+      }
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
+static void test_evidence_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"id\":\"9007199254740993\"}");
+   private_command_operation = "user-evidence";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"evidence\":[],"
+                           "\"independent_support_count\":null}";
+   cJSON *response = materialize_reply(memory_evidence_command(request));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(response, "evidence")));
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(response, "independent_support_count")));
+   cJSON_Delete(response);
+   private_command_operation = private_command_reply = NULL;
+   cJSON_AddStringToObject(request, "store", "kb");
+   hygiene_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"evidence\":[],"
+                   "\"independent_support_count\":null}";
+   response = materialize_reply(memory_evidence_command(request));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(response, "evidence")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "id")),
+                  "9007199254740993"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "scope_context")));
+   cJSON_Delete(response);
+   hygiene_reply = "{\"status\":\"ok\",\"evidence\":{}}";
+   response = materialize_reply(memory_evidence_command(request));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "kind")),
+                  SERVER_ERR_UNAVAILABLE));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   hygiene_reply = NULL;
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+}
+
+static void test_served_view_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"view\":\"historical_context\",\"task\":"
+                                "\"atlas\",\"valid_at\":\"2025-01-01T00:00:00Z\",\"context_"
+                                "limits\":{\"schema_version\":1,\"max_context_bytes\":0}}");
+   hygiene_reply = "{\"status\":\"degraded\",\"store\":\"kb\",\"receipt\":{"
+                   "\"id\":9007199254740993},\"rendered_context\":\"\"}";
+   handle_memory_serve(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "view")),
+                  "historical_context"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "task")),
+                  "atlas"));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "valid_at")),
+               "2025-01-01T00:00:00Z"));
+   assert(
+       cJSON_GetObjectItemCaseSensitive(
+           cJSON_GetObjectItemCaseSensitive(hygiene_request, "context_limits"), "max_context_bytes")
+           ->valuedouble == 0);
+   cJSON_Delete(request);
+   request = cJSON_Parse("{\"store\":\"user\",\"view\":\"briefing\",\"task\":\"atlas\"}");
+   private_command_operation = "user-serve";
+   private_command_reply = "{\"status\":\"degraded\",\"store\":\"user\",\"receipt\":{},"
+                           "\"omissions\":[\"unsupported_channel\"]}";
+   handle_memory_serve(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   private_command_operation = "user-claim-card";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"claim\":{"
+                           "\"id\":9007199254740993}}";
+   cJSON_AddStringToObject(request, "id", "9007199254740993");
+   handle_memory_claim_card(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   cJSON_Delete(request);
+   private_command_operation = private_command_reply = hygiene_reply = NULL;
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -716,6 +1040,20 @@ int main(void)
    }
    assert(calls == 6 && clears == calls);
    cJSON_Delete(request);
+   result = 0;
+   expected_read_policy =
+       "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
+   request = cJSON_Parse("{\"store\":\"kb\",\"id\":42}");
+   cJSON_AddItemToObject(request, "read_policy", cJSON_Parse(expected_read_policy));
+   cJSON_AddBoolToObject(request, "include_version", 1);
+   expect_include_version = 1;
+   response = materialize_reply(memory_get_command(request));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(response, "memory")));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   expected_read_policy = NULL;
+   expect_include_version = 0;
+   test_evidence_transport();
    test_store_confidence();
    test_review_transport();
    test_store_owner_envelope();
@@ -725,7 +1063,14 @@ int main(void)
    test_search_owner_transport();
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
+   test_private_validity_owner_transport();
+   test_validity_owner_transport();
+   test_hygiene_owner_transport();
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
+   test_shared_supersede_authority();
+   test_private_verified_context();
+   test_private_correction_review_transport();
+   test_served_view_transport();
    return 0;
 }

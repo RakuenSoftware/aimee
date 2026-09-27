@@ -745,6 +745,47 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "trajectory.batch");
 }
+/* Dispatch-only handlers; behavior is covered by the owner/transport suites. */
+int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.evidence");
+}
+int handle_task_projection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "task.projection");
+}
+int handle_action_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "action.receipt");
+}
+int handle_memory_serve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.serve");
+}
+int handle_memory_claim_card(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.claim_card");
+}
+int handle_memory_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.receipt");
+}
+int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "learning.application");
+}
+int handle_learning_task_cost(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "learning.task_cost");
+}
+int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.health");
+}
+int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.receipt_forget");
+}
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.search");
@@ -783,6 +824,20 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "memory.delete");
 }
 
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.supersede");
@@ -798,6 +853,15 @@ int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "entities.unmerge");
+}
+int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.validity");
+}
+
+int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.hygiene");
 }
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1599,6 +1663,19 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
    return g_hook_guard_result;
 }
 
+static int g_policy_session_calls;
+static int g_policy_session_reject;
+int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
+                              const char *attempt, char *reason, size_t reason_len)
+{
+   assert(session && tool && arguments);
+   (void)attempt;
+   g_policy_session_calls++;
+   if (g_policy_session_reject)
+      snprintf(reason, reason_len, "session policy denied");
+   return g_policy_session_reject;
+}
+
 static int g_client_non_git_workspace;
 int pre_tool_check_client_workspace(const char *tool_name, const char *tool_input,
                                     session_state_t *state, const char *guardrail_mode,
@@ -2362,6 +2439,7 @@ static void test_hook_identity_session_binding(void)
    snprintf(saved, sizeof(saved), "%s", token);
    cJSON_Delete(json);
 
+   g_policy_session_calls = 0;
    char pre[1024];
    snprintf(pre, sizeof(pre),
             "{\"method\":\"hooks.pre\",\"session_id\":\"bound-session\","
@@ -2373,7 +2451,15 @@ static void test_hook_identity_session_binding(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "trusted") == 0);
    assert(g_client_non_git_workspace == 1);
+   assert(g_policy_session_calls == 1);
    cJSON_Delete(json);
+
+   g_policy_session_reject = 1;
+   json = dispatch_json(ctx, conn, pre, strlen(pre));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(json, "exit_code")) == 2);
+   assert(g_policy_session_calls == 2);
+   cJSON_Delete(json);
+   g_policy_session_reject = 0;
 
    /* The same secret cannot claim a different harness or session. */
    char mismatch[1024];
@@ -2387,6 +2473,7 @@ static void test_hook_identity_session_binding(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "untrusted") == 0);
    assert(g_client_non_git_workspace == 0);
+   assert(g_policy_session_calls == 2);
    cJSON_Delete(json);
 
    hook_session_token_registry_reset();

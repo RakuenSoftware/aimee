@@ -9,25 +9,26 @@ import (
 )
 
 type Directive struct {
-	ID                 int64  `json:"id"`
-	Question           string `json:"question"`
-	Topic              string `json:"topic"`
-	AnchorEntity       string `json:"anchor_entity"`
-	AnchorFile         string `json:"anchor_file"`
-	Cause              string `json:"cause"`
-	Priority           int    `json:"priority"`
-	State              string `json:"state"`
-	MemoryAID          int64  `json:"memory_a_id"`
-	MemoryBID          int64  `json:"memory_b_id"`
-	ResolutionMemoryID int64  `json:"resolution_memory_id"`
-	Evidence           string `json:"evidence"`
-	SourceSession      string `json:"source_session"`
-	SurfacedCount      int    `json:"surfaced_count"`
-	LastSurfacedAt     string `json:"last_surfaced_at"`
-	ResolvedAt         string `json:"resolved_at"`
-	ValidUntil         string `json:"valid_until"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	Source             *typedSourceVersion `json:"source_version,omitempty"`
+	ID                 int64               `json:"id"`
+	Question           string              `json:"question"`
+	Topic              string              `json:"topic"`
+	AnchorEntity       string              `json:"anchor_entity"`
+	AnchorFile         string              `json:"anchor_file"`
+	Cause              string              `json:"cause"`
+	Priority           int                 `json:"priority"`
+	State              string              `json:"state"`
+	MemoryAID          int64               `json:"memory_a_id"`
+	MemoryBID          int64               `json:"memory_b_id"`
+	ResolutionMemoryID int64               `json:"resolution_memory_id"`
+	Evidence           string              `json:"evidence"`
+	SourceSession      string              `json:"source_session"`
+	SurfacedCount      int                 `json:"surfaced_count"`
+	LastSurfacedAt     string              `json:"last_surfaced_at"`
+	ResolvedAt         string              `json:"resolved_at"`
+	ValidUntil         string              `json:"valid_until"`
+	CreatedAt          string              `json:"created_at"`
+	UpdatedAt          string              `json:"updated_at"`
 }
 
 type DirectiveCounts struct {
@@ -48,17 +49,30 @@ func scanDirective(row store.Row, out *Directive) error {
 		&out.LastSurfacedAt, &out.ResolvedAt, &out.ValidUntil, &out.CreatedAt, &out.UpdatedAt)
 }
 
-func scanDirectiveRows(rows store.Rows) ([]Directive, error) {
+func scanDirectiveRows(rows store.Rows, observed ...bool) ([]Directive, error) {
 	defer rows.Close()
 	items := make([]Directive, 0)
 	for rows.Next() {
 		var item Directive
-		if err := rows.Scan(&item.ID, &item.Question, &item.Topic, &item.AnchorEntity,
+		dest := []any{&item.ID, &item.Question, &item.Topic, &item.AnchorEntity,
 			&item.AnchorFile, &item.Cause, &item.Priority, &item.State, &item.MemoryAID,
 			&item.MemoryBID, &item.ResolutionMemoryID, &item.Evidence, &item.SourceSession,
 			&item.SurfacedCount, &item.LastSurfacedAt, &item.ResolvedAt, &item.ValidUntil,
-			&item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.CreatedAt, &item.UpdatedAt}
+		var owner, revision, parents string
+		observe := len(observed) > 0 && observed[0]
+		if observe {
+			dest = append(dest, &owner, &revision, &parents)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
+		}
+		if observe {
+			var err error
+			item.Source, err = structuredSource("memory_directive", owner, revision, parents, item.ID)
+			if err != nil {
+				return nil, err
+			}
 		}
 		items = append(items, item)
 	}
@@ -189,14 +203,34 @@ WHERE state='open' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 	return count, nil
 }
 
+// Open questions may quote their referenced memories. Every nonzero parent
+// must remain current and visible; an unrelated visible input cannot authorize
+// another hidden input. Unlinked authored questions retain their own lifecycle.
+func currentDirectiveParentsSQL(alias string) string {
+	return `NOT EXISTS(SELECT 1 FROM (VALUES (` + alias + `.memory_a_id),
+ (` + alias + `.memory_b_id),(` + alias + `.resolution_memory_id)) directive_input(id)
+ WHERE directive_input.id IS DISTINCT FROM 0 AND NOT EXISTS(
+ SELECT 1 FROM memories directive_parent WHERE directive_parent.id=directive_input.id
+ AND ` + currentMemorySQL("directive_parent.") + ` LIMIT 1))`
+}
+
 func (s *postgresDataStore) DirectiveMatch(ctx context.Context, turn, entity, file string, limit int) ([]Directive, error) {
+	return s.directiveMatch(ctx, turn, entity, file, limit, false)
+}
+
+func (s *postgresDataStore) directiveMatch(ctx context.Context, turn, entity, file string, limit int, observe bool) ([]Directive, error) {
 	started := time.Now()
 	defer runtimeMetricState.directiveCalls.observe(started)
 	if err := s.requireKBDirective(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives
+	columns := directiveColumns
+	if observe {
+		columns += structuredSourceColumns("epistemic_directives")
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+columns+` FROM epistemic_directives
 WHERE state='open' AND `+memoryUnexpiredSQL("")+`
+AND `+currentDirectiveParentsSQL("epistemic_directives")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
      ($1<>'' AND (lower(question) LIKE '%'||lower($1)||'%' OR
@@ -208,7 +242,7 @@ priority DESC, created_at DESC LIMIT $4`, turn, entity, file, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanDirectiveRows(rows)
+	return scanDirectiveRows(rows, observe)
 }
 
 func (s *postgresDataStore) DirectiveMarkSurfaced(ctx context.Context, id int64) (bool, error) {

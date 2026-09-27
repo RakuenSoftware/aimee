@@ -1,0 +1,54 @@
+[
+  {
+    "name": "fixture config memory_recall_enabled",
+    "passed": true
+  },
+  {
+    "name": "fixture config ingress_preinject_enabled",
+    "passed": true
+  },
+  {
+    "name": "fixture config code_context_mode",
+    "passed": true
+  },
+  {
+    "name": "owned activation session",
+    "passed": true
+  },
+  {
+    "name": "activation provider pinned",
+    "passed": true
+  },
+  {
+    "name": "primary scope completes",
+    "passed": true
+  },
+  {
+    "name": "primary coverage completes",
+    "passed": true
+  },
+  {
+    "name": "activated literal-zero discovery cap returns a structured restriction",
+    "passed": true
+  },
+  {
+    "name": "activated contract expands from the owned indexed miss",
+    "passed": true
+  },
+  {
+    "name": "bounded fallback reads actual contradictory source",
+    "passed": true
+  },
+  {
+    "name": "primary activated completes",
+    "passed": true
+  },
+  {
+    "name": "activated native recovery reaches five provider turns",
+    "passed": true
+  },
+  {
+    "name": "primary revoked completes",
+    "passed": true
+  }
+]

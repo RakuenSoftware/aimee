@@ -1,0 +1,75 @@
+{
+  "sources": [
+    {
+      "channel": "native_directives",
+      "stable_id": "8",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "8",
+          "record_revision": "3"
+        },
+        "memory_parents": [
+          {
+            "schema_version": 1,
+            "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+            "record_id": "11",
+            "record_revision": "2"
+          }
+        ],
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_directives",
+      "stable_id": "14",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "14",
+          "record_revision": "1"
+        },
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_reminders",
+      "stable_id": "1",
+      "source_version": {
+        "record_kind": "memory_reminder",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "c9d62c8d-a6f6-4bef-ba8b-dab2d62c7d38",
+          "record_id": "1",
+          "record_revision": "5"
+        },
+        "memory_parent_state": "observed"
+      }
+    }
+  ],
+  "admission": {
+    "check_id": "bb57b1d03f7742c5a3bef05f04cbdb9f",
+    "eligible": true,
+    "lease_ms": 5000,
+    "send_guard": "acquired",
+    "sources_digest": "cfd16ce64ff136fffaaf280c89078faeab58fb321e24281b2e3c7fe44a3ae01d",
+    "status": "ok"
+  },
+  "release": {
+    "check_id": "bb57b1d03f7742c5a3bef05f04cbdb9f",
+    "eligible": true,
+    "send_guard": "released",
+    "sources_digest": "cfd16ce64ff136fffaaf280c89078faeab58fb321e24281b2e3c7fe44a3ae01d",
+    "status": "ok"
+  },
+  "stale_reacquisition": {
+    "check_id": "e23b58f66247498ea3bd1845536dd476",
+    "eligible": false,
+    "sources_digest": "cfd16ce64ff136fffaaf280c89078faeab58fb321e24281b2e3c7fe44a3ae01d",
+    "status": "ok"
+  }
+}

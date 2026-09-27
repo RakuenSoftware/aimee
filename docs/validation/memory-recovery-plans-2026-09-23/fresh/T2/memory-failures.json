@@ -1,0 +1,121 @@
+[
+  {
+    "role": "kb",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "kb",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "kb",
+    "operation": "delete-as",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "recall-bundle",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "recall-bundle",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "correction-review",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "delete",
+    "trace": "0",
+    "status": 5,
+    "error_class": "sqlstate_23514"
+  },
+  {
+    "role": "server",
+    "operation": "other",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "get",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "recall-bundle",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "store",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "supersede",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "delete",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  },
+  {
+    "role": "server",
+    "operation": "get",
+    "trace": "0",
+    "status": 5,
+    "error_class": "internal"
+  }
+]

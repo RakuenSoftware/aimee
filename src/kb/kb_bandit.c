@@ -3,6 +3,7 @@
  */
 
 #include "kb_bandit.h"
+#include "kb_bandit_registry.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/bandit.h"
 #include "modules/db2/c/db2_internal.h"
@@ -131,6 +132,10 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       return -1;
    if (!decision_point || !arm_ids || n_arms <= 0)
       return -1;
+
+   const kb_bandit_decision_point_t *point = kb_bandit_registry_get(decision_point);
+   if (point && !strcmp(point->status, "observe"))
+      return -1; /* Keep prior artifacts, but do not route from count-trained weights. */
 
    /* Budget Gate: refuse exploration when the observed window fraction is
     * already at or above the configured budget. Below a minimum sample count
@@ -285,13 +290,35 @@ int kb_bandit_reward(const char *decision_point, const char *decision_id, const 
    return db2_bandit_arm_stats_update(decision_point, arm_id, reward, new_alpha, new_beta);
 }
 
-double kb_bandit_recall_sufficiency_reward(int n_results, int limit)
+kb_bandit_result_count_t kb_bandit_result_count_availability(int n_results, int limit)
 {
-   if (n_results <= 0)
-      return 0.0;
-   if (limit > 0 && n_results >= limit)
-      return 0.5; /* truncated at the cap: a larger limit might have helped */
-   return 1.0;    /* sufficient recall without truncation */
+   kb_bandit_result_count_t result = {n_results > 0 ? n_results : 0,
+                                      limit > 0 && n_results >= limit};
+   return result;
+}
+
+int kb_bandit_record_result_count(const char *decision_id, int n_results, int limit)
+{
+   if (!decision_id || !decision_id[0] || n_results < 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   kb_bandit_result_count_t result = kb_bandit_result_count_availability(n_results, limit);
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE bandit_decisions SET result_count=?1,result_truncated=?2"
+                        " WHERE id=?3 AND result_count IS NULL",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", result.result_count);
+   aimee_pg_bind_int(st, "?2", result.truncated);
+   aimee_pg_bind_text(st, "?3", decision_id);
+   int rc = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE ? 0 : -1;
+   aimee_pg_finalize(st);
+   return rc;
 }
 
 /* ---- replay evidence ---- */

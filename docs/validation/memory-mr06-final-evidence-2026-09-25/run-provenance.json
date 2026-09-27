@@ -1,0 +1,14 @@
+{
+  "T2": {
+    "evidence_directory": "/opt/pr2990-evidence/mr06-50874e508",
+    "application_commit": "50874e508",
+    "harness_commit": "50874e508",
+    "actual_exit": 0
+  },
+  "T3": {
+    "evidence_directory": "/opt/pr2990-evidence/mr06-t3-bbc95e548",
+    "application_commit": "50874e508",
+    "harness_commit": "bbc95e548",
+    "actual_exit": 0
+  }
+}

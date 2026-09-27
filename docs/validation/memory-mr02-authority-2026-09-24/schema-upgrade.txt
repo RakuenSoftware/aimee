@@ -1,0 +1,1522 @@
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+NOTICE:  relation "rules" already exists, skipping
+NOTICE:  relation "projects" already exists, skipping
+NOTICE:  column "lifecycle_state" of relation "projects" already exists, skipping
+NOTICE:  column "current_generation" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_lifecycle" already exists, skipping
+NOTICE:  relation "code_index_project_state" already exists, skipping
+NOTICE:  relation "code_scan_sessions" already exists, skipping
+NOTICE:  relation "idx_code_scan_sessions_project" already exists, skipping
+NOTICE:  relation "code_scan_manifest_files" already exists, skipping
+NOTICE:  relation "code_project_aliases" already exists, skipping
+NOTICE:  relation "idx_code_project_alias_project" already exists, skipping
+NOTICE:  relation "code_project_generations" already exists, skipping
+NOTICE:  relation "idx_code_project_generation_state" already exists, skipping
+NOTICE:  relation "files" already exists, skipping
+NOTICE:  constraint "files_project_id_path_key" of relation "files" does not exist, skipping
+NOTICE:  relation "idx_files_project_generation_path" already exists, skipping
+NOTICE:  column "language" of relation "files" already exists, skipping
+NOTICE:  column "vendored" of relation "files" already exists, skipping
+NOTICE:  relation "file_exports" already exists, skipping
+NOTICE:  relation "file_imports" already exists, skipping
+NOTICE:  column "is_system" of relation "file_imports" already exists, skipping
+NOTICE:  relation "terms" already exists, skipping
+NOTICE:  column "line_end" of relation "terms" already exists, skipping
+NOTICE:  column "def_kind" of relation "terms" already exists, skipping
+NOTICE:  relation "stopwords" already exists, skipping
+NOTICE:  relation "entity_edges" already exists, skipping
+NOTICE:  relation "memories" already exists, skipping
+NOTICE:  column "scope_type" of relation "memories" already exists, skipping
+NOTICE:  column "scope_value" of relation "memories" already exists, skipping
+NOTICE:  column "owner_principal" of relation "memories" already exists, skipping
+NOTICE:  relation "idx_memories_row_scope" already exists, skipping
+NOTICE:  relation "memory_rejection_tombstones" already exists, skipping
+NOTICE:  relation "uq_memory_rejection_fact_active" already exists, skipping
+NOTICE:  relation "uq_memory_rejection_memory_active" already exists, skipping
+NOTICE:  relation "idx_memory_rejection_review" already exists, skipping
+NOTICE:  relation "memory_provenance" already exists, skipping
+NOTICE:  relation "memory_conflicts" already exists, skipping
+NOTICE:  relation "tasks" already exists, skipping
+NOTICE:  relation "task_edges" already exists, skipping
+NOTICE:  relation "decision_log" already exists, skipping
+NOTICE:  relation "kb_audit_outbox" already exists, skipping
+NOTICE:  relation "kb_audit_delivery" already exists, skipping
+NOTICE:  constraint "kb_audit_delivery_audit_seq_fkey" of relation "kb_audit_delivery" does not exist, skipping
+NOTICE:  relation "idx_kb_audit_delivery_seq" already exists, skipping
+NOTICE:  relation "anti_patterns" already exists, skipping
+NOTICE:  relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_fp" already exists, skipping
+NOTICE:  relation "idx_kbenroll_scope" already exists, skipping
+NOTICE:  relation "kb_console_oidc" already exists, skipping
+NOTICE:  relation "workflow_patterns" already exists, skipping
+NOTICE:  relation "tool_registry" already exists, skipping
+NOTICE:  relation "memory_health" already exists, skipping
+NOTICE:  relation "contradiction_log" already exists, skipping
+NOTICE:  relation "memory_workspaces" already exists, skipping
+NOTICE:  relation "kind_lifecycle" already exists, skipping
+NOTICE:  relation "memory_links" already exists, skipping
+NOTICE:  relation "trace_mining_log" already exists, skipping
+NOTICE:  relation "mining_jobs" already exists, skipping
+NOTICE:  relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "scope_kind" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "scope_id" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "task_family" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "action_sequence" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "error_signature" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "environment" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "preconditions" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "outcome" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "recovery_action" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  relation "idx_interaction_event_embeddings_type_id" already exists, skipping
+NOTICE:  relation "idx_interaction_event_embeddings_failure" already exists, skipping
+NOTICE:  relation "code_calls" already exists, skipping
+NOTICE:  relation "file_contents" already exists, skipping
+NOTICE:  relation "kb_runtime_state" already exists, skipping
+NOTICE:  relation "notes" already exists, skipping
+NOTICE:  relation "agent_hints" already exists, skipping
+NOTICE:  relation "collab_rules" already exists, skipping
+NOTICE:  relation "collab_rules_meta" already exists, skipping
+NOTICE:  relation "kb_meta" already exists, skipping
+NOTICE:  relation "kb_documents" already exists, skipping
+NOTICE:  column "owner_principal" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_subject_erasure_request" already exists, skipping
+NOTICE:  relation "kb_async_jobs" already exists, skipping
+NOTICE:  constraint "kb_async_jobs_document_id_fkey" of relation "kb_async_jobs" does not exist, skipping
+NOTICE:  column "next_attempt_at" of relation "kb_async_jobs" already exists, skipping
+NOTICE:  relation "memory_aliases" already exists, skipping
+NOTICE:  relation "memory_entities" already exists, skipping
+NOTICE:  relation "memory_temporal_refs" already exists, skipping
+NOTICE:  relation "memory_event_frames" already exists, skipping
+NOTICE:  relation "memory_summaries" already exists, skipping
+NOTICE:  relation "retrieval_shortcuts" already exists, skipping
+NOTICE:  relation "memory_chunks" already exists, skipping
+NOTICE:  relation "memory_units" already exists, skipping
+NOTICE:  relation "memory_unit_edges" already exists, skipping
+NOTICE:  relation "memory_episodes" already exists, skipping
+NOTICE:  relation "memory_relations" already exists, skipping
+NOTICE:  relation "memory_scopes" already exists, skipping
+NOTICE:  relation "entity_profiles" already exists, skipping
+NOTICE:  relation "memory_lineage" already exists, skipping
+NOTICE:  relation "memory_scenes" already exists, skipping
+NOTICE:  relation "memory_scene_members" already exists, skipping
+NOTICE:  relation "memory_relation_schema" already exists, skipping
+NOTICE:  relation "memory_active_embedder" already exists, skipping
+NOTICE:  relation "memory_reembed_progress" already exists, skipping
+NOTICE:  relation "memory_coref_audit" already exists, skipping
+NOTICE:  relation "curator_invalidation_events" already exists, skipping
+NOTICE:  relation "code_index_ops" already exists, skipping
+NOTICE:  relation "vector_index_ops" already exists, skipping
+NOTICE:  relation "memory_promotion_approvals" already exists, skipping
+NOTICE:  relation "prospective_memories" already exists, skipping
+NOTICE:  relation "epistemic_directives" already exists, skipping
+NOTICE:  relation "failed_queries" already exists, skipping
+NOTICE:  relation "working_profile_state" already exists, skipping
+NOTICE:  relation "working_profile_observations" already exists, skipping
+NOTICE:  relation "curiosity_items" already exists, skipping
+NOTICE:  relation "learning_signals" already exists, skipping
+NOTICE:  relation "learning_proposals" already exists, skipping
+NOTICE:  relation "learning_proposal_fate" already exists, skipping
+NOTICE:  relation "learning_observations" already exists, skipping
+NOTICE:  relation "learning_observation_evidence" already exists, skipping
+NOTICE:  relation "learning_application_events" already exists, skipping
+NOTICE:  relation "idx_learning_application_procedure" already exists, skipping
+NOTICE:  relation "idx_learning_application_observation" already exists, skipping
+NOTICE:  relation "idx_kb_async_jobs_status" already exists, skipping
+NOTICE:  relation "kb_ingest_queue" already exists, skipping
+NOTICE:  column "priority" of relation "kb_ingest_queue" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_status" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_claim" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_dedup" already exists, skipping
+NOTICE:  relation "kb_file_index" already exists, skipping
+NOTICE:  column "owner_principal" of relation "kb_file_index" already exists, skipping
+NOTICE:  constraint "kb_file_index_project_file_path_key" of relation "kb_file_index" does not exist, skipping
+NOTICE:  relation "idx_kb_file_index_project_generation_path" already exists, skipping
+NOTICE:  relation "idx_kb_file_index_project" already exists, skipping
+NOTICE:  relation "idx_files_path" already exists, skipping
+NOTICE:  relation "idx_terms_name" already exists, skipping
+NOTICE:  relation "idx_fi_name" already exists, skipping
+NOTICE:  relation "idx_fe_name" already exists, skipping
+NOTICE:  relation "idx_file_exports_file_id" already exists, skipping
+NOTICE:  relation "idx_file_imports_file_id" already exists, skipping
+NOTICE:  relation "idx_terms_file_id" already exists, skipping
+NOTICE:  relation "idx_code_calls_file_id" already exists, skipping
+NOTICE:  relation "idx_code_calls_callee" already exists, skipping
+NOTICE:  relation "idx_ee_source" already exists, skipping
+NOTICE:  relation "idx_ee_target" already exists, skipping
+NOTICE:  relation "idx_mem_tier" already exists, skipping
+NOTICE:  relation "idx_mem_kind" already exists, skipping
+NOTICE:  relation "idx_mem_key" already exists, skipping
+NOTICE:  relation "idx_memories_sensitivity" already exists, skipping
+NOTICE:  relation "idx_mp_mem" already exists, skipping
+NOTICE:  relation "idx_mc_unresolved" already exists, skipping
+NOTICE:  relation "idx_tasks_state" already exists, skipping
+NOTICE:  relation "idx_tasks_parent" already exists, skipping
+NOTICE:  relation "idx_te_source" already exists, skipping
+NOTICE:  relation "idx_te_target" already exists, skipping
+NOTICE:  relation "idx_dl_task" already exists, skipping
+NOTICE:  column "status" of relation "decision_log" already exists, skipping
+NOTICE:  column "revisit_when" of relation "decision_log" already exists, skipping
+NOTICE:  column "supersedes_id" of relation "decision_log" already exists, skipping
+NOTICE:  column "subject" of relation "decision_log" already exists, skipping
+NOTICE:  column "author" of relation "decision_log" already exists, skipping
+NOTICE:  column "linked_policy_id" of relation "decision_log" already exists, skipping
+NOTICE:  relation "idx_dl_active_scope" already exists, skipping
+NOTICE:  relation "idx_dl_revisit" already exists, skipping
+NOTICE:  relation "idx_agent_hints_lookup" already exists, skipping
+NOTICE:  relation "idx_memory_workspaces_workspace" already exists, skipping
+NOTICE:  relation "idx_memory_aliases_memory" already exists, skipping
+NOTICE:  relation "idx_memory_aliases_alias" already exists, skipping
+NOTICE:  relation "idx_memory_entities_entity" already exists, skipping
+NOTICE:  relation "idx_memory_entities_memory" already exists, skipping
+NOTICE:  relation "idx_memory_temporal_refs_ref" already exists, skipping
+NOTICE:  relation "idx_memory_temporal_refs_memory" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_actor" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_action" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_event_time" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_memory" already exists, skipping
+NOTICE:  relation "idx_memory_summaries_scope" already exists, skipping
+NOTICE:  relation "idx_retrieval_shortcuts_promoted" already exists, skipping
+NOTICE:  relation "idx_memory_chunks_memory" already exists, skipping
+NOTICE:  relation "idx_memory_units_memory" already exists, skipping
+NOTICE:  relation "idx_memory_units_type" already exists, skipping
+NOTICE:  relation "idx_memory_units_key" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_src" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_dst" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_type" already exists, skipping
+NOTICE:  relation "idx_kb_documents_project" already exists, skipping
+NOTICE:  relation "idx_memory_units_kind" already exists, skipping
+NOTICE:  relation "idx_memory_units_kind_key" already exists, skipping
+NOTICE:  relation "idx_entity_profiles_refreshed" already exists, skipping
+NOTICE:  relation "idx_kb_docs_prev" already exists, skipping
+NOTICE:  relation "idx_kb_docs_next" already exists, skipping
+NOTICE:  relation "idx_ml_object" already exists, skipping
+NOTICE:  relation "idx_msm_memory" already exists, skipping
+NOTICE:  relation "idx_mrs_rel" already exists, skipping
+NOTICE:  relation "idx_mca_memory" already exists, skipping
+NOTICE:  relation "idx_mca_session" already exists, skipping
+NOTICE:  relation "idx_vio_status" already exists, skipping
+NOTICE:  relation "idx_vio_memory_id" already exists, skipping
+NOTICE:  relation "idx_mpa_target" already exists, skipping
+NOTICE:  relation "idx_prospective_state" already exists, skipping
+NOTICE:  relation "idx_prospective_state_valid" already exists, skipping
+NOTICE:  relation "idx_prospective_anchor_entity" already exists, skipping
+NOTICE:  relation "idx_prospective_anchor_file" already exists, skipping
+NOTICE:  relation "idx_memories_lifecycle_ttl" already exists, skipping
+NOTICE:  relation "idx_memories_lifecycle" already exists, skipping
+NOTICE:  relation "idx_directives_state" already exists, skipping
+NOTICE:  relation "idx_directives_state_priority" already exists, skipping
+NOTICE:  relation "idx_directives_anchor_entity" already exists, skipping
+NOTICE:  relation "idx_directives_anchor_file" already exists, skipping
+NOTICE:  relation "idx_directives_cause" already exists, skipping
+NOTICE:  relation "idx_directives_dedup_contradiction" already exists, skipping
+NOTICE:  relation "idx_directives_dedup_topic" already exists, skipping
+NOTICE:  relation "idx_memories_cognified_kind" already exists, skipping
+NOTICE:  relation "idx_working_profile_obs_field" already exists, skipping
+NOTICE:  relation "idx_working_profile_obs_field_value" already exists, skipping
+NOTICE:  relation "idx_curiosity_state" already exists, skipping
+NOTICE:  relation "idx_curiosity_gap_type" already exists, skipping
+NOTICE:  relation "idx_curiosity_target" already exists, skipping
+NOTICE:  relation "idx_curiosity_dedup_missing_fact" already exists, skipping
+NOTICE:  relation "idx_learning_signals_type" already exists, skipping
+NOTICE:  relation "idx_learning_proposals_state" already exists, skipping
+NOTICE:  relation "idx_learning_proposals_target" already exists, skipping
+NOTICE:  relation "idx_learning_observations_scope" already exists, skipping
+NOTICE:  relation "idx_learning_observation_evidence_source" already exists, skipping
+NOTICE:  extension "pg_trgm" already exists, skipping
+NOTICE:  column "provenance_category" of relation "memories" already exists, skipping
+NOTICE:  column "use_cases" of relation "memories" already exists, skipping
+NOTICE:  column "confidence_ceiling" of relation "memories" already exists, skipping
+NOTICE:  column "activation_sticky_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_cooldown_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_delay_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_suppressed" of relation "memories" already exists, skipping
+NOTICE:  column "memories_fts_tsv" of relation "memories" already exists, skipping
+NOTICE:  column "memory_negation_fts_tsv" of relation "memories" already exists, skipping
+NOTICE:  column "memories_code_fts_text" of relation "memories" already exists, skipping
+NOTICE:  relation "memories_fts_gin" already exists, skipping
+NOTICE:  relation "memory_negation_fts_gin" already exists, skipping
+NOTICE:  relation "memories_code_fts_trgm_gin" already exists, skipping
+NOTICE:  column "chunk_strategy" of relation "kb_documents" already exists, skipping
+NOTICE:  column "doc_kind" of relation "kb_documents" already exists, skipping
+NOTICE:  column "chunk_context" of relation "kb_documents" already exists, skipping
+NOTICE:  column "kb_fts_tsv" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_fts_gin" already exists, skipping
+NOTICE:  column "page_start" of relation "kb_documents" already exists, skipping
+NOTICE:  column "page_end" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_doc_regions" already exists, skipping
+NOTICE:  relation "idx_kb_doc_regions_chunk" already exists, skipping
+NOTICE:  relation "idx_kb_doc_regions_dockey" already exists, skipping
+NOTICE:  column "sensitivity_class" of relation "kb_documents" already exists, skipping
+NOTICE:  column "quarantine_state" of relation "kb_documents" already exists, skipping
+NOTICE:  column "sensitivity_class" of relation "kb_doc_regions" already exists, skipping
+NOTICE:  column "tsr_state" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_table_cells" already exists, skipping
+NOTICE:  relation "idx_kb_table_cells_dockey" already exists, skipping
+NOTICE:  relation "idx_kb_table_cells_region" already exists, skipping
+NOTICE:  relation "kb_doc_assets" already exists, skipping
+NOTICE:  column "project" of relation "kb_doc_assets" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_project" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_dockey" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_blob" already exists, skipping
+NOTICE:  column "memory_chunks_fts_tsv" of relation "memory_chunks" already exists, skipping
+NOTICE:  relation "memory_chunks_fts_gin" already exists, skipping
+NOTICE:  column "memory_units_fts_tsv" of relation "memory_units" already exists, skipping
+NOTICE:  relation "memory_units_fts_gin" already exists, skipping
+NOTICE:  column "prospective_memories_fts_tsv" of relation "prospective_memories" already exists, skipping
+NOTICE:  relation "prospective_memories_fts_gin" already exists, skipping
+NOTICE:  column "epistemic_directives_fts_tsv" of relation "epistemic_directives" already exists, skipping
+NOTICE:  relation "epistemic_directives_fts_gin" already exists, skipping
+NOTICE:  column "code_fts_tsv" of relation "file_contents" already exists, skipping
+NOTICE:  relation "code_fts_gin" already exists, skipping
+NOTICE:  column "content" of relation "kb_file_index" already exists, skipping
+NOTICE:  relation "kb_code_unit_jobs" already exists, skipping
+NOTICE:  column "next_attempt_at" of relation "kb_code_unit_jobs" already exists, skipping
+NOTICE:  constraint "kb_code_unit_jobs_project_file_path_symbol_key" of relation "kb_code_unit_jobs" does not exist, skipping
+NOTICE:  relation "idx_kb_code_unit_jobs_project_generation_symbol" already exists, skipping
+NOTICE:  relation "idx_kb_code_unit_jobs_status" already exists, skipping
+NOTICE:  relation "sketch_store" already exists, skipping
+NOTICE:  relation "kb_minhash_signatures" already exists, skipping
+NOTICE:  relation "idx_kb_minhash_signatures_project" already exists, skipping
+NOTICE:  relation "kb_lsh_buckets" already exists, skipping
+NOTICE:  relation "idx_kb_lsh_buckets_lookup" already exists, skipping
+NOTICE:  relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_kind_state" already exists, skipping
+NOTICE:  relation "idx_artifacts_scope" already exists, skipping
+NOTICE:  relation "idx_artifacts_retrieval_attr" already exists, skipping
+NOTICE:  relation "idx_artifacts_demotion_profile" already exists, skipping
+NOTICE:  relation "evidence_index_ops" already exists, skipping
+NOTICE:  relation "idx_evidence_index_ops_status" already exists, skipping
+NOTICE:  relation "learning_synth_ops" already exists, skipping
+NOTICE:  relation "idx_learning_synth_ops_status" already exists, skipping
+NOTICE:  relation "artifact_citations" already exists, skipping
+NOTICE:  relation "artifact_links" already exists, skipping
+NOTICE:  relation "audit_events" already exists, skipping
+NOTICE:  relation "idx_audit_events_artifact" already exists, skipping
+NOTICE:  relation "idx_audit_events_surface" already exists, skipping
+NOTICE:  relation "feature_rows" already exists, skipping
+NOTICE:  relation "idx_feature_rows_kind_ts" already exists, skipping
+NOTICE:  relation "report_enrichments" already exists, skipping
+NOTICE:  relation "idx_report_enrichments_subject" already exists, skipping
+NOTICE:  relation "idx_report_enrichments_kind_ts" already exists, skipping
+NOTICE:  relation "bandit_decisions" already exists, skipping
+NOTICE:  column "is_exploration" of relation "bandit_decisions" already exists, skipping
+NOTICE:  relation "idx_bandit_decisions_point" already exists, skipping
+NOTICE:  relation "idx_bandit_decisions_explore" already exists, skipping
+NOTICE:  relation "bandit_arm_stats" already exists, skipping
+NOTICE:  relation "bandit_promotions" already exists, skipping
+NOTICE:  column "last_accessed_at" of relation "artifacts" already exists, skipping
+NOTICE:  column "last_decay_at" of relation "artifacts" already exists, skipping
+NOTICE:  relation "kb_maintenance_runs" already exists, skipping
+NOTICE:  relation "idx_kb_maintenance_runs_at" already exists, skipping
+NOTICE:  column "reflected_at" of relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_review" already exists, skipping
+NOTICE:  column "turn_id" of relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_turn_event" already exists, skipping
+NOTICE:  relation "docs" already exists, skipping
+NOTICE:  relation "idx_docs_state_review" already exists, skipping
+NOTICE:  relation "idx_docs_content_hash" already exists, skipping
+NOTICE:  column "doc_type" of relation "docs" already exists, skipping
+NOTICE:  column "doc_type_confidence" of relation "docs" already exists, skipping
+NOTICE:  relation "idx_docs_doc_type" already exists, skipping
+NOTICE:  relation "document_sections" already exists, skipping
+NOTICE:  relation "idx_document_sections_doc" already exists, skipping
+NOTICE:  relation "idx_document_sections_parent" already exists, skipping
+NOTICE:  relation "document_references" already exists, skipping
+NOTICE:  relation "idx_doc_refs_from" already exists, skipping
+NOTICE:  relation "idx_doc_refs_to" already exists, skipping
+NOTICE:  relation "idx_doc_refs_resolution" already exists, skipping
+NOTICE:  relation "corpus_processing_jobs" already exists, skipping
+NOTICE:  relation "idx_corpus_jobs_status" already exists, skipping
+NOTICE:  relation "corpus_stage_events" already exists, skipping
+NOTICE:  relation "idx_corpus_stage_events_doc" already exists, skipping
+NOTICE:  relation "document_versions" already exists, skipping
+NOTICE:  relation "idx_document_versions_current" already exists, skipping
+NOTICE:  relation "doc_releases" already exists, skipping
+NOTICE:  relation "idx_doc_releases_state" already exists, skipping
+NOTICE:  relation "release_docs" already exists, skipping
+NOTICE:  relation "idx_release_docs_doc_id" already exists, skipping
+NOTICE:  extension "vector" already exists, skipping
+NOTICE:  extension "vectorscale" already exists, skipping
+NOTICE:  relation "memory_embeddings" already exists, skipping
+NOTICE:  relation "kb_embeddings" already exists, skipping
+NOTICE:  relation "kb_pdf_embeddings" already exists, skipping
+NOTICE:  column "generation" of relation "kb_embeddings" already exists, skipping
+NOTICE:  column "generation" of relation "kb_pdf_embeddings" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_generation" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_generation" already exists, skipping
+NOTICE:  relation "curator_entity_vectors" already exists, skipping
+NOTICE:  column "artifact_id" of relation "curator_entity_vectors" already exists, skipping
+NOTICE:  relation "curator_narrative_vectors" already exists, skipping
+NOTICE:  relation "curator_claim_vectors" already exists, skipping
+NOTICE:  relation "curator_code_unit_vectors" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_record_type" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_scope" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_curator_entity_vectors_scope" already exists, skipping
+NOTICE:  relation "idx_curator_narrative_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_entity_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_narrative_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_value_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_intent_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_body_diskann" already exists, skipping
+NOTICE:  relation "exemplar_vectors" already exists, skipping
+NOTICE:  relation "idx_exemplar_vectors_artifact_id" already exists, skipping
+NOTICE:  relation "idx_exemplar_vectors_collection" already exists, skipping
+NOTICE:  relation "evidence_vectors" already exists, skipping
+NOTICE:  relation "idx_evidence_vectors_artifact_id" already exists, skipping
+NOTICE:  relation "idx_evidence_vectors_collection" already exists, skipping
+NOTICE:  relation "code_embeddings" already exists, skipping
+NOTICE:  column "body_hash" of relation "code_embeddings" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_body_hash" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_diskann" already exists, skipping
+NOTICE:  table "db3_backfill" does not exist, skipping
+NOTICE:  table "db3_delivery" does not exist, skipping
+NOTICE:  table "db3_outbox" does not exist, skipping
+NOTICE:  table "db3_provider" does not exist, skipping
+NOTICE:  table "db3_projection" does not exist, skipping
+NOTICE:  relation "reasoning_rulesets" already exists, skipping
+NOTICE:  relation "idx_reasoning_rulesets_active" already exists, skipping
+NOTICE:  relation "memory_recall_shadow_deltas" already exists, skipping
+NOTICE:  relation "idx_mrsd_query_created" already exists, skipping
+NOTICE:  relation "idx_mrsd_project_created" already exists, skipping
+NOTICE:  column "utility_touched_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "structural_weight" of relation "entity_edges" already exists, skipping
+NOTICE:  column "edge_origin" of relation "entity_edges" already exists, skipping
+NOTICE:  column "edge_class" of relation "entity_edges" already exists, skipping
+NOTICE:  column "confidence_class" of relation "entity_edges" already exists, skipping
+NOTICE:  column "confidence" of relation "entity_edges" already exists, skipping
+NOTICE:  column "asserted_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "superseded_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "suppressed" of relation "entity_edges" already exists, skipping
+NOTICE:  column "assertion_kind" of relation "entity_edges" already exists, skipping
+NOTICE:  column "lifecycle_state" of relation "entity_edges" already exists, skipping
+NOTICE:  column "authority_rank" of relation "entity_edges" already exists, skipping
+NOTICE:  column "actor_principal" of relation "entity_edges" already exists, skipping
+NOTICE:  column "version" of relation "entity_edges" already exists, skipping
+NOTICE:  column "prior_version_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "commit_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "invalidated_at" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_fact_lifecycle" already exists, skipping
+NOTICE:  relation "idx_entity_edges_fact_commit" already exists, skipping
+NOTICE:  column "identity_key" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_identity" already exists, skipping
+NOTICE:  column "identity_subject_key" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_identity_subject" already exists, skipping
+NOTICE:  relation "fact_evidence" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_assertion" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_source" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_ingest" already exists, skipping
+NOTICE:  relation "memory_fact_actors" already exists, skipping
+NOTICE:  relation "fact_graph_commits" already exists, skipping
+NOTICE:  relation "fact_graph_changes" already exists, skipping
+NOTICE:  relation "idx_fact_graph_changes_commit" already exists, skipping
+NOTICE:  relation "idx_fact_graph_changes_assertion" already exists, skipping
+NOTICE:  relation "fact_review_actions" already exists, skipping
+NOTICE:  relation "idx_fact_review_assertion" already exists, skipping
+NOTICE:  relation "fact_erasure_reports" already exists, skipping
+NOTICE:  relation "rel_types" already exists, skipping
+NOTICE:  relation "ontology_evaluations" already exists, skipping
+NOTICE:  relation "entity_registry" already exists, skipping
+NOTICE:  relation "entity_aliases" already exists, skipping
+NOTICE:  relation "idx_entity_aliases_cid" already exists, skipping
+NOTICE:  relation "entity_merges" already exists, skipping
+NOTICE:  relation "entity_name_conflicts" already exists, skipping
+NOTICE:  relation "entity_nodes" already exists, skipping
+NOTICE:  relation "idx_entity_nodes_project" already exists, skipping
+NOTICE:  relation "idx_entity_nodes_kind" already exists, skipping
+NOTICE:  relation "entity_node_aliases" already exists, skipping
+NOTICE:  relation "idx_entity_node_aliases_alias" already exists, skipping
+NOTICE:  relation "idx_entity_node_aliases_project_alias" already exists, skipping
+NOTICE:  relation "code_projection_generations" already exists, skipping
+NOTICE:  relation "idx_cpg_project_state" already exists, skipping
+NOTICE:  relation "idx_cpg_one_visible_project" already exists, skipping
+NOTICE:  relation "code_projection_edges" already exists, skipping
+NOTICE:  relation "idx_cpe_project_triple" already exists, skipping
+NOTICE:  relation "code_projection_communities" already exists, skipping
+NOTICE:  relation "idx_cpc_gen_community" already exists, skipping
+NOTICE:  relation "lessons_outcome_ledger" already exists, skipping
+NOTICE:  relation "idx_lessons_ledger_project" already exists, skipping
+NOTICE:  relation "idx_lessons_ledger_finding" already exists, skipping
+NOTICE:  relation "lessons_outcome_citations" already exists, skipping
+NOTICE:  column "projection_generation_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "structural_updated_at" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_ee_source_relation" already exists, skipping
+NOTICE:  relation "idx_ee_target_relation" already exists, skipping
+NOTICE:  relation "idx_ee_origin_source" already exists, skipping
+NOTICE:  relation "idx_ee_projection_generation" already exists, skipping
+NOTICE:  column "trust" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_trust" already exists, skipping
+NOTICE:  relation "cross_repo_meta" already exists, skipping
+NOTICE:  column "review_overflow_dropped" of relation "cross_repo_meta" already exists, skipping
+NOTICE:  relation "blocked_symbols" already exists, skipping
+NOTICE:  relation "idx_blocked_symbols_version" already exists, skipping
+NOTICE:  relation "cross_repo_review_queue" already exists, skipping
+NOTICE:  relation "idx_crrq_evict_open" already exists, skipping
+NOTICE:  relation "idx_crrq_caller" already exists, skipping
+NOTICE:  relation "cross_repo_trust_audit" already exists, skipping
+NOTICE:  relation "idx_crta_project" already exists, skipping
+NOTICE:  relation "cross_repo_identity" already exists, skipping
+NOTICE:  relation "idx_cri_lookup" already exists, skipping
+NOTICE:  relation "cross_repo_route" already exists, skipping
+NOTICE:  relation "idx_crr_caller" already exists, skipping
+NOTICE:  relation "idx_crr_definer" already exists, skipping
+NOTICE:  relation "cross_repo_build_dep" already exists, skipping
+NOTICE:  relation "idx_crbd_caller" already exists, skipping
+NOTICE:  relation "css_rules" already exists, skipping
+NOTICE:  relation "css_declarations" already exists, skipping
+NOTICE:  relation "idx_css_rules_file" already exists, skipping
+NOTICE:  relation "idx_css_rules_selector" already exists, skipping
+NOTICE:  relation "idx_css_decl_rule" already exists, skipping
+NOTICE:  relation "idx_css_decl_property" already exists, skipping
+NOTICE:  relation "css_component_styles" already exists, skipping
+NOTICE:  relation "idx_css_comp_file" already exists, skipping
+NOTICE:  relation "idx_css_comp_token" already exists, skipping
+NOTICE:  relation "css_migration_units" already exists, skipping
+NOTICE:  constraint "css_migration_units_project_unit_path_key" of relation "css_migration_units" does not exist, skipping
+NOTICE:  relation "idx_css_migration_units_project_generation_path" already exists, skipping
+NOTICE:  relation "idx_css_migration_project" already exists, skipping
+NOTICE:  relation "css_render_snapshots" already exists, skipping
+NOTICE:  constraint "css_render_snapshots_project_unit_path_phase_key" of relation "css_render_snapshots" does not exist, skipping
+NOTICE:  relation "idx_css_render_snapshots_project_generation_phase" already exists, skipping
+NOTICE:  relation "idx_css_render_snapshots_unit" already exists, skipping
+NOTICE:  relation "typed_facts" already exists, skipping
+NOTICE:  relation "idx_typed_facts_subject" already exists, skipping
+NOTICE:  relation "idx_typed_facts_relation" already exists, skipping
+NOTICE:  relation "kb_team" already exists, skipping
+NOTICE:  relation "kb_project" already exists, skipping
+NOTICE:  relation "kb_team_membership" already exists, skipping
+NOTICE:  relation "idx_kbmember_default" already exists, skipping
+NOTICE:  relation "idx_kbmember_team" already exists, skipping
+NOTICE:  relation "kb_project_membership" already exists, skipping
+NOTICE:  relation "idx_kbprojmember_id" already exists, skipping
+NOTICE:  relation "kb_admin_grant" already exists, skipping
+NOTICE:  relation "kb_oidc_jwks" already exists, skipping
+NOTICE:  relation "idx_kbjwks_issuer" already exists, skipping
+NOTICE:  column "cert_issuer" of relation "kb_enrollments" already exists, skipping
+NOTICE:  column "cert_serial_norm" of relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_issuer_serial" already exists, skipping
+NOTICE:  column "kb_project" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_kb_project" already exists, skipping
+NOTICE:  relation "org_model_pricing" already exists, skipping
+NOTICE:  relation "org_model_pricing_current" already exists, skipping
+NOTICE:  relation "kb_team_lead" already exists, skipping
+NOTICE:  relation "idx_kbteamlead_id" already exists, skipping
+NOTICE:  relation "org_token_audit" already exists, skipping
+NOTICE:  relation "idx_org_audit_team" already exists, skipping
+NOTICE:  relation "idx_org_audit_state" already exists, skipping
+NOTICE:  relation "idx_org_audit_created" already exists, skipping
+NOTICE:  relation "org_spend_rollup" already exists, skipping
+NOTICE:  relation "idx_org_rollup_key" already exists, skipping
+NOTICE:  relation "org_vault_salt" already exists, skipping
+NOTICE:  relation "org_vault_secret" already exists, skipping
+NOTICE:  column "hwm_attestation" of relation "org_vault_secret" already exists, skipping
+NOTICE:  relation "idx_org_vault_secret_team" already exists, skipping
+NOTICE:  relation "idx_org_vault_secret_slot" already exists, skipping
+NOTICE:  relation "org_vault_current" already exists, skipping
+NOTICE:  relation "kb_vault_control" already exists, skipping
+NOTICE:  relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "old_vendor_ref" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "new_vendor_ref" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "revoke_receipt" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "failure_phase" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_owner" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_token" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_until" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_active_slot" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_active_key" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_team" already exists, skipping
+NOTICE:  relation "org_vault_key_use_intent" already exists, skipping
+NOTICE:  column "seal_epoch" of relation "org_vault_key_use_intent" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_operation" already exists, skipping
+NOTICE:  column "failure_from_state" of relation "kb_vault_rewrap_operation" already exists, skipping
+NOTICE:  schema "aimee_kb_vault_orchestrator_api" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_dek_stage" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_check_stage" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_worm" already exists, skipping
+NOTICE:  relation "kb_vault_open_event" already exists, skipping
+NOTICE:  constraint "kb_vault_rewrap_worm_check" of relation "kb_vault_rewrap_worm" does not exist, skipping
+NOTICE:  function org_vault_rewrap_check_page(text,pg_catalog.int8,text,pg_catalog.int4) does not exist, skipping
+NOTICE:  function aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  function public.org_vault_rewrap_stage_finish(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  relation "kb_vault_witness_shard" already exists, skipping
+NOTICE:  relation "kb_vault_witness_log" already exists, skipping
+NOTICE:  relation "kb_vault_witness_checkpoint" already exists, skipping
+NOTICE:  relation "kb_vault_witness_emit_cursor" already exists, skipping
+NOTICE:  function kb_audit_worm_append_internal(text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  schema "aimee_kb_worm_api" already exists, skipping
+NOTICE:  function aimee_kb_worm_api.drain(pg_catalog.int4) does not exist, skipping
+NOTICE:  function kb_audit_worm_drain(pg_catalog.int4) does not exist, skipping
+NOTICE:  function kb_audit_worm_append_internal(text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  relation "org_model_catalog" already exists, skipping
+NOTICE:  column "bedrock_api" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "model_family" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "bedrock_target_type" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_partition" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_invoke_region" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_account" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_region_set" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "underlying_fm_arns" of relation "org_model_catalog" already exists, skipping
+NOTICE:  constraint "org_model_catalog_wire_check" of relation "org_model_catalog" does not exist, skipping
+NOTICE:  relation "org_model_entitlement" already exists, skipping
+NOTICE:  relation "idx_org_ent_team" already exists, skipping
+NOTICE:  relation "idx_org_ent_model" already exists, skipping
+NOTICE:  relation "org_budget" already exists, skipping
+NOTICE:  relation "idx_org_budget_key" already exists, skipping
+NOTICE:  relation "org_budget_counter" already exists, skipping
+NOTICE:  relation "idx_org_budget_counter_key" already exists, skipping
+NOTICE:  relation "org_budget_reservation" already exists, skipping
+NOTICE:  relation "idx_org_budget_resv_lease" already exists, skipping
+NOTICE:  relation "idx_org_budget_resv_team" already exists, skipping
+NOTICE:  relation "org_budget_reservation_alloc" already exists, skipping
+NOTICE:  relation "idx_org_budget_alloc_resv" already exists, skipping
+NOTICE:  relation "org_rate_policy" already exists, skipping
+NOTICE:  relation "idx_org_rate_policy_key" already exists, skipping
+NOTICE:  relation "org_rate_window" already exists, skipping
+NOTICE:  relation "org_telemetry" already exists, skipping
+NOTICE:  relation "idx_org_telemetry_source" already exists, skipping
+NOTICE:  relation "idx_org_telemetry_team_created" already exists, skipping
+NOTICE:  relation "org_telemetry_allowlist" already exists, skipping
+NOTICE:  relation "kb_cert_revocation_generation" already exists, skipping
+NOTICE:  relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_issuer" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_serial_norm" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_fingerprint" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_issuer" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_serial_norm" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_fingerprint" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "enrollment_op" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_csr_digest" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_csr_digest" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "activation_expires_at" of relation "kb_server_registry" already exists, skipping
+NOTICE:  relation "idx_kb_server_registry_team" already exists, skipping
+NOTICE:  relation "idx_kbsrv_enrollment_op" already exists, skipping
+NOTICE:  relation "idx_kbsrv_client_cert" already exists, skipping
+NOTICE:  relation "idx_kbsrv_mgmt_cert" already exists, skipping
+NOTICE:  relation "idx_kbsrv_client_fp" already exists, skipping
+NOTICE:  relation "idx_kbsrv_mgmt_fp" already exists, skipping
+NOTICE:  relation "kb_write_tier_grant" already exists, skipping
+NOTICE:  relation "idx_kb_write_tier_grant_live" already exists, skipping
+NOTICE:  relation "kb_management_status_key" already exists, skipping
+NOTICE:  column "bootstrap_id" of relation "kb_management_status_key" already exists, skipping
+NOTICE:  column "public_key" of relation "kb_management_status_key" already exists, skipping
+NOTICE:  function kb_management_status_key_bootstrap_stage(text,text,text,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea) does not exist, skipping
+NOTICE:  function kb_management_status_key_bootstrap_resume(text) does not exist, skipping
+NOTICE:  relation "kb_management_status_key_use_intent" already exists, skipping
+NOTICE:  function kb_management_status_key_candidate(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  relation "kb_management_token_root" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_root" already exists, skipping
+NOTICE:  relation "kb_management_token_root_vault_permit" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_candidate" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_generation" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_registry" already exists, skipping
+NOTICE:  relation "kb_management_jwks_manifest_key_use_intent" already exists, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_intent_generation_candidate_id_key" will be truncated to "kb_management_jwks_manifest_key_use_intent_generation_candidate"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_generation_candidate_id_key" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_intent_generation_candidate_id_seal_epoch_key" will be truncated to "kb_management_jwks_manifest_key_use_intent_generation_candidate"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_generation_candidate_id_seal_epoch_key" will be truncated to "kb_management_jwks_manifest_key_use_generation_candidate_id_sea"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_generation_candidate_id_sea" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  relation "kb_management_jwks_publication_permit" already exists, skipping
+NOTICE:  column "authority_id" of relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_authority" already exists, skipping
+NOTICE:  relation "kb_management_instance_grant" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_live_custody" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_live_binding" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_pending_lineage" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_one_successor" already exists, skipping
+NOTICE:  relation "kb_management_instance" already exists, skipping
+NOTICE:  relation "idx_kb_mi_live_custody" already exists, skipping
+NOTICE:  relation "idx_kb_mi_live_binding" already exists, skipping
+NOTICE:  relation "kb_management_instance_issue" already exists, skipping
+NOTICE:  relation "idx_kb_mi_issue_cert_identity" already exists, skipping
+NOTICE:  relation "idx_kb_mi_issue_cert_fingerprint" already exists, skipping
+NOTICE:  function kb_management_instance_begin_initial(text,text,text,text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  relation "org_egress_binding" already exists, skipping
+NOTICE:  relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_prompt_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_completion_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_cache_read_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_cache_write_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "overage_usd" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  relation "idx_org_egress_recover" already exists, skipping
+NOTICE:  function org_egress_dispatch_settle(pg_catalog.int8,text,pg_catalog.int8,text,pg_catalog.int4,pg_catalog.int8,pg_catalog.int8,pg_catalog.int8,pg_catalog.int8,text) does not exist, skipping
+NOTICE:  relation "kb_management_token_intent_namespace" already exists, skipping
+NOTICE:  relation "kb_management_read_intent" already exists, skipping
+NOTICE:  relation "kb_management_read_key_use" already exists, skipping
+NOTICE:  relation "kb_management_identity_intent" already exists, skipping
+NOTICE:  relation "kb_management_action_intent" already exists, skipping
+NOTICE:  column "kind" of relation "kb_management_action_intent" already exists, skipping
+NOTICE:  relation "kb_management_action_outcome" already exists, skipping
+NOTICE:  relation "kb_management_token_key_use_intent" already exists, skipping
+NOTICE:  relation "kb_management_identity_key_use_intent" already exists, skipping
+NOTICE:  column "origin_ref" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "transport_identity" of relation "memory_fact_actors" already exists, skipping
+NOTICE:  column "irreversible_why" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "reverts_changeset" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "closed_at" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "event_id" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "before_state" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "after_state" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "revert_plan" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  relation "memory_evidence_events" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_object" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_changeset" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_correlation" already exists, skipping
+NOTICE:  column "lifecycle_version" of relation "docs" already exists, skipping
+NOTICE:  column "purged_at" of relation "docs" already exists, skipping
+NOTICE:  column "current_changeset" of relation "docs" already exists, skipping
+NOTICE:  column "content_hash" of relation "memories" already exists, skipping
+NOTICE:  column "support_status" of relation "memories" already exists, skipping
+NOTICE:  column "reverify_needed" of relation "memories" already exists, skipping
+NOTICE:  column "support_status" of relation "entity_edges" already exists, skipping
+NOTICE:  column "reverify_needed" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "document_lifecycle_previews" already exists, skipping
+NOTICE:  relation "document_purge_receipts" already exists, skipping
+NOTICE:  relation "derived_memory_registry" already exists, skipping
+NOTICE:  relation "derived_memory_dependencies" already exists, skipping
+NOTICE:  relation "idx_derived_dep_forward" already exists, skipping
+NOTICE:  relation "idx_derived_dep_reverse" already exists, skipping
+NOTICE:  relation "derivation_policy_versions" already exists, skipping
+NOTICE:  relation "derived_rederivation_queue" already exists, skipping
+NOTICE:  relation "work_outcomes" already exists, skipping
+NOTICE:  relation "idx_work_outcome_subject" already exists, skipping
+NOTICE:  relation "evidence_lifecycle_settings" already exists, skipping
+NOTICE:  column "epistemic_kind" of relation "memories" already exists, skipping
+NOTICE:  column "epistemic_kind" of relation "entity_edges" already exists, skipping
+NOTICE:  column "governance_promoted" of relation "memories" already exists, skipping
+NOTICE:  column "governance_promoted" of relation "entity_edges" already exists, skipping
+NOTICE:  column "expiry_days_migration_override" of relation "memories" already exists, skipping
+NOTICE:  relation "epistemic_annotations" already exists, skipping
+NOTICE:  relation "epistemic_resolutions" already exists, skipping
+NOTICE:  relation "knowledge_review_decisions" already exists, skipping
+NOTICE:  column "reverted_by_changeset" of relation "knowledge_review_decisions" already exists, skipping
+NOTICE:  relation "knowledge_corrections" already exists, skipping
+NOTICE:  relation "review_evidence_requests" already exists, skipping
+NOTICE:  column "cardinality" of relation "rel_types" already exists, skipping
+NOTICE:  column "ontology_version" of relation "rel_types" already exists, skipping
+NOTICE:  column "ontology_version" of relation "entity_edges" already exists, skipping
+NOTICE:  column "ontology_quarantined" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "ontology_packages" already exists, skipping
+NOTICE:  relation "ontology_package_relations" already exists, skipping
+NOTICE:  relation "ontology_package_versions" already exists, skipping
+NOTICE:  relation "idx_ontology_one_active" already exists, skipping
+NOTICE:  relation "ontology_dry_runs" already exists, skipping
+NOTICE:  relation "ontology_migration_reports" already exists, skipping
+NOTICE:  relation "recall_traces" already exists, skipping
+NOTICE:  relation "recall_trace_results" already exists, skipping
+NOTICE:  relation "idx_recall_trace_subject" already exists, skipping
+NOTICE:  column "generation" of relation "kb_async_jobs" already exists, skipping
+NOTICE:  relation "memory_embedder_versions" already exists, skipping
+NOTICE:  column "serving_id" of relation "memory_embedder_versions" already exists, skipping
+NOTICE:  relation "memory_embedding_versions" already exists, skipping
+NOTICE:  column "record_revision" of relation "memories" already exists, skipping
+NOTICE:  column "dependency_revision" of relation "memories" already exists, skipping
+NOTICE:  relation "memory_collection_owner" already exists, skipping
+NOTICE:  relation "memory_collection_generations" already exists, skipping
+NOTICE:  relation "memory_invalidation_outbox" already exists, skipping
+NOTICE:  relation "memory_relation_consumer_state" already exists, skipping
+NOTICE:  relation "memory_relation_consumer_positions" already exists, skipping
+NOTICE:  relation "idx_memory_links_target_source" already exists, skipping
+NOTICE:  relation "idx_memory_relation_input_record" already exists, skipping
+NOTICE:  column "record_revision" of relation "epistemic_directives" already exists, skipping
+NOTICE:  column "record_revision" of relation "prospective_memories" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_episodes" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_summaries" already exists, skipping
+NOTICE:  relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "proposal_id" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "operation" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "target_revision" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "scope_type" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "scope_value" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  relation "memory_correction_proposals" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_pending" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_parent" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_recent" already exists, skipping
+NOTICE:  column "memory_record_id" of relation "learning_observations" already exists, skipping
+NOTICE:  relation "learning_observation_memory_record_id" already exists, skipping
+NOTICE:  column "record_revision" of relation "learning_observations" already exists, skipping
+NOTICE:  column "record_revision" of relation "learning_proposals" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_relations" already exists, skipping
+NOTICE:  column "record_revision" of relation "rules" already exists, skipping
+NOTICE:  column "rules_revision" of relation "memory_collection_owner" already exists, skipping
+NOTICE:  relation "memory_send_barrier" already exists, skipping
+NOTICE:  relation "memory_send_leases" already exists, skipping
+NOTICE:  column "sender_identity" of relation "memory_send_leases" already exists, skipping
+NOTICE:  trigger "memory_send_guard" for relation "memory_links" does not exist, skipping
+NOTICE:  trigger "memory_send_truncate_guard" for relation "memory_links" does not exist, skipping
+NOTICE:  trigger "memory_send_guard" for relation "memory_scopes" does not exist, skipping
+NOTICE:  trigger "memory_send_truncate_guard" for relation "memory_scopes" does not exist, skipping
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+NOTICE:  relation "rules" already exists, skipping
+NOTICE:  relation "projects" already exists, skipping
+NOTICE:  column "lifecycle_state" of relation "projects" already exists, skipping
+NOTICE:  column "current_generation" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_lifecycle" already exists, skipping
+NOTICE:  relation "code_index_project_state" already exists, skipping
+NOTICE:  relation "code_scan_sessions" already exists, skipping
+NOTICE:  relation "idx_code_scan_sessions_project" already exists, skipping
+NOTICE:  relation "code_scan_manifest_files" already exists, skipping
+NOTICE:  relation "code_project_aliases" already exists, skipping
+NOTICE:  relation "idx_code_project_alias_project" already exists, skipping
+NOTICE:  relation "code_project_generations" already exists, skipping
+NOTICE:  relation "idx_code_project_generation_state" already exists, skipping
+NOTICE:  relation "files" already exists, skipping
+NOTICE:  constraint "files_project_id_path_key" of relation "files" does not exist, skipping
+NOTICE:  relation "idx_files_project_generation_path" already exists, skipping
+NOTICE:  column "language" of relation "files" already exists, skipping
+NOTICE:  column "vendored" of relation "files" already exists, skipping
+NOTICE:  relation "file_exports" already exists, skipping
+NOTICE:  relation "file_imports" already exists, skipping
+NOTICE:  column "is_system" of relation "file_imports" already exists, skipping
+NOTICE:  relation "terms" already exists, skipping
+NOTICE:  column "line_end" of relation "terms" already exists, skipping
+NOTICE:  column "def_kind" of relation "terms" already exists, skipping
+NOTICE:  relation "stopwords" already exists, skipping
+NOTICE:  relation "entity_edges" already exists, skipping
+NOTICE:  relation "memories" already exists, skipping
+NOTICE:  column "scope_type" of relation "memories" already exists, skipping
+NOTICE:  column "scope_value" of relation "memories" already exists, skipping
+NOTICE:  column "owner_principal" of relation "memories" already exists, skipping
+NOTICE:  relation "idx_memories_row_scope" already exists, skipping
+NOTICE:  relation "memory_rejection_tombstones" already exists, skipping
+NOTICE:  relation "uq_memory_rejection_fact_active" already exists, skipping
+NOTICE:  relation "uq_memory_rejection_memory_active" already exists, skipping
+NOTICE:  relation "idx_memory_rejection_review" already exists, skipping
+NOTICE:  relation "memory_provenance" already exists, skipping
+NOTICE:  relation "memory_conflicts" already exists, skipping
+NOTICE:  relation "tasks" already exists, skipping
+NOTICE:  relation "task_edges" already exists, skipping
+NOTICE:  relation "decision_log" already exists, skipping
+NOTICE:  relation "kb_audit_outbox" already exists, skipping
+NOTICE:  relation "kb_audit_delivery" already exists, skipping
+NOTICE:  constraint "kb_audit_delivery_audit_seq_fkey" of relation "kb_audit_delivery" does not exist, skipping
+NOTICE:  relation "idx_kb_audit_delivery_seq" already exists, skipping
+NOTICE:  relation "anti_patterns" already exists, skipping
+NOTICE:  relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_fp" already exists, skipping
+NOTICE:  relation "idx_kbenroll_scope" already exists, skipping
+NOTICE:  relation "kb_console_oidc" already exists, skipping
+NOTICE:  relation "workflow_patterns" already exists, skipping
+NOTICE:  relation "tool_registry" already exists, skipping
+NOTICE:  relation "memory_health" already exists, skipping
+NOTICE:  relation "contradiction_log" already exists, skipping
+NOTICE:  relation "memory_workspaces" already exists, skipping
+NOTICE:  relation "kind_lifecycle" already exists, skipping
+NOTICE:  relation "memory_links" already exists, skipping
+NOTICE:  relation "trace_mining_log" already exists, skipping
+NOTICE:  relation "mining_jobs" already exists, skipping
+NOTICE:  relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "scope_kind" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "scope_id" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "task_family" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "action_sequence" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "error_signature" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "environment" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "preconditions" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "outcome" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  column "recovery_action" of relation "interaction_event_embeddings" already exists, skipping
+NOTICE:  relation "idx_interaction_event_embeddings_type_id" already exists, skipping
+NOTICE:  relation "idx_interaction_event_embeddings_failure" already exists, skipping
+NOTICE:  relation "code_calls" already exists, skipping
+NOTICE:  relation "file_contents" already exists, skipping
+NOTICE:  relation "kb_runtime_state" already exists, skipping
+NOTICE:  relation "notes" already exists, skipping
+NOTICE:  relation "agent_hints" already exists, skipping
+NOTICE:  relation "collab_rules" already exists, skipping
+NOTICE:  relation "collab_rules_meta" already exists, skipping
+NOTICE:  relation "kb_meta" already exists, skipping
+NOTICE:  relation "kb_documents" already exists, skipping
+NOTICE:  column "owner_principal" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_subject_erasure_request" already exists, skipping
+NOTICE:  relation "kb_async_jobs" already exists, skipping
+NOTICE:  constraint "kb_async_jobs_document_id_fkey" of relation "kb_async_jobs" does not exist, skipping
+NOTICE:  column "next_attempt_at" of relation "kb_async_jobs" already exists, skipping
+NOTICE:  relation "memory_aliases" already exists, skipping
+NOTICE:  relation "memory_entities" already exists, skipping
+NOTICE:  relation "memory_temporal_refs" already exists, skipping
+NOTICE:  relation "memory_event_frames" already exists, skipping
+NOTICE:  relation "memory_summaries" already exists, skipping
+NOTICE:  relation "retrieval_shortcuts" already exists, skipping
+NOTICE:  relation "memory_chunks" already exists, skipping
+NOTICE:  relation "memory_units" already exists, skipping
+NOTICE:  relation "memory_unit_edges" already exists, skipping
+NOTICE:  relation "memory_episodes" already exists, skipping
+NOTICE:  relation "memory_relations" already exists, skipping
+NOTICE:  relation "memory_scopes" already exists, skipping
+NOTICE:  relation "entity_profiles" already exists, skipping
+NOTICE:  relation "memory_lineage" already exists, skipping
+NOTICE:  relation "memory_scenes" already exists, skipping
+NOTICE:  relation "memory_scene_members" already exists, skipping
+NOTICE:  relation "memory_relation_schema" already exists, skipping
+NOTICE:  relation "memory_active_embedder" already exists, skipping
+NOTICE:  relation "memory_reembed_progress" already exists, skipping
+NOTICE:  relation "memory_coref_audit" already exists, skipping
+NOTICE:  relation "curator_invalidation_events" already exists, skipping
+NOTICE:  relation "code_index_ops" already exists, skipping
+NOTICE:  relation "vector_index_ops" already exists, skipping
+NOTICE:  relation "memory_promotion_approvals" already exists, skipping
+NOTICE:  relation "prospective_memories" already exists, skipping
+NOTICE:  relation "epistemic_directives" already exists, skipping
+NOTICE:  relation "failed_queries" already exists, skipping
+NOTICE:  relation "working_profile_state" already exists, skipping
+NOTICE:  relation "working_profile_observations" already exists, skipping
+NOTICE:  relation "curiosity_items" already exists, skipping
+NOTICE:  relation "learning_signals" already exists, skipping
+NOTICE:  relation "learning_proposals" already exists, skipping
+NOTICE:  relation "learning_proposal_fate" already exists, skipping
+NOTICE:  relation "learning_observations" already exists, skipping
+NOTICE:  relation "learning_observation_evidence" already exists, skipping
+NOTICE:  relation "learning_application_events" already exists, skipping
+NOTICE:  relation "idx_learning_application_procedure" already exists, skipping
+NOTICE:  relation "idx_learning_application_observation" already exists, skipping
+NOTICE:  relation "idx_kb_async_jobs_status" already exists, skipping
+NOTICE:  relation "kb_ingest_queue" already exists, skipping
+NOTICE:  column "priority" of relation "kb_ingest_queue" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_status" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_claim" already exists, skipping
+NOTICE:  relation "idx_kb_ingest_queue_dedup" already exists, skipping
+NOTICE:  relation "kb_file_index" already exists, skipping
+NOTICE:  column "owner_principal" of relation "kb_file_index" already exists, skipping
+NOTICE:  constraint "kb_file_index_project_file_path_key" of relation "kb_file_index" does not exist, skipping
+NOTICE:  relation "idx_kb_file_index_project_generation_path" already exists, skipping
+NOTICE:  relation "idx_kb_file_index_project" already exists, skipping
+NOTICE:  relation "idx_files_path" already exists, skipping
+NOTICE:  relation "idx_terms_name" already exists, skipping
+NOTICE:  relation "idx_fi_name" already exists, skipping
+NOTICE:  relation "idx_fe_name" already exists, skipping
+NOTICE:  relation "idx_file_exports_file_id" already exists, skipping
+NOTICE:  relation "idx_file_imports_file_id" already exists, skipping
+NOTICE:  relation "idx_terms_file_id" already exists, skipping
+NOTICE:  relation "idx_code_calls_file_id" already exists, skipping
+NOTICE:  relation "idx_code_calls_callee" already exists, skipping
+NOTICE:  relation "idx_ee_source" already exists, skipping
+NOTICE:  relation "idx_ee_target" already exists, skipping
+NOTICE:  relation "idx_mem_tier" already exists, skipping
+NOTICE:  relation "idx_mem_kind" already exists, skipping
+NOTICE:  relation "idx_mem_key" already exists, skipping
+NOTICE:  relation "idx_memories_sensitivity" already exists, skipping
+NOTICE:  relation "idx_mp_mem" already exists, skipping
+NOTICE:  relation "idx_mc_unresolved" already exists, skipping
+NOTICE:  relation "idx_tasks_state" already exists, skipping
+NOTICE:  relation "idx_tasks_parent" already exists, skipping
+NOTICE:  relation "idx_te_source" already exists, skipping
+NOTICE:  relation "idx_te_target" already exists, skipping
+NOTICE:  relation "idx_dl_task" already exists, skipping
+NOTICE:  column "status" of relation "decision_log" already exists, skipping
+NOTICE:  column "revisit_when" of relation "decision_log" already exists, skipping
+NOTICE:  column "supersedes_id" of relation "decision_log" already exists, skipping
+NOTICE:  column "subject" of relation "decision_log" already exists, skipping
+NOTICE:  column "author" of relation "decision_log" already exists, skipping
+NOTICE:  column "linked_policy_id" of relation "decision_log" already exists, skipping
+NOTICE:  relation "idx_dl_active_scope" already exists, skipping
+NOTICE:  relation "idx_dl_revisit" already exists, skipping
+NOTICE:  relation "idx_agent_hints_lookup" already exists, skipping
+NOTICE:  relation "idx_memory_workspaces_workspace" already exists, skipping
+NOTICE:  relation "idx_memory_aliases_memory" already exists, skipping
+NOTICE:  relation "idx_memory_aliases_alias" already exists, skipping
+NOTICE:  relation "idx_memory_entities_entity" already exists, skipping
+NOTICE:  relation "idx_memory_entities_memory" already exists, skipping
+NOTICE:  relation "idx_memory_temporal_refs_ref" already exists, skipping
+NOTICE:  relation "idx_memory_temporal_refs_memory" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_actor" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_action" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_event_time" already exists, skipping
+NOTICE:  relation "idx_memory_event_frames_memory" already exists, skipping
+NOTICE:  relation "idx_memory_summaries_scope" already exists, skipping
+NOTICE:  relation "idx_retrieval_shortcuts_promoted" already exists, skipping
+NOTICE:  relation "idx_memory_chunks_memory" already exists, skipping
+NOTICE:  relation "idx_memory_units_memory" already exists, skipping
+NOTICE:  relation "idx_memory_units_type" already exists, skipping
+NOTICE:  relation "idx_memory_units_key" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_src" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_dst" already exists, skipping
+NOTICE:  relation "idx_memory_unit_edges_type" already exists, skipping
+NOTICE:  relation "idx_kb_documents_project" already exists, skipping
+NOTICE:  relation "idx_memory_units_kind" already exists, skipping
+NOTICE:  relation "idx_memory_units_kind_key" already exists, skipping
+NOTICE:  relation "idx_entity_profiles_refreshed" already exists, skipping
+NOTICE:  relation "idx_kb_docs_prev" already exists, skipping
+NOTICE:  relation "idx_kb_docs_next" already exists, skipping
+NOTICE:  relation "idx_ml_object" already exists, skipping
+NOTICE:  relation "idx_msm_memory" already exists, skipping
+NOTICE:  relation "idx_mrs_rel" already exists, skipping
+NOTICE:  relation "idx_mca_memory" already exists, skipping
+NOTICE:  relation "idx_mca_session" already exists, skipping
+NOTICE:  relation "idx_vio_status" already exists, skipping
+NOTICE:  relation "idx_vio_memory_id" already exists, skipping
+NOTICE:  relation "idx_mpa_target" already exists, skipping
+NOTICE:  relation "idx_prospective_state" already exists, skipping
+NOTICE:  relation "idx_prospective_state_valid" already exists, skipping
+NOTICE:  relation "idx_prospective_anchor_entity" already exists, skipping
+NOTICE:  relation "idx_prospective_anchor_file" already exists, skipping
+NOTICE:  relation "idx_memories_lifecycle_ttl" already exists, skipping
+NOTICE:  relation "idx_memories_lifecycle" already exists, skipping
+NOTICE:  relation "idx_directives_state" already exists, skipping
+NOTICE:  relation "idx_directives_state_priority" already exists, skipping
+NOTICE:  relation "idx_directives_anchor_entity" already exists, skipping
+NOTICE:  relation "idx_directives_anchor_file" already exists, skipping
+NOTICE:  relation "idx_directives_cause" already exists, skipping
+NOTICE:  relation "idx_directives_dedup_contradiction" already exists, skipping
+NOTICE:  relation "idx_directives_dedup_topic" already exists, skipping
+NOTICE:  relation "idx_memories_cognified_kind" already exists, skipping
+NOTICE:  relation "idx_working_profile_obs_field" already exists, skipping
+NOTICE:  relation "idx_working_profile_obs_field_value" already exists, skipping
+NOTICE:  relation "idx_curiosity_state" already exists, skipping
+NOTICE:  relation "idx_curiosity_gap_type" already exists, skipping
+NOTICE:  relation "idx_curiosity_target" already exists, skipping
+NOTICE:  relation "idx_curiosity_dedup_missing_fact" already exists, skipping
+NOTICE:  relation "idx_learning_signals_type" already exists, skipping
+NOTICE:  relation "idx_learning_proposals_state" already exists, skipping
+NOTICE:  relation "idx_learning_proposals_target" already exists, skipping
+NOTICE:  relation "idx_learning_observations_scope" already exists, skipping
+NOTICE:  relation "idx_learning_observation_evidence_source" already exists, skipping
+NOTICE:  extension "pg_trgm" already exists, skipping
+NOTICE:  column "provenance_category" of relation "memories" already exists, skipping
+NOTICE:  column "use_cases" of relation "memories" already exists, skipping
+NOTICE:  column "confidence_ceiling" of relation "memories" already exists, skipping
+NOTICE:  column "activation_sticky_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_cooldown_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_delay_turns" of relation "memories" already exists, skipping
+NOTICE:  column "activation_suppressed" of relation "memories" already exists, skipping
+NOTICE:  column "memories_fts_tsv" of relation "memories" already exists, skipping
+NOTICE:  column "memory_negation_fts_tsv" of relation "memories" already exists, skipping
+NOTICE:  column "memories_code_fts_text" of relation "memories" already exists, skipping
+NOTICE:  relation "memories_fts_gin" already exists, skipping
+NOTICE:  relation "memory_negation_fts_gin" already exists, skipping
+NOTICE:  relation "memories_code_fts_trgm_gin" already exists, skipping
+NOTICE:  column "chunk_strategy" of relation "kb_documents" already exists, skipping
+NOTICE:  column "doc_kind" of relation "kb_documents" already exists, skipping
+NOTICE:  column "chunk_context" of relation "kb_documents" already exists, skipping
+NOTICE:  column "kb_fts_tsv" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_fts_gin" already exists, skipping
+NOTICE:  column "page_start" of relation "kb_documents" already exists, skipping
+NOTICE:  column "page_end" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_doc_regions" already exists, skipping
+NOTICE:  relation "idx_kb_doc_regions_chunk" already exists, skipping
+NOTICE:  relation "idx_kb_doc_regions_dockey" already exists, skipping
+NOTICE:  column "sensitivity_class" of relation "kb_documents" already exists, skipping
+NOTICE:  column "quarantine_state" of relation "kb_documents" already exists, skipping
+NOTICE:  column "sensitivity_class" of relation "kb_doc_regions" already exists, skipping
+NOTICE:  column "tsr_state" of relation "kb_documents" already exists, skipping
+NOTICE:  relation "kb_table_cells" already exists, skipping
+NOTICE:  relation "idx_kb_table_cells_dockey" already exists, skipping
+NOTICE:  relation "idx_kb_table_cells_region" already exists, skipping
+NOTICE:  relation "kb_doc_assets" already exists, skipping
+NOTICE:  column "project" of relation "kb_doc_assets" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_project" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_dockey" already exists, skipping
+NOTICE:  relation "idx_kb_doc_assets_blob" already exists, skipping
+NOTICE:  column "memory_chunks_fts_tsv" of relation "memory_chunks" already exists, skipping
+NOTICE:  relation "memory_chunks_fts_gin" already exists, skipping
+NOTICE:  column "memory_units_fts_tsv" of relation "memory_units" already exists, skipping
+NOTICE:  relation "memory_units_fts_gin" already exists, skipping
+NOTICE:  column "prospective_memories_fts_tsv" of relation "prospective_memories" already exists, skipping
+NOTICE:  relation "prospective_memories_fts_gin" already exists, skipping
+NOTICE:  column "epistemic_directives_fts_tsv" of relation "epistemic_directives" already exists, skipping
+NOTICE:  relation "epistemic_directives_fts_gin" already exists, skipping
+NOTICE:  column "code_fts_tsv" of relation "file_contents" already exists, skipping
+NOTICE:  relation "code_fts_gin" already exists, skipping
+NOTICE:  column "content" of relation "kb_file_index" already exists, skipping
+NOTICE:  relation "kb_code_unit_jobs" already exists, skipping
+NOTICE:  column "next_attempt_at" of relation "kb_code_unit_jobs" already exists, skipping
+NOTICE:  constraint "kb_code_unit_jobs_project_file_path_symbol_key" of relation "kb_code_unit_jobs" does not exist, skipping
+NOTICE:  relation "idx_kb_code_unit_jobs_project_generation_symbol" already exists, skipping
+NOTICE:  relation "idx_kb_code_unit_jobs_status" already exists, skipping
+NOTICE:  relation "sketch_store" already exists, skipping
+NOTICE:  relation "kb_minhash_signatures" already exists, skipping
+NOTICE:  relation "idx_kb_minhash_signatures_project" already exists, skipping
+NOTICE:  relation "kb_lsh_buckets" already exists, skipping
+NOTICE:  relation "idx_kb_lsh_buckets_lookup" already exists, skipping
+NOTICE:  relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_kind_state" already exists, skipping
+NOTICE:  relation "idx_artifacts_scope" already exists, skipping
+NOTICE:  relation "idx_artifacts_retrieval_attr" already exists, skipping
+NOTICE:  relation "idx_artifacts_demotion_profile" already exists, skipping
+NOTICE:  relation "evidence_index_ops" already exists, skipping
+NOTICE:  relation "idx_evidence_index_ops_status" already exists, skipping
+NOTICE:  relation "learning_synth_ops" already exists, skipping
+NOTICE:  relation "idx_learning_synth_ops_status" already exists, skipping
+NOTICE:  relation "artifact_citations" already exists, skipping
+NOTICE:  relation "artifact_links" already exists, skipping
+NOTICE:  relation "audit_events" already exists, skipping
+NOTICE:  relation "idx_audit_events_artifact" already exists, skipping
+NOTICE:  relation "idx_audit_events_surface" already exists, skipping
+NOTICE:  relation "feature_rows" already exists, skipping
+NOTICE:  relation "idx_feature_rows_kind_ts" already exists, skipping
+NOTICE:  relation "report_enrichments" already exists, skipping
+NOTICE:  relation "idx_report_enrichments_subject" already exists, skipping
+NOTICE:  relation "idx_report_enrichments_kind_ts" already exists, skipping
+NOTICE:  relation "bandit_decisions" already exists, skipping
+NOTICE:  column "is_exploration" of relation "bandit_decisions" already exists, skipping
+NOTICE:  relation "idx_bandit_decisions_point" already exists, skipping
+NOTICE:  relation "idx_bandit_decisions_explore" already exists, skipping
+NOTICE:  relation "bandit_arm_stats" already exists, skipping
+NOTICE:  relation "bandit_promotions" already exists, skipping
+NOTICE:  column "last_accessed_at" of relation "artifacts" already exists, skipping
+NOTICE:  column "last_decay_at" of relation "artifacts" already exists, skipping
+NOTICE:  relation "kb_maintenance_runs" already exists, skipping
+NOTICE:  relation "idx_kb_maintenance_runs_at" already exists, skipping
+NOTICE:  column "reflected_at" of relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_review" already exists, skipping
+NOTICE:  column "turn_id" of relation "artifacts" already exists, skipping
+NOTICE:  relation "idx_artifacts_turn_event" already exists, skipping
+NOTICE:  relation "docs" already exists, skipping
+NOTICE:  relation "idx_docs_state_review" already exists, skipping
+NOTICE:  relation "idx_docs_content_hash" already exists, skipping
+NOTICE:  column "doc_type" of relation "docs" already exists, skipping
+NOTICE:  column "doc_type_confidence" of relation "docs" already exists, skipping
+NOTICE:  relation "idx_docs_doc_type" already exists, skipping
+NOTICE:  relation "document_sections" already exists, skipping
+NOTICE:  relation "idx_document_sections_doc" already exists, skipping
+NOTICE:  relation "idx_document_sections_parent" already exists, skipping
+NOTICE:  relation "document_references" already exists, skipping
+NOTICE:  relation "idx_doc_refs_from" already exists, skipping
+NOTICE:  relation "idx_doc_refs_to" already exists, skipping
+NOTICE:  relation "idx_doc_refs_resolution" already exists, skipping
+NOTICE:  relation "corpus_processing_jobs" already exists, skipping
+NOTICE:  relation "idx_corpus_jobs_status" already exists, skipping
+NOTICE:  relation "corpus_stage_events" already exists, skipping
+NOTICE:  relation "idx_corpus_stage_events_doc" already exists, skipping
+NOTICE:  relation "document_versions" already exists, skipping
+NOTICE:  relation "idx_document_versions_current" already exists, skipping
+NOTICE:  relation "doc_releases" already exists, skipping
+NOTICE:  relation "idx_doc_releases_state" already exists, skipping
+NOTICE:  relation "release_docs" already exists, skipping
+NOTICE:  relation "idx_release_docs_doc_id" already exists, skipping
+NOTICE:  extension "vector" already exists, skipping
+NOTICE:  extension "vectorscale" already exists, skipping
+NOTICE:  relation "memory_embeddings" already exists, skipping
+NOTICE:  relation "kb_embeddings" already exists, skipping
+NOTICE:  relation "kb_pdf_embeddings" already exists, skipping
+NOTICE:  column "generation" of relation "kb_embeddings" already exists, skipping
+NOTICE:  column "generation" of relation "kb_pdf_embeddings" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_generation" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_generation" already exists, skipping
+NOTICE:  relation "curator_entity_vectors" already exists, skipping
+NOTICE:  column "artifact_id" of relation "curator_entity_vectors" already exists, skipping
+NOTICE:  relation "curator_narrative_vectors" already exists, skipping
+NOTICE:  relation "curator_claim_vectors" already exists, skipping
+NOTICE:  relation "curator_code_unit_vectors" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_record_type" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_scope" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_curator_entity_vectors_scope" already exists, skipping
+NOTICE:  relation "idx_curator_narrative_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_kind" already exists, skipping
+NOTICE:  relation "idx_memory_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_kb_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_kb_pdf_embeddings_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_entity_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_narrative_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_claim_vectors_value_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_intent_diskann" already exists, skipping
+NOTICE:  relation "idx_curator_code_unit_vectors_body_diskann" already exists, skipping
+NOTICE:  relation "exemplar_vectors" already exists, skipping
+NOTICE:  relation "idx_exemplar_vectors_artifact_id" already exists, skipping
+NOTICE:  relation "idx_exemplar_vectors_collection" already exists, skipping
+NOTICE:  relation "evidence_vectors" already exists, skipping
+NOTICE:  relation "idx_evidence_vectors_artifact_id" already exists, skipping
+NOTICE:  relation "idx_evidence_vectors_collection" already exists, skipping
+NOTICE:  relation "code_embeddings" already exists, skipping
+NOTICE:  column "body_hash" of relation "code_embeddings" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_project" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_body_hash" already exists, skipping
+NOTICE:  relation "idx_code_embeddings_diskann" already exists, skipping
+NOTICE:  table "db3_backfill" does not exist, skipping
+NOTICE:  table "db3_delivery" does not exist, skipping
+NOTICE:  table "db3_outbox" does not exist, skipping
+NOTICE:  table "db3_provider" does not exist, skipping
+NOTICE:  table "db3_projection" does not exist, skipping
+NOTICE:  relation "reasoning_rulesets" already exists, skipping
+NOTICE:  relation "idx_reasoning_rulesets_active" already exists, skipping
+NOTICE:  relation "memory_recall_shadow_deltas" already exists, skipping
+NOTICE:  relation "idx_mrsd_query_created" already exists, skipping
+NOTICE:  relation "idx_mrsd_project_created" already exists, skipping
+NOTICE:  column "utility_touched_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "structural_weight" of relation "entity_edges" already exists, skipping
+NOTICE:  column "edge_origin" of relation "entity_edges" already exists, skipping
+NOTICE:  column "edge_class" of relation "entity_edges" already exists, skipping
+NOTICE:  column "confidence_class" of relation "entity_edges" already exists, skipping
+NOTICE:  column "confidence" of relation "entity_edges" already exists, skipping
+NOTICE:  column "asserted_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "superseded_at" of relation "entity_edges" already exists, skipping
+NOTICE:  column "suppressed" of relation "entity_edges" already exists, skipping
+NOTICE:  column "assertion_kind" of relation "entity_edges" already exists, skipping
+NOTICE:  column "lifecycle_state" of relation "entity_edges" already exists, skipping
+NOTICE:  column "authority_rank" of relation "entity_edges" already exists, skipping
+NOTICE:  column "actor_principal" of relation "entity_edges" already exists, skipping
+NOTICE:  column "version" of relation "entity_edges" already exists, skipping
+NOTICE:  column "prior_version_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "commit_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "invalidated_at" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_fact_lifecycle" already exists, skipping
+NOTICE:  relation "idx_entity_edges_fact_commit" already exists, skipping
+NOTICE:  column "identity_key" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_identity" already exists, skipping
+NOTICE:  column "identity_subject_key" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_entity_edges_identity_subject" already exists, skipping
+NOTICE:  relation "fact_evidence" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_assertion" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_source" already exists, skipping
+NOTICE:  relation "idx_fact_evidence_ingest" already exists, skipping
+NOTICE:  relation "memory_fact_actors" already exists, skipping
+NOTICE:  relation "fact_graph_commits" already exists, skipping
+NOTICE:  relation "fact_graph_changes" already exists, skipping
+NOTICE:  relation "idx_fact_graph_changes_commit" already exists, skipping
+NOTICE:  relation "idx_fact_graph_changes_assertion" already exists, skipping
+NOTICE:  relation "fact_review_actions" already exists, skipping
+NOTICE:  relation "idx_fact_review_assertion" already exists, skipping
+NOTICE:  relation "fact_erasure_reports" already exists, skipping
+NOTICE:  relation "rel_types" already exists, skipping
+NOTICE:  relation "ontology_evaluations" already exists, skipping
+NOTICE:  relation "entity_registry" already exists, skipping
+NOTICE:  relation "entity_aliases" already exists, skipping
+NOTICE:  relation "idx_entity_aliases_cid" already exists, skipping
+NOTICE:  relation "entity_merges" already exists, skipping
+NOTICE:  relation "entity_name_conflicts" already exists, skipping
+NOTICE:  relation "entity_nodes" already exists, skipping
+NOTICE:  relation "idx_entity_nodes_project" already exists, skipping
+NOTICE:  relation "idx_entity_nodes_kind" already exists, skipping
+NOTICE:  relation "entity_node_aliases" already exists, skipping
+NOTICE:  relation "idx_entity_node_aliases_alias" already exists, skipping
+NOTICE:  relation "idx_entity_node_aliases_project_alias" already exists, skipping
+NOTICE:  relation "code_projection_generations" already exists, skipping
+NOTICE:  relation "idx_cpg_project_state" already exists, skipping
+NOTICE:  relation "idx_cpg_one_visible_project" already exists, skipping
+NOTICE:  relation "code_projection_edges" already exists, skipping
+NOTICE:  relation "idx_cpe_project_triple" already exists, skipping
+NOTICE:  relation "code_projection_communities" already exists, skipping
+NOTICE:  relation "idx_cpc_gen_community" already exists, skipping
+NOTICE:  relation "lessons_outcome_ledger" already exists, skipping
+NOTICE:  relation "idx_lessons_ledger_project" already exists, skipping
+NOTICE:  relation "idx_lessons_ledger_finding" already exists, skipping
+NOTICE:  relation "lessons_outcome_citations" already exists, skipping
+NOTICE:  column "projection_generation_id" of relation "entity_edges" already exists, skipping
+NOTICE:  column "structural_updated_at" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "idx_ee_source_relation" already exists, skipping
+NOTICE:  relation "idx_ee_target_relation" already exists, skipping
+NOTICE:  relation "idx_ee_origin_source" already exists, skipping
+NOTICE:  relation "idx_ee_projection_generation" already exists, skipping
+NOTICE:  column "trust" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_trust" already exists, skipping
+NOTICE:  relation "cross_repo_meta" already exists, skipping
+NOTICE:  column "review_overflow_dropped" of relation "cross_repo_meta" already exists, skipping
+NOTICE:  relation "blocked_symbols" already exists, skipping
+NOTICE:  relation "idx_blocked_symbols_version" already exists, skipping
+NOTICE:  relation "cross_repo_review_queue" already exists, skipping
+NOTICE:  relation "idx_crrq_evict_open" already exists, skipping
+NOTICE:  relation "idx_crrq_caller" already exists, skipping
+NOTICE:  relation "cross_repo_trust_audit" already exists, skipping
+NOTICE:  relation "idx_crta_project" already exists, skipping
+NOTICE:  relation "cross_repo_identity" already exists, skipping
+NOTICE:  relation "idx_cri_lookup" already exists, skipping
+NOTICE:  relation "cross_repo_route" already exists, skipping
+NOTICE:  relation "idx_crr_caller" already exists, skipping
+NOTICE:  relation "idx_crr_definer" already exists, skipping
+NOTICE:  relation "cross_repo_build_dep" already exists, skipping
+NOTICE:  relation "idx_crbd_caller" already exists, skipping
+NOTICE:  relation "css_rules" already exists, skipping
+NOTICE:  relation "css_declarations" already exists, skipping
+NOTICE:  relation "idx_css_rules_file" already exists, skipping
+NOTICE:  relation "idx_css_rules_selector" already exists, skipping
+NOTICE:  relation "idx_css_decl_rule" already exists, skipping
+NOTICE:  relation "idx_css_decl_property" already exists, skipping
+NOTICE:  relation "css_component_styles" already exists, skipping
+NOTICE:  relation "idx_css_comp_file" already exists, skipping
+NOTICE:  relation "idx_css_comp_token" already exists, skipping
+NOTICE:  relation "css_migration_units" already exists, skipping
+NOTICE:  constraint "css_migration_units_project_unit_path_key" of relation "css_migration_units" does not exist, skipping
+NOTICE:  relation "idx_css_migration_units_project_generation_path" already exists, skipping
+NOTICE:  relation "idx_css_migration_project" already exists, skipping
+NOTICE:  relation "css_render_snapshots" already exists, skipping
+NOTICE:  constraint "css_render_snapshots_project_unit_path_phase_key" of relation "css_render_snapshots" does not exist, skipping
+NOTICE:  relation "idx_css_render_snapshots_project_generation_phase" already exists, skipping
+NOTICE:  relation "idx_css_render_snapshots_unit" already exists, skipping
+NOTICE:  relation "typed_facts" already exists, skipping
+NOTICE:  relation "idx_typed_facts_subject" already exists, skipping
+NOTICE:  relation "idx_typed_facts_relation" already exists, skipping
+NOTICE:  relation "kb_team" already exists, skipping
+NOTICE:  relation "kb_project" already exists, skipping
+NOTICE:  relation "kb_team_membership" already exists, skipping
+NOTICE:  relation "idx_kbmember_default" already exists, skipping
+NOTICE:  relation "idx_kbmember_team" already exists, skipping
+NOTICE:  relation "kb_project_membership" already exists, skipping
+NOTICE:  relation "idx_kbprojmember_id" already exists, skipping
+NOTICE:  relation "kb_admin_grant" already exists, skipping
+NOTICE:  relation "kb_oidc_jwks" already exists, skipping
+NOTICE:  relation "idx_kbjwks_issuer" already exists, skipping
+NOTICE:  column "cert_issuer" of relation "kb_enrollments" already exists, skipping
+NOTICE:  column "cert_serial_norm" of relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_issuer_serial" already exists, skipping
+NOTICE:  column "kb_project" of relation "projects" already exists, skipping
+NOTICE:  relation "idx_projects_kb_project" already exists, skipping
+NOTICE:  relation "org_model_pricing" already exists, skipping
+NOTICE:  relation "org_model_pricing_current" already exists, skipping
+NOTICE:  relation "kb_team_lead" already exists, skipping
+NOTICE:  relation "idx_kbteamlead_id" already exists, skipping
+NOTICE:  relation "org_token_audit" already exists, skipping
+NOTICE:  relation "idx_org_audit_team" already exists, skipping
+NOTICE:  relation "idx_org_audit_state" already exists, skipping
+NOTICE:  relation "idx_org_audit_created" already exists, skipping
+NOTICE:  relation "org_spend_rollup" already exists, skipping
+NOTICE:  relation "idx_org_rollup_key" already exists, skipping
+NOTICE:  relation "org_vault_salt" already exists, skipping
+NOTICE:  relation "org_vault_secret" already exists, skipping
+NOTICE:  column "hwm_attestation" of relation "org_vault_secret" already exists, skipping
+NOTICE:  relation "idx_org_vault_secret_team" already exists, skipping
+NOTICE:  relation "idx_org_vault_secret_slot" already exists, skipping
+NOTICE:  relation "org_vault_current" already exists, skipping
+NOTICE:  relation "kb_vault_control" already exists, skipping
+NOTICE:  relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "old_vendor_ref" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "new_vendor_ref" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "revoke_receipt" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "failure_phase" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_owner" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_token" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  column "claim_until" of relation "org_vault_rotation" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_active_slot" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_active_key" already exists, skipping
+NOTICE:  relation "idx_org_vault_rotation_team" already exists, skipping
+NOTICE:  relation "org_vault_key_use_intent" already exists, skipping
+NOTICE:  column "seal_epoch" of relation "org_vault_key_use_intent" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_operation" already exists, skipping
+NOTICE:  column "failure_from_state" of relation "kb_vault_rewrap_operation" already exists, skipping
+NOTICE:  schema "aimee_kb_vault_orchestrator_api" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_dek_stage" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_check_stage" already exists, skipping
+NOTICE:  relation "kb_vault_rewrap_worm" already exists, skipping
+NOTICE:  relation "kb_vault_open_event" already exists, skipping
+NOTICE:  constraint "kb_vault_rewrap_worm_check" of relation "kb_vault_rewrap_worm" does not exist, skipping
+NOTICE:  function org_vault_rewrap_check_page(text,pg_catalog.int8,text,pg_catalog.int4) does not exist, skipping
+NOTICE:  function aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  function public.org_vault_rewrap_stage_finish(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  relation "kb_vault_witness_shard" already exists, skipping
+NOTICE:  relation "kb_vault_witness_log" already exists, skipping
+NOTICE:  relation "kb_vault_witness_checkpoint" already exists, skipping
+NOTICE:  relation "kb_vault_witness_emit_cursor" already exists, skipping
+NOTICE:  function kb_audit_worm_append_internal(text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  schema "aimee_kb_worm_api" already exists, skipping
+NOTICE:  function aimee_kb_worm_api.drain(pg_catalog.int4) does not exist, skipping
+NOTICE:  function kb_audit_worm_drain(pg_catalog.int4) does not exist, skipping
+NOTICE:  function kb_audit_worm_append_internal(text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  relation "org_model_catalog" already exists, skipping
+NOTICE:  column "bedrock_api" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "model_family" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "bedrock_target_type" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_partition" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_invoke_region" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_account" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "aws_region_set" of relation "org_model_catalog" already exists, skipping
+NOTICE:  column "underlying_fm_arns" of relation "org_model_catalog" already exists, skipping
+NOTICE:  constraint "org_model_catalog_wire_check" of relation "org_model_catalog" does not exist, skipping
+NOTICE:  relation "org_model_entitlement" already exists, skipping
+NOTICE:  relation "idx_org_ent_team" already exists, skipping
+NOTICE:  relation "idx_org_ent_model" already exists, skipping
+NOTICE:  relation "org_budget" already exists, skipping
+NOTICE:  relation "idx_org_budget_key" already exists, skipping
+NOTICE:  relation "org_budget_counter" already exists, skipping
+NOTICE:  relation "idx_org_budget_counter_key" already exists, skipping
+NOTICE:  relation "org_budget_reservation" already exists, skipping
+NOTICE:  relation "idx_org_budget_resv_lease" already exists, skipping
+NOTICE:  relation "idx_org_budget_resv_team" already exists, skipping
+NOTICE:  relation "org_budget_reservation_alloc" already exists, skipping
+NOTICE:  relation "idx_org_budget_alloc_resv" already exists, skipping
+NOTICE:  relation "org_rate_policy" already exists, skipping
+NOTICE:  relation "idx_org_rate_policy_key" already exists, skipping
+NOTICE:  relation "org_rate_window" already exists, skipping
+NOTICE:  relation "org_telemetry" already exists, skipping
+NOTICE:  relation "idx_org_telemetry_source" already exists, skipping
+NOTICE:  relation "idx_org_telemetry_team_created" already exists, skipping
+NOTICE:  relation "org_telemetry_allowlist" already exists, skipping
+NOTICE:  relation "kb_cert_revocation_generation" already exists, skipping
+NOTICE:  relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_issuer" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_serial_norm" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_fingerprint" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_issuer" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_serial_norm" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_fingerprint" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "enrollment_op" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "client_csr_digest" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "mgmt_csr_digest" of relation "kb_server_registry" already exists, skipping
+NOTICE:  column "activation_expires_at" of relation "kb_server_registry" already exists, skipping
+NOTICE:  relation "idx_kb_server_registry_team" already exists, skipping
+NOTICE:  relation "idx_kbsrv_enrollment_op" already exists, skipping
+NOTICE:  relation "idx_kbsrv_client_cert" already exists, skipping
+NOTICE:  relation "idx_kbsrv_mgmt_cert" already exists, skipping
+NOTICE:  relation "idx_kbsrv_client_fp" already exists, skipping
+NOTICE:  relation "idx_kbsrv_mgmt_fp" already exists, skipping
+NOTICE:  relation "kb_write_tier_grant" already exists, skipping
+NOTICE:  relation "idx_kb_write_tier_grant_live" already exists, skipping
+NOTICE:  relation "kb_management_status_key" already exists, skipping
+NOTICE:  column "bootstrap_id" of relation "kb_management_status_key" already exists, skipping
+NOTICE:  column "public_key" of relation "kb_management_status_key" already exists, skipping
+NOTICE:  function kb_management_status_key_bootstrap_stage(text,text,text,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea,bytea) does not exist, skipping
+NOTICE:  function kb_management_status_key_bootstrap_resume(text) does not exist, skipping
+NOTICE:  relation "kb_management_status_key_use_intent" already exists, skipping
+NOTICE:  function kb_management_status_key_candidate(text,pg_catalog.int8) does not exist, skipping
+NOTICE:  relation "kb_management_token_root" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_root" already exists, skipping
+NOTICE:  relation "kb_management_token_root_vault_permit" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_candidate" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_generation" already exists, skipping
+NOTICE:  relation "kb_management_jwks_publication_registry" already exists, skipping
+NOTICE:  relation "kb_management_jwks_manifest_key_use_intent" already exists, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_intent_generation_candidate_id_key" will be truncated to "kb_management_jwks_manifest_key_use_intent_generation_candidate"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_generation_candidate_id_key" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_intent_generation_candidate_id_seal_epoch_key" will be truncated to "kb_management_jwks_manifest_key_use_intent_generation_candidate"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  identifier "kb_management_jwks_manifest_key_use_generation_candidate_id_seal_epoch_key" will be truncated to "kb_management_jwks_manifest_key_use_generation_candidate_id_sea"
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_generation_candidate_id_sea" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  constraint "kb_management_jwks_manifest_key_use_intent_generation_candidate" of relation "kb_management_jwks_manifest_key_use_intent" does not exist, skipping
+NOTICE:  relation "kb_management_jwks_publication_permit" already exists, skipping
+NOTICE:  column "authority_id" of relation "kb_enrollments" already exists, skipping
+NOTICE:  relation "idx_kbenroll_authority" already exists, skipping
+NOTICE:  relation "kb_management_instance_grant" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_live_custody" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_live_binding" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_pending_lineage" already exists, skipping
+NOTICE:  relation "idx_kb_mi_grant_one_successor" already exists, skipping
+NOTICE:  relation "kb_management_instance" already exists, skipping
+NOTICE:  relation "idx_kb_mi_live_custody" already exists, skipping
+NOTICE:  relation "idx_kb_mi_live_binding" already exists, skipping
+NOTICE:  relation "kb_management_instance_issue" already exists, skipping
+NOTICE:  relation "idx_kb_mi_issue_cert_identity" already exists, skipping
+NOTICE:  relation "idx_kb_mi_issue_cert_fingerprint" already exists, skipping
+NOTICE:  function kb_management_instance_begin_initial(text,text,text,text,text,text,text,text,text,text) does not exist, skipping
+NOTICE:  relation "org_egress_binding" already exists, skipping
+NOTICE:  relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_prompt_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_completion_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_cache_read_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "raw_cache_write_tokens" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  column "overage_usd" of relation "org_egress_dispatch" already exists, skipping
+NOTICE:  relation "idx_org_egress_recover" already exists, skipping
+NOTICE:  function org_egress_dispatch_settle(pg_catalog.int8,text,pg_catalog.int8,text,pg_catalog.int4,pg_catalog.int8,pg_catalog.int8,pg_catalog.int8,pg_catalog.int8,text) does not exist, skipping
+NOTICE:  relation "kb_management_token_intent_namespace" already exists, skipping
+NOTICE:  relation "kb_management_read_intent" already exists, skipping
+NOTICE:  relation "kb_management_read_key_use" already exists, skipping
+NOTICE:  relation "kb_management_identity_intent" already exists, skipping
+NOTICE:  relation "kb_management_action_intent" already exists, skipping
+NOTICE:  column "kind" of relation "kb_management_action_intent" already exists, skipping
+NOTICE:  relation "kb_management_action_outcome" already exists, skipping
+NOTICE:  relation "kb_management_token_key_use_intent" already exists, skipping
+NOTICE:  relation "kb_management_identity_key_use_intent" already exists, skipping
+NOTICE:  column "origin_ref" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "transport_identity" of relation "memory_fact_actors" already exists, skipping
+NOTICE:  column "irreversible_why" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "reverts_changeset" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "closed_at" of relation "fact_graph_commits" already exists, skipping
+NOTICE:  column "event_id" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "before_state" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "after_state" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  column "revert_plan" of relation "fact_graph_changes" already exists, skipping
+NOTICE:  relation "memory_evidence_events" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_object" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_changeset" already exists, skipping
+NOTICE:  relation "idx_memory_evidence_correlation" already exists, skipping
+NOTICE:  column "lifecycle_version" of relation "docs" already exists, skipping
+NOTICE:  column "purged_at" of relation "docs" already exists, skipping
+NOTICE:  column "current_changeset" of relation "docs" already exists, skipping
+NOTICE:  column "content_hash" of relation "memories" already exists, skipping
+NOTICE:  column "support_status" of relation "memories" already exists, skipping
+NOTICE:  column "reverify_needed" of relation "memories" already exists, skipping
+NOTICE:  column "support_status" of relation "entity_edges" already exists, skipping
+NOTICE:  column "reverify_needed" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "document_lifecycle_previews" already exists, skipping
+NOTICE:  relation "document_purge_receipts" already exists, skipping
+NOTICE:  relation "derived_memory_registry" already exists, skipping
+NOTICE:  relation "derived_memory_dependencies" already exists, skipping
+NOTICE:  relation "idx_derived_dep_forward" already exists, skipping
+NOTICE:  relation "idx_derived_dep_reverse" already exists, skipping
+NOTICE:  relation "derivation_policy_versions" already exists, skipping
+NOTICE:  relation "derived_rederivation_queue" already exists, skipping
+NOTICE:  relation "work_outcomes" already exists, skipping
+NOTICE:  relation "idx_work_outcome_subject" already exists, skipping
+NOTICE:  relation "evidence_lifecycle_settings" already exists, skipping
+NOTICE:  column "epistemic_kind" of relation "memories" already exists, skipping
+NOTICE:  column "epistemic_kind" of relation "entity_edges" already exists, skipping
+NOTICE:  column "governance_promoted" of relation "memories" already exists, skipping
+NOTICE:  column "governance_promoted" of relation "entity_edges" already exists, skipping
+NOTICE:  column "expiry_days_migration_override" of relation "memories" already exists, skipping
+NOTICE:  relation "epistemic_annotations" already exists, skipping
+NOTICE:  relation "epistemic_resolutions" already exists, skipping
+NOTICE:  relation "knowledge_review_decisions" already exists, skipping
+NOTICE:  column "reverted_by_changeset" of relation "knowledge_review_decisions" already exists, skipping
+NOTICE:  relation "knowledge_corrections" already exists, skipping
+NOTICE:  relation "review_evidence_requests" already exists, skipping
+NOTICE:  column "cardinality" of relation "rel_types" already exists, skipping
+NOTICE:  column "ontology_version" of relation "rel_types" already exists, skipping
+NOTICE:  column "ontology_version" of relation "entity_edges" already exists, skipping
+NOTICE:  column "ontology_quarantined" of relation "entity_edges" already exists, skipping
+NOTICE:  relation "ontology_packages" already exists, skipping
+NOTICE:  relation "ontology_package_relations" already exists, skipping
+NOTICE:  relation "ontology_package_versions" already exists, skipping
+NOTICE:  relation "idx_ontology_one_active" already exists, skipping
+NOTICE:  relation "ontology_dry_runs" already exists, skipping
+NOTICE:  relation "ontology_migration_reports" already exists, skipping
+NOTICE:  relation "recall_traces" already exists, skipping
+NOTICE:  relation "recall_trace_results" already exists, skipping
+NOTICE:  relation "idx_recall_trace_subject" already exists, skipping
+NOTICE:  column "generation" of relation "kb_async_jobs" already exists, skipping
+NOTICE:  relation "memory_embedder_versions" already exists, skipping
+NOTICE:  column "serving_id" of relation "memory_embedder_versions" already exists, skipping
+NOTICE:  relation "memory_embedding_versions" already exists, skipping
+NOTICE:  column "record_revision" of relation "memories" already exists, skipping
+NOTICE:  column "dependency_revision" of relation "memories" already exists, skipping
+NOTICE:  relation "memory_collection_owner" already exists, skipping
+NOTICE:  relation "memory_collection_generations" already exists, skipping
+NOTICE:  relation "memory_invalidation_outbox" already exists, skipping
+NOTICE:  relation "memory_relation_consumer_state" already exists, skipping
+NOTICE:  relation "memory_relation_consumer_positions" already exists, skipping
+NOTICE:  relation "idx_memory_links_target_source" already exists, skipping
+NOTICE:  relation "idx_memory_relation_input_record" already exists, skipping
+NOTICE:  column "record_revision" of relation "epistemic_directives" already exists, skipping
+NOTICE:  column "record_revision" of relation "prospective_memories" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_episodes" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_summaries" already exists, skipping
+NOTICE:  relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "proposal_id" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "operation" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "target_revision" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "scope_type" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  column "scope_value" of relation "memory_mutation_receipts" already exists, skipping
+NOTICE:  relation "memory_correction_proposals" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_pending" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_parent" already exists, skipping
+NOTICE:  relation "memory_correction_proposals_recent" already exists, skipping
+NOTICE:  column "memory_record_id" of relation "learning_observations" already exists, skipping
+NOTICE:  relation "learning_observation_memory_record_id" already exists, skipping
+NOTICE:  column "record_revision" of relation "learning_observations" already exists, skipping
+NOTICE:  column "record_revision" of relation "learning_proposals" already exists, skipping
+NOTICE:  column "record_revision" of relation "memory_relations" already exists, skipping
+NOTICE:  column "record_revision" of relation "rules" already exists, skipping
+NOTICE:  column "rules_revision" of relation "memory_collection_owner" already exists, skipping
+NOTICE:  relation "memory_send_barrier" already exists, skipping
+NOTICE:  relation "memory_send_leases" already exists, skipping
+NOTICE:  column "sender_identity" of relation "memory_send_leases" already exists, skipping

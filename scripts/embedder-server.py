@@ -184,6 +184,75 @@ def serving_id():
     return f"{EMBEDDER_ID}/{hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]}"
 
 
+
+def embedding_identity_digest(identity):
+    """Cross-language commitment: ordered, length-prefixed UTF-8 fields."""
+    import hashlib
+    import struct
+    fields = ("schema_version", "model", "artifact_revision", "tokenizer_revision",
+              "query_preprocessing", "document_preprocessing", "query_prefix",
+              "document_prefix", "pooling", "normalization", "dimensions")
+    parts = ["embedding-identity-v1"] + [str(identity[key]) for key in fields]
+    config = identity["provider_configuration"]
+    parts.append(str(len(config)))
+    for key in sorted(config):
+        parts.extend((key, config[key]))
+    digest = hashlib.sha256()
+    for value in parts:
+        raw = value.encode("utf-8")
+        digest.update(struct.pack(">I", len(raw)))
+        digest.update(raw)
+    return "sha256:" + digest.hexdigest()
+
+
+_IMPLEMENTATION_IDENTITY = None
+
+
+def embedding_identity():
+    """Complete public identity alongside the legacy serving_id for old readers.
+
+    A new reader never joins this space to a legacy corpus by matching dimensions.
+    Registry aliases, endpoints and credentials are not model identity material.
+    """
+    global _IMPLEMENTATION_IDENTITY
+    if not SPEC or _load_status != "ok":
+        return None
+    if len(MODEL_REVISION) != 40 or any(c not in "0123456789abcdef" for c in MODEL_REVISION):
+        return None
+    if _IMPLEMENTATION_IDENTITY is None:
+        import hashlib
+        import importlib.metadata
+        from pathlib import Path
+        versions = {}
+        for package in ("sentence-transformers", "transformers", "tokenizers", "torch", "onnxruntime", "numpy"):
+            try:
+                versions[package] = importlib.metadata.version(package)
+            except importlib.metadata.PackageNotFoundError:
+                versions[package] = "absent"
+        material = Path(__file__).read_bytes() + json.dumps(versions, sort_keys=True).encode()
+        _IMPLEMENTATION_IDENTITY = hashlib.sha256(material).hexdigest()
+    return {
+        "schema_version": 1,
+        "model": MODEL_NAME,
+        "artifact_revision": MODEL_REVISION,
+        "tokenizer_revision": MODEL_REVISION,
+        "query_preprocessing": "utf8-prefix-encode-v1",
+        "document_preprocessing": "utf8-prefix-encode-v1",
+        "query_prefix": prefix_for("query"),
+        "document_prefix": prefix_for("document"),
+        "pooling": str(SPEC["pooling"]),
+        "normalization": "l2",
+        "dimensions": _dim,
+        "provider_configuration": {
+            "engine": "deterministic-stub-v1" if EMBEDDER_STUB else _runtime,
+            "quantization": EMBEDDER_QUANTIZE,
+            "context_limit": str(SPEC["context"]),
+            "external_code_revision": MODEL_CODE_REVISION or "none",
+            "implementation": _IMPLEMENTATION_IDENTITY,
+        },
+    }
+
+
 def parse_input_type(value):
     """Validate a caller-supplied input_type, or None when it is not one of ours."""
     if value is None or value == "":
@@ -622,6 +691,10 @@ class Handler(BaseHTTPRequestHandler):
             sid = serving_id()
             if sid:
                 payload["serving_id"] = sid
+            complete_identity = embedding_identity()
+            if complete_identity is not None:
+                payload["embedding_identity"] = complete_identity
+                payload["embedding_identity_digest"] = embedding_identity_digest(complete_identity)
             if REGISTRY_ERROR:
                 payload["error"] = REGISTRY_ERROR
             elif _load_status == "error":

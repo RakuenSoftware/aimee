@@ -1,0 +1,5 @@
+--- FAIL: TestSubjectErasureTransitiveCopiesPostgres (0.06s)
+    erasure_lineage_test.go:75: transitive erasure count 1 false
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.079s
+FAIL

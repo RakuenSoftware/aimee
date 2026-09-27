@@ -1,0 +1,19 @@
+{
+  "baseline_source_revision": "a49f6c0101456d4ee712579e743845642b9b941d",
+  "schema_sha256": "d83772812013e384956cc797ccc602ecbfb85b2510908591f9ffb3ea6252cd2f",
+  "schema_versions": [
+    28,
+    29,
+    29
+  ],
+  "result": "passed",
+  "checks": [
+    "exact prior correction and retirement receipts preserved",
+    "canonical records preserved",
+    "existing evidence history preserved",
+    "mixed purge and edit keep object-specific references",
+    "purge references remain empty",
+    "deletion replay verifier ACL remains restricted"
+  ],
+  "transcript": "PASS schema 28 -> 29 -> 29 preserves exact prior correction/retirement receipts, canonical rows, and evidence; mixed purge/edit references stay isolated; verifier ACL remains restricted"
+}

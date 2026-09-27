@@ -22,6 +22,7 @@ typedef struct
 static kb_cache_entry_t g_entries[KB_CACHE_MAX];
 static int g_count = 0;
 static unsigned g_seq = 0;
+static uint64_t g_generation = 1;
 static int g_ttl_s = 0;
 static long g_hits = 0, g_misses = 0, g_invalidations = 0;
 static pthread_mutex_t g_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -83,7 +84,18 @@ char *kb_cache_get(const char *key)
    return out;
 }
 
+uint64_t kb_cache_observe(void)
+{
+   pthread_mutex_lock(&g_mtx);
+   uint64_t generation = g_generation;
+   pthread_mutex_unlock(&g_mtx);
+   return generation;
+}
 void kb_cache_put(const char *key, const char *value)
+{
+   kb_cache_put_observed(key, value, kb_cache_observe());
+}
+void kb_cache_put_observed(const char *key, const char *value, uint64_t generation)
 {
    if (g_ttl_s <= 0 || !key || !key[0] || !value || strlen(key) >= KB_CACHE_KEY_MAX)
       return;
@@ -91,6 +103,12 @@ void kb_cache_put(const char *key, const char *value)
    if (!copy)
       return;
    pthread_mutex_lock(&g_mtx);
+   if (generation != g_generation || g_ttl_s <= 0)
+   {
+      pthread_mutex_unlock(&g_mtx);
+      free(copy);
+      return;
+   }
    int i = find_locked(key);
    if (i < 0)
    {
@@ -118,6 +136,7 @@ void kb_cache_put(const char *key, const char *value)
 void kb_cache_invalidate_all(void)
 {
    pthread_mutex_lock(&g_mtx);
+   g_generation++;
    int dropped = g_count;
    for (int i = 0; i < g_count; i++)
    {

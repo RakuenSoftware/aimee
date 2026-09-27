@@ -1,0 +1,4090 @@
+{
+  "source_revision": "91a1f02969806adca232da8f50fa394dffe343fa",
+  "verdicts": {
+    "correction-review.json": [
+      {
+        "name": "review fixture has verified user authorship",
+        "passed": true
+      },
+      {
+        "name": "MCP creates linked correction draft owner envelope",
+        "passed": true
+      },
+      {
+        "name": "model draft preserves authoritative current memory",
+        "passed": true
+      },
+      {
+        "name": "draft inspection preserves model authority and cap",
+        "passed": true
+      },
+      {
+        "name": "draft inspection obeys parent scope",
+        "passed": true
+      },
+      {
+        "name": "enrolled Server reaches restarted memory owner",
+        "passed": true
+      },
+      {
+        "name": "Server observes the exact target version after KB restart",
+        "passed": true
+      },
+      {
+        "name": "MCP draft retry after KB restart owner envelope",
+        "passed": true
+      },
+      {
+        "name": "draft retry survives owner restart",
+        "passed": true
+      },
+      {
+        "name": "restart and derived primary scope preserve target version",
+        "passed": true
+      },
+      {
+        "name": "direct service bearer cannot claim human review authority",
+        "passed": true
+      },
+      {
+        "name": "unauthenticated HTTP cannot review a draft",
+        "passed": true
+      },
+      {
+        "name": "review binds exact draft digest",
+        "passed": true
+      },
+      {
+        "name": "verified KB review approves the draft",
+        "passed": true
+      },
+      {
+        "name": "approval separates model authorship from reviewer",
+        "passed": true
+      },
+      {
+        "name": "approved model version keeps recomputed confidence",
+        "passed": true
+      },
+      {
+        "name": "approved extraction remains model authored",
+        "passed": true
+      },
+      {
+        "name": "review replay keeps one canonical commit",
+        "passed": true
+      },
+      {
+        "name": "MCP reviewed content requires another review owner envelope",
+        "passed": true
+      },
+      {
+        "name": "reviewed model text cannot be silently overwritten",
+        "passed": true
+      },
+      {
+        "name": "verified reviewer rejects the exact follow-up",
+        "passed": true
+      },
+      {
+        "name": "MCP repeats rejected draft owner envelope",
+        "passed": true
+      },
+      {
+        "name": "rejected draft cannot reopen through another model call",
+        "passed": true
+      },
+      {
+        "name": "review workflow retains exactly old and approved versions",
+        "passed": true
+      },
+      {
+        "name": "rejected draft never enters recall storage",
+        "passed": true
+      },
+      {
+        "name": "explicit erasure removes original proposal parent",
+        "passed": true
+      },
+      {
+        "name": "parent erasure removes draft payload",
+        "passed": true
+      },
+      {
+        "name": "MCP erased proposal retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "erasure does not free a committed proposal retry key",
+        "passed": true
+      }
+    ],
+    "identity.json": [
+      {
+        "name": "server persists its first-boot identity",
+        "passed": true
+      },
+      {
+        "name": "server rejects a role change without modifying its identity",
+        "passed": true
+      },
+      {
+        "name": "server accepts the same image and role on restart",
+        "passed": true
+      },
+      {
+        "name": "kb persists its first-boot identity",
+        "passed": true
+      },
+      {
+        "name": "kb rejects a role change without modifying its identity",
+        "passed": true
+      },
+      {
+        "name": "kb accepts the same image and role on restart",
+        "passed": true
+      }
+    ],
+    "local-memory.json": [
+      {
+        "name": "KB-free local store",
+        "passed": true
+      },
+      {
+        "name": "HTTP store commits personal invalidation",
+        "passed": true
+      },
+      {
+        "name": "personal store retry",
+        "passed": true
+      },
+      {
+        "name": "identical HTTP upsert preserves identity and invalidation progress",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall {}",
+        "passed": true
+      },
+      {
+        "name": "recall returns personal text and scoped handle {}",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall {'store': 'user'}",
+        "passed": true
+      },
+      {
+        "name": "recall returns personal text and scoped handle {'store': 'user'}",
+        "passed": true
+      },
+      {
+        "name": "personal recall tolerates brief database contention",
+        "passed": true
+      },
+      {
+        "name": "delayed recall preserves personal text and scoped handle",
+        "passed": true
+      },
+      {
+        "name": "KB-free session recall without hint",
+        "passed": true
+      },
+      {
+        "name": "KB-free CLI recall",
+        "passed": true
+      },
+      {
+        "name": "KB-free MCP recall",
+        "passed": true
+      },
+      {
+        "name": "recall rejects invalid store",
+        "passed": true
+      },
+      {
+        "name": "HTTP CLI MCP recall leaves personal invalidations unchanged",
+        "passed": true
+      },
+      {
+        "name": "HTTP mutation refuses failed invalidation commit",
+        "passed": true
+      },
+      {
+        "name": "personal content after failed invalidation",
+        "passed": true
+      },
+      {
+        "name": "failed invalidation preserves canonical content and progress",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall survives restart",
+        "passed": true
+      },
+      {
+        "name": "personal invalidations survive application restart",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall reports unavailable local store",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall recovers",
+        "passed": true
+      },
+      {
+        "name": "personal invalidations survive storage restart",
+        "passed": true
+      },
+      {
+        "name": "KB-free local retirement",
+        "passed": true
+      },
+      {
+        "name": "HTTP retirement commits a new personal invalidation",
+        "passed": true
+      },
+      {
+        "name": "KB-free recall after retirement",
+        "passed": true
+      },
+      {
+        "name": "retired personal record excluded from recall",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 0",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 0",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 1",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 1",
+        "passed": true
+      },
+      {
+        "name": "personal history fixture",
+        "passed": true
+      },
+      {
+        "name": "personal HTTP versioned get",
+        "passed": true
+      },
+      {
+        "name": "personal version uses owner and exact decimal identifiers",
+        "passed": true
+      },
+      {
+        "name": "personal same-key correction",
+        "passed": true
+      },
+      {
+        "name": "personal explicit historical get",
+        "passed": true
+      },
+      {
+        "name": "same-key correction retains labelled original revision",
+        "passed": true
+      },
+      {
+        "name": "personal HTTP correction rejects stale version",
+        "passed": true
+      },
+      {
+        "name": "personal MCP versioned get owner envelope",
+        "passed": true
+      },
+      {
+        "name": "personal MCP authoritative correction refusal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "personal MCP cannot replace HTTP-authored content",
+        "passed": true
+      },
+      {
+        "name": "personal HTTP authorized versioned correction",
+        "passed": true
+      },
+      {
+        "name": "personal authorized correction returns committed revision",
+        "passed": true
+      },
+      {
+        "name": "private HTTP captures verified user authorship",
+        "passed": true
+      },
+      {
+        "name": "personal MCP model fixture owner envelope",
+        "passed": true
+      },
+      {
+        "name": "personal model version owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP cannot forge user provenance or certainty",
+        "passed": true
+      },
+      {
+        "name": "personal MCP model correction owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP can correct model content with version admission",
+        "passed": true
+      },
+      {
+        "name": "personal MCP model history owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private model history retains original authorship",
+        "passed": true
+      },
+      {
+        "name": "private MCP authoritative store refusal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP store cannot mutate user content",
+        "passed": true
+      },
+      {
+        "name": "private MCP authoritative forget refusal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP forget cannot mutate user content",
+        "passed": true
+      },
+      {
+        "name": "private authority refusals leave canonical revision unchanged",
+        "passed": true
+      },
+      {
+        "name": "personal MCP stale retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "personal MCP rejects stale correction retry",
+        "passed": true
+      },
+      {
+        "name": "personal MCP historical get owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP history preserves exact second revision",
+        "passed": true
+      },
+      {
+        "name": "personal history rejects another owner",
+        "passed": true
+      },
+      {
+        "name": "private runtime cannot rewrite retained history",
+        "passed": true
+      },
+      {
+        "name": "private runtime cannot bypass retirement with physical erase",
+        "passed": true
+      },
+      {
+        "name": "private runtime cannot rewrite invalidation progress",
+        "passed": true
+      },
+      {
+        "name": "private runtime cannot invoke protected trigger helpers",
+        "passed": true
+      },
+      {
+        "name": "personal versions survive restart",
+        "passed": true
+      },
+      {
+        "name": "retained private history survives restart",
+        "passed": true
+      },
+      {
+        "name": "restart retains current and original private versions",
+        "passed": true
+      },
+      {
+        "name": "history persistence failure refuses correction",
+        "passed": true
+      },
+      {
+        "name": "personal version after history failure",
+        "passed": true
+      },
+      {
+        "name": "history failure rolls back content version and invalidation",
+        "passed": true
+      },
+      {
+        "name": "parent erasure removes private history payloads",
+        "passed": true
+      },
+      {
+        "name": "erased private revision cannot be retrieved",
+        "passed": true
+      },
+      {
+        "name": "private review parent",
+        "passed": true
+      },
+      {
+        "name": "private review original version",
+        "passed": true
+      },
+      {
+        "name": "private MCP correction draft owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private refusal links a non-serving model draft",
+        "passed": true
+      },
+      {
+        "name": "private parent after draft",
+        "passed": true
+      },
+      {
+        "name": "private draft leaves serving version and journal unchanged",
+        "passed": true
+      },
+      {
+        "name": "private repeated draft owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private proposal retry preserves original draft identity",
+        "passed": true
+      },
+      {
+        "name": "private exact draft inspection",
+        "passed": true
+      },
+      {
+        "name": "private inspection returns screened model payload",
+        "passed": true
+      },
+      {
+        "name": "private review refuses a different draft digest",
+        "passed": true
+      },
+      {
+        "name": "private review refuses late decision persistence failure",
+        "passed": true
+      },
+      {
+        "name": "private parent after failed review",
+        "passed": true
+      },
+      {
+        "name": "failed private review rolls back content history and journal",
+        "passed": true
+      },
+      {
+        "name": "private exact draft approval",
+        "passed": true
+      },
+      {
+        "name": "private reviewed memory",
+        "passed": true
+      },
+      {
+        "name": "private approval preserves model origin and records the reviewer",
+        "passed": true
+      },
+      {
+        "name": "private history after reviewed correction",
+        "passed": true
+      },
+      {
+        "name": "reviewed private correction retains human source revision",
+        "passed": true
+      },
+      {
+        "name": "private approved decision retry",
+        "passed": true
+      },
+      {
+        "name": "private decision retry has no second canonical effect",
+        "passed": true
+      },
+      {
+        "name": "private reviewed content still requires review owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private correction rejection",
+        "passed": true
+      },
+      {
+        "name": "private rejected suggestion retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private rejected draft cannot reopen or alter recall",
+        "passed": true
+      },
+      {
+        "name": "private review recovery after restart",
+        "passed": true
+      },
+      {
+        "name": "private decision survives restart",
+        "passed": true
+      },
+      {
+        "name": "restart preserves reviewed version author and decision",
+        "passed": true
+      },
+      {
+        "name": "private reviewed memory retirement",
+        "passed": true
+      },
+      {
+        "name": "private review retry cannot release a retired result",
+        "passed": true
+      },
+      {
+        "name": "private parent erasure removes correction drafts",
+        "passed": true
+      },
+      {
+        "name": "private erased proposal cannot be reviewed again",
+        "passed": true
+      },
+      {
+        "name": "private keyed correction parent",
+        "passed": true
+      },
+      {
+        "name": "private keyed original version",
+        "passed": true
+      },
+      {
+        "name": "private keyed correction refuses receipt failure",
+        "passed": true
+      },
+      {
+        "name": "private keyed parent after failure",
+        "passed": true
+      },
+      {
+        "name": "private receipt failure rolls back content and journal",
+        "passed": true
+      },
+      {
+        "name": "private keyed correction commits",
+        "passed": true
+      },
+      {
+        "name": "private receipt binds stable ID and new version",
+        "passed": true
+      },
+      {
+        "name": "private keyed HTTP retry",
+        "passed": true
+      },
+      {
+        "name": "private HTTP retry preserves one commit and canonical effect",
+        "passed": true
+      },
+      {
+        "name": "private HTTP retry rejects changed payload",
+        "passed": true
+      },
+      {
+        "name": "private keyed result after restart",
+        "passed": true
+      },
+      {
+        "name": "private keyed retry after restart",
+        "passed": true
+      },
+      {
+        "name": "private retry receipt survives Server restart",
+        "passed": true
+      },
+      {
+        "name": "private keyed result retirement",
+        "passed": true
+      },
+      {
+        "name": "private retry cannot release retired content",
+        "passed": true
+      },
+      {
+        "name": "private erasure does not free a committed retry key",
+        "passed": true
+      },
+      {
+        "name": "private keyed model fixture owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private model retry version",
+        "passed": true
+      },
+      {
+        "name": "private keyed MCP correction owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private keyed MCP retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP preserves durable receipt and capped model authority",
+        "passed": true
+      },
+      {
+        "name": "private keyed proposal parent",
+        "passed": true
+      },
+      {
+        "name": "private keyed proposal version",
+        "passed": true
+      },
+      {
+        "name": "private keyed model proposal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private keyed model proposal retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private proposal retry retains non-serving identity",
+        "passed": true
+      },
+      {
+        "name": "private keyed changed draft owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private proposal retry rejects changed draft",
+        "passed": true
+      },
+      {
+        "name": "private keyed proposal rejection",
+        "passed": true
+      },
+      {
+        "name": "private keyed rejected proposal retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private keyed rejected proposal cannot reopen",
+        "passed": true
+      },
+      {
+        "name": "private keyed erased proposal retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private erased proposal key cannot repeat a mutation",
+        "passed": true
+      },
+      {
+        "name": "private retirement parent",
+        "passed": true
+      },
+      {
+        "name": "private retirement expected version",
+        "passed": true
+      },
+      {
+        "name": "private retirement refuses receipt failure",
+        "passed": true
+      },
+      {
+        "name": "private retirement rollback parent",
+        "passed": true
+      },
+      {
+        "name": "private retirement rolls back content and invalidation",
+        "passed": true
+      },
+      {
+        "name": "private conditional retirement commits",
+        "passed": true
+      },
+      {
+        "name": "private retirement receipt binds a non-destructive transition",
+        "passed": true
+      },
+      {
+        "name": "private conditional retirement removes current recall",
+        "passed": true
+      },
+      {
+        "name": "private retirement HTTP retry",
+        "passed": true
+      },
+      {
+        "name": "private retirement retry preserves one commit and invalidation",
+        "passed": true
+      },
+      {
+        "name": "private retirement rejects changed retry version",
+        "passed": true
+      },
+      {
+        "name": "private retirement retry after Server restart",
+        "passed": true
+      },
+      {
+        "name": "private retirement receipt survives restart without another effect",
+        "passed": true
+      },
+      {
+        "name": "private retired history stays governed",
+        "passed": true
+      },
+      {
+        "name": "private authorized reactivation",
+        "passed": true
+      },
+      {
+        "name": "private retirement retry cannot retire reactivated content",
+        "passed": true
+      },
+      {
+        "name": "private erasure retains retirement retry identity",
+        "passed": true
+      },
+      {
+        "name": "private model retirement parent owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private model retirement version",
+        "passed": true
+      },
+      {
+        "name": "private keyed MCP retirement owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private keyed MCP retirement retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "private MCP retirement returns one non-destructive receipt",
+        "passed": true
+      },
+      {
+        "name": "private protected retirement parent",
+        "passed": true
+      },
+      {
+        "name": "private protected retirement version",
+        "passed": true
+      },
+      {
+        "name": "model conditional retirement of user assertion owner envelope",
+        "passed": true
+      },
+      {
+        "name": "model retirement cannot claim user authority",
+        "passed": true
+      },
+      {
+        "name": "private protected retirement cleanup",
+        "passed": true
+      },
+      {
+        "name": "user keyed HTTP creation",
+        "passed": true
+      },
+      {
+        "name": "user creation receipt binds exact result",
+        "passed": true
+      },
+      {
+        "name": "user keyed HTTP creation replay",
+        "passed": true
+      },
+      {
+        "name": "user replay preserves commit and invalidation",
+        "passed": true
+      },
+      {
+        "name": "user changed creation retry conflicts",
+        "passed": true
+      },
+      {
+        "name": "user creation result survives restart",
+        "passed": true
+      },
+      {
+        "name": "user creation replay survives restart",
+        "passed": true
+      },
+      {
+        "name": "user restart preserves creation commit",
+        "passed": true
+      },
+      {
+        "name": "user keyed MCP creation owner envelope",
+        "passed": true
+      },
+      {
+        "name": "user MCP creation has a durable receipt",
+        "passed": true
+      },
+      {
+        "name": "user MCP creation replay owner envelope",
+        "passed": true
+      },
+      {
+        "name": "user MCP retry identifies original commit",
+        "passed": true
+      },
+      {
+        "name": "user model creation read",
+        "passed": true
+      },
+      {
+        "name": "user keyed MCP creation retains confidence ceiling",
+        "passed": true
+      },
+      {
+        "name": "user creation proposal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "user creation proposal replay owner envelope",
+        "passed": true
+      },
+      {
+        "name": "user creation retry preserves review admission",
+        "passed": true
+      },
+      {
+        "name": "user keyed creation retirement",
+        "passed": true
+      },
+      {
+        "name": "user retired creation cannot be recreated by retry",
+        "passed": true
+      }
+    ],
+    "native-async.json": [
+      {
+        "name": "native fixture explicitly enables automatic recall",
+        "passed": true
+      },
+      {
+        "name": "native fixture stores complete private identity",
+        "passed": true
+      },
+      {
+        "name": "healthy native run queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "healthy native run completes",
+        "passed": true
+      },
+      {
+        "name": "healthy native run dispatches exactly once",
+        "passed": true
+      },
+      {
+        "name": "native provider receives complete Go memory",
+        "passed": true
+      },
+      {
+        "name": "inherited zero byte cap queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "worker preserves inherited byte refusal",
+        "passed": true
+      },
+      {
+        "name": "inherited byte refusal sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "native fixture identifies exactly one Go memory owner",
+        "passed": true
+      },
+      {
+        "name": "paused Go memory owner queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "native worker reports memory owner refusal",
+        "passed": true
+      },
+      {
+        "name": "native owner refusal sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "supervised memory restart preserves committed identity",
+        "passed": true
+      },
+      {
+        "name": "recovered native run queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "new native worker recovers and dispatches once",
+        "passed": true
+      },
+      {
+        "name": "recovered provider retains complete Go memory",
+        "passed": true
+      },
+      {
+        "name": "native context refresh queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "native refresh fixture commits its memory update",
+        "passed": true
+      },
+      {
+        "name": "native multi-turn run completes after five tool calls",
+        "passed": true
+      },
+      {
+        "name": "native refresh follows five real file reads",
+        "passed": true
+      },
+      {
+        "name": "initial context predates the new identity",
+        "passed": true
+      },
+      {
+        "name": "refreshed provider context contains the new complete identity",
+        "passed": true
+      },
+      {
+        "name": "native fixture identifies exactly one Go memory owner",
+        "passed": true
+      },
+      {
+        "name": "native refresh owner outage queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "native refresh intervention succeeds",
+        "passed": true
+      },
+      {
+        "name": "native refresh reports memory owner refusal",
+        "passed": true
+      },
+      {
+        "name": "native refresh refusal prevents a sixth provider request",
+        "passed": true
+      },
+      {
+        "name": "recovered native refresh queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "worker recovers after refresh refusal",
+        "passed": true
+      },
+      {
+        "name": "refresh recovery retains both committed identities",
+        "passed": true
+      },
+      {
+        "name": "native provider error queues a real asynchronous worker",
+        "passed": true
+      },
+      {
+        "name": "provider failure terminates without a successful response",
+        "passed": true
+      },
+      {
+        "name": "provider error events retain complete escaped diagnostics",
+        "passed": true
+      },
+      {
+        "name": "permanent provider error is not retried",
+        "passed": true
+      },
+      {
+        "name": "native fixture retires its refreshed identity",
+        "passed": true
+      },
+      {
+        "name": "native fixture retires its private identity",
+        "passed": true
+      }
+    ],
+    "provider-boundary.json": [
+      {
+        "name": "Fixture has a bounded deployment-owned provider byte ceiling",
+        "passed": true
+      },
+      {
+        "name": "Go private memory stores the Unicode and escaping fixture",
+        "passed": true
+      },
+      {
+        "name": "Go memory returns the exact content and current version",
+        "passed": true
+      },
+      {
+        "name": "Go recall selects the stored fixture",
+        "passed": true
+      },
+      {
+        "name": "chat to openai completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "chat to openai dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai uses OpenAI chat fields",
+        "passed": true
+      },
+      {
+        "name": "chat to openai preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "chat to openai preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "chat to openai includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "chat to openai includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "chat to openai admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "chat to openai exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "chat to openai one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to openai duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming zero cap emits a failure",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming zero cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "responses to openai dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai uses OpenAI chat fields",
+        "passed": true
+      },
+      {
+        "name": "responses to openai preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "responses to openai preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "responses to openai includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "responses to openai includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "responses to openai admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "responses to openai exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "responses to openai one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to openai duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai uses OpenAI chat fields",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "messages to openai dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai uses OpenAI chat fields",
+        "passed": true
+      },
+      {
+        "name": "messages to openai preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "messages to openai preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "messages to openai includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "messages to openai admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "messages to openai exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "messages to openai one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to openai duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming zero cap emits a failure",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming zero cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic uses Anthropic system and tool fields",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming zero cap emits a failure",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming zero cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic uses Anthropic system and tool fields",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic uses Anthropic system and tool fields",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic includes standing memory guidance exactly once",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic completes through the real provider adapter",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic dispatches exactly one request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic uses Anthropic system and tool fields",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic preserves the complete Go memory projection",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic preserves the user constraint",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic includes the tool schema in the final request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic captures provider serialization overhead",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic admits an exact final-byte fit",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic exact-fit dispatch preserves all provider bytes",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic one byte under reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic one byte under sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic literal zero reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic literal zero sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic unavailable tokens reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic unavailable tokens sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic null cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic null cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic unknown field reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic unknown field sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic duplicate cap reports explicit refusal",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic duplicate cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming zero cap emits a failure",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming zero cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming absent caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming absent caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming inherited caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming inherited caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming raised caller cap cannot bypass deployment ceiling",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming raised caller cap sends no provider request",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai continuation completes",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai continuation dispatches once",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai continuation preserves prior memory and current input",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai continuation uses current instructions",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai tool result is relayed without local execution",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai preserves returned call identity",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to openai preserves returned call arguments",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic continuation completes",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic continuation dispatches once",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic continuation preserves prior memory and current input",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic continuation uses current instructions",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic tool result is relayed without local execution",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic preserves returned call identity",
+        "passed": true
+      },
+      {
+        "name": "buffered Responses to anthropic preserves returned call arguments",
+        "passed": true
+      },
+      {
+        "name": "provider refusal fixture identifies one real memory owner",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "chat to openai buffered paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "chat to openai streaming paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "responses to openai buffered paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to openai streaming paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "messages to openai buffered paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "messages to openai streaming paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic buffered paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "chat to anthropic streaming paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "responses to anthropic buffered paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming paused memory owner reports explicit failure",
+        "passed": true
+      },
+      {
+        "name": "responses_stream to anthropic streaming paused memory owner sends zero provider requests",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic buffered memory-disabled passthrough retains provider dispatch",
+        "passed": true
+      },
+      {
+        "name": "messages to anthropic streaming memory-disabled passthrough retains provider dispatch",
+        "passed": true
+      },
+      {
+        "name": "provider refusal fixture recovers committed memory after owner restart",
+        "passed": true
+      },
+      {
+        "name": "new request after memory owner recovery dispatches exactly once",
+        "passed": true
+      },
+      {
+        "name": "fixture memory is retired after capture",
+        "passed": true
+      }
+    ],
+    "shared-memory.json": [
+      {
+        "name": "local store",
+        "passed": true
+      },
+      {
+        "name": "local store leaves KB unchanged",
+        "passed": true
+      },
+      {
+        "name": "local get",
+        "passed": true
+      },
+      {
+        "name": "get returns exact local content for colliding ID",
+        "passed": true
+      },
+      {
+        "name": "explicit KB get",
+        "passed": true
+      },
+      {
+        "name": "explicit KB get selects the other record",
+        "passed": true
+      },
+      {
+        "name": "MCP store defaults to user",
+        "passed": true
+      },
+      {
+        "name": "MCP personal content stays local",
+        "passed": true
+      },
+      {
+        "name": "MCP update uses local ID",
+        "passed": true
+      },
+      {
+        "name": "MCP forget retires local ID",
+        "passed": true
+      },
+      {
+        "name": "CLI default get selects user",
+        "passed": true
+      },
+      {
+        "name": "CLI explicit get selects KB",
+        "passed": true
+      },
+      {
+        "name": "CLI store identifies local scope",
+        "passed": true
+      },
+      {
+        "name": "CLI supersede updates local record",
+        "passed": true
+      },
+      {
+        "name": "CLI mutations leave KB unchanged",
+        "passed": true
+      },
+      {
+        "name": "local stats",
+        "passed": true
+      },
+      {
+        "name": "invalid store rejected 'both'",
+        "passed": true
+      },
+      {
+        "name": "invalid store rejected ''",
+        "passed": true
+      },
+      {
+        "name": "invalid store rejected 1",
+        "passed": true
+      },
+      {
+        "name": "invalid selectors leave KB unchanged",
+        "passed": true
+      },
+      {
+        "name": "local list",
+        "passed": true
+      },
+      {
+        "name": "list returns local fixture",
+        "passed": true
+      },
+      {
+        "name": "local review",
+        "passed": true
+      },
+      {
+        "name": "review returns local fixture",
+        "passed": true
+      },
+      {
+        "name": "local search",
+        "passed": true
+      },
+      {
+        "name": "search returns local fixture",
+        "passed": true
+      },
+      {
+        "name": "MCP get preserves selected store {'id': 48}",
+        "passed": true
+      },
+      {
+        "name": "MCP get preserves selected store {'handle': 'memory:48', 'scope': 'all'}",
+        "passed": true
+      },
+      {
+        "name": "local preference fixture",
+        "passed": true
+      },
+      {
+        "name": "explicit shared recall",
+        "passed": true
+      },
+      {
+        "name": "explicit shared recall excludes personal preferences",
+        "passed": true
+      },
+      {
+        "name": "local supersede",
+        "passed": true
+      },
+      {
+        "name": "local mutation leaves colliding KB record unchanged",
+        "passed": true
+      },
+      {
+        "name": "get corrected local memory",
+        "passed": true
+      },
+      {
+        "name": "local replacement content",
+        "passed": true
+      },
+      {
+        "name": "local memory survives restart",
+        "passed": true
+      },
+      {
+        "name": "restart preserves corrected value",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails list",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails get",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails recall",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails store",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails supersede",
+        "passed": true
+      },
+      {
+        "name": "local dependency outage fails delete",
+        "passed": true
+      },
+      {
+        "name": "local outage never writes KB",
+        "passed": true
+      },
+      {
+        "name": "local dependency recovers",
+        "passed": true
+      },
+      {
+        "name": "local get works with KB offline",
+        "passed": true
+      },
+      {
+        "name": "local recall works with KB offline",
+        "passed": true
+      },
+      {
+        "name": "local recall retains scoped ID and prompt text",
+        "passed": true
+      },
+      {
+        "name": "local session recall needs no hint or KB",
+        "passed": true
+      },
+      {
+        "name": "CLI recall works with KB offline",
+        "passed": true
+      },
+      {
+        "name": "MCP recall works with KB offline",
+        "passed": true
+      },
+      {
+        "name": "local store works with KB offline",
+        "passed": true
+      },
+      {
+        "name": "explicit KB outage is an HTTP failure",
+        "passed": true
+      },
+      {
+        "name": "KB recovers",
+        "passed": true
+      },
+      {
+        "name": "KB memory process outage fails list",
+        "passed": true
+      },
+      {
+        "name": "KB memory process outage fails get",
+        "passed": true
+      },
+      {
+        "name": "user store works during KB memory process outage",
+        "passed": true
+      },
+      {
+        "name": "KB memory process recovers",
+        "passed": true
+      },
+      {
+        "name": "local retirement",
+        "passed": true
+      },
+      {
+        "name": "retired local ID never resolves to KB collision",
+        "passed": true
+      },
+      {
+        "name": "local retirement leaves KB content unchanged",
+        "passed": true
+      },
+      {
+        "name": "derived parent current get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent current search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent current get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent current get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "derived parent future get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent future search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent future get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent future get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "derived parent expired get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent expired search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent expired get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent expired get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "derived parent suppressed get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent suppressed search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent suppressed get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent suppressed get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "derived parent retired get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent retired search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent retired get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent retired get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "derived parent restored get_episode",
+        "passed": true
+      },
+      {
+        "name": "derived parent restored search_graph",
+        "passed": true
+      },
+      {
+        "name": "derived parent restored get_entity",
+        "passed": true
+      },
+      {
+        "name": "derived parent restored get_entity_edges",
+        "passed": true
+      },
+      {
+        "name": "MCP creates model-authored shared correction fixture",
+        "passed": true
+      },
+      {
+        "name": "MCP versioned get owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP versioned get preserves exact target",
+        "passed": true
+      },
+      {
+        "name": "MCP private correction precondition owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP private placement refuses a shared owner version",
+        "passed": true
+      },
+      {
+        "name": "MCP keyed update owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP update returns canonical commit receipt",
+        "passed": true
+      },
+      {
+        "name": "MCP update preserves confidence and model authority",
+        "passed": true
+      },
+      {
+        "name": "MCP keyed update retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP replay preserves commit without requesting another host audit",
+        "passed": true
+      },
+      {
+        "name": "MCP changed retry payload owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP refuses changed idempotency payload",
+        "passed": true
+      },
+      {
+        "name": "MCP stale update version owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP forwards and enforces expected version",
+        "passed": true
+      },
+      {
+        "name": "MCP retired update retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP retry never releases retired content",
+        "passed": true
+      },
+      {
+        "name": "MCP retries retain exactly one replacement",
+        "passed": true
+      },
+      {
+        "name": "shared journal HTTP store",
+        "passed": true
+      },
+      {
+        "name": "shared versioned HTTP get",
+        "passed": true
+      },
+      {
+        "name": "shared version binds exact identity and owner",
+        "passed": true
+      },
+      {
+        "name": "shared version binds current revision",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP store commits invalidation",
+        "passed": true
+      },
+      {
+        "name": "shared journal identical retry",
+        "passed": true
+      },
+      {
+        "name": "shared retry preserves identity and journal",
+        "passed": true
+      },
+      {
+        "name": "MCP update admission before audit owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP update requires review before canonical audit",
+        "passed": true
+      },
+      {
+        "name": "MCP update stale admission before audit owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP update rejects stale version before canonical audit",
+        "passed": true
+      },
+      {
+        "name": "MCP supersede admission before audit owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP supersede requires review before canonical audit",
+        "passed": true
+      },
+      {
+        "name": "HTTP supersede admitted correction reaches blocked audit",
+        "passed": true
+      },
+      {
+        "name": "MCP supersede stale admission before audit owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP supersede rejects stale version before canonical audit",
+        "passed": true
+      },
+      {
+        "name": "refused corrections preserve original revision and invalidations",
+        "passed": true
+      },
+      {
+        "name": "draft outcomes retain their retry references",
+        "passed": true
+      },
+      {
+        "name": "shared tag batch invalidates its parent once",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP rejects stale expected version",
+        "passed": true
+      },
+      {
+        "name": "shared refreshed versioned HTTP get",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP replacement refuses failed tag copy",
+        "passed": true
+      },
+      {
+        "name": "shared original after failed copy",
+        "passed": true
+      },
+      {
+        "name": "failed tag copy preserves original and invalidation",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP version replacement",
+        "passed": true
+      },
+      {
+        "name": "shared correction returns canonical commit receipt",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP idempotent correction replay",
+        "passed": true
+      },
+      {
+        "name": "shared correction replay preserves identity and commit",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP refuses idempotency key reuse",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP correction retry conflicts without duplicating",
+        "passed": true
+      },
+      {
+        "name": "shared replacement creates a new identity",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP correction retains verified user authorship",
+        "passed": true
+      },
+      {
+        "name": "shared replacement preserves visible tags",
+        "passed": true
+      },
+      {
+        "name": "shared replacement and copied tags have durable revisions",
+        "passed": true
+      },
+      {
+        "name": "shared replacement get",
+        "passed": true
+      },
+      {
+        "name": "shared direct read leaves invalidations unchanged",
+        "passed": true
+      },
+      {
+        "name": "shared destructive deletion parent",
+        "passed": true
+      },
+      {
+        "name": "shared deletion expected version",
+        "passed": true
+      },
+      {
+        "name": "model cannot elevate shared deletion owner envelope",
+        "passed": true
+      },
+      {
+        "name": "shared deletion precondition grants no user authority",
+        "passed": true
+      },
+      {
+        "name": "shared deletion rejects a stale target",
+        "passed": true
+      },
+      {
+        "name": "shared destruction refuses a receipt write failure",
+        "passed": true
+      },
+      {
+        "name": "failed shared destruction preserves its parent",
+        "passed": true
+      },
+      {
+        "name": "shared destruction failure rolls back revision and invalidation",
+        "passed": true
+      },
+      {
+        "name": "shared keyed destruction commits",
+        "passed": true
+      },
+      {
+        "name": "shared destruction receipt invents no current record version",
+        "passed": true
+      },
+      {
+        "name": "shared destruction is physically applied and audited as irreversible",
+        "passed": true
+      },
+      {
+        "name": "shared destruction HTTP retry",
+        "passed": true
+      },
+      {
+        "name": "shared destruction retry preserves its committed identity",
+        "passed": true
+      },
+      {
+        "name": "shared destruction key rejects a changed request",
+        "passed": true
+      },
+      {
+        "name": "MCP shared store without project context owner envelope",
+        "passed": true
+      },
+      {
+        "name": "shared store rejects the missing-context marker before writing",
+        "passed": true
+      },
+      {
+        "name": "MCP creates shared retirement parent",
+        "passed": true
+      },
+      {
+        "name": "MCP shared retirement expected version owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP keyed shared retirement owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP shared retirement receipt binds both versions",
+        "passed": true
+      },
+      {
+        "name": "MCP shared retirement retry owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP shared retirement replay repeats no mutation or host audit",
+        "passed": true
+      },
+      {
+        "name": "kb keyed HTTP creation",
+        "passed": true
+      },
+      {
+        "name": "kb creation receipt binds exact result",
+        "passed": true
+      },
+      {
+        "name": "kb keyed HTTP creation replay",
+        "passed": true
+      },
+      {
+        "name": "kb replay preserves commit and invalidation",
+        "passed": true
+      },
+      {
+        "name": "kb changed creation retry conflicts",
+        "passed": true
+      },
+      {
+        "name": "kb creation result survives restart",
+        "passed": true
+      },
+      {
+        "name": "kb creation replay survives restart",
+        "passed": true
+      },
+      {
+        "name": "kb restart preserves creation commit",
+        "passed": true
+      },
+      {
+        "name": "kb keyed MCP creation owner envelope",
+        "passed": true
+      },
+      {
+        "name": "kb MCP creation has a durable receipt",
+        "passed": true
+      },
+      {
+        "name": "kb MCP creation replay owner envelope",
+        "passed": true
+      },
+      {
+        "name": "kb MCP retry identifies original commit",
+        "passed": true
+      },
+      {
+        "name": "kb model creation read",
+        "passed": true
+      },
+      {
+        "name": "kb keyed MCP creation retains confidence ceiling",
+        "passed": true
+      },
+      {
+        "name": "kb creation proposal owner envelope",
+        "passed": true
+      },
+      {
+        "name": "kb creation proposal replay owner envelope",
+        "passed": true
+      },
+      {
+        "name": "kb creation retry preserves review admission",
+        "passed": true
+      },
+      {
+        "name": "kb keyed creation retirement",
+        "passed": true
+      },
+      {
+        "name": "kb retired creation cannot be recreated by retry",
+        "passed": true
+      },
+      {
+        "name": "shared replacement survives KB restart",
+        "passed": true
+      },
+      {
+        "name": "shared destruction receipt after KB restart",
+        "passed": true
+      },
+      {
+        "name": "shared destruction restart retry retains one commit",
+        "passed": true
+      },
+      {
+        "name": "shared destruction retry cannot certify a hidden restored ID as absent",
+        "passed": true
+      },
+      {
+        "name": "MCP shared retirement after KB restart owner envelope",
+        "passed": true
+      },
+      {
+        "name": "shared retirement restart retry retains one commit",
+        "passed": true
+      },
+      {
+        "name": "MCP retirement of reactivated result owner envelope",
+        "passed": true
+      },
+      {
+        "name": "shared retirement retry cannot repeat after reactivation",
+        "passed": true
+      },
+      {
+        "name": "MCP retirement of erased result owner envelope",
+        "passed": true
+      },
+      {
+        "name": "shared retirement key survives erasure",
+        "passed": true
+      },
+      {
+        "name": "shared journal owner and events survive KB restart",
+        "passed": true
+      },
+      {
+        "name": "shared correction receipt survives KB restart",
+        "passed": true
+      },
+      {
+        "name": "shared restarted correction never duplicates result",
+        "passed": true
+      },
+      {
+        "name": "shared HTTP retry refuses retired result without cached content",
+        "passed": true
+      },
+      {
+        "name": "explicit long KB store",
+        "passed": true
+      },
+      {
+        "name": "explicit long KB get",
+        "passed": true
+      },
+      {
+        "name": "KB get preserves full long Unicode content",
+        "passed": true
+      },
+      {
+        "name": "ordinary KB get hides retired record",
+        "passed": true
+      },
+      {
+        "name": "historical retired KB get 2026-03-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "historical KB get preserves content and validity 2026-03-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "historical retired KB get 2026-07-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "historical KB get preserves content and validity 2026-07-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "versioned historical HTTP read 2026-01-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "versioned historical HTTP read 2026-03-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "versioned historical HTTP excludes 2026-06-01T00:00:00Z",
+        "passed": true
+      },
+      {
+        "name": "versioned historical HTTP excludes 2025-12-31T23:59:59Z",
+        "passed": true
+      },
+      {
+        "name": "explicit HTTP read refusal user unsupported_version",
+        "passed": true
+      },
+      {
+        "name": "explicit HTTP read refusal user unsupported_mode",
+        "passed": true
+      },
+      {
+        "name": "explicit HTTP read refusal kb unsupported_version",
+        "passed": true
+      },
+      {
+        "name": "explicit HTTP read refusal kb unsupported_mode",
+        "passed": true
+      },
+      {
+        "name": "versioned personal current fixture",
+        "passed": true
+      },
+      {
+        "name": "versioned personal current HTTP read",
+        "passed": true
+      },
+      {
+        "name": "personal current HTTP reports applied policy",
+        "passed": true
+      },
+      {
+        "name": "personal historical HTTP refuses unsupported reconstruction",
+        "passed": true
+      },
+      {
+        "name": "personal email canaries absent from all KB tables",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "user HTTP rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP store rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP update rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user MCP supersede rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 0",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 0",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "user stores confidence 1",
+        "passed": true
+      },
+      {
+        "name": "user preserves confidence 1",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "kb HTTP rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "kb MCP store rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "kb MCP update rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "kb MCP supersede rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "kb stores confidence 0",
+        "passed": true
+      },
+      {
+        "name": "kb preserves confidence 0",
+        "passed": true
+      },
+      {
+        "name": "kb stores confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "kb preserves confidence 0.25",
+        "passed": true
+      },
+      {
+        "name": "kb stores confidence 1",
+        "passed": true
+      },
+      {
+        "name": "kb preserves confidence 1",
+        "passed": true
+      },
+      {
+        "name": "complete hard-rule HTTP recall False",
+        "passed": true
+      },
+      {
+        "name": "HTTP retains beyond former hard-rule cap False",
+        "passed": true
+      },
+      {
+        "name": "complete hard-rule HTTP recall True",
+        "passed": true
+      },
+      {
+        "name": "HTTP retains beyond former hard-rule cap True",
+        "passed": true
+      },
+      {
+        "name": "CLI retains the complete hard-rule set",
+        "passed": true
+      },
+      {
+        "name": "optional oversized recall fixture",
+        "passed": true
+      },
+      {
+        "name": "hard rules survive optional trimming",
+        "passed": true
+      },
+      {
+        "name": "packing keeps complete rules and omits oversized optional row",
+        "passed": true
+      },
+      {
+        "name": "HTTP exposes protected overflow without partial recall",
+        "passed": true
+      },
+      {
+        "name": "MCP protected overflow False owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP preserves protected refusal before guidance False",
+        "passed": true
+      },
+      {
+        "name": "MCP protected overflow True owner envelope",
+        "passed": true
+      },
+      {
+        "name": "MCP preserves protected refusal before guidance True",
+        "passed": true
+      },
+      {
+        "name": "HTTP refuses oversized last rule instead of truncating",
+        "passed": true
+      },
+      {
+        "name": "recall recovers after protected overflow",
+        "passed": true
+      }
+    ],
+    "topology.json": [
+      {
+        "name": "KB application metadata contains no database or enrollment credential",
+        "passed": true
+      },
+      {
+        "name": "KB boots with standardized PostgreSQL and local embedding",
+        "passed": true
+      },
+      {
+        "name": "KB shared memory module stores a record",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence -1",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence 1.01",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence False",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence None",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence 'invalid'",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence []",
+        "passed": true
+      },
+      {
+        "name": "Direct KB store rejects confidence {}",
+        "passed": true
+      },
+      {
+        "name": "KB ranked search uses its local embedding service",
+        "passed": true
+      },
+      {
+        "name": "KB graph and memory retrieval survives the deepest worker path",
+        "passed": true
+      },
+      {
+        "name": "Typed projection retains both untrusted caller turns",
+        "passed": true
+      },
+      {
+        "name": "Typed projection identity binds rendered bytes and retained IDs",
+        "passed": true
+      },
+      {
+        "name": "Typed projection obeys byte limit 0",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds exact accounting at limit 0",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds retained IDs at limit 0",
+        "passed": true
+      },
+      {
+        "name": "Zero byte typed projection emits no wrappers or retained IDs",
+        "passed": true
+      },
+      {
+        "name": "Typed projection obeys byte limit 1",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds exact accounting at limit 1",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds retained IDs at limit 1",
+        "passed": true
+      },
+      {
+        "name": "Typed projection obeys byte limit 400",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds exact accounting at limit 400",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds retained IDs at limit 400",
+        "passed": true
+      },
+      {
+        "name": "Typed byte packing preserves the earlier small item",
+        "passed": true
+      },
+      {
+        "name": "Typed projection obeys byte limit 1062",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds exact accounting at limit 1062",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds retained IDs at limit 1062",
+        "passed": true
+      },
+      {
+        "name": "Typed projection obeys byte limit 1063",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds exact accounting at limit 1063",
+        "passed": true
+      },
+      {
+        "name": "Typed projection binds retained IDs at limit 1063",
+        "passed": true
+      },
+      {
+        "name": "Typed projection retains exact-fit serialized bytes",
+        "passed": true
+      },
+      {
+        "name": "Typed projection refuses unavailable max_context_tokens",
+        "passed": true
+      },
+      {
+        "name": "Typed projection refuses unavailable max_request_tokens",
+        "passed": true
+      },
+      {
+        "name": "Typed projection refuses unavailable reserved_response_tokens",
+        "passed": true
+      },
+      {
+        "name": "Typed projection refuses unavailable reserved_tool_tokens",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects null limits without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects null byte cap without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects null token cap without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects duplicate byte cap without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects escaped duplicate cap without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection rejects case alias without serving context",
+        "passed": true
+      },
+      {
+        "name": "Typed projection remains usable after malformed limit refusals",
+        "passed": true
+      },
+      {
+        "name": "Typed assembly references commit through authenticated evidence writer",
+        "passed": true
+      },
+      {
+        "name": "Typed evidence preserves exact references without invented source versions",
+        "passed": true
+      },
+      {
+        "name": "Repeated typed evidence merge preserves event identity",
+        "passed": true
+      },
+      {
+        "name": "Repeated typed evidence merge does not duplicate references",
+        "passed": true
+      },
+      {
+        "name": "Repacked typed selection joins the same turn event",
+        "passed": true
+      },
+      {
+        "name": "Distinct accepted projection identities remain distinguishable",
+        "passed": true
+      },
+      {
+        "name": "Empty typed evidence does not create a bare event",
+        "passed": true
+      },
+      {
+        "name": "Empty typed evidence trace remains explicitly unavailable",
+        "passed": true
+      },
+      {
+        "name": "Large typed evidence writer accepts the reference batch",
+        "passed": true
+      },
+      {
+        "name": "Bounded trace refuses a truncated event instead of reporting success",
+        "passed": true
+      },
+      {
+        "name": "Bounded-read refusal preserves subsequent event merge retries",
+        "passed": true
+      },
+      {
+        "name": "Typed assertion binds the exact owner record revision",
+        "passed": true
+      },
+      {
+        "name": "Typed selection digest includes source revision evidence",
+        "passed": true
+      },
+      {
+        "name": "Unchanged typed assertion retains its source binding",
+        "passed": true
+      },
+      {
+        "name": "Changed assertion revision cannot reuse the prior selection binding",
+        "passed": true
+      },
+      {
+        "name": "Omitted typed assertion claims no retained source revision",
+        "passed": true
+      },
+      {
+        "name": "Evidence writer accepts exact int64 source identities",
+        "passed": true
+      },
+      {
+        "name": "Evidence trace preserves adjacent large IDs and int64 maximum",
+        "passed": true
+      },
+      {
+        "name": "Evidence provenance retains exact source identity on lookup",
+        "passed": true
+      },
+      {
+        "name": "Memory outcome writer accepts exact source IDs",
+        "passed": true
+      },
+      {
+        "name": "Single memory outcome accepts int64 maximum",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 0",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 0",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 1",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 1",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 2",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 2",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 3",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 3",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 4",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 4",
+        "passed": true
+      },
+      {
+        "name": "Evidence rejects ambiguous or malformed ID case 5",
+        "passed": true
+      },
+      {
+        "name": "Invalid identity creates no partial event case 5",
+        "passed": true
+      },
+      {
+        "name": "Outcome writer never attributes a rounded numeric ID",
+        "passed": true
+      },
+      {
+        "name": "Server boots without a KB connection",
+        "passed": true
+      },
+      {
+        "name": "Server application metadata contains no database or enrollment credential",
+        "passed": true
+      },
+      {
+        "name": "KB-free personal memory regression gate",
+        "passed": true
+      },
+      {
+        "name": "Linked model correction drafts and authenticated decisions",
+        "passed": true
+      },
+      {
+        "name": "Enrolled optional KB, scope isolation, restart and outage regressions",
+        "passed": true
+      },
+      {
+        "name": "One application image and immutable first-boot identities",
+        "passed": true
+      },
+      {
+        "name": "Provider-bound memory, constraints, tools and continuation gate",
+        "passed": true
+      },
+      {
+        "name": "Live asynchronous native memory refusal and recovery gate",
+        "passed": true
+      }
+    ]
+  },
+  "native_runs": [
+    {
+      "name": "healthy native run",
+      "run_id": "run_1789978328_1",
+      "status": "completed",
+      "elapsed_seconds": 0.7095213700085878,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        22794
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "inherited zero byte cap",
+      "run_id": "run_1789978328_2",
+      "status": "failed",
+      "elapsed_seconds": 0.5168869099579751,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_exceeded"
+      ]
+    },
+    {
+      "name": "paused Go memory owner",
+      "run_id": "run_1789978329_3",
+      "status": "failed",
+      "elapsed_seconds": 60.266655660932884,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native run",
+      "run_id": "run_1789978391_4",
+      "status": "completed",
+      "elapsed_seconds": 0.7169950969982892,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24023
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native context refresh",
+      "run_id": "run_1789978392_5",
+      "status": "completed",
+      "elapsed_seconds": 2.3189067309722304,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        23861,
+        24341,
+        24821,
+        25301,
+        25781,
+        26558
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native refresh owner outage",
+      "run_id": "run_1789978394_6",
+      "status": "failed",
+      "elapsed_seconds": 66.9991566198878,
+      "provider_requests": 5,
+      "provider_request_bytes": [
+        23998,
+        24478,
+        24958,
+        25438,
+        25918
+      ],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native refresh",
+      "run_id": "run_1789978463_7",
+      "status": "completed",
+      "elapsed_seconds": 0.6082910869736224,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24047
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native provider error",
+      "run_id": "run_1789978464_8",
+      "status": "failed",
+      "elapsed_seconds": 0.7177517670206726,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        24045
+      ],
+      "refusal_kinds": []
+    }
+  ],
+  "accounting": [
+    {
+      "frontend": "chat",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8837,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:94684951873aa1d4f04e9f70f7f44c4083fedc4b6d0aae4c6558b070df252100",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8837,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:94684951873aa1d4f04e9f70f7f44c4083fedc4b6d0aae4c6558b070df252100",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses_stream",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8837,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:94684951873aa1d4f04e9f70f7f44c4083fedc4b6d0aae4c6558b070df252100",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8835,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:1b35973d197a3cd137486af61bf014e663e2fc857cfc84fe31f1ff1afb5df0f3",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "chat",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8939,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:90f598261a8addd0b594a38de428abd6e507bbe275e03fc365f235b77b28db27",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8939,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:90f598261a8addd0b594a38de428abd6e507bbe275e03fc365f235b77b28db27",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses_stream",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8939,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:90f598261a8addd0b594a38de428abd6e507bbe275e03fc365f235b77b28db27",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 3015,
+      "memory_projection_bytes": 2271,
+      "digest": "sha256:81872448042c386c517f55e60b4e617775d787517a7e3c22e909437141e240c2",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    }
+  ]
+}

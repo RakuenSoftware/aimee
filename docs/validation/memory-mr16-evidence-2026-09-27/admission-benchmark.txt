@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/JBailes/aimee/server-go/modules/execution-policy
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkGovernedActionAdmission/retained_0-16         	   69976	     17275 ns/op	    9647 B/op	      75 allocs/op
+BenchmarkGovernedActionAdmission/retained_0-16         	   68877	     17535 ns/op	    9646 B/op	      75 allocs/op
+BenchmarkGovernedActionAdmission/retained_0-16         	   67833	     17413 ns/op	    9646 B/op	      75 allocs/op
+BenchmarkGovernedActionAdmission/retained_32-16        	    2370	    487106 ns/op	  212207 B/op	    1555 allocs/op
+BenchmarkGovernedActionAdmission/retained_32-16        	    2536	    484449 ns/op	  212868 B/op	    1556 allocs/op
+BenchmarkGovernedActionAdmission/retained_32-16        	    2512	    484217 ns/op	  212551 B/op	    1556 allocs/op
+BenchmarkGovernedActionAdmission/retained_256-16       	     298	   3984232 ns/op	 2179378 B/op	   11684 allocs/op
+BenchmarkGovernedActionAdmission/retained_256-16       	     295	   4023591 ns/op	 2157223 B/op	   11684 allocs/op
+BenchmarkGovernedActionAdmission/retained_256-16       	     298	   3994315 ns/op	 2101927 B/op	   11683 allocs/op
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/execution-policy	21.844s

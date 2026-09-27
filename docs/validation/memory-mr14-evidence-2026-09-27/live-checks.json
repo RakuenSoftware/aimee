@@ -1,0 +1,90 @@
+[
+  {
+    "name": "scoped dry run covers duplicate and expired assertion",
+    "passed": true
+  },
+  {
+    "name": "dry run has no canonical proposal or job writes",
+    "passed": true
+  },
+  {
+    "name": "hidden and expired peers excluded from duplicate cluster",
+    "passed": true
+  },
+  {
+    "name": "bounded first page exposes resume",
+    "passed": true
+  },
+  {
+    "name": "resume completes remaining retained records",
+    "passed": true
+  },
+  {
+    "name": "unknown model actions rejected",
+    "passed": true
+  },
+  {
+    "name": "normal run only admits version-bound review proposals",
+    "passed": true
+  },
+  {
+    "name": "retry reuses job and proposal identities",
+    "passed": true
+  },
+  {
+    "name": "rejected finding is suppressed without canonical changes",
+    "passed": true
+  },
+  {
+    "name": "compiled CLI dry-run parity",
+    "passed": true
+  },
+  {
+    "name": "MCP governed proposal parity",
+    "passed": true
+  },
+  {
+    "name": "worker lacks canonical and review privileges",
+    "passed": true
+  },
+  {
+    "name": "stale review fails closed",
+    "passed": true
+  },
+  {
+    "name": "expired proposal cannot be accepted",
+    "passed": true
+  },
+  {
+    "name": "expiry and failed review leave canonical state unchanged",
+    "passed": true
+  },
+  {
+    "name": "opt-in bounded scheduler records completed job",
+    "passed": true
+  },
+  {
+    "name": "cleanup fixture projection created",
+    "passed": true
+  },
+  {
+    "name": "retention blocks early cleanup",
+    "passed": true
+  },
+  {
+    "name": "workflow lease blocks expired cleanup",
+    "passed": true
+  },
+  {
+    "name": "expired old-task cleanup succeeds after lease",
+    "passed": true
+  },
+  {
+    "name": "cleanup clears only disposable content",
+    "passed": true
+  },
+  {
+    "name": "cleanup retry is idempotent",
+    "passed": true
+  }
+]

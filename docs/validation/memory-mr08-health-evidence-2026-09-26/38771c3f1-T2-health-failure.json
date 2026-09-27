@@ -1,0 +1,10 @@
+{
+  "result": "failed",
+  "reason": "no serving query fingerprint reached the receipt collector",
+  "assembled_receipts": 27,
+  "receipts_with_native_metadata": 27,
+  "receipts_with_query_context": 0,
+  "topology": "T2",
+  "candidate": "38771c3f1",
+  "acceptance_waived": false
+}

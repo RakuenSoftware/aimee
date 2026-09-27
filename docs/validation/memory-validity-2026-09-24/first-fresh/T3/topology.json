@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Server boots without a KB connection",
+    "passed": true
+  },
+  {
+    "name": "Server application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "topology completed",
+    "passed": false,
+    "error": "python3  failed with exit 1 (unclassified)"
+  }
+]

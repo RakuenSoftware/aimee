@@ -528,6 +528,27 @@
  ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
  "]}"},
 
+{"memory.evidence",
+ "{\"fields\":["
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"string\",\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
+
+{"memory.claim_card",
+ "{\"bool_flags\":[\"expand-evidence\"],\"fields\":["
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"string\",\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"expand_evidence\",\"from\":\"flag\",\"flag\":\"expand-evidence\",\"type\":\"true_if_set\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
+
 {"memory.embed",
  "{\"bool_flags\":[\"all\"],\"fields\":["
  "{\"json\":\"all\",\"from\":\"flag\",\"flag\":\"all\",\"type\":\"true_if_set\"},"
@@ -1011,3 +1032,13 @@
  ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
  ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
  "]}"},
+
+{"memory.receipt", "{\"bool_flags\":[\"replay\"],\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"replay\",\"from\":\"flag\",\"flag\":\"replay\",\"type\":\"bool\"}]}"},
+
+{"memory.health", "{\"fields\":[{\"json\":\"window\",\"from\":\"flag\",\"flag\":\"window\",\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"},{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"},{\"json\":\"purpose\",\"from\":\"flag\",\"flag\":\"purpose\",\"empty\":\"emit\"},{\"json\":\"query_class\",\"from\":\"flag\",\"flag\":\"query-class\",\"empty\":\"emit\"},{\"json\":\"stage\",\"from\":\"flag\",\"flag\":\"stage\",\"empty\":\"emit\"},{\"json\":\"traces\",\"flag\":\"traces\",\"type\":\"bool\",\"from\":\"flag\"}],\"bool_flags\":[\"traces\"]}"},
+
+{"learning.application", "{\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"event_json\",\"from\":\"flag\",\"flag\":\"event-json\",\"required\":true}]}"},
+
+{"learning.task_cost", "{\"fields\":[{\"json\":\"cost_json\",\"from\":\"flag\",\"flag\":\"cost-json\",\"required\":true}]}"},
+
+{"action.receipt", "{\"fields\":[{\"json\":\"operation\",\"from\":\"positional\",\"index\":0},{\"json\":\"session_id\",\"from\":\"flag\",\"flag\":\"session_id\"},{\"json\":\"action_id\",\"from\":\"flag\",\"flag\":\"action_id\"},{\"json\":\"directory\",\"from\":\"flag\",\"flag\":\"directory\"},{\"json\":\"arguments_json\",\"from\":\"flag\",\"flag\":\"arguments_json\"}]}"},

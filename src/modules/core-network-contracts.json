@@ -56,7 +56,7 @@
         {
           "primitive": "http",
           "path": "src/server/anthropic_http.c",
-          "count": 3
+          "count": 1
         },
         {
           "primitive": "http",

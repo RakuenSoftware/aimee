@@ -1,0 +1,5 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+aimee: version changed ( -> v0.4.3-486-g9c1242b1d) — cleaned stale objects in build/obj
+check_tests_are_run: ok (652 run, 50 exempt of 701 defined; 31 source(s) unbuilt)
+check_test_tmpdir: ok (90 files, 348 sites, ratchet holding)
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

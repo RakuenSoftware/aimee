@@ -1,0 +1,6 @@
+{
+  "configured_image": "aimee-pr2990:be46915db",
+  "image_digest": "sha256:e26ea5eafdc1d2f3f724cb773f0215b2c1abe6a1d50ca5ff1a8bdc87aae6df1b",
+  "healthy": true,
+  "optional_health_environment": []
+}

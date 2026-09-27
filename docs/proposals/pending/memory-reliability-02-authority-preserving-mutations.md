@@ -1,28 +1,30 @@
 # MR-02: Authority-preserving memory mutations
 
-- **State:** In progress; initial KB admission/versioning slice implemented
+- **State:** Complete — implementation and acceptance validated 2026-09-24
 - **Priority:** P0: durable correctness
 - **Owner:** Go memory mutation admission, with PostgreSQL durable guards
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for shared authorization vocabulary; admission fixes can begin immediately
 - **Delivery:** Three implementation slices
 
-## Problem and intended result
+## Problem and implemented result
 
-The original same-key insert could overwrite active content in place, while edits
-used a different history path. KB store/upsert, edit, supersede and legacy content
-adapters now share Go admission and create versions for changed content. User
-corrections preserve history; model writes cannot displace user or unknown-origin
-content. Immutable kinds are protected on conflict, exact same-author retries
-preserve identity and captured authorship, and concurrent same-key creators are
-serialized. PostgreSQL tests cover rollback, protected writer/verb combinations,
-private metadata preservation and an actual blocked concurrent writer.
+All canonical shared/private mutation entry points preserve the authenticated
+actor, retained versions and protected kinds. Model attempts to replace user or
+unknown-origin content produce review proposals; exact-draft approval records the
+reviewer separately from model authorship. Expected-version and idempotency checks
+share the canonical transaction with history, audit, invalidation and receipts.
 
-This is a foundation slice. Review-required writes currently refuse without
-creating a linked proposal. Personal versioning, explicit expected versions,
-idempotency keys, durable guards/outbox/consumer replay and full retention policy
-remain acceptance work.
+Automatic maintenance and folding cannot bypass those protections. Bulk import
+preserves epistemic kinds without importing authority; import/export retain the
+verified caller scope. Shared schema 36 prevents two-step protected-kind downgrade.
+Transactional change feeds, ordered scoped generations and durable consumer
+checkpoints survive restart and retention gaps. Canonical source-version checks
+at release remain authoritative while consumers catch up.
 
-Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
+The [final closeout](../../validation/memory-mr02-closeout-2026-09-24.md) and
+[eight-gate checklist](memory-reliability-02-closeout.md) record all implementation
+and acceptance evidence. The contract below is unchanged; this result does not
+certify MR-03 through MR-18.
 
 ## Existing integration points
 

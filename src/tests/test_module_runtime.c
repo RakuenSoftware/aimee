@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <openssl/sha.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/prctl.h>
@@ -87,6 +88,34 @@ static aimee_module_status_t handle(const aimee_module_invocation_t *invocation,
       return AIMEE_MODULE_STATUS_INTERNAL;
    memcpy(response, request, request_len);
    *response_len = request_len;
+   return AIMEE_MODULE_STATUS_OK;
+}
+
+/* The private owner must finish its storage-owned erasure replay before it
+ * advertises stages. This transport fixture acknowledges only that exact SQL
+ * operation; all other storage work remains unavailable. Real non-owner SQL
+ * behavior is covered by the PostgreSQL replay suite, not this wire fixture. */
+static atomic_int startup_replays;
+static aimee_module_status_t startup_store(const aimee_module_invocation_t *invocation,
+                                           const uint8_t *request, uint32_t request_len,
+                                           uint8_t *response, uint32_t response_capacity,
+                                           uint32_t *response_len, void *user_data)
+{
+   (void)invocation;
+   (void)user_data;
+   static const char sql[] = "SELECT user_memory_replay_erasure_intents()";
+   uint8_t expected[24 + sizeof(sql) - 1] = {2}; /* QUERY, empty statement, no tx/args */
+   expected[16] = sizeof(sql) - 1;
+   memcpy(expected + 20, sql, sizeof(sql) - 1);
+   if (request_len != sizeof(expected) || memcmp(request, expected, sizeof(expected)) != 0)
+      return AIMEE_MODULE_STATUS_CAPABILITY_ABSENT;
+   assert(response_capacity >= 29);
+   memset(response, 0, 29);
+   response[12] = 1; /* one column */
+   response[16] = 1; /* one row */
+   response[20] = 2; /* int64 zero */
+   *response_len = 29;
+   atomic_fetch_add(&startup_replays, 1);
    return AIMEE_MODULE_STATUS_OK;
 }
 
@@ -196,7 +225,7 @@ static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
       (void)bus_runtime_maintain(runtime, now_ns);
       uint32_t admitted = host->admitted;
       pthread_mutex_unlock(lock);
-      if (admitted == 2)
+      if (admitted == 3)
          return;
       nanosleep(&pause, NULL);
    }
@@ -302,7 +331,10 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[2] = AIMEE_ECONOMIZER_EVENT_TOOL_RECALL;
       served[3] = AIMEE_ECONOMIZER_EVENT_TOOL_STATS;
       served[4] = AIMEE_ECONOMIZER_EVENT_RECORD_BUILD;
-      *serve_count = 5;
+      served[5] = AIMEE_ECONOMIZER_EVENT_POST_STATUS;
+      served[6] = AIMEE_ECONOMIZER_EVENT_STATS;
+      served[7] = AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET;
+      *serve_count = 8;
       return 0;
    }
    /* These four were missing, and the omission was invisible because the only
@@ -578,14 +610,20 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "runtime-web") == 0)
    {
-      uint32_t status = 0;
-      assert(aimee_runtime_web_request_encode("permission_denied", request, sizeof(request)) == 0);
-      request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
-      assert(status == 403u);
+      const char *kinds[] = {"permission_denied", "conflict", "review_required", "unsupported_mode",
+                             "protected_context_overflow"};
+      const uint32_t statuses[] = {403u, 409u, 409u, 400u, 413u};
+      for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
+      {
+         uint32_t status = 0;
+         assert(aimee_runtime_web_request_encode(kinds[i], request, sizeof(request)) == 0);
+         request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
+         assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013 + i,
+                                         0, request, request_len, response, sizeof(response),
+                                         &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+         assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
+         assert(status == statuses[i]);
+      }
    }
    else if (strcmp(name, "control-web") == 0)
    {
@@ -701,6 +739,55 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(strstr((const char *)response, "src/server/session_compact.c") != NULL);
       assert(strstr((const char *)response, "decisions_made") != NULL);
       assert(strstr((const char *)response, "[done] changed") != NULL);
+
+      /* Real C host and shipped Go handler: preserve the metadata commitment
+       * and distinguish exact-fit admission from one-byte overflow. */
+      const char limits[] = "{\"schema_version\":1,\"max_request_bytes\":3}";
+      uint8_t budget[256] = {'B', 'D', 'G', 'T', 1, 0, 1, 0};
+      budget[48] = sizeof(limits) - 1;
+      memcpy(budget + 52, limits, sizeof(limits) - 1);
+      assert(SHA256((const unsigned char *)"abc", 3, budget + 16));
+      for (unsigned size = 3; size <= 4; size++)
+      {
+         budget[8] = size;
+         uint8_t commitment[SHA256_DIGEST_LENGTH];
+         assert(SHA256(budget, 52 + sizeof(limits) - 1, commitment));
+         assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                         AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2024 + size, 0,
+                                         budget, 52 + sizeof(limits) - 1, response,
+                                         sizeof(response), &response_len, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+         assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
+         assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
+         assert(response[8] == 32 && response[9] == 0 && response[10] == 0 && response[11] == 0);
+         assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
+      }
+      /* Policy metadata v2: absent or more permissive caller limits cannot
+       * raise the operator cap. The response binds both independent layers. */
+      const char permissive[] = "{\"schema_version\":1,\"max_request_bytes\":999}";
+      for (unsigned caller = 0; caller <= 1; caller++)
+         for (unsigned size = 3; size <= 4; size++)
+         {
+            memset(budget, 0, sizeof(budget));
+            memcpy(budget, "BDGT\2\0\1\0", 8);
+            budget[8] = size;
+            assert(SHA256((const unsigned char *)"abc", 3, budget + 16));
+            unsigned caller_len = caller ? sizeof(permissive) - 1 : 0;
+            budget[48] = caller_len;
+            budget[52] = sizeof(limits) - 1;
+            memcpy(budget + 56, permissive, caller_len);
+            memcpy(budget + 56 + caller_len, limits, sizeof(limits) - 1);
+            unsigned length = 56 + caller_len + sizeof(limits) - 1;
+            uint8_t commitment[SHA256_DIGEST_LENGTH];
+            assert(SHA256(budget, length, commitment));
+            assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                            AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2030 + size, 0,
+                                            budget, length, response, sizeof(response),
+                                            &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+            assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
+            assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
+            assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
+         }
    }
    else if (strcmp(name, "postgres") == 0)
    {
@@ -1052,7 +1139,13 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = probe_executable,
                                     .request = requested,
-                                    .request_count = serve_count}};
+                                    .request_count = serve_count},
+                                   {.principal_class = 1,
+                                    .principal_ref = 28,
+                                    .uid = BUS_RUNTIME_SELF_UID,
+                                    .executable = executable,
+                                    .serve = postgres_request,
+                                    .serve_count = 1}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -1070,7 +1163,8 @@ int main(int argc, char **argv)
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
                                           .grants = grants,
-                                          .grant_count = argc == 4 ? 4
+                                          .grant_count = memory_process ? 5
+                                                         : argc == 4    ? 4
                                                          : (memory_process || provider_process)
                                                              ? 3
                                                              : 2};
@@ -1085,6 +1179,25 @@ int main(int argc, char **argv)
                                           .stages = stages,
                                           .stage_count = 1,
                                           .handler = handle}};
+   pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
+   atomic_init(&pump_state.stop, 0);
+   pthread_t pump_thread;
+   assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
+
+   static const aimee_module_stage_t sql_stage[] = {
+       {AIMEE_POSTGRES_EVENT_SQL, AIMEE_POSTGRES_STAGE_SQL}};
+   process_thread_t startup = {.config = {.socket_path = socket_path,
+                                          .module_name = "startup-store-fixture",
+                                          .principal_class = 1,
+                                          .principal_ref = 28,
+                                          .stages = sql_stage,
+                                          .stage_count = 1,
+                                          .handler = startup_store}};
+   pthread_t startup_thread;
+   atomic_init(&startup_replays, 0);
+   if (memory_process)
+      assert(pthread_create(&startup_thread, NULL, run_process, &startup) == 0);
+
    pthread_t module_thread;
    pid_t module_pid = -1;
    if (argc >= 2)
@@ -1099,12 +1212,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, memory_process ? 4 : provider_process ? 3 : 2, module_pid);
-
-   pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
-   atomic_init(&pump_state.stop, 0);
-   pthread_t pump_thread;
-   assert(pthread_create(&pump_thread, NULL, run_pump, &pump_state) == 0);
+   wait_for_clients(&host, &host_lock, memory_process ? 5 : provider_process ? 3 : 2, module_pid);
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
@@ -1126,7 +1234,7 @@ int main(int argc, char **argv)
             wait_for_memory_departure(runtime, &host, &host_lock, &caller, &embedding_host);
             memory_discovery_unavailable(&module_client);
             module_pid = spawn_module_child(module_executable, socket_path, NULL);
-            wait_for_clients(&host, &host_lock, 4, module_pid);
+            wait_for_clients(&host, &host_lock, 5, module_pid);
             smoke_host_gateway_plan(&embedding_host);
             run_memory_probe(probe_executable, socket_path);
             puts("memory: terminated provider unavailable; restarted Go owner passed host/client "
@@ -1207,6 +1315,13 @@ finish:
    {
       aimee_module_process_stop();
       assert(pthread_join(module_thread, NULL) == 0 && process.result == 0);
+   }
+   if (memory_process)
+   {
+      const char *placement = getenv("AIMEE_MODULE_PLACEMENT");
+      assert(atomic_load(&startup_replays) == (strcmp(placement, "server") == 0 ? 2 : 0));
+      aimee_module_process_stop();
+      assert(pthread_join(startup_thread, NULL) == 0 && startup.result == 0);
    }
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);

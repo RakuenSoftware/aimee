@@ -1308,6 +1308,23 @@ static cJSON *tp_list_background_processes(void)
    return params;
 }
 
+static cJSON *tp_context_contract_expand(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "reason", "string", "Why the supplied context needs additional discovery.");
+   tp_prop(props, "gap_ref", "string",
+           "Host-recorded gap reference from an indexed lookup result.");
+   tp_prop(props, "outcome_id", "string", "Matching host-recorded indexed lookup attempt.");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *required = cJSON_CreateArray();
+   cJSON_AddItemToArray(required, cJSON_CreateString("reason"));
+   cJSON_AddItemToArray(required, cJSON_CreateString("gap_ref"));
+   cJSON_AddItemToArray(required, cJSON_CreateString("outcome_id"));
+   cJSON_AddItemToObject(params, "required", required);
+   return params;
+}
+
 static cJSON *tp_find_symbol(void)
 {
    cJSON *params = tp_obj();
@@ -1516,6 +1533,10 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "or domain concepts. Returns matching passages with source attribution. "
      "Requires the documentation index to be available.",
      tp_search_docs, TSURF_RESP},
+    {"context_contract_expand",
+     "Request bounded discovery after a host-recorded empty or failed indexed lookup. Operator "
+     "access and work limits still apply.",
+     tp_context_contract_expand, TSURF_ALL},
     {"find_symbol",
      "Look up the exact definition location of a C symbol, function, type, or macro in the "
      "indexed codebase. Returns file:line matches. Prefer this over grep for finding where "

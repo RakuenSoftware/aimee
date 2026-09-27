@@ -1,6 +1,6 @@
 # MR-13: Disposable task projections with explicit promotion
 
-- **State:** Proposed
+- **State:** Accepted — implementation and 31 canary acceptance checks complete; release follows PR #2990
 - **Priority:** P2: task continuity
 - **Owner:** Task runtime and derived-memory owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md), [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md)
@@ -51,3 +51,5 @@ Any promotion uses the existing durable-memory proposal/admission path. Promotio
 Begin with explicit task projection reads; shadow generation before automatic preload. Keep TTL/work limits configurable. Rollback disables generation/serving and safely discards derived state; promoted canonical records remain governed history and are not automatically undone.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+[Functional closeout and evidence](../../validation/memory-mr13-task-projections-2026-09-27.md).

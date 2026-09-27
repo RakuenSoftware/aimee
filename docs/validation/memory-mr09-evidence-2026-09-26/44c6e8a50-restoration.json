@@ -1,0 +1,14 @@
+[
+  {
+    "role": "kb",
+    "image": "sha256:f90df02667b4a8fde2cb3b3a3654373466f9af609473c8d48cff9191ce4613d7",
+    "healthy": true,
+    "selection_enabled_present": false
+  },
+  {
+    "role": "server",
+    "image": "sha256:f90df02667b4a8fde2cb3b3a3654373466f9af609473c8d48cff9191ce4613d7",
+    "healthy": true,
+    "selection_enabled_present": false
+  }
+]
