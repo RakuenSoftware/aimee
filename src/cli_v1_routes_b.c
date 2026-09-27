@@ -21,22 +21,6 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
-static cJSON *marshal_aux_test(int argc, char **argv)
-{
-   cli_args_t opts;
-   cli_args_parse(argc, argv, NULL, &opts);
-
-   cJSON *req = marshal_no_args("aux.test");
-
-   if (opts.pos_count > 0)
-      cJSON_AddStringToObject(req, "task", opts.positional[0]);
-   if (opts.pos_count > 1)
-      cJSON_AddStringToObject(req, "prompt", opts.positional[1]);
-   if (opts.pos_count > 2)
-      cJSON_AddNumberToObject(req, "max_tokens", atoi(opts.positional[2]));
-   return req;
-}
-
 static cJSON *marshal_agent_episodes(int argc, char **argv)
 {
    cli_args_t opts;
