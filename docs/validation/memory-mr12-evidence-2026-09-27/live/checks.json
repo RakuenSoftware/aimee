@@ -1,0 +1,174 @@
+[
+  {
+    "name": "user active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "user active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "user new constraint invalidates view",
+    "passed": true
+  },
+  {
+    "name": "user active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "user cache reuse issues fresh receipt",
+    "passed": true
+  },
+  {
+    "name": "user active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "user zero budget retains no text",
+    "passed": true
+  },
+  {
+    "name": "user card binds correction and uncertainty",
+    "passed": true
+  },
+  {
+    "name": "user active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "user correction recomputes view",
+    "passed": true
+  },
+  {
+    "name": "user CLI and HTTP exact projection parity",
+    "passed": true
+  },
+  {
+    "name": "user MCP and HTTP exact projection parity",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb new constraint invalidates view",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb cache reuse issues fresh receipt",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb zero budget retains no text",
+    "passed": true
+  },
+  {
+    "name": "kb card binds correction and uncertainty",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb correction recomputes view",
+    "passed": true
+  },
+  {
+    "name": "kb CLI and HTTP exact projection parity",
+    "passed": true
+  },
+  {
+    "name": "kb MCP and HTTP exact projection parity",
+    "passed": true
+  },
+  {
+    "name": "kb open_contradictions exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb open_contradictions exact accounting",
+    "passed": true
+  },
+  {
+    "name": "contradictions include both visible sides and no hidden side",
+    "passed": true
+  },
+  {
+    "name": "kb open_contradictions exact accounting",
+    "passed": true
+  },
+  {
+    "name": "revocation removes the whole contradiction bundle",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "future constraint withheld before boundary",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb active_constraints exact accounting",
+    "passed": true
+  },
+  {
+    "name": "clock alone refreshes cached current view",
+    "passed": true
+  },
+  {
+    "name": "kb historical_context exact accounting",
+    "passed": true
+  },
+  {
+    "name": "kb historical_context exact accounting",
+    "passed": true
+  },
+  {
+    "name": "explicit historical coordinates bind separate cache identities",
+    "passed": true
+  }
+]

@@ -1,0 +1,11 @@
+make: Entering directory '/home/virant/dev/aimee-pr2990/src'
+check-native-tool-parity: ok (89 MCP tools, 48 native, 4 exempt, 66 pre-existing gaps to work off)
+check_memory_c_boundary: ok
+memory-ownership: all original files/APIs and external findings classified; C bus retained
+check_aimee_home: ok
+lint: ok (Debian clang-format version 19.1.7 (3+b1))
+gen-api-docs: docs/gen/api-v1.md up to date (no-op)
+gen-reference-docs: wrote docs/gen/cli-commands.md
+gen-reference-docs: wrote docs/gen/configuration.md
+gen-v1-route-descriptor: wrote 407 routes -> docs/gen/v1-route-descriptor.json
+make: Leaving directory '/home/virant/dev/aimee-pr2990/src'

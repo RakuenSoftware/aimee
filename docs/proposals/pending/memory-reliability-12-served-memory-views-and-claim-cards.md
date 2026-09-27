@@ -1,6 +1,6 @@
 # MR-12: Named served-memory views and inspectable claim cards
 
-- **State:** In progress — Go owner and transport implementation; acceptance pending
+- **State:** Functional implementation complete — explicit views, owner-checked cards and 43 deployed acceptance checks
 - **Priority:** P1: task-oriented access to existing memory
 - **Owner:** Go memory API and views, with host/operator interfaces
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)
