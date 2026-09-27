@@ -50,6 +50,8 @@
 #include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
 #include "request_context.h"
+#include "db1_client/server_sessions.h"
+#include "platform_random.h"
 #include "response_dedup.h"
 #include "token_tracker.h"
 #include "token_audit.h" /* db1_token_audit_insert for the avoided-turn row */
@@ -1824,6 +1826,24 @@ static void *run_job_worker(void *arg)
       goto done;
    }
 
+   /* A worker cannot borrow session_id()'s process-parent fallback: the
+    * governed-action journal requires a durable session owned by this caller.
+    * Allocate independently per run, including concurrent callers. */
+   if (j->has_reqctx && j->reqctx.principal[0])
+   {
+      char sid[33];
+      if (platform_random_hex(sid, 32) != 0 ||
+          db1_server_session_create(sid, "openai-run", j->reqctx.principal) != 0)
+      {
+         openai_runs_store_append_event(j->run_id, "error",
+                                        "{\"error\":\"run session owner unavailable\"}");
+         openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
+                                    run_status_json(j, "failed", buf, RUN_JSON_CAP));
+         goto done;
+      }
+      session_id_set_override(sid);
+   }
+
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    /* /v1/runs is the agentic endpoint (vs. the stateless /v1/chat/completions):
@@ -1929,6 +1949,7 @@ static void *run_job_worker(void *arg)
    free(result.response);
 
 done:
+   session_id_clear_override();
    free(buf);
    free(j->prompt);
    free(j);

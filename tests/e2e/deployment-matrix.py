@@ -47,6 +47,10 @@ class Stack:
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
+        # Direct users, including the legacy upgrade gate, need the same cap
+        # as topology runs. Preserve an explicit operator ceiling.
+        if not self.env.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
+            self.env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=65536))
         self.env['AIMEE_KB_API_BEARER_TOKEN'] = 'scope:service:aimee-server:' + secrets.token_hex(32)
         self.service_identity = 'scope:service:aimee-server:' + secrets.token_hex(32)
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
@@ -1235,10 +1239,6 @@ def main():
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
                COMPOSE_PROFILES='', EMBEDDER_MODEL='bekko-a25m',
                EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384')
-    # A missing operator cap silently skips the deployment-ceiling regressions.
-    # Every release topology must exercise this boundary in the actual process.
-    if not env.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
-        env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=65536))
     for name in ('AIMEE_APPLICATION_IMAGE', 'AIMEE_POSTGRES_IMAGE', 'AIMEE_EMBEDDER_IMAGE'):
         if not env.get(name):
             parser.error(name + ' must name the candidate image')

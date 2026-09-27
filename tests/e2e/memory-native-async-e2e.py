@@ -54,8 +54,9 @@ def inside(output):
     previous_recall = None
     exploration_session = None
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
+    fixture_read_root = Path(fixture_files.name)
     for turn in range(1, 6):
-        (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
+        (fixture_read_root / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
 
     def check(name, passed):
         checks.append(dict(name=name, passed=bool(passed)))
@@ -147,7 +148,7 @@ def inside(output):
                 # and provider dispatch cannot race the test's intervention.
                 tool = dict(id=f'{prefix}-call-{ordinal}', type='function', function=dict(
                     name='read_file', arguments=json.dumps(dict(
-                        path=str(Path(fixture_files.name) / f'{ordinal}.txt')))))
+                        path=str(fixture_read_root / f'{ordinal}.txt')))))
                 response['choices'] = [dict(index=0, finish_reason='tool_calls',
                     message=dict(role='assistant', content=None, tool_calls=[tool]))]
                 if ordinal == 5:
@@ -419,6 +420,9 @@ def inside(output):
         worktrees = subprocess.check_output(['git', '-C', fixture_files.name, 'worktree', 'list', '--porcelain'], text=True)
         roots = [line[9:] for line in worktrees.splitlines() if line.startswith('worktree ') and line[9:] != fixture_files.name]
         check('primary fixture resolves its host-isolated worktree', len(roots) == 1)
+        # Subsequent reads and mutations must address the same isolated tree;
+        # the host redirects original-checkout paths into this worktree.
+        fixture_read_root = Path(roots[0])
         def external_tool(name, arguments):
             status, result = api('/v1/tools/execute', dict(tool=name, arguments=json.dumps(arguments),
                 session_id=exploration_session, cwd=roots[0], timeout_ms=30000))
@@ -499,7 +503,7 @@ def inside(output):
             for key, value in fold_settings.items():
                 config('set', key, json.dumps(value))
             for turn in range(1, 6):
-                (Path(fixture_files.name) / f'{turn}.txt').write_text(
+                (fixture_read_root / f'{turn}.txt').write_text(
                     f'Native refresh evidence {turn}: {prefix}\n' + 'optional source detail; ' * 60)
             before = len(captures)
             result, _ = run('protected native fold', mode='protected-fold', input_text=protected)
@@ -507,6 +511,8 @@ def inside(output):
                   result.get('status') == 'completed' and len(captures) == before + 6)
             check('native reduction preserves complete user constraint bytes', all(
                 any(protected in text for text in strings(body)) for body in captures[before:]))
+            check('native fold consumes updated optional source bytes', any(
+                'optional source detail;' in text for body in captures[before:] for text in strings(body)))
             check('native provider observes actual optional history reduction', any(
                 'optional folded history' in text for text in strings(captures[-1])))
             check('native generated history is not promoted to user instructions', all(
@@ -517,7 +523,7 @@ def inside(output):
             for key, value in previous_fold.items():
                 config('set', key, json.dumps(value))
             for turn in range(1, 6):
-                (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
+                (fixture_read_root / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
         native_roster = roster.read_bytes()
         try:
             for backend in ('tmux-cli', 'provider-cli'):
@@ -616,6 +622,14 @@ def main():
     inspected = json.loads(subprocess.check_output(['docker', 'inspect', args.server], text=True))[0]
     if inspected['Config']['Labels'].get('com.docker.compose.project') != args.server.removesuffix('-aimee-server-1'):
         parser.error('Server does not belong to the named disposable project')
+    postgres = args.server.removesuffix('-aimee-server-1') + '-aimee-store-db-1'
+    def worker_sessions():
+        raw = subprocess.check_output(['docker', 'exec', postgres, 'psql', '-U', 'postgres', '-d', 'aimee_store',
+            '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c',
+            "SELECT COALESCE(json_object_agg(id,principal),'{}'::json) FROM server_sessions WHERE client_type='openai-run'"],
+            text=True)
+        return json.loads(raw)
+    prior_sessions = worker_sessions()
     remote = '/tmp/' + uuid.uuid4().hex + '-native-async.py'
     result = remote + '.json'
     try:
@@ -626,6 +640,16 @@ def main():
         if run_result.returncode:
             return run_result.returncode
         evidence = json.loads(Path(args.output).read_text())
+        current_sessions = worker_sessions()
+        created_sessions = {key: value for key, value in current_sessions.items() if key not in prior_sessions}
+        expected_sessions = sum(bool(run.get('run_id')) for run in evidence['runs'])
+        owned = len(created_sessions) == expected_sessions and all(
+            principal == 'uid:1000' and len(key) == 32 and all(c in '0123456789abcdef' for c in key)
+            for key, principal in created_sessions.items())
+        evidence['checks'].append(dict(name='each asynchronous run owns a distinct authenticated durable session', passed=owned))
+        Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')
+        if not owned:
+            raise RuntimeError('asynchronous worker session ownership did not match actual runs')
         # Read only this fixture's row from its owned Compose PostgreSQL.
         import re
         sid = evidence.get('exploration_session', '')

@@ -762,6 +762,16 @@ def go_process_shared_sources(module_id: str) -> list[str]:
             if not path.name.endswith("_test.go") or
             (module_id == "config" and directory == "server-go/config")
         )
+    if module_id == "memory":
+        # Frozen corpora are data dependencies of exported Go tests, not native
+        # executable test registrations in the module descriptor.
+        sources.extend([
+            "tests/eval/memory_mr05_coverage_cases.json",
+            "tests/eval/memory_mr09/baseline-policy.json",
+            "tests/eval/memory_mr09/diversity-policy.json",
+            "tests/eval/memory_mr09/diversity-v2-policy.json",
+            "tests/eval/memory_mr09/code-navigation-pilot.json",
+        ])
     return sorted(sources)
 
 

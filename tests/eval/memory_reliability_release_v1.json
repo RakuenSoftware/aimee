@@ -1155,7 +1155,7 @@
     "benchmarks/tests/test_reliability_experiment.py": "581bc17e1aa9de18c632a17f6f717d7aa04fda96938b93ce35f7337271ff3b74",
     "benchmarks/tests/test_result_schema.py": "a49dcc685060690f413f22a12e7ed6f3b720d20b0956c00a3982aec27a113eef",
     "scripts/check_memory_reliability_release.py": "15e76445bccf769fd3be8b8ffa3bb9890ef88f1327d3d8cac422904ca70fd8b3",
-    "scripts/tests/test_memory_reliability_release.py": "16bba00afc175b5e31b68a4012ae9410ff58f33965bcd17fa55cb72be2316fc8",
+    "scripts/tests/test_memory_reliability_release.py": "640e05f2a17dd84f5f23cc2eafe0ae33f8de63b59f68f08a2a5b528367458db0",
     "server-go/cmd/aimee-module/main_test.go": "474c15b65be6a0850fe4b2ec08e10b04dcaf9d75d8b1d099f1fc3bd0e4c9d882",
     "server-go/modules/aimee/families/clean_retry_test.go": "c36bb39955455877a2bafbe1a3ed43155de6d91463a68239ac845207fe33036d",
     "server-go/modules/aimee/families/governed_actions_test.go": "91d4342d17f6b1739e43374b3651a7bb43e51ba682d4abc17e3146cea9237459",
