@@ -373,3 +373,16 @@ bus-framing tests, and update the descriptor-owned sources. Do not restore a
 retired C policy or storage implementation to satisfy a legacy ABI. Both role
 supervisors require memory; removing it requires migrating those consumers
 and their event contracts rather than silently dropping recall behavior.
+
+### Retained fidelity evidence
+
+The host-only `memory.runtime` operation `fidelity-read` reads retained
+`fidelity_report` and `fidelity_attribution` artifacts through the shared PostgreSQL
+module in both role compositions. The KB audit adapter forwards the exact turn ID.
+A missing report remains `not_evaluated`; owner or database failures become
+`evidence_unavailable` at the audit transport. Report and attribution count come
+from one statement snapshot. No native connection pool is used by this path.
+
+The former C fidelity writer APIs had no production callers and were removed with
+the C reader. This does not enable the deferred fidelity judge or add a new write
+API. Existing rows and the public audit response fields remain readable.

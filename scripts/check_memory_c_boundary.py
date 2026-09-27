@@ -26,6 +26,9 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/fidelity.c",
+    "src/modules/db2/c/fidelity.h",
+    "src/tests/test_fidelity.c",
     "src/cmd_memory.c",
     "src/cmd_memory_core.c",
     "src/cmd_memory_curiosity.c",
@@ -105,6 +108,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\bdb2_fidelity_(?:report_write|report_by_turn|attribution_write|attribution_count_by_turn)\b(?=\s*\()|"
     r"\b(?:kb_client_memory_diagnose|kb_client_memory_diagnose_scoped|kb_client_memory_explain_match|kbc_memory_diagnostic_from_json)\b(?=\s*\()|"
     r"\b(?:kb_client_memory_delete|kb_client_memory_delete_as|kb_client_memory_find_facts|kb_client_memory_find_facts_ex|kb_client_memory_find_facts_scoped|kb_client_memory_find_facts_scoped_ex|kb_client_memory_list|kb_client_memory_list_conflicts|kb_client_memory_list_session_scope_priority|kb_client_memory_list_session_scope_priority_like|kb_client_memory_load_eval_corpus|kb_client_memory_query_edges|kb_client_memory_search|kb_client_memory_search_facts_patterns_by_keyword|kb_client_memory_set_artifact|kb_client_memory_supersede|kb_client_memory_top_l2_facts|kb_client_memory_touch|kb_client_memory_update|kb_client_memory_update_as|session_scope_item_cmp|session_append_scope_section|get_memory_subcmds|cmd_memory)\b(?=\s*\()|"
     r"\bdb1_user_memory_merge_into_array\b(?=\s*\()|"

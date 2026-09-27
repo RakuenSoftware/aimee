@@ -653,7 +653,6 @@ def enforce_shrink_only(previous: object, current: object) -> None:
             # source, retargeted header, different class or extra include fails.
             if (key in {
                     ("src/modules/db2/c/demotion.c", "json_int64.h", "src/headers/json_int64.h"),
-                    ("src/modules/db2/c/fidelity.c", "json_int64.h", "src/headers/json_int64.h"),
                 }
                     and count == 1 and classification == "host-api"
                     and source in previous_source_paths

@@ -753,7 +753,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-learning-version \
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
-               $(TESTPREFIX)/unit-test-fidelity \
+               $(TESTPREFIX)/unit-test-fidelity-transport \
                $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-ranker-fit \
@@ -1304,16 +1304,6 @@ $(TESTPREFIX)/unit-test-cross-repo-acceptance: \
 $(TESTPREFIX)/unit-test-cross-repo-review: \
                                        $(OBJDIR)/tests/test_cross_repo_review.o \
                                        $(OBJDIR)/db2/cross_repo_review.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
-
-# auditable-correctness P3 fidelity storage substrate over the sqlite shim.
-$(TESTPREFIX)/unit-test-fidelity: \
-                                       $(OBJDIR)/tests/test_fidelity.o \
-                                       $(OBJDIR)/db2/fidelity.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)
@@ -7981,3 +7971,6 @@ $(TESTPREFIX)/unit-test-server-clean-retry: $(OBJDIR)/tests/test_server_clean_re
 
 $(TESTPREFIX)/unit-test-workspace-hook-scope: $(OBJDIR)/tests/test_workspace_hook_scope.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-fidelity-transport: $(OBJDIR)/tests/test_fidelity_transport.o $(OBJDIR)/kb/kb_service_memory.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

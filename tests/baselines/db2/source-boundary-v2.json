@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "469e02608b2b0fe751a3061f69f606f63f468ea4",
+  "source_revision": "c53d2a13f7c016ab821dd16f204bbf2eb50850d5",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 115,
-    "headers": 125,
+    "c_files": 114,
+    "headers": 124,
     "sql_files": 6,
-    "consumer_files": 268,
+    "consumer_files": 267,
     "production_consumers": 122,
-    "test_consumers": 146,
-    "include_directives": 775,
-    "outbound_dependency_rows": 146,
-    "outbound_include_directives": 146
+    "test_consumers": 145,
+    "include_directives": 770,
+    "outbound_dependency_rows": 143,
+    "outbound_include_directives": 143
   },
   "source_files": {
     "c": [
@@ -71,7 +71,6 @@
       "src/modules/db2/c/failed_queries.c",
       "src/modules/db2/c/feature_rows.c",
       "src/modules/db2/c/feedback.c",
-      "src/modules/db2/c/fidelity.c",
       "src/modules/db2/c/kb_audit_worm.c",
       "src/modules/db2/c/kb_docs.c",
       "src/modules/db2/c/kb_maintenance.c",
@@ -191,7 +190,6 @@
       "src/modules/db2/c/failed_queries.h",
       "src/modules/db2/c/feature_rows.h",
       "src/modules/db2/c/feedback.h",
-      "src/modules/db2/c/fidelity.h",
       "src/modules/db2/c/kb_audit_worm.h",
       "src/modules/db2/c/kb_docs.h",
       "src/modules/db2/c/kb_maintenance.h",
@@ -1656,10 +1654,6 @@
         },
         {
           "header": "modules/db2/c/fact_mutation.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/fidelity.h",
           "count": 1
         },
         {
@@ -3570,28 +3564,6 @@
         },
         {
           "header": "modules/db2/c/db2.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_test_shim.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_fidelity.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "../modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/db_postgres.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/fidelity.h",
           "count": 1
         },
         {
@@ -5616,27 +5588,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/fidelity.c",
-      "header": "aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fidelity.c",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fidelity.c",
-      "header": "json_int64.h",
-      "resolved": "src/headers/json_int64.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/kb_audit_worm.c",
       "header": "../support/db2_runtime_config.h",
       "resolved": "src/modules/db2/support/db2_runtime_config.h",
@@ -6001,5 +5952,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "26ac0529e108e2d0e474d4bf93528dca5e04217277b15583b603b752ce2c1b84"
+  "fingerprint": "501300bce45a23c906fd6ae1b339be525cb1b1e3f0e71f3a43195ff7b3ca0261"
 }

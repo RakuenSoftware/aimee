@@ -586,7 +586,8 @@ class BoundaryTests(unittest.TestCase):
         for item in (fidelity_before, fidelity_after):
             item["source_files"]["c"] = ["src/modules/db2/c/fidelity.c"]
         fidelity_after["outbound_dependencies"][0]["source"] = "src/modules/db2/c/fidelity.c"
-        checker.enforce_shrink_only(fidelity_before, fidelity_after)
+        with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+            checker.enforce_shrink_only(fidelity_before, fidelity_after)
         for field, value in [("count", 2), ("source", "src/modules/db2/c/store.c"),
                              ("header", "other.h"), ("resolved", "src/kb/json_int64.h"),
                              ("classification", "kb-authority-leak")]:

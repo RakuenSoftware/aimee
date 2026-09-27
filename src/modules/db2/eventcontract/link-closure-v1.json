@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "469e02608b2b0fe751a3061f69f606f63f468ea4",
-  "source_fingerprint": "8fa525817caf756bd982987add75c619b93c10e10d4a0a9595b64826a45d8100",
+  "source_revision": "584052d15d0b6d33c2a94797493407dcdafa87ab",
+  "source_fingerprint": "2451769609bcbbce779981799b8a4aaf27968165358f6d2ede2f91ec71d7f3fb",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -71,7 +71,6 @@
     "src/modules/db2/c/failed_queries.c",
     "src/modules/db2/c/feature_rows.c",
     "src/modules/db2/c/feedback.c",
-    "src/modules/db2/c/fidelity.c",
     "src/modules/db2/c/kb_audit_worm.c",
     "src/modules/db2/c/kb_docs.c",
     "src/modules/db2/c/kb_maintenance.c",
@@ -334,7 +333,6 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/corpus_structural.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/rules.c",
@@ -347,7 +345,6 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/corpus_structural.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
@@ -369,7 +366,6 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/corpus_structural.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
@@ -386,7 +382,6 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/corpus_structural.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/org_model_catalog.c",
@@ -410,7 +405,6 @@
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
         "cJSON_IsArray": [
@@ -424,14 +418,12 @@
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/code_audit.c",
-          "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c"
+          "src/modules/db2/c/demotion.c"
         ],
         "cJSON_IsObject": [],
         "cJSON_IsString": [
           "src/modules/db2/c/artifacts.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/org_model_catalog.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
@@ -441,7 +433,6 @@
           "src/modules/db2/c/calibration.c",
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/pgvec_transport.c"
         ],
         "cJSON_ParseWithOpts": [
@@ -452,7 +443,6 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/corpus_structural.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/rules.c"
         ]
@@ -2016,7 +2006,6 @@
         "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/fact_identity.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/learning.c",
@@ -2418,7 +2407,6 @@
         "src/modules/db2/c/fact_identity.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/feature_rows.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_audit_worm.c",
         "src/modules/db2/c/kb_docs.c",
         "src/modules/db2/c/kb_maintenance.c",
@@ -2569,7 +2557,6 @@
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/feedback.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_releases.c",
         "src/modules/db2/c/kb_runtime_state.c",
@@ -2951,7 +2938,7 @@
     }
   ],
   "summary": {
-    "translation_units": 115,
+    "translation_units": 114,
     "descriptor_support_units": 18,
     "unresolved_symbols": 140,
     "dispositions": {
@@ -2963,5 +2950,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "836ce081dc773b3622428cb6bebaee2f976963bf6510cd818db23a999e780f0f"
+  "fingerprint": "70706e2fe2ebac67506797e354a24763593edf03f7e101ff9d2711444fb178d0"
 }

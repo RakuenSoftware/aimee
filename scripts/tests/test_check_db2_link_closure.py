@@ -1074,5 +1074,34 @@ class MemoryMigrationComparisonTest(unittest.TestCase):
             self.compare()
 
 
+
+class FidelityRetirementComparisonTest(unittest.TestCase):
+    def setUp(self):
+        self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        self.previous = copy.deepcopy(self.current)
+        self.previous["fingerprint"] = checker.FIDELITY_RETIREMENT_BASE
+        self.previous["translation_units"] += sorted(checker.FIDELITY_RETIRED_UNITS)
+
+    def compare(self):
+        def validated(root, contract, **kwargs):
+            return (contract["translation_units"], contract["descriptor_support_units"],
+                    {row["symbol"]: row for row in contract["unresolved"]})
+        with mock.patch.object(checker, "validate_contract", side_effect=validated):
+            checker.compare_contracts(REPO, self.previous, self.current)
+
+    def test_exact_fidelity_retirement_passes(self):
+        self.compare()
+
+    def test_other_base_cannot_retire_fidelity(self):
+        self.previous["fingerprint"] = "0" * 64
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+    def test_other_source_cannot_disappear(self):
+        self.previous["translation_units"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+
 if __name__ == "__main__":
     unittest.main()

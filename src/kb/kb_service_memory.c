@@ -14,7 +14,6 @@
 #include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
 #include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
 #include "modules/db2/c/fact_mutation.h"
 #include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_service_memory.h"
@@ -407,36 +406,27 @@ int kb_handle_evidence_fidelity(int fd, cJSON *req)
    if (strlen(turn_j->valuestring) > 128)
       return kb_send_error(fd, "audit.fidelity turn_id too long");
 
-   char fstatus[32] = "";
-   int sup = 0, uns = 0, abst = 0;
-   int rc = db2_fidelity_report_by_turn(turn_j->valuestring, fstatus, sizeof(fstatus), &sup, &uns,
-                                        &abst);
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
-   if (rc == 1)
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "fidelity-read");
+   cJSON_AddStringToObject(args, "turn_id", turn_j->valuestring);
+   int rc = args ? aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) : -1;
+   cJSON_Delete(args);
+   cJSON *resp = NULL;
+   if (rc == 1 && cJSON_IsObject(reply) && !strcmp(jo_cstr(reply, "status"), "ok") &&
+       !strcmp(jo_cstr(reply, "turn_id"), turn_j->valuestring) &&
+       jo_cstr(reply, "fidelity_status")[0])
    {
-      cJSON_AddStringToObject(resp, "fidelity_status", fstatus[0] ? fstatus : "ok");
-      cJSON *rep = cJSON_AddObjectToObject(resp, "report");
-      cJSON_AddNumberToObject(rep, "supported", sup);
-      cJSON_AddNumberToObject(rep, "unsupported", uns);
-      cJSON_AddNumberToObject(rep, "abstained", abst);
-      /* Emit the count only when it read cleanly; on a count error omit it (rather
-       * than clamp to 0, which would conflate "no attributions" with "count
-       * failed") and flag the error — honesty over a silent zero on an audit read. */
-      int ac = db2_fidelity_attribution_count_by_turn(turn_j->valuestring);
-      if (ac >= 0)
-         cJSON_AddNumberToObject(resp, "attribution_count", ac);
-      else
-         cJSON_AddBoolToObject(resp, "attribution_count_error", 1);
+      resp = reply;
+      reply = NULL;
    }
-   else
+   cJSON_Delete(reply);
+   if (!resp)
    {
-      cJSON_AddStringToObject(resp, "fidelity_status",
-                              rc < 0 ? "evidence_unavailable" : "not_evaluated");
-      cJSON_AddStringToObject(resp, "detail",
-                              rc < 0 ? "lookup error" : "no fidelity report for this turn");
+      resp = cJSON_CreateObject();
+      cJSON_AddStringToObject(resp, "status", "ok");
+      cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
+      cJSON_AddStringToObject(resp, "fidelity_status", "evidence_unavailable");
+      cJSON_AddStringToObject(resp, "detail", "lookup error");
    }
    return kb_reply_or_error(fd, resp, "failed to read fidelity report");
 }

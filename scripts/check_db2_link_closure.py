@@ -111,6 +111,10 @@ MEMORY_MIGRATION_BASE = "bc88c720134efbd3b18a737d5c6bba252a59fcbb1568bbae1ca6beb
 # 0.4.5 completes the Go cutover from the exact 0.4.4 release contract.
 # Once main advances, this admission cannot be reused for later retirements.
 MEMORY_GO_ONLY_BASE = "ee445f8cb4473d33730c42697efc1efeb1c29bd3cd461f494fcb1d796d0b76c3"
+# Fidelity storage retires only from this reviewed release contract. The live
+# reader moves to Go memory through PostgreSQL; no replacement native unit is admitted.
+FIDELITY_RETIREMENT_BASE = "836ce081dc773b3622428cb6bebaee2f976963bf6510cd818db23a999e780f0f"
+FIDELITY_RETIRED_UNITS = {"src/modules/db2/c/fidelity.c"}
 MEMORY_GO_ONLY_RETIRED_UNITS = {
     f"src/modules/db2/c/{name}.c" for name in (
         "entity_registry", "epistemic_directives", "fact_ingest", "fact_lifecycle",
@@ -293,7 +297,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/collab_rules.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
@@ -311,7 +314,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/collab_rules.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
@@ -342,7 +344,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/collab_rules.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
@@ -366,7 +367,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/collab_rules.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
@@ -394,7 +394,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/calibration.c",
         "src/modules/db2/c/code_audit.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
         "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/pgvec_transport.c",
@@ -414,7 +413,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/calibration.c",
         "src/modules/db2/c/code_audit.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
         "src/modules/db2/c/kb_service_backend_export.c",
     ],
@@ -422,7 +420,6 @@ CJSON_BASE_REFERENCES = {
     "cJSON_IsString": [
         "src/modules/db2/c/artifacts.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
         "src/modules/db2/c/kb_service_backend_export.c",
         "src/modules/db2/c/kb_service_backend_memory.c",
@@ -435,7 +432,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/calibration.c",
         "src/modules/db2/c/code_audit.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
         "src/modules/db2/c/pgvec_transport.c",
     ],
@@ -445,7 +441,6 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/collab_rules.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/demotion.c",
-        "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend_agent.c",
         "src/modules/db2/c/kb_service_backend_memory.c",
@@ -1753,6 +1748,8 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     if memory_go_only:
         retired_units = MEMORY_GO_ONLY_RETIRED_UNITS
         retired_support = {"src/modules/db2/support/rel_enum_text_primitives.c"}
+    if isinstance(previous, dict) and previous.get("fingerprint") == FIDELITY_RETIREMENT_BASE:
+        retired_units = retired_units | FIDELITY_RETIRED_UNITS
     refresh_allowed = (
         isinstance(previous, dict) and
         previous.get("source_revision") in REVIEWED_REFRESH_BASE_REVISIONS

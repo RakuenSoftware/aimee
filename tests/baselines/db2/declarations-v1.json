@@ -766,10 +766,6 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_fidelity.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_graph_fusion.c"
     },
     {
@@ -1414,7 +1410,6 @@
         "src/tests/test_db2_code_audit.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -1627,7 +1622,6 @@
         "src/tests/test_cross_repo_stats.c",
         "src/tests/test_db2.c",
         "src/tests/test_entity_registry.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -1740,7 +1734,6 @@
         "src/tests/test_demotion.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
@@ -1822,7 +1815,6 @@
         "src/tests/test_embedding_dim.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
@@ -1947,7 +1939,6 @@
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -2046,7 +2037,6 @@
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
         "src/tests/test_embedding_dim.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_tenancy_shim_guard.c"
       ],
@@ -2149,7 +2139,6 @@
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -2328,7 +2317,6 @@
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -4969,7 +4957,6 @@
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -8051,68 +8038,6 @@
       "signature_sha256": "923fbba7ce09917eddd4b35c6919078d6b4830edcb20747b2ebfeae45e9be281",
       "status": "audit-pending",
       "symbol": "db2_feedback_record"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service_memory.c",
-        "src/tests/test_fidelity.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fidelity.h",
-          "line": 51
-        }
-      ],
-      "signature": "int db2_fidelity_attribution_count_by_turn ( const char * turn_id )",
-      "signature_sha256": "00d594b46960adac6cc676ef7e879c2638327cb267f6e7e09ce8fcabb878a3dd",
-      "status": "audit-pending",
-      "symbol": "db2_fidelity_attribution_count_by_turn"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fidelity.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fidelity.h",
-          "line": 45
-        }
-      ],
-      "signature": "int db2_fidelity_attribution_write ( const char * turn_id , int64_t surfaced_id , const char * verdict )",
-      "signature_sha256": "2492802b3e8454247f86541daa6650a42184a9b787d77ab6e7b30f644a72da18",
-      "status": "private-test-only",
-      "symbol": "db2_fidelity_attribution_write"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service_memory.c",
-        "src/tests/test_fidelity.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fidelity.h",
-          "line": 36
-        }
-      ],
-      "signature": "int db2_fidelity_report_by_turn ( const char * turn_id , char * status_out , int status_out_len , int * supported_out , int * unsupported_out , int * abstained_out )",
-      "signature_sha256": "802a328267dabc3fc1250a306322e4ecde766a600400d2fddfd25b3812ffc053",
-      "status": "audit-pending",
-      "symbol": "db2_fidelity_report_by_turn"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fidelity.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fidelity.h",
-          "line": 30
-        }
-      ],
-      "signature": "int db2_fidelity_report_write ( const char * turn_id , const char * status , int supported , int unsupported , int abstained )",
-      "signature_sha256": "691c86e670bb9f694f88160eb1f7d3b9239a08dca589b280f0febcee22f09582",
-      "status": "private-test-only",
-      "symbol": "db2_fidelity_report_write"
     },
     {
       "consumers": [],
@@ -16353,7 +16278,6 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_feedback_shadow.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_graph_fusion.c",
         "src/tests/test_graph_scoring.c",
         "src/tests/test_guardrails.c",
@@ -16486,7 +16410,6 @@
         "src/tests/test_evidence_embed.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
-        "src/tests/test_fidelity.c",
         "src/tests/test_guardrails.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -19914,15 +19837,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d33c16223167d4ad49637f0e92b0618704abb69b269d24a01b6562fef0222898",
+  "fingerprint": "f825d9429eda59511006bf44e32b98f775c9f4a507ab4b6b644a854b1b81acbc",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 424,
-    "declarations": 1095,
-    "headers": 125,
+    "audit_pending": 422,
+    "declarations": 1091,
+    "headers": 124,
     "internal_unconsumed": 203,
-    "private_test_only": 279,
+    "private_test_only": 277,
     "reviewed": 189
   }
 }

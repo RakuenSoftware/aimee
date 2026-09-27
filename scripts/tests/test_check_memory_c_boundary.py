@@ -113,6 +113,10 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_relocated_native_client_or_declaration(self) -> None:
         for suffix, declaration in (
+            ("c", "int db2_fidelity_report_write(void) { return 0; }"),
+            ("h", "int db2_fidelity_report_by_turn(void);"),
+            ("c", "int db2_fidelity_attribution_write(void) { return 0; }"),
+            ("h", "int db2_fidelity_attribution_count_by_turn(void);"),
             ("c", "int memory_extract_patterns(void) { return 0; }"),
             ("c", "int session_append_scope_section(void) { return 0; }"),
             ("h", "int kb_client_memory_find_facts(void);"),
