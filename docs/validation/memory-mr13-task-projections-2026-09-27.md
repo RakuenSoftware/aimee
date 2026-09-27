@@ -1,6 +1,10 @@
 # MR-13 task projection candidate
 
-Implementation is ready for CT109 acceptance. Live acceptance is pending.
+The first candidate upgraded successfully but failed live task access because
+the process SQL adapter does not support scanning into `time.Time`. Both task
+expiry and promotion admission now read database-clock integer microseconds.
+Direct PostgreSQL fixture success was insufficient to catch this boundary;
+corrected live acceptance remains pending.
 
 The existing DB1 session-state owner holds one bounded, disposable projection
 for its authenticated principal and active task. Atomic expected-revision updates

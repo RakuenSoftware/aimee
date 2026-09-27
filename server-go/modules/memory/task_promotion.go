@@ -74,11 +74,11 @@ func (s *postgresDataStore) checkTaskPromotionSources(ctx context.Context, p *ta
 		return e
 	}
 	if atAdmission {
-		var now time.Time
-		if e := s.db.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); e != nil {
+		var nowMicros int64
+		if e := s.db.QueryRow(ctx, `SELECT floor(extract(epoch FROM clock_timestamp())*1000000)::bigint`).Scan(&nowMicros); e != nil {
 			return e
 		}
-		if !now.Before(p.Expires) {
+		if !time.UnixMicro(nowMicros).Before(p.Expires) {
 			return errMutationVersionConflict
 		}
 	}

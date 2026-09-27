@@ -163,12 +163,13 @@ func sessionTaskProjectionApply(ctx context.Context, q store.Queryer, f []string
 	}
 	var active int64
 	var raw string
-	var now time.Time
-	if err = q.QueryRow(ctx, `SELECT active_task_id,task_projection_state,clock_timestamp() FROM session_state WHERE session_id=$1 FOR UPDATE`, sid).Scan(&active, &raw, &now); store.IsNoRows(err) {
+	var nowMicros int64
+	if err = q.QueryRow(ctx, `SELECT active_task_id,task_projection_state,floor(extract(epoch FROM clock_timestamp())*1000000)::bigint FROM session_state WHERE session_id=$1 FOR UPDATE`, sid).Scan(&active, &raw, &nowMicros); store.IsNoRows(err) {
 		return store.StatusMissing, nil, nil
 	} else if err != nil {
 		return 0, nil, err
 	}
+	now := time.UnixMicro(nowMicros).UTC()
 	if active != task {
 		return taskProjectionReply("error", "active_task_mismatch", nil)
 	}
