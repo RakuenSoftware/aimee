@@ -1,0 +1,22 @@
+PASS scoped dry run covers duplicate and expired assertion
+PASS dry run has no canonical proposal or job writes
+PASS hidden and expired peers excluded from duplicate cluster
+PASS bounded first page exposes resume
+PASS resume completes remaining retained records
+PASS unknown model actions rejected
+PASS normal run only admits version-bound review proposals
+PASS retry reuses job and proposal identities
+PASS rejected finding is suppressed without canonical changes
+PASS compiled CLI dry-run parity
+PASS MCP governed proposal parity
+PASS worker lacks canonical and review privileges
+PASS stale review fails closed
+PASS expired proposal cannot be accepted
+PASS expiry and failed review leave canonical state unchanged
+PASS opt-in bounded scheduler records completed job
+PASS cleanup fixture projection created
+PASS retention blocks early cleanup
+PASS workflow lease blocks expired cleanup
+PASS expired old-task cleanup succeeds after lease
+PASS cleanup clears only disposable content
+PASS cleanup retry is idempotent

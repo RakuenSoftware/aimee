@@ -29,6 +29,17 @@ class HygieneScheduleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 tick("/aimee", "project:other", state)
 
+    def test_native_cli_status_elision_preserves_success_contract(self):
+        with tempfile.TemporaryDirectory() as folder, patch("scripts.memory_hygiene_schedule.subprocess.run") as run:
+            receipt = json.loads(self.reply().stdout)
+            del receipt["status"]
+            run.return_value = subprocess.CompletedProcess([], 0, json.dumps(receipt), "")
+            self.assertEqual(tick("/aimee", "project:p", Path(folder) / "state")["status"], "complete")
+            del receipt["job_id"]
+            run.return_value = subprocess.CompletedProcess([], 0, json.dumps(receipt), "")
+            with self.assertRaises(RuntimeError):
+                tick("/aimee", "project:p", Path(folder) / "state")
+
     def test_failure_preserves_cursor_and_stall_is_not_clean(self):
         with tempfile.TemporaryDirectory() as folder, patch("scripts.memory_hygiene_schedule.subprocess.run") as run:
             state = Path(folder) / "state.json"

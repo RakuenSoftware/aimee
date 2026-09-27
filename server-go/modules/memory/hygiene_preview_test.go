@@ -191,6 +191,20 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if digest() != before {
 		t.Fatal("hygiene admission or rejection mutated canonical state")
 	}
+	exec("SET LOCAL ROLE NONE")
+	var expiredProposal int64
+	if err := tx.QueryRow(ctx, `UPDATE learning_proposals SET expires_at='2000-01-01T00:00:00Z' WHERE sink='memory_hygiene' AND target_memory_id=$1 RETURNING id`, ids[4]).Scan(&expiredProposal); err != nil {
+		t.Fatal(err)
+	}
+	exec("SAVEPOINT hygiene_expired_review")
+	if _, err := tx.Exec(ctx, `UPDATE learning_proposals SET state='committed' WHERE id=$1`, expiredProposal); err == nil || !strings.Contains(err.Error(), "hygiene proposal expired") {
+		t.Fatal("expired review accepted", err)
+	}
+	exec("ROLLBACK TO SAVEPOINT hygiene_expired_review; RELEASE SAVEPOINT hygiene_expired_review")
+	exec("SET LOCAL ROLE aimee_store_runtime")
+	if retried := queue(); retried.ProposalWrites != 0 || digest() != before {
+		t.Fatal("expired proposal retry changed canonical state or duplicated admission", retried)
+	}
 	exec("UPDATE memories SET content='changed canonical evidence' WHERE id=$1", ids[0])
 	changed := duplicates(preview(128, 32768))
 	if len(changed.Findings) != 1 || changed.Findings[0].ID == full.Findings[0].ID || changed.Generation == full.Generation {

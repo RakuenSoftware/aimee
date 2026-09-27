@@ -59,7 +59,9 @@ def tick(cli, scope, state_path, max_pages=4, max_seconds=30, restart=False):
             if reply.returncode:
                 raise RuntimeError("hygiene command failed; cursor preserved")
             result = json.loads(reply.stdout)
-            if result.get("status") != "ok" or result.get("dry_run") is not False or result.get("canonical_writes") != 0 or not result.get("job_id"):
+            # Native CLI removes the HTTP success status from --json output.
+            # Exit success plus the typed owner receipt remains mandatory.
+            if result.get("status", "ok") != "ok" or result.get("dry_run") is not False or result.get("canonical_writes") != 0 or not result.get("job_id"):
                 raise RuntimeError("invalid proposal-only job receipt; cursor preserved")
             next_cursor = result.get("resume_cursor", "")
             if not isinstance(next_cursor, str) or len(next_cursor) > 4096:

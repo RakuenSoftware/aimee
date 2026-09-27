@@ -1,6 +1,6 @@
 # MR-14: Proposal-only memory hygiene and bounded maintenance
 
-- **State:** In progress — bounded detector, scoped resume and governed proposal admission
+- **State:** Accepted — functional implementation and 22 canary checks complete; release follows PR #2990
 - **Priority:** P2: operational maintenance
 - **Owner:** Go memory maintenance/proposal generation, with the reviewed-learning owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-08](memory-reliability-08-retrieval-health-telemetry.md), [MR-13](memory-reliability-13-disposable-task-projections.md)
@@ -65,3 +65,14 @@ The scheduler is opt-in initially. Model-assisted detectors use an allowed model
 Start manually with dry runs and review acceptance statistics. Enable scheduling only with bounded workload and queue observability. Disable scheduling/detectors independently; preserve reviewed proposal history. Do not roll back committed canonical changes by deleting audit records.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation and acceptance record
+
+[MR-14 closeout](../../validation/memory-mr14-hygiene-2026-09-27.md) records bounded
+scoped detectors, immutable proposal admission/review, retained rejection/expiry
+deduplication, existing-queue job receipts, explicit scheduler ticks, and separate
+private expired-projection cleanup. The candidate upgrade and an actual failed
+startup/restore cycle are recorded. Model assistance remains disabled, delivered
+exposure has no shared-store detector adapter, and scheduling is not enabled by
+default. Real reviewer usefulness and false-positive qualification remain rollout
+evidence, not claims inferred from synthetic acceptance.
