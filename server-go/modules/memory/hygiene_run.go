@@ -12,12 +12,13 @@ import (
 const hygienePolicy = "bounded-proposal-hygiene-v1"
 
 type hygieneCursor struct {
-	Schema     int    `json:"schema_version"`
-	Owner      string `json:"owner_id"`
-	Scope      Scope  `json:"scope"`
-	Generation string `json:"generation"`
-	After      string `json:"after_id"`
-	Policy     string `json:"policy"`
+	ClusterLimit bool   `json:"cluster_limit,omitempty"`
+	Schema       int    `json:"schema_version"`
+	Owner        string `json:"owner_id"`
+	Scope        Scope  `json:"scope"`
+	Generation   string `json:"generation"`
+	After        string `json:"after_id"`
+	Policy       string `json:"policy"`
 }
 
 func decodeHygieneCursor(raw string, scope Scope) (hygieneCursor, int64, error) {
@@ -38,8 +39,12 @@ func decodeHygieneCursor(raw string, scope Scope) (hygieneCursor, int64, error) 
 	}
 	return c, id, nil
 }
-func encodeHygieneCursor(owner string, scope Scope, generation string, after int64) string {
-	raw, _ := json.Marshal(hygieneCursor{1, owner, scope, generation, strconv.FormatInt(after, 10), hygienePolicy})
+func encodeHygieneCursor(owner string, scope Scope, generation string, after int64, clusterLimit ...bool) string {
+	c := hygieneCursor{Schema: 1, Owner: owner, Scope: scope, Generation: generation, After: strconv.FormatInt(after, 10), Policy: hygienePolicy}
+	if len(clusterLimit) > 0 {
+		c.ClusterLimit = clusterLimit[0]
+	}
+	raw, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 

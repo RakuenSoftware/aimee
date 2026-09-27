@@ -157,9 +157,12 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 		return out, errors.New("memory: hygiene snapshot changed; restart scan")
 	}
 	last := after
+	remaining := false
+	clusterLimit := cursor.ClusterLimit
 	groups := map[string][]MemoryRecordVersion{}
 	for _, row := range selected.Rows {
 		if !row.WithinRows {
+			remaining = true
 			out.Partial = true
 			continue
 		}
@@ -168,6 +171,7 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 			out.RowsConsidered++
 		}
 		if !row.WithinBytes {
+			remaining = true
 			out.Partial = true
 			continue
 		}
@@ -183,6 +187,7 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 			peers := row.Duplicates
 			if len(peers) > 16 {
 				peers = peers[:16]
+				clusterLimit = true
 				out.Partial = true
 				out.Unvisited = "duplicate_cluster_exceeds_16"
 			}
@@ -213,13 +218,17 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 			}
 		}
 	}
+	if clusterLimit {
+		out.Partial = true
+		out.Unvisited = "duplicate_cluster_exceeds_16"
+	}
 	if out.Partial {
 		if out.Unvisited != "duplicate_cluster_exceeds_16" {
 			out.Unvisited = "remaining_retained_rows_or_content_unknown"
 		}
-		if last > after {
+		if remaining && last > after {
 			out.ResumeAvailable = true
-			out.ResumeCursor = encodeHygieneCursor(selected.Owner, scope, selected.Generation, last)
+			out.ResumeCursor = encodeHygieneCursor(selected.Owner, scope, selected.Generation, last, clusterLimit)
 		}
 	}
 	for content, versions := range groups {

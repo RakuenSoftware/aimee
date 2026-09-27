@@ -225,6 +225,40 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if types["broken_correction_chain"] != 1 || types["unreferenced_observation"] != 1 || types["possible_contradiction"] != 1 || types["obsolete_assertion_candidate"] != 1 {
 		t.Fatal("diagnostic coverage", types)
 	}
+
+	for i := 0; i < 21; i++ {
+		content := "large duplicate cluster"
+		if i == 20 {
+			content = "unique tail after truncated cluster"
+		}
+		exec(`INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact',$1,$2,'project','hygiene-visible')`, fmt.Sprintf("hygiene-large-%d", i), content)
+	}
+	bounded := preview(128, 32768)
+	if !bounded.Partial || bounded.ResumeAvailable || bounded.Unvisited != "duplicate_cluster_exceeds_16" {
+		t.Fatal("truncated cluster reported complete", bounded)
+	}
+	cursor = ""
+	sawClusterGap := false
+	for page := 0; page < 12; page++ {
+		raw, e := client.Command(ctx, 73, "hygiene", json.RawMessage(fmt.Sprintf(`{"dry_run":true,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":4,"max_content_bytes":32768,"cursor":%q}`, cursor)))
+		var next hygienePreview
+		if e != nil || json.Unmarshal(raw, &next) != nil || next.Status != "ok" {
+			t.Fatalf("cluster resume: %s %v", raw, e)
+		}
+		if next.Unvisited == "duplicate_cluster_exceeds_16" {
+			sawClusterGap = true
+		}
+		if sawClusterGap && (!next.Partial || next.Unvisited != "duplicate_cluster_exceeds_16") {
+			t.Fatal("later page lost coverage gap", next)
+		}
+		cursor = next.ResumeCursor
+		if cursor == "" {
+			break
+		}
+	}
+	if !sawClusterGap || cursor != "" {
+		t.Fatal("bounded cluster scan failed to terminate with its gap")
+	}
 }
 
 func TestHygieneCursorBindsScopeAndSnapshotIdentity(t *testing.T) {
