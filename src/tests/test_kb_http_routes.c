@@ -1,3 +1,4 @@
+#include <aimee/postgres/client.h>
 #include "module_commands.h"
 #include "support/module_runtime_fixture.h"
 #include "json_fluent.h"
@@ -23,11 +24,11 @@
 extern int handle_get_code_context(const char *query_string, char *out_buf, int out_cap);
 #include "kb_route_acl.h"
 #include "kb_scope.h"
-#include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
-#include "td_search_render.h"        /* consumer side of the /v1/search contract test */
-#include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
-#include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
-#include "modules/db2/c/code_project_lifecycle.h"
+#include "kb/http/kb_http_search.h" /* kb_http_search_project_scope: "scope" parsing */
+#include "td_search_render.h"       /* consumer side of the /v1/search contract test */
+#include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
+#include "modules/kb/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
+#include "modules/kb/c/code_project_lifecycle.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -209,23 +210,10 @@ int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *o
 /* /v1/health reports pool starvation, so the route layer now reads the pool.
  * A route test wants no real DB2: report an idle pool so health stays "ok" and
  * the route assertions are about routing, not pool state. */
-void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
-                    long *stuck, long *poisoned)
+int aimee_postgres_session_stats(aimee_postgres_session_stats_t *stats)
 {
-   if (size)
-      *size = 0;
-   if (in_use)
-      *in_use = 0;
-   if (waiters)
-      *waiters = 0;
-   if (lease_grants)
-      *lease_grants = 0;
-   if (lease_timeouts)
-      *lease_timeouts = 0;
-   if (stuck)
-      *stuck = 0;
-   if (poisoned)
-      *poisoned = 0;
+   *stats = (aimee_postgres_session_stats_t){.capacity = 16};
+   return 0;
 }
 
 static int code_project_manifest_stub(const char *project, code_project_manifest_t *out)
@@ -2169,7 +2157,7 @@ static void test_capabilities(void)
 /* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
-#include "modules/db2/c/enrollments.h"
+#include "modules/kb/c/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
@@ -2283,7 +2271,7 @@ const char *config_default_dir(void)
  * Note: we do NOT include db2/artifacts.h (it re-declares db2_artifact_* which
  * this file already stubs with different signatures). Mirror just the audit row
  * struct — layout must match db2/artifacts.h. */
-#include "modules/db2/c/decision_log.h"
+#include "modules/kb/c/decision_log.h"
 typedef struct
 {
    char id[64];

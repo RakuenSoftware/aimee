@@ -1,6 +1,6 @@
 #include "kb_neardup.h"
 
-#include "modules/db2/c/artifacts.h"
+#include "modules/kb/c/artifacts.h"
 #include "log.h"
 #include "cJSON.h"
 

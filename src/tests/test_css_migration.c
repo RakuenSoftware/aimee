@@ -8,14 +8,14 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-#include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/css_graph.h"
-#include "../modules/db2/c/css_migration.h"
+#include "../modules/kb/c/code_index.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/css_graph.h"
+#include "../modules/kb/c/css_migration.h"
 
 static void test_gate(void)
 {

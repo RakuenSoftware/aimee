@@ -35,6 +35,21 @@ for source in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
         printf '[kb-entrypoint] preserving operator policy in %s; it differs from the shipped grant\n' "$dest" >&2
     fi
 done
+# Principal 29 was the retired Db2 process. Its executable is no longer in
+# either composition, and leaving the old grant active prevents bus startup.
+# Preserve the exact policy outside the active directory, including operator
+# edits; never transfer any of its capabilities to PostgreSQL.
+for obsolete in "$AIMEE_HOME"/modules.d/kb/*.grant; do
+    [ -f "$obsolete" ] || continue
+    [ "$(grep '^principal_class=' "$obsolete" || true)" = 'principal_class=1' ] || continue
+    [ "$(grep '^principal_ref=' "$obsolete" || true)" = 'principal_ref=29' ] || continue
+    retired="$AIMEE_HOME/modules.d/kb/.retired"
+    mkdir -p "$retired"
+    chmod 0700 "$retired"
+    digest=$(sha256sum "$obsolete" | cut -d' ' -f1)
+    mv "$obsolete" "$retired/$(basename "$obsolete").$digest.retired"
+    printf '[kb-entrypoint] archived grant for retired database principal 29\n' >&2
+done
 # <<< kb-module-grant-seeding
 manifest=$(apply_optional_modules kb "${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/kb.modules}" "$AIMEE_HOME")
 module-supervisor.sh kb "$AIMEE_MODULE_BUS_SOCKET" "$manifest" &

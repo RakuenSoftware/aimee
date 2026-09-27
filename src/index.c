@@ -2,11 +2,11 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/css_graph.h"
-#include "modules/db2/c/entity_edges.h"
-#include "modules/db2/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
-#include "aimee/db2/graph_kinds.h"          /* REL_CO_EDITED / NODE_FILE */
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/css_graph.h"
+#include "modules/kb/c/entity_edges.h"
+#include "modules/kb/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
+#include "aimee/kb/graph_kinds.h"          /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>

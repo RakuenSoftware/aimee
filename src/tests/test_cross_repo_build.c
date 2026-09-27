@@ -5,10 +5,10 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/cross_repo_build.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/cross_repo_build.h"
+#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static void X(const char *sql)
 {

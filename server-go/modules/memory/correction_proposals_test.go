@@ -16,7 +16,7 @@ import (
 
 func installProposalFixture(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestCorrectionProposalRuntimeReplay(t *testing.T) {
  END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

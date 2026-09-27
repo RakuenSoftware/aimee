@@ -55,7 +55,7 @@ Verified against `a397223849`. Nothing below is inferred from a file name.
 | --- | --- | --- |
 | Assembly chokepoint | `emit_candidate` (`memory_assemble.c:387`), called once from the section loop (`:1283`) | **exists**: the single point every served candidate passes |
 | Abstention | `answerability_withheld` / `config_memory_abstain_enabled` (`memory_assemble.c:999`, `:1082`, `:1106`, `:1354`), with `memory_directive_record_retrieval_failure` on threshold crossings | **exists**: recall-side abstain is already first-class |
-| Per-attribute sensitivity gate | `memory_pii_should_inject` / `memory_pii_rel_sensitivity` (`src/modules/memory/memory_pii_gate.c`), wired at `src/modules/db2/c/fact_recall.c:102` and `src/kb/db2_adapters/kb_service_backend_memory.c:1430` | **exists**, fails closed on unknown `rel_type` (`rel_types.sensitivity NOT NULL DEFAULT 'pii'`, `schema.sql:2052`) |
+| Per-attribute sensitivity gate | `memory_pii_should_inject` / `memory_pii_rel_sensitivity` (`src/modules/memory/memory_pii_gate.c`), wired at `src/modules/kb/c/fact_recall.c:102` and `src/kb/db2_adapters/kb_service_backend_memory.c:1430` | **exists**, fails closed on unknown `rel_type` (`rel_types.sensitivity NOT NULL DEFAULT 'pii'`, `schema.sql:2052`) |
 | Typed-triple write gate | `memory_fact_gate_check` + `FACT_GATE_REJECT_SENSITIVE` (`src/modules/memory/memory_fact_gate.h`) | **exists**: single commit point for semantic edges |
 | Supersession + conflict | `memory_supersede` (`memory_advanced.c:55`, `:286`), `memory_conflict.c`, `db2_memory_supersede_lookup` (`memory_assemble.c:433`) | **exists** |
 | **Destructive-edit authority** | `memory_authority_t` (`src/headers/memory_authority.h`); `memory_delete_as` / `memory_update_content_as` (`headers/memory.h:412`, `:425`) route MODEL authority to `memory_retire` / `memory_supersede` and only USER authority destroys, behind `CAP_MEMORY_ADMIN` (`headers/server.h:156`) | **exists**: the tree already refuses to let a model destroy what a user stated |
@@ -77,7 +77,7 @@ on the recall path, which is the gap below.
 
 - **No recall decision record anywhere.** `memory_assemble.c` contains **32
   `continue;` statements**, none of which records why the candidate went away;
-  `src/modules/db2/c/fact_recall.c:102` drops a PII-gated fact the same way; and
+  `src/modules/kb/c/fact_recall.c:102` drops a PII-gated fact the same way; and
   `answerability_withheld` zeroes `cand_count` wholesale. Grepping
   `src/modules/memory/` for `exclusion`, `drop_reason`, `why_not`,
   `recall_trace`, or `memory_trace` returns nothing but the `answerability_*`

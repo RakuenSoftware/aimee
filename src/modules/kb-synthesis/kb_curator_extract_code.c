@@ -14,9 +14,9 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "log.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <errno.h>
 #include <pthread.h> /* reclaim throttle is shared across the code workers */

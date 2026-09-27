@@ -8,11 +8,11 @@
 #include "kb_ranker_fit.h"
 #include "kb_ranker.h"
 #include "kb_features.h" /* KB_FEATURE_SET_VERSION */
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/feature_rows.h" /* db2_feature_row_read */
-#include "modules/db2/c/demotion.h"     /* DEMOTION_VERDICT_ACCEPTED */
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/feature_rows.h" /* db2_feature_row_read */
+#include "modules/kb/c/demotion.h"     /* DEMOTION_VERDICT_ACCEPTED */
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
 #include "platform_process.h"

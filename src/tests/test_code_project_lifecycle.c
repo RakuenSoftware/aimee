@@ -3,14 +3,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <aimee/db2/host_contracts.h>
+#include <aimee/kb/host_contracts.h>
 
-#include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/code_project_lifecycle.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/kb_audit_worm.h"
+#include "../modules/kb/c/code_index.h"
+#include "../modules/kb/c/code_project_lifecycle.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/kb_audit_worm.h"
 
 static long scalar(const char *sql)
 {

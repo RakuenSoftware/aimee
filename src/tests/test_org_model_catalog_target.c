@@ -1,5 +1,5 @@
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/org_model_catalog.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/org_model_catalog.h"
 
 #include <assert.h>
 #include <stdio.h>

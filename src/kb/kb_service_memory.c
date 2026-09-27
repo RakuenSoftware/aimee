@@ -10,12 +10,12 @@
 #include "json_fluent.h"
 #include "module_commands.h"
 #include "config.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
-#include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/fact_mutation.h"
-#include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
+#include "modules/kb/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/fact_mutation.h"
+#include "modules/kb/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_service_memory.h"
 #include "log.h"
 

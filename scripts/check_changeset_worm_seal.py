@@ -28,7 +28,7 @@ import sys
 # the same from src/ (where the Makefile invokes it) and from the repo root.
 DEFAULT_SCHEMA = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "src", "modules", "db2", "c", "schema.sql")
+    "src", "modules", "kb", "c", "schema.sql")
 
 CLOSE = re.compile(r"UPDATE\s+fact_graph_commits\s+SET\s+status\s*=", re.I)
 OWN = re.compile(r"commit_id\s*=\s*cid\b", re.I)

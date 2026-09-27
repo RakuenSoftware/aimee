@@ -9,13 +9,13 @@
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
-#include "kb_curator_drain.h"                 /* kb_curator_stages_json / _presets_json */
-#include "kb_service.h"                       /* kb_service_workers_json, kb_service_ctx_t */
-#include "kb_reqctx.h"                        /* verifier-derived trace scope */
-#include "kb_service_kb.h"                    /* kb_service_health_json */
-#include "modules/db2/c/kb_service_backend.h" /* async queue status */
-#include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
-#include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
+#include "kb_curator_drain.h"                /* kb_curator_stages_json / _presets_json */
+#include "kb_service.h"                      /* kb_service_workers_json, kb_service_ctx_t */
+#include "kb_reqctx.h"                       /* verifier-derived trace scope */
+#include "kb_service_kb.h"                   /* kb_service_health_json */
+#include "modules/kb/c/kb_service_backend.h" /* async queue status */
+#include "modules/kb/c/fact_mutation.h"      /* assertion review/rollback/removal */
+#include "modules/kb/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
 #include "runtime_secret.h"
 #include <math.h>
 #include <openssl/crypto.h> /* wipe transient credential request copies */

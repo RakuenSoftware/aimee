@@ -9,7 +9,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / "src/modules/db2/support/extractor_primitives.c"
+OUTPUT = ROOT / "src/modules/kb/support/extractor_primitives.c"
 
 
 def read(relative: str) -> str:

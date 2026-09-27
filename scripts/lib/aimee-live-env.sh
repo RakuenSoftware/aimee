@@ -32,7 +32,7 @@
 # run-pam-login-live.sh and run-write-tier-enforce-live.sh are on it.
 #
 # run-grant-cli-live.sh is NOT, and should not be: it provisions the REAL
-# cluster-scope roles from src/modules/db2/c/schema_roles.sql and connects as the real
+# cluster-scope roles from src/modules/kb/c/schema_roles.sql and connects as the real
 # aimee_kb_owner, because whoever pre-applies the schema has to be the role kb
 # will connect as. That provisioning IS part of what the rig tests, so putting it
 # behind this helper's disposable-database path would quietly reduce its coverage
@@ -310,22 +310,14 @@ live_env_pg_create() {
       echo "$LIVE_NAME: disposable store migrator has no CREATE authority on aimee_private" >&2
       exit 2
    fi
-   # BOTH tiers, exported HERE rather than beside the process that reads each.
-   # The store's DSN used to be set nowhere: AIMEE_DB2_URL was exported inside
-   # live_env_start_kb, and live_env_start_module passed AIMEE_STORE_URL through
-   # as ${AIMEE_STORE_URL:-} -- empty, in every rig. The store then attached,
-   # found no database, and declined to serve, which every rig reported as
-   # nineteen separate "DB1 <family> is unreachable" warnings and one failure
-   # somewhere downstream. Not one of them named the DSN.
-   #
-   # They are the same database on purpose: a rig provisions ONE disposable
-   # database, with shared objects in public and private objects in aimee_private.
-   # TCP rather than the
-   # socket for the reason above -- kb runs as root here and peer auth would
-   # present root.
-   export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
-   export AIMEE_STORE_URL="$AIMEE_DB2_URL?search_path=aimee_private"
-   export AIMEE_STORE_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB?search_path=aimee_private"
+   # Each daemon uses the same PostgreSQL provider contract. The disposable
+   # Server and KB keep separate namespaces, with distinct migration credentials.
+   export LIVE_KB_STORE_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   export LIVE_KB_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
+   export AIMEE_STORE_URL="$LIVE_KB_STORE_URL?search_path=aimee_private"
+   export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL?search_path=aimee_private"
+   pg_admin "GRANT $LIVE_OWNER TO $LIVE_MIGRATOR" >/dev/null
+   pg_db -c "GRANT USAGE, CREATE ON SCHEMA public TO $LIVE_MIGRATOR; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO $LIVE_OWNER" >/dev/null || exit 2
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
 }
 
@@ -485,6 +477,9 @@ YAML
 }
 
 live_env_start_kb() {
+   local AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
+   local AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
+   export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
    local AIMEE_HOME="$LIVE_KB_HOME"
    export AIMEE_HOME
    step "Starting aimee-kb"
@@ -496,8 +491,7 @@ live_env_start_kb() {
    # failure is silent and identical wherever it happens.
    local v
    for v in $(env | sed -nE 's/^(AIMEE_KB_OIDC[A-Z_]*)=.*/\1/p'); do unset "$v"; done
-   # AIMEE_DB2_URL and AIMEE_STORE_URL are exported by live_env_pg_create, with
-   # the database they name.
+   # The PostgreSQL provider receives the fixed runtime and migration profiles.
    export AIMEE_KB_API_BEARER_TOKEN="$LIVE_KB_BEARER"
    live_env_start_kb_modules
    ./aimee-kb --http-port="$LIVE_KB_PORT" >"$LIVE_KB_LOG" 2>&1 &
@@ -523,13 +517,16 @@ live_env_start_kb() {
 }
 
 live_env_restart_kb() {
+   local AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
+   local AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
+   export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
    local AIMEE_HOME="$LIVE_KB_HOME"
    export AIMEE_HOME
-   live_env_stop_kb_modules
    kill "$LIVE_KB_PID" 2>/dev/null
    sleep 1
    kill -9 "$LIVE_KB_PID" 2>/dev/null
    wait "$LIVE_KB_PID" 2>/dev/null
+   live_env_stop_kb_modules
    rm -f "$AIMEE_HOME/kb-module-bus.sock"
    live_env_start_kb_modules
    ./aimee-kb --http-port="$LIVE_KB_PORT" >>"$LIVE_KB_LOG" 2>&1 &
@@ -567,6 +564,17 @@ live_env_prepare_modules() {
       cp "$multicall" src/build/obj/aimee-module-postgres
    [ -x src/build/obj/aimee-module-memory ] ||
       cp "$multicall" src/build/obj/aimee-module-memory
+   # Native bootstrap and operator tools invoke this fixed provider executable.
+   # These rigs run as root on disposable hosts; refuse to replace an installed
+   # provider from a different build.
+   local provider=/usr/local/libexec/aimee-modules/aimee-module-postgres
+   if [ -e "$provider" ] && ! cmp -s "$multicall" "$provider"; then
+      echo "$LIVE_NAME: installed PostgreSQL provider differs from this test build" >&2
+      exit 2
+   fi
+   if [ ! -e "$provider" ]; then
+      install -D -m 0755 "$multicall" "$provider" || exit 2
+   fi
    local bundle="src/build/obj/module-bundle"
    [ -r "$bundle/grants/server/config.grant" ] ||
       python3 scripts/export_c_repositories.py --runtime-bundle "$bundle" >/dev/null 2>&1 || true
@@ -601,6 +609,9 @@ live_env_arm_module() { # executable bus-socket log-file pid-variable [env assig
 }
 
 live_env_start_kb_modules() {
+   local AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
+   local AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
+   export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
    local AIMEE_HOME="$LIVE_KB_HOME"
    export AIMEE_HOME
    live_env_stop_kb_modules
@@ -618,7 +629,8 @@ live_env_start_kb_modules() {
       "AIMEE_MODULE_POLICY_DIR=$grants"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-postgres" "$bus" \
       "$AIMEE_HOME/kb-postgres-module.log" LIVE_KB_POSTGRES_PID \
-      "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+      "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_STORE_URL=$AIMEE_STORE_URL" \
+      "AIMEE_STORE_MIGRATION_URL=$AIMEE_STORE_MIGRATION_URL"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
       "$AIMEE_HOME/kb-memory-module.log" LIVE_KB_MEMORY_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_MODULE_PLACEMENT=kb"
@@ -841,8 +853,6 @@ live_env_restart_server() {
 }
 
 live_env_cleanup() {
-   live_env_stop_module
-   live_env_stop_kb_modules
    [ -n "${LIVE_SRV_PID:-}" ] && kill "$LIVE_SRV_PID" 2>/dev/null
    [ -n "${LIVE_KB_PID:-}" ] && kill "$LIVE_KB_PID" 2>/dev/null
    sleep 1
@@ -850,6 +860,8 @@ live_env_cleanup() {
    [ -n "${LIVE_KB_PID:-}" ] && kill -9 "$LIVE_KB_PID" 2>/dev/null
    [ -n "${LIVE_SRV_PID:-}" ] && wait "$LIVE_SRV_PID" 2>/dev/null
    [ -n "${LIVE_KB_PID:-}" ] && wait "$LIVE_KB_PID" 2>/dev/null
+   live_env_stop_module
+   live_env_stop_kb_modules
    [ -n "${LIVE_EXTRA_CLEANUP:-}" ] && eval "$LIVE_EXTRA_CLEANUP"
    live_env_remove_host_accounts
    # --keep must keep the DATABASE too. Keeping only the work directory is useless

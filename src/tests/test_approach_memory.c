@@ -13,12 +13,12 @@
 #include <string.h>
 
 #include "db1.h"
-#include "modules/db2/c/anti_patterns.h"
+#include "modules/kb/c/anti_patterns.h"
 #include "approach_failures.h"
 #include "approach_store.h"
 #include "support/store_module_fixture.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
 

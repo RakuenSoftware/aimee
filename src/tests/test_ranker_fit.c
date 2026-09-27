@@ -33,10 +33,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/artifacts.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/artifacts.h"
 #include "feature_rows.h"
 #include "../kb_ranker.h"
 #include "../kb_ranker_fit.h"

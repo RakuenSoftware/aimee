@@ -4,10 +4,10 @@
 
 #include "aimee.h"
 #include "config.h"
-#include "modules/db2/c/kb_payload.h" /* db2_kb_async_enqueue */
-#include "modules/db2/c/decision_log.h"
+#include "modules/kb/c/kb_payload.h" /* db2_kb_async_enqueue */
+#include "modules/kb/c/decision_log.h"
 #include "session_briefing.h"
-#include "modules/db2/c/tasks.h"
+#include "modules/kb/c/tasks.h"
 
 #include <stdlib.h>
 #include <string.h>

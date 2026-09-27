@@ -4,11 +4,10 @@
 #include <string.h>
 
 #include "db_postgres.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_pool.h"
-#include "modules/db2/c/db_schema.h" /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
-#include "../headers/log.h"          /* log_level_t for the aimee_log stub below */
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_schema.h" /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
+#include "../headers/log.h"         /* log_level_t for the aimee_log stub below */
 #include <stdarg.h>
 
 struct aimee_pg_stmt
@@ -60,6 +59,18 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
                                                        : (void *)&g_fake_conn;
 }
 
+void *aimee_pg_open_runtime(char *error, size_t capacity)
+{
+   return aimee_pg_open("postgres://db2.test/aimee", error, capacity);
+}
+void *aimee_pg_open_configured(char *error, size_t capacity)
+{
+   return aimee_pg_open_runtime(error, capacity);
+}
+void *aimee_pg_open_migration(char *error, size_t capacity)
+{
+   return aimee_pg_open_runtime(error, capacity);
+}
 void aimee_pg_close(void *pg_conn)
 {
    g_close_calls++;
@@ -153,8 +164,7 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return 0;
 }
 
-/* member_reset_real (in db2_pool.o, not exercised by these pool tests — they shim
- * g_reset) references this; provide a stub so the object links. */
+/* Session transaction state for the lifecycle fixture. */
 int aimee_pg_in_transaction(void *pg_conn)
 {
    (void)pg_conn;
@@ -499,17 +509,10 @@ static void *probe_from_worker(void *arg)
    return NULL;
 }
 
-static int worker_pool_reset(void *conn)
-{
-   assert(conn == &g_worker_conn);
-   return 0;
-}
-
 static void test_worker_health_probe_never_shares_init_connection(void)
 {
    reset_mocks();
    g_distinct_worker_conn = 1;
-   db2_pool_set_test_ops(NULL, NULL, worker_pool_reset);
    assert(db2_init("postgres://db2.test/aimee") == 0);
 
    worker_health_result_t result = {0};
@@ -524,7 +527,6 @@ static void test_worker_health_probe_never_shares_init_connection(void)
    assert(g_last_exec_conn == &g_worker_conn);
 
    db2_shutdown();
-   db2_pool_set_test_ops(NULL, NULL, NULL);
 }
 
 static void test_worker_acquire_failure_never_shares_init_connection(void)
@@ -534,7 +536,6 @@ static void test_worker_acquire_failure_never_shares_init_connection(void)
 
    /* Simulate an unavailable pool and a failed overflow connection. Sharing the
     * init thread's PGconn here corrupts libpq under concurrent load. */
-   db2_pool_shutdown();
    g_fail_open = 1;
    void *worker_conn = &g_fake_conn;
    pthread_t worker;
@@ -545,8 +546,25 @@ static void test_worker_acquire_failure_never_shares_init_connection(void)
    db2_shutdown();
 }
 
+static void test_migration_authority_is_not_leased_to_workers(void)
+{
+   reset_mocks();
+   assert(db2_init_migration() == 0);
+   assert(db2_conn() == &g_fake_conn);
+   int opens = g_open_calls;
+   void *worker_conn = &g_fake_conn;
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, acquire_from_worker, &worker_conn) == 0);
+   assert(pthread_join(worker, NULL) == 0);
+   assert(worker_conn == NULL);
+   assert(db2_scope_connection_open(NULL, 0) == NULL);
+   assert(g_open_calls == opens);
+   db2_shutdown();
+}
+
 int main(void)
 {
+   test_migration_authority_is_not_leased_to_workers();
    test_init_shutdown_roundtrip();
    test_recorded_dim_precedence();
    test_init_rejects_url_change_without_shutdown();

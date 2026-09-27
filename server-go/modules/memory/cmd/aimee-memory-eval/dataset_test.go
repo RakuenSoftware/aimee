@@ -82,7 +82,7 @@ func TestDatasetIsolatedGoReplay(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf '[1,0,0]\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	schema := "../../../../../src/modules/db2/c/schema.sql"
+	schema := "../../../../../src/modules/kb/c/schema.sql"
 	for _, suite := range []string{"locomo", "longmemeval"} {
 		sample := locomoSample
 		if suite == "longmemeval" {
@@ -131,7 +131,7 @@ func TestUnanswerableRetrievalPreservesCasesAndNullMetrics(t *testing.T) {
 	sample = strings.Replace(sample, `"answer_session_ids":["session-1"]`, `"answer_session_ids":[]`, 1)
 	path := datasetFile(t, "["+sample+"]")
 	var output bytes.Buffer
-	if err := runDataset(context.Background(), "../../../../../src/modules/db2/c/schema.sql", 3, path, "longmemeval", 0, script, "", "json", "", "", &output); err != nil {
+	if err := runDataset(context.Background(), "../../../../../src/modules/kb/c/schema.sql", 3, path, "longmemeval", 0, script, "", "json", "", "", &output); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any

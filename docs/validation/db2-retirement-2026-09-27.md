@@ -1,71 +1,70 @@
-# DB2 retirement: PostgreSQL as the shared database provider
+# PostgreSQL-only database provider retirement
 
-## Required end state
+## Implementation
 
-Both `aimee-server` and `aimee-kb` must obtain database connections, transactions,
-and migration execution exclusively from the PostgreSQL module. Knowledge,
-memory, management, and Vault policy stay with their domain owners. Removing or
-renaming DB2 metadata alone does not achieve this: the legacy C code still opens
-connections and links libpq into the hosts.
+Both `aimee-server` and `aimee-kb` obtain production database connections from the
+Go PostgreSQL provider. The DB2 process, descriptor, generated wire catalog,
+unused Go implementations, native libpq driver, and native connection pool are
+removed. Principal 29 is reserved; existing grants for it are archived by identity
+without transferring permissions. PostgreSQL principal 28 serves both placements.
 
-## First removal: fidelity audit evidence
+The generic host session contract preserves transaction state, exact integers,
+NULL versus empty values, SQLSTATE, bytea, notifications and paged results. It
+shares the PostgreSQL runtime pool, reserves capacity for ordinary SQL clients,
+refuses overflow, expires idle capabilities and discards failed or abandoned
+connections. Native daemons no longer link libpq.
 
-The live `kb_handle_evidence_fidelity` reader now calls the host-only
-`memory.runtime` operation `fidelity-read`. The Go memory owner reads existing
-artifacts through the same PostgreSQL module contract used by both roles.
-Report and attribution count use one statement snapshot. Exact turn IDs and
-public response fields are preserved. A missing report is `not_evaluated`;
-a failed owner/query is `evidence_unavailable`, never an invented empty report.
+KB owns knowledge algorithms and schema under `src/modules/kb/c`; PostgreSQL
+owns driver and connection management. Domain `db2_*` C API names and immutable
+SQL identifiers remain compatibility names. The six relocated SQL inputs are
+byte-identical to their previous versions; no data-table renaming is performed.
+Vault custody and the append-only audit sink remain separate resource owners.
 
-Removed `src/modules/db2/c/fidelity.c`, its header, and its SQLite-shim test.
-Repository call-site inspection found the native writer APIs were called only
-by that deleted test. The deferred judge remains disabled; no write API or schema
-migration was added. The native transport now has its own test; Go tests use the
-real PostgreSQL module store wire in an isolated disposable database for both roles.
-The C-retirement guard prevents the removed files from returning, and the temporary
-fidelity-specific source-boundary exception is removed.
+Native startup, offline bootstrap, Vault operator status/rewrap and the isolated
+WORM worker use the same provider implementation. Fixed runtime and migration
+profiles accept no substitute credential, validate the same database/namespace,
+and separate runtime from migration roles. Migration authority is restricted to
+the bootstrap thread and closed before serving. Operator sessions retain their
+restricted role, verified TLS and absolute deadline policy.
 
-## Remaining migration order
-
-1. Retrieval evidence and attribution (`demotion.c`, `artifacts.c`,
-   `evidence_lifecycle.c`): preserve typed source IDs, first-writer semantics,
-   compare-and-swap merges, outcome history, and audit records in the memory owner.
-2. Knowledge/code ingestion and indexing: move the remaining domain operations
-   behind their owning module contracts while retaining scoped visibility.
-3. Enrollment, management journals, tenant grants, and Vault database operations:
-   preserve identity and authority separation; migrate runtime and offline tools.
-4. Knowledge schema bootstrap and hardening: preserve existing schemas, migration
-   checksums, role permissions, and upgrade/rollback behavior through PostgreSQL.
-5. Delete the final C pool/driver (`db2_pool.c`, `db_postgres.c`), DB2 process
-   contract, descriptor, and host linkage only after every live consumer is migrated.
-
-The direct-libpq surface still includes `db_postgres.c`, `db2_hardening.c`, and
-Vault operator status/rewrap runtimes. This change is the first deletion, not a
-claim that DB2 or direct host database access has been eliminated.
+The audit consumer queues durable writes to its writer thread: a synchronous
+PostgreSQL request from the bus pump would wait for its own reply. Regression
+coverage exercises startup retry, flush and shutdown while the sink calls back
+through the real bus.
 
 ## Validation
 
-Focused Go race tests passed with real PostgreSQL-module execution for both roles:
-retained reports, exact turn identity, attribution isolation, missing reports,
-all four audit states, malformed payloads, database failures, invalid inputs,
-and rejection of public RPC principals.
+- All 75 repository lint checks passed. The 650-target native unit run on CT109
+  identified one asynchronous audit assertion; its corrected regression passed
+  locally and on CT109.
+- Full Go suite passed. PostgreSQL and memory race suites passed with required
+  real database fixtures; native client fixtures ran with ASan/UBSan.
+- Native transport checks cover large schema batches, multi-frame result sets,
+  exact typed values, rollback/reset, abandoned streams, expiry, notification,
+  deadlines, reconnect, invalid authority and credential redaction.
+- Native audit concurrency, audit durability, capture-gap, fidelity transport,
+  KB HTTP, Vault operator and organization rewrap checks passed.
+- PostgreSQL-only ownership, process inventory, native boundaries, retired-grant
+  migration, packaging and independent export checks passed. CMake thin-client
+  build and isolated generated-header export build passed.
+- CT109 on `.253`: both published-0.4.5 stores passed all 12 upgrade checks:
+  identity, retained canary, new write, and persistence after recreation for both
+  roles. Native KB schema upgraded from version 21 to 44. Runtime readiness,
+  graph evidence scope and legacy query eligibility checks passed. Native audit
+  writes were observed in PostgreSQL; daemon linkage contains no libpq.
+- Live KB authorization (40 checks) and mTLS scope enforcement (5 checks) passed
+  with no skips against the PostgreSQL provider on CT109.
+- The full WORM worker PostgreSQL gate passed on CT109: isolated claim/ack
+  privileges, refusal of producer/admin authority, crash retry without duplicate
+  events, three delivered events and zero broken audit-chain links.
 
-The native fidelity transport test passed. Source ownership, package ownership,
-bus boundaries, module documentation, declaration ledger, source shrink-only,
-and retirement checks passed. Full memory and PostgreSQL race suites passed
-(361 seconds and 11 seconds respectively). Both native daemons compiled on CT109;
-the actual linker probe and all 79 linkage-check tests passed with the release
-Ubuntu/PostgreSQL toolchain.
+The final native candidate repeated all 12 upgrade checks after restricting
+migration authority to the bootstrap thread. A matching database/home rollback
+restored both published 0.4.5 identities and canaries.
 
-CT109 retained published-0.4.5 Server and KB stores passed all 12 upgrade checks:
-original identities and canaries survived, new writes succeeded, and recreated
-containers retained the new writes. The old release read a seeded fidelity report
-before upgrade; the candidate read the same report and attribution count through
-the live audit route afterward. Missing evidence remained `not_evaluated` in both.
+The upgrade exercises caught and fixed retired grants, the old schema version,
+a schema batch larger than 1 MiB, and audit-bus self-deadlock. Hosted CI closeout
+is recorded on the pull request; this record does not claim deployment.
 
-Both fixtures then rolled back to published 0.4.5, with their original canaries
-retained. The rollback restored the complete database and matching home/Vault
-snapshot; it did not attempt to overlay an older schema onto the upgraded store.
-
-The DB2 closure still contains 114 native translation units. Production CT100 has
-not been changed by this retirement work.
+Production CT100 remains on its existing 0.4.5 native-bridge overlay. Release
+promotion and rollout are separate from this code retirement.

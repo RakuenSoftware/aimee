@@ -1,6 +1,6 @@
-#include "modules/db2/c/db2_pool.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/org_vault_rewrap.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/org_vault_rewrap.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -79,21 +79,18 @@ static void test_reseal_contract(void)
    assert(db2_vault_reseal_receipt_digest(wire, digest) == 0);
 }
 
-int db2_pool_active(void)
+void *db2_scope_connection_open(char *error, size_t capacity)
 {
-   return 1;
-}
-void *db2_pool_lease(int timeout_ms)
-{
-   (void)timeout_ms;
+   (void)error;
+   (void)capacity;
    return &g_conn;
 }
-void db2_pool_return(void *conn)
+void aimee_pg_close(void *conn)
 {
    assert(conn == &g_conn);
    g_returns++;
 }
-void db2_pool_discard(void *conn)
+void aimee_pg_discard(void *conn)
 {
    assert(conn == &g_conn);
    g_discards++;

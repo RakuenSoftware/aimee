@@ -1,10 +1,10 @@
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_vault_rotation.h"
 #include "kb/kb_vault_rotation_ops.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdint.h>

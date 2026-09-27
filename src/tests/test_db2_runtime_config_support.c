@@ -1,4 +1,4 @@
-#include "../modules/db2/support/db2_runtime_config.h"
+#include "../modules/kb/support/db2_runtime_config.h"
 
 #include <assert.h>
 #include <string.h>

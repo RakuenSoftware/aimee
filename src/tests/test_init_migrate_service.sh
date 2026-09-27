@@ -118,7 +118,7 @@ sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
 cat > "$SERVICE_BIN_DIR/aimee-kb" <<'EOF'
 #!/bin/sh
 case "$1" in
-  --bootstrap-db2)
+  --bootstrap-postgres)
     printf '%s\n' '{"status":"ok","bootstrapped":true,"db2_url_saved":true}'
     ;;
   --migrate-db2-from-sqlite)

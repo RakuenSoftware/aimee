@@ -66,16 +66,17 @@
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "storage-protocol": {
-      "owner": "DB2 storage and shared graph ABI",
-      "contract": "DB2 generated wire catalog and persisted enum/row definitions",
-      "reason": "Declarations, enum codecs and persisted relation codes belong to external storage. Retired memory_* implementations are absent; legacy wire IDs remain reserved rather than renumbered. Go memory owns the domain operations.",
+      "owner": "KB persisted graph contracts; PostgreSQL connection provider",
+      "contract": "KB-owned persisted enum/row definitions and PostgreSQL session protocol",
+      "reason": "Persisted relation codes and KB domain declarations remain with KB. PostgreSQL alone opens production store connections. The retired DB2 process and wire catalog are removed; their principal and event IDs remain reserved. Go memory owns memory domain operations.",
       "evidence": [
-        "src/tests/test_db2_module_contract.c",
-        "src/tests/test_bus_db2_module.c",
         "src/tests/test_db2_rel_seed_support.c",
-        "scripts/check_db2_link_closure.py"
+        "src/tests/test_db2_rel_type_support.c",
+        "src/tests/test_postgres_session_transport.c",
+        "server-go/modules/postgres/sessions_test.go",
+        "scripts/check_postgres_provider_boundary.py"
       ],
-      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
+      "cutover_dependency": "Completed: PostgreSQL is the sole database provider for both placements; memory boundary checks prohibit a native memory fallback."
     },
     "protocol-catalog": {
       "owner": "Host protocol/catalog generation",
@@ -249,7 +250,7 @@
       "disposition": "go-owner",
       "replacement_files": [
         "server-go/modules/memory/ontology.go",
-        "src/modules/db2/include/aimee/db2/graph_kinds.h"
+        "src/modules/kb/include/aimee/kb/graph_kinds.h"
       ]
     },
     "src/modules/memory/memory_pii_gate.c": {
@@ -1716,7 +1717,7 @@
         "kb_client_memory_insert",
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "e81388aca7314f889fdb26c139b77c7109301a2f52844fa50394ad8b8ad6ed8b"
+      "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de"
     },
     "src/cmd_dogfood.c": {
       "disposition": "legacy-command",
@@ -1751,7 +1752,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "0abee9a8f40dedea019ca17b8d5c243d30f003ada3f13e197b3dff8c62a6d111"
+      "sha256": "787eac8c9cdaf9058a1ee967e689bd68f6523e2cd017825b32086cb33cf0fe72"
     },
     "src/headers/memory.h": {
       "disposition": "storage-protocol",
@@ -1832,21 +1833,21 @@
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "770c49491bc20c4cfdf777bc7088a6eed41774ff7617e25df353b805f9eb50a8"
+      "sha256": "c070fa64f683cc7122da96df64ef1c25b08d0ea2ba9ee54df2f16e1b9d7cfc13"
     },
     "src/kb/kb.c": {
       "disposition": "host-transport",
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "9e93ee3b26ddf22f45d2aa1342fdb1e25bd2b3aa2f6d065feea0a0319d072e4a"
+      "sha256": "5dfe0d155eb067174b441f9ee186ee0ea09f7af0829402a4ebfc15817784a2a3"
     },
     "src/kb/kb_memory_facts.c": {
       "disposition": "host-transport",
       "symbols": [
         "kb_module_memory_data"
       ],
-      "sha256": "63540ad0635fa366d5c3e56721e8d624bac6b45fd49b11dd475e6fd659eef8bd"
+      "sha256": "5b2184d53392b6a3f5b8b1fd4414079c12910cec7a8e2fedfde90b90ff2d9d19"
     },
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
@@ -1857,21 +1858,21 @@
         "AIMEE_MEMORY_STAGE_EMBED",
         "kb_module_memory_data"
       ],
-      "sha256": "680b2d301db8658893634a555d6a8db6aed0d27f2bdc4997d43752e23b3baf89"
+      "sha256": "088ac1632e84051e90529cc73fccd4d22abea02c26d8f851832be62241d766bc"
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
         "kb_module_memory_data"
       ],
-      "sha256": "a321e4f7702d696057f7f7796134096e95e339117337e2a10f5143ce1e0585d3"
+      "sha256": "7ef635a8516aa4a529758388d4b61890277f11e4a078388f02644a901276414e"
     },
     "src/kb/kb_service.c": {
       "disposition": "protocol-catalog",
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "a5db146689d00f3ad8f3aa7ed2688c511c6717387d696682d00375f064b067a7"
+      "sha256": "cdeb9955a6c2f61f2a013cb9fada98a77d3947779ea1239a96b195aaa64d972f"
     },
     "src/modules/benchmarks/agent_eval_memory_transport.c": {
       "disposition": "benchmark-transport",
@@ -1884,7 +1885,7 @@
       ],
       "sha256": "092c35cde685ac1430e4dcacc178d9ee4e345de61f2f50cdcb6e2220f7ec053b"
     },
-    "src/modules/db2/include/aimee/db2/graph_kinds.h": {
+    "src/modules/kb/include/aimee/kb/graph_kinds.h": {
       "disposition": "storage-protocol",
       "symbols": [
         "memory_node_kind_t",
@@ -1892,22 +1893,22 @@
       ],
       "sha256": "2c4a4c818c0d9e5bc838782f9a1f26d31127d2a951667bd5c3cfc8a8f273d782"
     },
-    "src/modules/db2/c/memory_payload.h": {
+    "src/modules/kb/c/memory_payload.h": {
       "disposition": "storage-protocol",
       "symbols": [
         "db2_memory_key_exists"
       ],
-      "sha256": "c1703b7daabf60e0e946f5c885c7a1d9d8f16b862bc71d96e2e58b91b1c31df8"
+      "sha256": "608638e25aa458bfaff24c978e11e63f427378464ea21f9112707a694e30bead"
     },
-    "src/modules/db2/c/memory_query.h": {
+    "src/modules/kb/c/memory_query.h": {
       "disposition": "storage-protocol",
       "symbols": [
         "db2_memory_find_id_by_key_kind",
         "db2_memory_review_list"
       ],
-      "sha256": "3a471572aa3798ae4a28c74cc907aaa1a25a5aeffb96e0f613a61c9da5f98eb6"
+      "sha256": "7018b4146bf6bfd8b773786cc8fb88e172f50d52fcfb3b4a5d557f16d54398e0"
     },
-    "src/modules/db2/c/memory_vectors.h": {
+    "src/modules/kb/c/memory_vectors.h": {
       "disposition": "storage-protocol",
       "symbols": [
         "pgvec_memory_vector_collection_recreate"
@@ -2079,7 +2080,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5841c398c5b1100fd356f43bbad6377d20d7373878b54ad5297777f2325d466a"
+      "sha256": "ba73805ad86ca22e36c3d6b632ec4932a3f3d64cc4650cdc09ed3c467e9baa7f"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2115,7 +2116,7 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "a1ee6b14392aaaa8e8eda577478dd62eb259b10b3915125386b1701bc091552d"
+      "sha256": "fd5207c828fba0b29affa0bc7162ef36a11831049d0c2641394d4626a1fa8e8e"
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2170,7 +2171,7 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "4c070b91498cb115b931aecffbfa1e93d69a5d921ab13e3ad8e72e8d90c28aaa"
+      "sha256": "57bf09c0192f973fe087864b79d76d4000d94b3cfa07b2c949fb821168bea8e2"
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2184,7 +2185,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "42d69d7ee18608c04778b73a824066e6c85c712f5d8dae70e76212b28416ee20"
+      "sha256": "cac2e802edaae65107480ead11944c54c57bf87b9963dc3389e84781e29f037f"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2250,7 +2251,7 @@
         "memory_search",
         "memory_stats"
       ],
-      "sha256": "e59bfd74749fc8e2b7b2e4f51410de4c438823f0b172a14ceb985f8e40e75cc1"
+      "sha256": "ada62ca3bcdebb9f0d95b31d348ec14c1834322c75deeb732f33f37957a121f1"
     },
     "src/tests/support/kb_client_test_stub.c": {
       "disposition": "host-fixture",
@@ -2264,7 +2265,7 @@
       "symbols": [
         "db2_memory_review_list"
       ],
-      "sha256": "6da102d88d8ab39fa963e655873899d4ae161145eccf7324c89c8b9effd18b86"
+      "sha256": "cb0f3701db864c740b93fb434445499e9a2c4ea4bb4f234f1299469f962be03c"
     },
     "src/tests/test_agent_memory_transport.c": {
       "disposition": "host-fixture",
@@ -2272,13 +2273,6 @@
         "kb_client_memory_scope_context_apply"
       ],
       "sha256": "8b35ddf28eeb6fbb44e3be94cc1ab3e9e3eaa898b157cf68de1642439a4abaa4"
-    },
-    "src/tests/test_bus_db2_module.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "db2_memory_find_id_by_key_kind"
-      ],
-      "sha256": "1605edf71e2a947b6af3c34ef1d1d992141b2ad34eeb5392d044a5562193623d"
     },
     "src/tests/test_bus_memory_audit.c": {
       "disposition": "host-fixture",
@@ -2303,7 +2297,7 @@
         "memory_insert",
         "memory_transition_lifecycle"
       ],
-      "sha256": "79dce2701ce04437d94e6c137d25812f45c57d08f59c82459291f000f30777b5"
+      "sha256": "126f92024bed0ea2cd81d3af72a0be9ebab95b4fa27594ac22625344682da917"
     },
     "src/tests/test_curiosity.c": {
       "disposition": "host-fixture",
@@ -2311,28 +2305,21 @@
         "memory_directive_list",
         "memory_insert"
       ],
-      "sha256": "d90f1195ac0c3f61d48f15c34fd32dbaff2b74e6fd272f82ecfbe739c1578e17"
-    },
-    "src/tests/test_db2_module_contract.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "db2_memory_find_id_by_key_kind"
-      ],
-      "sha256": "db04057def93328592de112abd2e65ddec1daa4c2719219c77759a4f5f6f7035"
+      "sha256": "f5c546adaeba0fee007b6c467d925c600b9bfcea87e4af5d0d164d0c25374201"
     },
     "src/tests/test_db2_rel_seed_support.c": {
       "disposition": "host-fixture",
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "98db2cce74e7c4185cf3b4140178755ca11e5acec105004082ffa4924e369dd0"
+      "sha256": "c82c59e4edbf4f155f1a7a92b0094640193b67d821b6c7530398cc35ac502ed6"
     },
     "src/tests/test_db2_rel_type_support.c": {
       "disposition": "host-fixture",
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "2ac3e9e3a0ba0f6598cad376b6e3db7aa446e72ff83c2a50de4af13c43368165"
+      "sha256": "5a7c86dfa3dd9e34d51cdf19267605ebd9455a0eb9fe07c568703a7cb0222f68"
     },
     "src/tests/test_dogfood.c": {
       "disposition": "host-fixture",
@@ -2369,7 +2356,7 @@
       "symbols": [
         "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
       ],
-      "sha256": "2e887804db85b888a43e1ad0f7fee23ea6d8865309ccedebeabe59704fd7a700"
+      "sha256": "13adbf1a58040104f4c3bd60721adf4a83b08fd1842b5a0ca2fb48c59f824841"
     },
     "src/tests/test_kb_client_memory.c": {
       "disposition": "host-fixture",
@@ -2466,7 +2453,7 @@
         "memory_resolve_conflict",
         "memory_transition_lifecycle"
       ],
-      "sha256": "8a471dd30fb403f02c79c573c5c041d707e3a140e42eca80606c6e50e0f40289"
+      "sha256": "cb2e0d56a1fc6be62e1ce59df63936f4767e9d77cd2bad7e12c5211297dfe8ce"
     },
     "src/tests/test_memory_checkpoint_transport.c": {
       "disposition": "host-fixture",
@@ -2487,7 +2474,7 @@
       "symbols": [
         "pgvec_memory_vector_collection_recreate"
       ],
-      "sha256": "f6ec281efe496b865b62eff9dd0c3156d003e4651e08e7a2c97594956ce31bfc"
+      "sha256": "f71aa550752dc5beee8fc1c0e70fc5f6f72410aa9d61383951cce25bdc1c9090"
     },
     "src/tests/test_server_dispatch.c": {
       "disposition": "host-fixture",
@@ -2496,7 +2483,7 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "79cb8b85b3c0db13c0258f66f6330d5d4a8a55ad5e61480e2b9fc5c8e784cdfd"
+      "sha256": "a58b07c98e74a5c36aab5e141ec3c4dd2711587d6ffe5c645b349c5ce50c993c"
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",
@@ -2549,7 +2536,7 @@
         "memory_prospective_create",
         "memory_prospective_list"
       ],
-      "sha256": "ed25d88d5696fad401602ba1ce36e6627f360eab075a0bda1e934c09d8bb6745"
+      "sha256": "3ac47a917aac47f88d0d210b29cbd21457eb7f91d5c31956c221b6f854f78f42"
     },
     "src/tests/test_session_memory_transport.c": {
       "disposition": "host-fixture",
@@ -2575,7 +2562,7 @@
         "memory_tag_global",
         "memory_tag_project"
       ],
-      "sha256": "fce0e7896093e0b676854c2cb2b9d9a5c11e6f3384f743f228d732ad95c2926c"
+      "sha256": "aca31731b50fbdab4418ded5d042d3ca575c9eb1ea41975dda16e8923e81a2f2"
     },
     "src/wiki_render.c": {
       "disposition": "host-context",
@@ -2594,9 +2581,9 @@
       ],
       "sha256": "505428ed42073ce1f3f66c3a67424160bfc54738bbb4f038992fd6fedc8c727c",
       "inputs": {
-        "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "ab3b3e738a84a6fa84c340ac227f4eab8010caea33fa06870e3211b04449c735",
-        "src/modules/db2/c/schema_sqlite.sql": "6241722db33b81c95bf9c07f16a9212657206b0f449ba7ecb064911fdd4a0d1e"
+        "src/gen_schema.py": "729ea588edad34704fab38232290a191d4f539ef31fdc9085c7ece61557173fa",
+        "src/modules/kb/c/schema.sql": "ab3b3e738a84a6fa84c340ac227f4eab8010caea33fa06870e3211b04449c735",
+        "src/modules/kb/c/schema_sqlite.sql": "6241722db33b81c95bf9c07f16a9212657206b0f449ba7ecb064911fdd4a0d1e"
       }
     },
     "src/server/openapi_server_data.h": {

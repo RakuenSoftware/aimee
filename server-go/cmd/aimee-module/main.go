@@ -424,7 +424,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28
-		// Two stages, and the SQL one is what every store call in the tree
+		// PostgreSQL owns health, typed SQL, and host session transport. The SQL stage
 		// ultimately lands on: aimee keeps no database and reaches PostgreSQL
 		// through here. Before it existed the store module attached, built its
 		// client, found nothing serving 11266 and exited -- which read as "the
@@ -432,14 +432,19 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.Stages = []bus.ModuleStage{
 			{EventKind: postgres.EventHealth, StageID: postgres.StageHealth},
 			{EventKind: postgres.EventSQL, StageID: postgres.StageSQL},
+			{EventKind: postgres.EventSession, StageID: postgres.StageSession},
 		}
-		// BOTH STAGES, ALWAYS. The SQL handler opens its pool on first use and
+		// Register all stages even before the database is available. The SQL handler
 		// answers with the reason when it cannot, so a missing DSN produces an
 		// explained refusal rather than a stage that is declared and absent.
 		// Trimming the list here instead would make this process disagree with
 		// process-contracts.json exactly when the database is unreachable.
 		sqlHandler := postgres.NewSQLHandler()
+		sessionHandler := postgres.NewSessionHandler(ctx)
 		config.Handler = func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+			if invocation.StageID == postgres.StageSession {
+				return sessionHandler(invocation, frame)
+			}
 			if invocation.StageID == postgres.StageSQL {
 				return sqlHandler(invocation, frame)
 			}
@@ -681,6 +686,13 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) == 2 && os.Args[1] == "__aimee_postgres_local_session" {
+		if err := postgres.ServeLocalSession(ctx, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "PostgreSQL local session failed")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__aimee_supervise_modules" {
 		if len(os.Args) != 5 {
 			fmt.Fprintln(os.Stderr, "invalid role composition arguments")

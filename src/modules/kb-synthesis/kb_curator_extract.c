@@ -13,11 +13,11 @@
 #include "config.h" /* config_current_mode, aimee_mode_t, legacy_config_read */
 #include "cJSON.h"
 #include "log.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/feature_rows.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/feature_rows.h"
 #include "kb_mdl.h"
 
 #include <pthread.h> /* reclaim throttle is shared across the doc workers */

@@ -14,29 +14,14 @@ container:
 
 ```bash
 KB=$(docker ps --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
-docker exec -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' "$KB" \
+docker exec "$KB" \
   aimee-kb team list
 ```
 
 Every example below is the `aimee-kb ...` part of that.
 
-Expect noise, and expect the occasional retry. Each of these commands runs the full DB2
-initialisation before its read, so it emits several `NOTICE` lines first and, against a KB that is
-serving, can lose a race with the daemon's own schema pass:
-
-```text
-aimee: db2_init: schema apply failed: ERROR:  tuple concurrently updated
-aimee-kb: DB2 not reachable at postgresql:///aimee_shared?...
-```
-
-That message names the wrong problem. The KB is reachable; two schema applies collided. Run it again.
-Tracked in [#2217](https://github.com/RakuenSoftware/aimee/issues/2217).
-
-To read the answer rather than the notices:
-
-```bash
-docker exec ... aimee-kb team list 2>&1 | grep -v '^NOTICE'
-```
+Commands use the configured runtime profile through the PostgreSQL provider.
+Schema migrations run during bootstrap, before normal serving.
 
 ## Teams own projects, and projects scope everything else
 

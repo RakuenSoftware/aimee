@@ -103,11 +103,6 @@ jobs:
           cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/core-build" --parallel 2
           cmake --install "$RUNNER_TEMP/core-build" --prefix "$RUNNER_TEMP/prefix"
-      - name: Build isolated DB2 repository
-        run: |
-          cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-db2" -B "$RUNNER_TEMP/db2-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
-          cmake --build "$RUNNER_TEMP/db2-build" --parallel 2
-          test -x "$RUNNER_TEMP/db2-build/aimee-module-db2"
       - name: Build isolated role, memory, PostgreSQL and provider repositories
         run: |
           set -euo pipefail

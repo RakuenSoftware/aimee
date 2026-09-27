@@ -9,13 +9,13 @@
 #define _GNU_SOURCE
 #endif
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
-#include "modules/db2/c/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
-#include "modules/db2/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
-#include "modules/db2/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
-#include "modules/db2/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
+#include "modules/kb/c/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
+#include "modules/kb/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
+#include "modules/kb/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
+#include "modules/kb/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"

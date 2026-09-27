@@ -29,11 +29,11 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_witness_checkpoint.h"
-#include "modules/db2/c/db2_witness_emit.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_witness_checkpoint.h"
+#include "modules/kb/c/db2_witness_emit.h"
+#include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "vault_witness_provider_fixture.h"
 

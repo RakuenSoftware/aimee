@@ -36,7 +36,7 @@ func TestMemoryDependencyRegistryPostgres(t *testing.T) {
 		}
 	}
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

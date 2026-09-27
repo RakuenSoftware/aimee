@@ -3,7 +3,7 @@
 
 #include "kb_identity.h"
 
-#include "modules/db2/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+#include "modules/kb/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 
 #include <ctype.h>
 #include <stdio.h>

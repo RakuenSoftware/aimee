@@ -808,14 +808,6 @@ const char *config_default_db1_path(void)
    return path;
 }
 
-int config_db2_url_effective(char *out, size_t n)
-{
-   if (!out || n == 0)
-      return 0;
-   out[0] = 0;
-   return runtime_secret_get("AIMEE_DB2_URL", out, n) && out[0];
-}
-
 int config_embedder_dims_default(void)
 {
    return CONFIG_EMBEDDER_DIMS_DEFAULT;

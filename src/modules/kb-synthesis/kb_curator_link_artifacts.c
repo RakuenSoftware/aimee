@@ -21,10 +21,10 @@
 #include "config.h"
 #include "log.h"
 #include "memory.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/pgvec_transport.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/pgvec_transport.h"
 
 #include <stdio.h>
 #include <stdlib.h>

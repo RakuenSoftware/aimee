@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMAS = [ROOT / "src" / "db2" / "schema.sql", ROOT / "src" / "db2" / "schema_sqlite.sql"]
+SCHEMAS = [ROOT / "src" / "modules" / "kb" / "c" / "schema.sql", ROOT / "src" / "modules" / "kb" / "c" / "schema_sqlite.sql"]
 
 CREATE_RE = re.compile(r"^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)", re.I)
 ALTER_RE = re.compile(r"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)", re.I)

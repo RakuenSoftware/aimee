@@ -298,6 +298,9 @@ func initializeSQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 		config.MaxConns = maxOpenTx + 8
 	}
 	config.MinConns = 0
+	if err := validateRuntimeTLS(config); err != nil {
+		return nil, err
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: the SQL stage could not open its pool: %w", err)
@@ -330,6 +333,9 @@ func initializeMigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 	config, err := parseMigrationConfig(dsn, runtimeDSN)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateRuntimeTLS(config); err != nil {
 		return nil, err
 	}
 	config.MaxConns = 2
@@ -1105,11 +1111,15 @@ func (r *reader) byte1() (uint8, error) {
 }
 
 func (r *reader) str() (string, error) {
+	return r.strLimit(maxCellBytes)
+}
+
+func (r *reader) strLimit(limit int) (string, error) {
 	n, err := r.u32()
 	if err != nil {
 		return "", err
 	}
-	if int(n) > maxCellBytes || r.at+int(n) > len(r.buf) {
+	if uint64(n) > uint64(limit) || r.at+int(n) > len(r.buf) {
 		return "", errShort
 	}
 	s := string(r.buf[r.at : r.at+int(n)])

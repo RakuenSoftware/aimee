@@ -62,27 +62,6 @@ def exemption(tree: str) -> str | None:
     """Say why `tree` is exempt right now, or None if it must be enforced."""
     descriptor = DESCRIPTORS / tree / "module.yaml"
 
-    if tree == "db2":
-        # Exempt only while the descriptor declares nothing at all. That is a
-        # descriptor nobody has filled in, which is a different defect from a
-        # file slipping out of a maintained list. db2 is mid-move under the
-        # ruling -- domain operations leaving for control-plane, memory and
-        # aimee, keeping a tree while that happens -- and a transitional state
-        # is exactly when this check earns its keep, so the moment the
-        # descriptor declares anything, every file in the tree is enforced.
-        if not descriptor.exists():
-            return None
-        try:
-            declared = json.loads(descriptor.read_text()).get("go_sources", [])
-        except (OSError, json.JSONDecodeError):
-            return None  # Unreadable: enforce and let the failure say so.
-        if declared:
-            return None
-        return (
-            "descriptor declares no Go sources at all; mid-move under the "
-            "ruling. Enforced automatically once it declares any"
-        )
-
     if tree == "vectordb":
         # Exempt only while there is no descriptor, and for a reason the tree
         # cannot settle on its own: vectordb is a DB3 VECTOR PROVIDER, and a
@@ -190,7 +169,7 @@ def main() -> int:
     # allowlist rots into a place anything can later hide. (Taken from the
     # session building the aimee module, whose complementary lint had the rule
     # first.)
-    for tree in ("db2", "mcp"):
+    for tree in ("mcp",):
         if exemption(tree) is not None and tree not in unclaimed:
             print(
                 f"check-module-descriptor-sources: {tree} is exempt but has no "

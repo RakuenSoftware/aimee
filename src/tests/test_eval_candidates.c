@@ -23,8 +23,8 @@
 #include "eval_synthesis_store.h"
 #include "support/store_module_fixture.h"
 #include "kb_client.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 
 #include <aimee/learning/learning.h>
 

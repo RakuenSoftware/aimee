@@ -19,12 +19,12 @@
 #include "cJSON.h"
 #include "log.h"
 #include "memory.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/kb_payload.h"       /* db2_kb_txn_* wrappers */
-#include "modules/db2/c/kb_runtime_state.h" /* db2_kb_purge_fence_active */
-#include "modules/db2/c/pgvec_transport.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/kb_payload.h"       /* db2_kb_txn_* wrappers */
+#include "modules/kb/c/kb_runtime_state.h" /* db2_kb_purge_fence_active */
+#include "modules/kb/c/pgvec_transport.h"
 
 #include <stdint.h>
 #include <stdio.h>

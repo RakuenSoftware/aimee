@@ -1,4 +1,4 @@
-/* test_pgvec.c: smoke tests for the pgvector transport in src/modules/db2/c/.
+/* test_pgvec.c: smoke tests for the pgvector transport in src/modules/kb/c/.
  *
  * The test shim provides sqlite-backed aimee_pg_* stubs.  pgvec SQL will
  * fail at the statement level (sqlite does not understand the vector type or
@@ -14,12 +14,12 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/lifecycle.h" /* db2_set_embedding_dim */
-#include "../modules/db2/c/pgvec_transport.h"
-#include "../modules/db2/c/memory_vectors.h"
-#include "../modules/db2/c/kb_vectors.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/lifecycle.h" /* db2_set_embedding_dim */
+#include "../modules/kb/c/pgvec_transport.h"
+#include "../modules/kb/c/memory_vectors.h"
+#include "../modules/kb/c/kb_vectors.h"
 
 static void test_collection_names(void)
 {

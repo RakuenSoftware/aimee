@@ -6,22 +6,22 @@
 #include "config.h"
 #include "kb_curator_queue.h"
 #include "cJSON.h"
-#include "modules/db2/c/canonical_index.h"
-#include "modules/db2/c/cross_repo_classify.h" /* xrepo_tier_name */
-#include "modules/db2/c/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
-#include "modules/db2/c/cross_repo_review.h"   /* db2_cross_repo_review_list */
-#include "modules/db2/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
-#include "modules/db2/c/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
-#include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/code_projection.h"
-#include "modules/db2/c/code_project_lifecycle.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/pgvec_transport.h"
-#include "code_collect.h"                   /* §6 live: git_resolve_default_sha + change gate */
-#include "modules/db2/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
+#include "modules/kb/c/canonical_index.h"
+#include "modules/kb/c/cross_repo_classify.h" /* xrepo_tier_name */
+#include "modules/kb/c/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
+#include "modules/kb/c/cross_repo_review.h"   /* db2_cross_repo_review_list */
+#include "modules/kb/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
+#include "modules/kb/c/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
+#include "modules/kb/c/lifecycle.h"
+#include "modules/kb/c/code_projection.h"
+#include "modules/kb/c/code_project_lifecycle.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/pgvec_transport.h"
+#include "code_collect.h"                  /* §6 live: git_resolve_default_sha + change gate */
+#include "modules/kb/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
 #include "kb_rrf.h"
-#include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
-#include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
+#include "modules/kb/c/lessons.h" /* §3 actuation: earned-trust tie-break */
+#include "kb/lessons_reflect.h"   /* reflect the ledger into per-node trust */
 #include "kb_reqctx.h"
 #include "kb_scope.h"
 #include <time.h>

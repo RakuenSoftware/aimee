@@ -1,12 +1,12 @@
 /* Remaining native graph mutation/rollback fixture. Ingestion, confidence
  * and candidate maintenance run against Go in fact_ingestion_parity_test.go. */
 #include "../headers/aimee.h"
-#include "../modules/db2/c/entity_edges.h"
-#include "../modules/db2/c/fact_mutation.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "aimee/db2/graph_kinds.h"
+#include "../modules/kb/c/entity_edges.h"
+#include "../modules/kb/c/fact_mutation.h"
+#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "aimee/kb/graph_kinds.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

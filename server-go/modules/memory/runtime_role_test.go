@@ -96,7 +96,7 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 		t.Fatal(err)
 	}
 	// Run the actual migration grant block, including the upgrade/reapply path.
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,11 +22,11 @@
 #include <sys/stat.h>
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "roadmap.h"
-#include "../modules/db2/c/artifacts.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/artifacts.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static void open_db(void)
 {

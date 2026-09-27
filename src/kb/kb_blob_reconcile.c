@@ -1,7 +1,7 @@
 /* kb_blob_reconcile.c: orphan-blob reconciliation sweep. See kb_blob_reconcile.h. */
 #include "kb_blob_reconcile.h"
 
-#include "modules/db2/c/kb_payload.h" /* db2_kb_blob_ref_referenced */
+#include "modules/kb/c/kb_payload.h" /* db2_kb_blob_ref_referenced */
 #include "kb_blob_store.h"
 #include "log.h"
 

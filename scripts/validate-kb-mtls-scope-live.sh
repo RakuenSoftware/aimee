@@ -28,7 +28,14 @@ KB="${AIMEE_KB_BIN:-$SRC/aimee-kb}"
 # undecryptable record in the shared DB2 vault and every later enrollment fails
 # with a misleading "invalid or used token". A fixed path would make this suite
 # pass once and fail forever after.
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/aimee-mtls-scope.XXXXXX")"
+# Use the shared disposable PostgreSQL fixture and the production module graph.
+source "$SRC/scripts/lib/aimee-live-env.sh"
+live_env_init "kb-mtls" "${AIMEE_STORE_URL:?isolated PostgreSQL admin URL required}"
+live_env_pg_create
+WORK="$LIVE_WORK"
+LIVE_KB_HOME="$WORK/home"
+export AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
+export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
 HTTP_PORT=8751
 MTLS_PORT=8752
 BASE="http://127.0.0.1:$HTTP_PORT"
@@ -43,7 +50,6 @@ export AIMEE_HOME="$WORK/home"
 mkdir -p "$AIMEE_HOME"
 export AIMEE_KB_API_BEARER_TOKEN="owner-secret-mtls-test"
 export AIMEE_KB_MTLS_PORT="$MTLS_PORT"
-export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql://aimee:aimee@127.0.0.1/aimee_kb}"
 cat > "$AIMEE_HOME/aimee.yaml" <<YAML
 kb:
   api:
@@ -51,14 +57,16 @@ kb:
 YAML
 
 cleanup() { [ -f "$WORK/kb.pid" ] && kill "$(cat "$WORK/kb.pid")" 2>/dev/null; }
-trap cleanup EXIT
+trap 'cleanup; live_env_cleanup' EXIT
 
 ulimit -s 65536
 # Same first-boot transport as the container entrypoint: the runtime reads the
 # bearer from Vault, so it must be sealed before the listener starts.
 "$KB" --bootstrap-vault-env > "$WORK/bootstrap.log" 2>&1
+live_env_start_kb_modules
 nohup "$KB" > "$WORK/kb.log" 2>&1 &
-echo $! > "$WORK/kb.pid"
+LIVE_KB_PID=$!
+echo "$LIVE_KB_PID" > "$WORK/kb.pid"
 
 ready=0
 for _ in $(seq 1 60); do
@@ -67,7 +75,7 @@ for _ in $(seq 1 60); do
 done
 if [ "$ready" != 1 ]; then
   skip "entire suite" "aimee-kb did not become healthy; see $WORK/kb.log"
-  echo "  PASS=$PASS FAIL=$FAIL SKIP=$SKIP"; exit 0
+  echo "  PASS=$PASS FAIL=$FAIL SKIP=$SKIP"; exit 1
 fi
 # The mTLS listener is separate from the HTTP one; wait for it too.
 for _ in $(seq 1 30); do

@@ -1,7 +1,7 @@
 #ifndef AIMEE_TEST_VAULT_WITNESS_PROVIDER_FIXTURE_H
 #define AIMEE_TEST_VAULT_WITNESS_PROVIDER_FIXTURE_H
 
-#include "modules/db2/c/db2_vault_witness_provider.h"
+#include "modules/kb/c/db2_vault_witness_provider.h"
 #include "modules/vault/vault_witness_export.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "modules/vault/vault_witness_verify.h"

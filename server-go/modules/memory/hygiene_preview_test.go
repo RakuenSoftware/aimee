@@ -310,7 +310,7 @@ func TestHygieneGovernedPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

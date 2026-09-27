@@ -1,7 +1,7 @@
 /* Replay the generated DB2 fallback parser beside the authoritative monolith. */
 #include "index.h"
 #define AIMEE_DB2_EXTRACTOR_NO_PUBLIC_PROTOTYPES 1
-#include "../modules/db2/support/db2_extractors.h"
+#include "../modules/kb/support/db2_extractors.h"
 
 #include <assert.h>
 #include <stddef.h>

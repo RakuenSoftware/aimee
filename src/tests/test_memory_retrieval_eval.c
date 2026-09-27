@@ -5,7 +5,7 @@
 #include "module_commands.h"
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include <sqlite3.h>
 #include "platform_test_util.h"
 #include <math.h>
@@ -15,13 +15,13 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "agent_eval.h"
-#include "modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/lifecycle.h"
+#include "modules/kb/c/db2.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/lifecycle.h"
 #include "memory.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/memory_vectors.h"
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/memory_vectors.h"
 #include "config.h"
 #include "agent_eval_internal.h"
 

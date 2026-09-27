@@ -40,7 +40,7 @@ func TestNativeHostStageIdentifiersMatchGo(t *testing.T) {
 }
 
 func TestNativeStorageGraphCodesMatchGo(t *testing.T) {
-	text, err := os.ReadFile("../../../src/modules/db2/include/aimee/db2/graph_kinds.h")
+	text, err := os.ReadFile("../../../src/modules/kb/include/aimee/kb/graph_kinds.h")
 	if err != nil {
 		t.Fatal(err)
 	}

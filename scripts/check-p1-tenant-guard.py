@@ -13,11 +13,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = [
-    "src/modules/db2/c/team.c",
-    "src/modules/db2/c/project.c",
-    "src/modules/db2/c/membership.c",
-    "src/modules/db2/c/admin_grant.c",
-    "src/modules/db2/c/oidc_jwks.c",
+    "src/modules/kb/c/team.c",
+    "src/modules/kb/c/project.c",
+    "src/modules/kb/c/membership.c",
+    "src/modules/kb/c/admin_grant.c",
+    "src/modules/kb/c/oidc_jwks.c",
 ]
 
 # A top-level function definition: return-type + name(...) { at column 0, where the

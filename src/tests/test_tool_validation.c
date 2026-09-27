@@ -14,10 +14,10 @@
 #include "../headers/tool_args_coerce.h"
 #include <aimee/tools/agent_tools.h>
 #include "db1_client/db1.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 /* --- helpers --- */
 

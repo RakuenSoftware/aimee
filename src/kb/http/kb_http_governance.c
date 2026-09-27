@@ -8,9 +8,9 @@
 #include "kb_blob_reconcile.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
-#include "modules/db2/c/artifacts.h"    /* db2_audit_event_* */
-#include "modules/db2/c/decision_log.h" /* db2_decision_log_* */
-#include "modules/db2/c/kb_payload.h"
+#include "modules/kb/c/artifacts.h"    /* db2_audit_event_* */
+#include "modules/kb/c/decision_log.h" /* db2_decision_log_* */
+#include "modules/kb/c/kb_payload.h"
 #include "log.h"
 
 #include <math.h>

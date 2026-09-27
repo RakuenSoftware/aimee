@@ -16,11 +16,11 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "../kb_planner.h"
-#include "../modules/db2/c/artifacts.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/artifacts.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 #include "config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

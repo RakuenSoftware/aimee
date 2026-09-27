@@ -2,10 +2,10 @@
 #include "modules/vault/vault_custody_kms.h"
 #include "modules/vault/vault_internal.h"
 #include "modules/vault/vault_server_key.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdint.h>

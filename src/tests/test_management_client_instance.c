@@ -1,5 +1,5 @@
-#include "modules/db2/c/management_client_instance.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/management_client_instance.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>

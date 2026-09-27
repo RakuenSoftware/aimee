@@ -14,12 +14,12 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "../kb_bandit.h"
 #include "../kb_bandit_registry.h"
-#include "../modules/db2/c/bandit.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/bandit.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 #include "config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

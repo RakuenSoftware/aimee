@@ -12,9 +12,9 @@
  * the schema seeded so aimee_test_reset() can restore them between tests. */
 #include "aimee.h"
 #include "config_embedder_dims.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/lifecycle.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/lifecycle.h"
 
 #include <stdio.h>
 #include <stdlib.h>

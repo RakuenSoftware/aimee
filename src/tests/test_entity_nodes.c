@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../modules/db2/c/entity_nodes.h"
+#include "../modules/kb/c/entity_nodes.h"
 
 static void test_encode_alphanumeric(void)
 {

@@ -8,7 +8,7 @@
  * the nodes that fired happen OUTSIDE the lock so DB I/O never serializes callers. */
 #include "lessons_session_capture.h"
 
-#include "modules/db2/c/lessons.h"
+#include "modules/kb/c/lessons.h"
 #include "lessons_cite_tracker.h" /* tracker + LESSONS_AUTO_USEFUL_TURNS + LESSONS_NODE_MAX */
 
 #include <pthread.h>

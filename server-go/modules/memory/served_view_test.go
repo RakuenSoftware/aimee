@@ -69,7 +69,7 @@ func TestServedViewsOwnerAndCachePostgres(t *testing.T) {
 		}
 	}
 	exec(`SET LOCAL jit=off; DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime; DELETE FROM memories; DELETE FROM entity_edges; DELETE FROM rules; SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project','mr12-visible',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','mr12-visible',true),set_config('aimee.principal','mr12-operator',true)`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

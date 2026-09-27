@@ -173,8 +173,8 @@ static void build_schema_path(char *buf, size_t buf_len, int compact_variant)
       segment. */
    static const char part_root[] = {'s', 'r', 'c', '/', 'm', 'o', 'd',
                                     'u', 'l', 'e', 's', '/', '\0'};
-   static const char part_tier_a[] = {'d', 'b', '\0'};
-   static const char part_tier_b[] = {'2', '/', 'c', '/', '\0'};
+   static const char part_tier_a[] = {'k', 'b', '\0'};
+   static const char part_tier_b[] = {'/', 'c', '/', '\0'};
    static const char part_stem[] = {'s', 'c', 'h', 'e', 'm', 'a', '\0'};
    static const char part_lite_a[] = {'_', 's', 'q', 'l', '\0'};
    static const char part_lite_b[] = {'i', 't', 'e', '\0'};

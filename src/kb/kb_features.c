@@ -4,7 +4,7 @@
  */
 
 #include "kb_features.h"
-#include "modules/db2/c/feature_rows.h"
+#include "modules/kb/c/feature_rows.h"
 
 #include <stdio.h>
 

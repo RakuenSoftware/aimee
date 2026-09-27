@@ -28,7 +28,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         (root / "src/modules/memory").mkdir(parents=True)
-        (root / "src/modules/db2/c").mkdir(parents=True)
+        (root / "src/modules/kb/c").mkdir(parents=True)
         (root / "server-go/modules/memory").mkdir(parents=True)
         for relative in ALLOWED_C:
             path = root / relative
@@ -89,7 +89,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_retired_db2_memory_source(self) -> None:
         root = self.fixture()
-        (root / "src/modules/db2/c/memory_query.c").write_text("int query(void);\n", encoding="utf-8")
+        (root / "src/modules/kb/c/memory_query.c").write_text("int query(void);\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 

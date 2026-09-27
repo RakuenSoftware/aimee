@@ -13,6 +13,8 @@
  * not the one every store call in the tree actually lands on. */
 #define AIMEE_POSTGRES_EVENT_SQL      11266u
 #define AIMEE_POSTGRES_STAGE_SQL      2u
+#define AIMEE_POSTGRES_EVENT_SESSION  11267u
+#define AIMEE_POSTGRES_STAGE_SESSION  3u
 #define AIMEE_POSTGRES_REQUEST_MAGIC  0x51484750u /* "PGHQ" */
 #define AIMEE_POSTGRES_RESPONSE_MAGIC 0x52484750u /* "PGHR" */
 #define AIMEE_POSTGRES_WIRE_VERSION   1u

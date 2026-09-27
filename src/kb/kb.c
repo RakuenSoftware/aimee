@@ -4,15 +4,15 @@
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/vector_index_ops.h"
-#include "modules/db2/c/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
-#include "modules/db2/c/sketch.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/vector_index_ops.h"
+#include "modules/kb/c/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
+#include "modules/kb/c/sketch.h"
 #include "kb_vectors.h"
 #include "kb_curator_notify.h"
 #include "kb_features.h"
@@ -20,7 +20,7 @@
 #include "kb_detect.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
-#include "modules/db2/c/bandit.h"
+#include "modules/kb/c/bandit.h"
 #include "headers/sketch.h"
 #include <strings.h>
 #include "kb.h"
@@ -1388,7 +1388,7 @@ typedef struct
 
 /* Fetch a kb_documents row by (id, project) into out, returning 1 on
  * hit / 0 on miss. Routes through db2_kb_document_fetch so the SQL
- * stays inside src/modules/db2/c/. */
+ * stays inside src/modules/kb/c/. */
 static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
 {
    db2_kb_document_row_t row;

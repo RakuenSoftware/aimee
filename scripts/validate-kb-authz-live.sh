@@ -21,8 +21,15 @@ KB="${AIMEE_KB_BIN:-$SRC/aimee-kb}"
 # kb.modules and enabled by default), so a harness that starts a bare aimee-kb is
 # testing a shape that never ships. Build and run the module here so the
 # confinement assertions below exercise a REAL denial instead of an outage.
-WORK="${TMPDIR:-/tmp}/aimee-authz-live"
-mkdir -p "$WORK"
+# Use the shared disposable PostgreSQL fixture and the production module graph.
+source "$SRC/scripts/lib/aimee-live-env.sh"
+live_env_init "kb-authz" "${AIMEE_STORE_URL:?isolated PostgreSQL admin URL required}"
+live_env_pg_create
+WORK="$LIVE_WORK"
+LIVE_KB_HOME="$WORK/home"
+export AIMEE_STORE_URL="$LIVE_KB_STORE_URL"
+export AIMEE_STORE_MIGRATION_URL="$LIVE_KB_MIGRATION_URL"
+LIVE_EXTRA_CLEANUP=stop_control_web_module
 MODULE_BIN="${AIMEE_MODULE_BIN:-$WORK/aimee-module-control-web}"
 PORT=8741
 BASE="http://127.0.0.1:$PORT"
@@ -145,7 +152,6 @@ start_kb() { # start_kb CONFIGURED_TOKEN
   # Fresh vault state per credential shape, else the first sealed bearer sticks.
   rm -rf "$AIMEE_HOME"
   export AIMEE_KB_API_BEARER_TOKEN="$1"
-  export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql://aimee:aimee@127.0.0.1/aimee_kb}"
   mkdir -p "$AIMEE_HOME"
   cat > "$AIMEE_HOME/aimee.yaml" <<YAML
 kb:
@@ -155,6 +161,7 @@ YAML
   # The bus reads its admission policy once at host startup, so this must happen
   # before aimee-kb is launched, not after it is healthy.
   seed_control_web_grant
+  live_env_start_kb_modules
   ulimit -s 65536
   # The env bearer is FIRST-BOOT TRANSPORT only: the runtime reads it from Vault,
   # so it has to be sealed before the listener starts. This mirrors
@@ -163,7 +170,8 @@ YAML
   "$KB" --bootstrap-vault-env > "$AIMEE_HOME/bootstrap.log" 2>&1
   echo "  (bootstrap-vault-env rc=$?)"
   nohup "$KB" > "$WORK/kb.log" 2>&1 &
-  echo $! > "$WORK/kb.pid"
+  LIVE_KB_PID=$!
+  echo "$LIVE_KB_PID" > "$WORK/kb.pid"
   for _ in $(seq 1 60); do
     if curl -s -m 2 "$BASE/v1/health" >/dev/null 2>&1; then
       # Console-admin confinement is only meaningful once the authorizer is
@@ -178,10 +186,14 @@ YAML
 }
 
 stop_kb() {
-  stop_control_web_module
   [ -f "$WORK/kb.pid" ] && kill "$(cat "$WORK/kb.pid")" 2>/dev/null
-  rm -f "$WORK/kb.pid"
   sleep 1
+  [ -n "${LIVE_KB_PID:-}" ] && kill -9 "$LIVE_KB_PID" 2>/dev/null
+  [ -n "${LIVE_KB_PID:-}" ] && wait "$LIVE_KB_PID" 2>/dev/null
+  live_env_stop_kb_modules
+  stop_control_web_module
+  rm -f "$WORK/kb.pid"
+  LIVE_KB_PID=
 }
 
 MAINT_ROUTES="/v1/maintenance/repair /v1/maintenance/reconcile /v1/maintenance/clear

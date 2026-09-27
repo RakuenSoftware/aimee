@@ -12,9 +12,9 @@
 
 #include "curiosity_resolve.h"
 #include "db1.h"
-#include "modules/db2/c/curiosity.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/curiosity.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 
 static int g_probe_calls;
 static curiosity_evidence_t g_probe_answer;

@@ -4,10 +4,10 @@
 
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/bandit.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/bandit.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "headers/platform_process.h"
 
 #include <cJSON.h>

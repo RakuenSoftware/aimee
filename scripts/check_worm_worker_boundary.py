@@ -92,7 +92,7 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
     for forbidden in ("fact_mutation.h", "kb_service", "vault_", "provider_"):
         if forbidden in worker:
             failures.append(f"worker binary: forbidden dependency marker {forbidden}")
-    if ("AIMEE_WORM_DB2_URL is required" not in worker or
+    if ("AIMEE_WORM_POSTGRES_URL is required" not in worker or
             "refusing runtime credential " not in worker):
         failures.append("worker binary: separate credential is not mandatory")
     if ("aimee_kb_worm_api.claim" not in worker or
@@ -117,11 +117,9 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
             failures.append(f"Makefile: WORM binary missing shared object {required_obj}")
     if "COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm" not in dockerfile:
         failures.append("Dockerfile: WORM worker is not packaged")
-    if ('AIMEE_WORM_DB2_URL="$embedded_worm_dsn"' not in entrypoint or
-            'AIMEE_WORM_PATH="$AIMEE_HOME/audit/kb-worm-live.db"' not in entrypoint):
-        failures.append("entrypoint: self-contained tier does not supervise a separate worker")
-    if "REVOKE USAGE ON SCHEMA public FROM PUBLIC;" not in entrypoint:
-        failures.append("entrypoint: embedded worker inherits public schema access")
+    if ('exec /usr/local/bin/aimee-server-entrypoint "$@"' not in entrypoint or
+            re.search(r'\b(?:pg_ctl|initdb)\b', entrypoint)):
+        failures.append("entrypoint: retired embedded database startup returned")
     if 'entrypoint: ["/usr/local/bin/aimee-kb-worm"]' not in compose:
         failures.append("compose: hardened worker does not replace the KB entrypoint")
     if "aimee-worm-data:/var/lib/aimee-worm" not in compose:
@@ -136,11 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = args.root
     inputs = {
-        "schema": root / "src/modules/db2/c/schema.sql",
-        "grants": root / "src/modules/db2/c/schema_grants.sql",
-        "roles": root / "src/modules/db2/c/schema_roles.sql",
-        "c_appender": root / "src/modules/db2/c/kb_audit_worm.c",
-        "fact_mutation": root / "src/modules/db2/c/fact_mutation.c",
+        "schema": root / "src/modules/kb/c/schema.sql",
+        "grants": root / "src/modules/kb/c/schema_grants.sql",
+        "roles": root / "src/modules/kb/c/schema_roles.sql",
+        "c_appender": root / "src/modules/kb/c/kb_audit_worm.c",
+        "fact_mutation": root / "src/modules/kb/c/fact_mutation.c",
         "worker": root / "src/kb/kb_worm_worker_main.c",
         "server": root / "src/server/server_main.c",
         "worm_store": root / "src/modules/audit/audit_worm.c",

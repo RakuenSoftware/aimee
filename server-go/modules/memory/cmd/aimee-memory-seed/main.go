@@ -33,12 +33,12 @@ func main() {
 	}
 	outputs := map[string]string{
 		"server-go/modules/memory/testdata/ontology_seed.tsv": artifacts["tsv"],
-		"src/modules/db2/support/rel_seed_primitives.c":       artifacts["db2"],
+		"src/modules/kb/support/rel_seed_primitives.c":       artifacts["db2"],
 	}
 	for _, item := range []struct{ path, start, end, key string }{
 		{"src/rel_types.c", "/* BEGIN GO MEMORY ONTOLOGY SEED */", "/* END GO MEMORY ONTOLOGY SEED */", "native"},
-		{"src/modules/db2/c/schema.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
-		{"src/modules/db2/c/schema_sqlite.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
+		{"src/modules/kb/c/schema.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
+		{"src/modules/kb/c/schema_sqlite.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(*root, item.path))
 		if err != nil {

@@ -6,12 +6,12 @@
 
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/code_projection.h"
-#include "modules/db2/c/entity_edges.h"
-#include "modules/db2/c/entity_nodes.h"
-#include "modules/db2/c/kb_service_backend.h" /* db2_kb_service_code_audit_json */
-#include "kb_graph_analytics.h"               /* kb_graph_communities */
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/code_projection.h"
+#include "modules/kb/c/entity_edges.h"
+#include "modules/kb/c/entity_nodes.h"
+#include "modules/kb/c/kb_service_backend.h" /* db2_kb_service_code_audit_json */
+#include "kb_graph_analytics.h"              /* kb_graph_communities */
 
 #include <stdlib.h>
 #include <string.h>

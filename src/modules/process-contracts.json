@@ -901,83 +901,13 @@
           "event_kind": 11266,
           "durability": "capture",
           "durability_reason": "internal high-volume SQL transport; owning domain stages record semantic decisions durably"
-        }
-      ]
-    },
-    {
-      "id": "db2",
-      "execution": "process",
-      "runtime": "c",
-      "principal_ref": 29,
-      "placements": [
-        "kb"
-      ],
-      "stages": [
-        {
-          "id": 1,
-          "name": "db2-health",
-          "event_kind": 11521,
-          "durability": "ledger",
-          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
-          "emitter": "obs_bus_emit_durable_event"
-        }
-      ],
-      "durability_declarations": [
-        {
-          "id": 2,
-          "name": "db2-tenancy",
-          "event_kind": 11522,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 tenancy family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
         },
         {
           "id": 3,
-          "name": "db2-memory",
-          "event_kind": 11523,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 memory family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
-        },
-        {
-          "id": 4,
-          "name": "db2-index",
-          "event_kind": 11524,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 index family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
-        },
-        {
-          "id": 5,
-          "name": "db2-learning",
-          "event_kind": 11525,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 learning family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
-        },
-        {
-          "id": 6,
-          "name": "db2-organization",
-          "event_kind": 11526,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 organization family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
-        },
-        {
-          "id": 7,
-          "name": "db2-custody",
-          "event_kind": 11527,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 custody family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
-        },
-        {
-          "id": 8,
-          "name": "db2-maintenance",
-          "event_kind": 11528,
-          "durability": "ledger",
-          "durability_reason": "reserved DB2 maintenance family; durable when activated",
-          "emitter": "obs_bus_emit_durable_event"
+          "name": "postgres-session",
+          "event_kind": 11267,
+          "durability": "capture",
+          "durability_reason": "host-scoped runtime sessions; PostgreSQL owns credentials, pooling and cleanup"
         }
       ]
     },

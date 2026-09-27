@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "modules/db2/c/fact_identity.h"
+#include "modules/kb/c/fact_identity.h"
 
 static void key_of(const char *s, const char *r, const char *t, char *out, size_t n)
 {

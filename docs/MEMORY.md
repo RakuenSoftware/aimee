@@ -302,7 +302,7 @@ From `server-go`, with the environment variable already set:
 
 ```sh
 go run ./modules/memory/cmd/aimee-memory-eval \
-  -schema ../src/modules/db2/c/schema.sql -embedding-dim 1024 <<'JSONL'
+  -schema ../src/modules/kb/c/schema.sql -embedding-dim 1024 <<'JSONL'
 {"stage":"data","body":{"operation":"insert-epistemic","tier":"L2","kind":"fact","key":"eval-fixture","content":"eval-fixture content","confidence":0.9,"project":"evaluation"}}
 {"stage":"data","body":{"operation":"search","query":"eval-fixture","project":"evaluation","limit":10}}
 {"stage":"command","command":"runtime","body":{"operation":"benchmark-context","query":"eval-fixture","project":"evaluation"}}

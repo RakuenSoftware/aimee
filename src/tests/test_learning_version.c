@@ -15,7 +15,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "support/embedding_literal.h"
 #include "../kb/kb_learning_version.h"
 

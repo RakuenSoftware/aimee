@@ -5,14 +5,14 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "db1_client/db1.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_query.h"
-#include "../modules/db2/c/memory_relations.h"
-#include "../modules/db2/c/memory_vectors.h"
+#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/lifecycle.h"
+#include "../modules/kb/c/memory_query.h"
+#include "../modules/kb/c/memory_relations.h"
+#include "../modules/kb/c/memory_vectors.h"
 
 static void setup(void)
 {

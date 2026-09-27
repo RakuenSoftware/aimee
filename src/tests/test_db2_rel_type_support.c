@@ -3,7 +3,7 @@
 #define rel_types_seed_count  db2_support_rel_types_seed_count
 #define rel_types_seed_lookup db2_support_rel_types_seed_lookup
 #define rel_type_kind_allowed db2_support_rel_type_kind_allowed
-#include "../modules/db2/support/db2_rel_seed.h"
+#include "../modules/kb/support/db2_rel_seed.h"
 #undef rel_types_seed_at
 #undef rel_types_seed_count
 #undef rel_types_seed_lookup

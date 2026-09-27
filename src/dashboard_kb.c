@@ -17,8 +17,8 @@
  * splice agent_log rows into the response if it ever needs to. */
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/db2/c/decision_log.h"
-#include "modules/db2/c/memory_query.h"
+#include "modules/kb/c/decision_log.h"
+#include "modules/kb/c/memory_query.h"
 #include "dashboard.h"
 #include "lifecycle.h"
 #include "headers/memory.h"

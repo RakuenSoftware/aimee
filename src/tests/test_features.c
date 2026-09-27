@@ -19,11 +19,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "feature_rows.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "support/json_canonical.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/sketch.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/lifecycle.h"
+#include "../modules/kb/c/sketch.h"
 #include "../kb_features.h"
 #include "../kb_ranker.h"
 #include "../kb_detect.h"

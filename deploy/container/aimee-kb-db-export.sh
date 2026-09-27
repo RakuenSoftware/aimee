@@ -12,7 +12,7 @@
 # before anything is destroyed. With --wipe the data directory is removed only
 # AFTER the restore verified, and never while the target is unreachable.
 #
-# The container must then be started with AIMEE_DB2_URL set to the target; the
+# Configure the PostgreSQL module against the exported target; the
 # entrypoint starts no internal cluster when that variable is set.
 set -e
 
@@ -128,5 +128,5 @@ fi
 
 echo
 echo "restart aimee-kb with:"
-echo "  AIMEE_DB2_URL=$safe_target"
+echo "  Configure AIMEE_STORE_URL and a distinct AIMEE_STORE_MIGRATION_URL in Vault."
 echo "the entrypoint starts no internal cluster while that is set."

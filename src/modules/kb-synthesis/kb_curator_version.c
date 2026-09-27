@@ -4,9 +4,9 @@
 #include "kb_curator_version.h"
 
 #include "aimee.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/kb_runtime_state.h"
 #include "log.h"
 
 #include <stdio.h>

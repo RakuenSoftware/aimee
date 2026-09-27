@@ -305,7 +305,6 @@ an HTTP admin route:
 KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
   --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
 docker exec \
-  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
   "$KB_CONTAINER" aimee-kb team create default
 ```
 

@@ -1,10 +1,10 @@
 /* Go owns ontology decisions. Keep the native graph rollback consumer's
  * external relation-change contract covered until rollback also moves to Go. */
 #include "../headers/aimee.h"
-#include "../modules/db2/c/fact_mutation.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/fact_mutation.h"
+#include "../modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

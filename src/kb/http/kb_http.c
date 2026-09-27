@@ -6,9 +6,9 @@
 #include "aimee.h"
 #include "command_registry.h"
 #include "config.h"
-#include "config_database.h"        /* §2c: config_resolve_embedder_dims / is_pinned */
-#include "modules/db2/c/db2_pool.h" /* db2_pool_stats — health reports pool starvation */
-#include "lifecycle.h"              /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
+#include "config_database.h" /* §2c: config_resolve_embedder_dims / is_pinned */
+#include <aimee/postgres/client.h>
+#include "lifecycle.h" /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
 #include "kb_http.h"
 #include "kb_http_code.h"
@@ -22,8 +22,8 @@
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_service_kb.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/canonical_index.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/canonical_index.h"
 #include "kb_enroll.h"
 #include "kb_pki.h"
 #include "kb_paths.h"
@@ -39,7 +39,7 @@
 #include "kb_http_rate.h"
 #include "kb_http_servers.h"
 #include "kb_http_telemetry.h"
-#include "modules/db2/c/enrollments.h"
+#include "modules/kb/c/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
@@ -48,16 +48,16 @@
 #include "kb_http_grants.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
-#include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/pgvec_kb_service.h"
-#include "modules/db2/c/kb_vectors.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/vector_index_ops.h"
-#include "modules/db2/c/kb_runtime_state.h"
-#include "modules/db2/c/corpus_jobs.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/pgvec_transport.h"
-#include "modules/db2/c/sketch.h"
+#include "modules/kb/c/lifecycle.h"
+#include "modules/kb/c/pgvec_kb_service.h"
+#include "modules/kb/c/kb_vectors.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/vector_index_ops.h"
+#include "modules/kb/c/kb_runtime_state.h"
+#include "modules/kb/c/corpus_jobs.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/pgvec_transport.h"
+#include "modules/kb/c/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
@@ -130,31 +130,24 @@ void send_response(int fd, int status, const char *body)
 
 /* ── public route logic (also called by unit tests) ─────────────────────── */
 
-/* Health has to be able to say "I am sick".
- *
- * This endpoint returned a bare {"status":"ok"} unconditionally, so a kb whose
- * connection pool had been leaking for three hours reported ok on the one port
- * that still answered — 1096 failed health checks later, the only symptom
- * visible from outside was a TIMEOUT, which reads as a hung box rather than a
- * diagnosed fault. Report the pool, and fail the check when it is starved: every
- * member stuck past its ceiling with callers queued is a lease leak this process
- * cannot fix in place (the pool refuses to reclaim a live lease, and rightly).
- *
- * Non-2xx is the point. The container HEALTHCHECK is `curl -fsS`, so degraded
- * here is what finally makes Docker's unhealthy state mean something. It fires
- * before the pool reaper gives up and exits, so the softer signal comes first.
- *
- * Writes the pool object into `buf`; returns 1 when starved. */
+/* Provider admission reserves slots while opening sessions. Exhaustion refuses
+ * new native work immediately, so report saturation without waiting for a queue
+ * that the PostgreSQL provider deliberately does not maintain. The public
+ * waiters field preserves the old health shape and reports opening reservations. */
 static int kb_health_pool_json(char *buf, size_t cap)
 {
-   int size = 0, in_use = 0, waiters = 0;
-   long grants = 0, timeouts = 0, stuck = 0, poisoned = 0;
-   db2_pool_stats(&size, &in_use, &waiters, &grants, &timeouts, &stuck, &poisoned);
-   int starved = (size > 0 && in_use == size && waiters > 0);
+   aimee_postgres_session_stats_t stats;
+   if (aimee_postgres_session_stats(&stats))
+   {
+      snprintf(buf, cap, "\"pool\":{\"provider\":\"postgres\",\"available\":false}");
+      return 1;
+   }
+   int starved = stats.capacity > 0 && stats.in_use + stats.waiters >= stats.capacity;
    snprintf(buf, cap,
-            "\"pool\":{\"size\":%d,\"in_use\":%d,\"waiters\":%d,\"lease_timeouts\":%ld,"
-            "\"stuck\":%ld,\"poisoned\":%ld}",
-            size, in_use, waiters, timeouts, stuck, poisoned);
+            "\"pool\":{\"provider\":\"postgres\",\"size\":%u,\"in_use\":%u,\"waiters\":%u,"
+            "\"lease_timeouts\":%llu,\"stuck\":%llu,\"poisoned\":%llu}",
+            stats.capacity, stats.in_use, stats.waiters, (unsigned long long)stats.refused,
+            (unsigned long long)stats.expired, (unsigned long long)stats.discarded);
    return starved;
 }
 

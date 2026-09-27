@@ -12,7 +12,7 @@
 #include "guardrails_semantic.h"
 #include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
 #include "db1_client/guardrail_events.h"
-#include "modules/db2/c/bandit.h"
+#include "modules/kb/c/bandit.h"
 #include "headers/log.h"
 #include "platform_process.h"
 #include <cJSON.h>

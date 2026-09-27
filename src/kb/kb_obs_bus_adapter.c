@@ -3,8 +3,8 @@
 
 #include <aimee/audit/obs_bus.h>
 
-#include "modules/db2/c/kb_audit_worm.h"
-#include "modules/db2/c/db2.h" /* db2_lease_release_idle */
+#include "modules/kb/c/kb_audit_worm.h"
+#include "modules/kb/c/db2.h" /* db2_lease_release_idle */
 
 static int persist_durable(const char *actor_role, const char *actor_principal, const char *action,
                            const char *subject, const char *verdict, const char *detail, void *ctx)
@@ -13,11 +13,8 @@ static int persist_durable(const char *actor_role, const char *actor_principal, 
    return db2_kb_audit_append(actor_role, actor_principal, action, subject, verdict, detail);
 }
 
-/* db2_kb_audit_append leases a pooled DB2 connection lazily, and the bus
- * consumer thread never ends a unit of work, so the lease outlived every burst
- * and pinned one pool member until the process exited. Handing the release back
- * on the bus's idle edge returns the connection between bursts while keeping it
- * for the duration of one. */
+/* The audit writer leases a PostgreSQL session. Return it between batches;
+ * the bus consumer must stay free to route the provider's replies. */
 static void release_idle_lease(void *ctx)
 {
    (void)ctx;

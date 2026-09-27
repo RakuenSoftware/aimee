@@ -34,7 +34,7 @@
  * establish is that the module is safe to call unconditionally for every embed command,
  * which is the property the fix depends on.
  */
-#include "../modules/db2/c/lifecycle.h"
+#include "../modules/kb/c/lifecycle.h"
 #include "embedder_probe.h"
 #include <assert.h>
 #include <stdio.h>

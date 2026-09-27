@@ -230,7 +230,7 @@ health signal for exactly this reason.
 
 ## 3. Emission
 
-**Status: built and PG17-validated.** `src/modules/db2/c/db2_witness_emit.c` reads committed
+**Status: built and PG17-validated.** `src/modules/kb/c/db2_witness_emit.c` reads committed
 state only, driven from the checkpoint cadence in `src/kb/kb_witness_cadence.c`.
 
 **Log/OTLP path. All evidence bytes.** Witness records, signed checkpoints, and

@@ -106,10 +106,10 @@ Use database-native consistent dumps. Copying a live database data file is not a
 ## The combined image is gone, and the new stack will not adopt your old database
 
 - Replace `aimee-combined` with the managed server or split stack.
-- New KB containers start private PostgreSQL when `AIMEE_DB2_URL` is unset.
+- Both roles use the PostgreSQL module and the separate Compose database service.
 - The new compose topology does not import an older sibling PostgreSQL volume.
-- Keep the old database reachable and set `AIMEE_DB2_URL`, or dump and restore into the embedded
-  cluster.
+- Restore the old database into the separate service, or configure matching runtime and
+  migration profiles for the existing cluster. `AIMEE_DB2_URL` is no longer consumed.
 - Never use `docker compose down -v` until the new database has been verified and the backup has
   been restored in a clean test.
 
@@ -202,7 +202,6 @@ PostgreSQL socket:
 KB_CONTAINER=$(docker ps --filter label=com.docker.compose.project=aimee \
   --filter label=com.docker.compose.service=aimee-kb --format '{{.ID}}')
 docker exec \
-  -e 'AIMEE_DB2_URL=postgresql:///aimee_shared?host=/var/lib/aimee/run' \
   "$KB_CONTAINER" aimee-kb team create default
 ```
 
@@ -294,7 +293,7 @@ matching document. If pgvector is intentionally unavailable, omit the two embedd
 those optional relations do not exist.
 
 ```bash
-psql "$AIMEE_DB2_URL" -c "
+psql "$AIMEE_STORE_URL" -c "
   SELECT 'kb_documents' AS source, d.project, count(*) AS rows
     FROM kb_documents d LEFT JOIN projects p ON p.name=d.project
    WHERE p.kb_project IS NULL GROUP BY d.project
@@ -340,7 +339,7 @@ psql "$AIMEE_DB2_URL" -c "
 Then enable the policies as a deliberate operator act:
 
 ```bash
-psql "$AIMEE_DB2_URL" -c "select kb_content_scope_enable();"
+psql "$AIMEE_STORE_URL" -c "select kb_content_scope_enable();"
 ```
 
 The function refuses unless the release readiness marker is present and every content-bearing
@@ -478,7 +477,7 @@ aimee: db2_init: embedder serves 384-dimension vectors but this corpus is record
 Check before you upgrade, so this is a decision rather than a surprise:
 
 ```bash
-psql "$AIMEE_DB2_URL" -tAc \
+psql "$AIMEE_STORE_URL" -tAc \
   "select value from kb_meta where key='schema_embedding_dim'"
 ```
 

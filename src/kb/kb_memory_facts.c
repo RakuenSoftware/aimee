@@ -5,7 +5,7 @@
 #include "kb_module_stage_adapters.h"
 #include "cJSON.h"
 #include "kb_curator_llm.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_internal.h"
 
 #include <stdlib.h>
 

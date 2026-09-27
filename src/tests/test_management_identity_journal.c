@@ -13,9 +13,9 @@
  *   - a lost COMMIT is COMMIT_AMBIGUOUS with cleared outputs, so a retry reuses
  *     the caller's identifiers rather than filing a second intent
  */
-#include "modules/db2/c/management_identity_journal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/management_identity_journal.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>

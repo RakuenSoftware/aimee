@@ -20,7 +20,7 @@
 
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/db2.h"
 #include "agent_config.h"
 #include "guardrails.h"
 #include "platform_test_util.h"

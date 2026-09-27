@@ -21,8 +21,8 @@
 #include "kb_http_grants.h"
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_tenant.h" /* the real tenancy codes this maps from */
-#include "modules/db2/c/write_tier_grant.h"
+#include "modules/kb/c/db2_tenant.h" /* the real tenancy codes this maps from */
+#include "modules/kb/c/write_tier_grant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 

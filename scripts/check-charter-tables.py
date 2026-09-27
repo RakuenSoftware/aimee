@@ -3,7 +3,7 @@
 
 The architecture charter defines exactly four shared tables —
 artifacts, artifact_citations, artifact_links, audit_events — created
-exactly once, in DB2 (src/modules/db2/c/schema.sql). The cross-source-learning and
+exactly once, in DB2 (src/modules/kb/c/schema.sql). The cross-source-learning and
 deep-curator proposals both write into them and must NOT introduce parallel
 artifact/citation/audit tables of their own.
 
@@ -124,7 +124,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Enforce the charter artifact-table invariant.")
     parser.add_argument(
         "--src-dir", default="src",
-        help="Source directory containing modules/db2/c/schema.sql",
+        help="Source directory containing modules/kb/c/schema.sql",
     )
     parser.add_argument("--plant-test", action="store_true", help="Run an internal self-test")
     args = parser.parse_args()
@@ -136,7 +136,7 @@ def main() -> int:
     # is "." rather than the repository root.
     src = pathlib.Path(args.src_dir).resolve()
     return check(
-        src / "modules" / "db2" / "c" / "schema.sql",
+        src / "modules" / "kb" / "c" / "schema.sql",
         # The store's schema, one file per family since it became a Go module.
         src.parent / "server-go" / "modules" / "aimee" / "families",
     )

@@ -24,7 +24,7 @@
 #include "evidence_vectors.h"
 #include "learning_synth_ops.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "../kb/kb_learning_synth.h"
 
 #define RESP_PATH "/tmp/aimee_synth_test_resp.json"

@@ -15,13 +15,13 @@
 #include "modules/vault/vault_kek_check.h"
 #include "modules/vault/vault_server_key.h"
 #include "modules/vault/vault_service.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/enrollments.h"
-#include "modules/db2/c/org_vault_key_use.h"
-#include "modules/db2/c/vault_pg.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/enrollments.h"
+#include "modules/kb/c/org_vault_key_use.h"
+#include "modules/kb/c/vault_pg.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>

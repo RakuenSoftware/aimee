@@ -1,11 +1,19 @@
 # Dedicated one-shot managed trust bootstrap. The final image contains the two
 # offline authority binaries and no ordinary KB/server runtime. It is invoked
 # only by the browser wizard after the private embedded PostgreSQL is healthy.
+# The same PostgreSQL provider serves private offline authority sessions.
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS postgres-provider
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-postgres ./cmd/aimee-module
+
 FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates libp11-kit-dev libpq-dev libssl-dev \
+        build-essential ca-certificates libp11-kit-dev libssl-dev \
         libzstd-dev pkg-config python3 zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -23,10 +31,11 @@ RUN apt-get update \
         python3 util-linux zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=postgres-provider /out/aimee-module-postgres /usr/local/libexec/aimee-modules/aimee-module-postgres
 COPY --from=build /src/aimee-kb-token-roots-provision /usr/local/bin/
 COPY --from=build /src/aimee-kb-jwks-publish /usr/local/bin/
 COPY scripts/managed_kms_helper.py /usr/libexec/aimee/managed-kms-helper.py
-COPY src/modules/db2/c/schema_roles.sql src/modules/db2/c/schema_grants.sql /usr/share/aimee/
+COPY src/modules/kb/c/schema_roles.sql src/modules/kb/c/schema_grants.sql /usr/share/aimee/
 COPY deploy/container/aimee-managed-authority-bootstrap.sh /usr/local/bin/aimee-managed-authority-bootstrap
 RUN chmod 0755 /usr/local/bin/aimee-managed-authority-bootstrap \
         /usr/libexec/aimee/managed-kms-helper.py \

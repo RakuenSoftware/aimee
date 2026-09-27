@@ -26,138 +26,6 @@
       "test": "src/tests/test_audit_worm_chain.c"
     },
     {
-      "ctest": true,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_bus_db2_module.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_bus_db2_process.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_cert_serial_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_cjson_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_cochange_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_code_audit_graph_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_code_import_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_code_match_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_dstr_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_extractor_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_log_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_management_read_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_model_validation_support.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_module_contract.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_module_init.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_random_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_rel_seed_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_rel_type_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_runtime_config_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_sketch_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_text_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_time_support.c"
-    },
-    {
       "ctest": false,
       "make": true,
       "module": "delegates",
@@ -388,6 +256,114 @@
     {
       "ctest": false,
       "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_cert_serial_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_cjson_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_cochange_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_code_audit_graph_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_code_import_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_code_match_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_dstr_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_extractor_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_log_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_management_read_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_model_validation_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_random_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_rel_type_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_runtime_config_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_sketch_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb",
+      "test": "src/tests/test_db2_time_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "kb-synthesis",
       "test": "src/tests/test_curator_code_unit.c"
     },
@@ -528,6 +504,18 @@
       "make": true,
       "module": "module-runtime",
       "test": "src/tests/test_plugin_c_hook.c"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "postgres",
+      "test": "src/tests/test_postgres_local_session.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "postgres",
+      "test": "src/tests/test_postgres_session_transport.c"
     },
     {
       "ctest": false,

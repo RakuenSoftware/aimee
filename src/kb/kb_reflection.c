@@ -21,8 +21,8 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2.h"   /* db2_lease_release_idle */
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2.h"    /* db2_lease_release_idle */
 #include "kb_curator_llm.h"      /* kb_curator_llm_run — shared curator LLM path */
 #include "kb_curator_provider.h" /* KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, provider_for_stage */
 #include "kb_features.h"

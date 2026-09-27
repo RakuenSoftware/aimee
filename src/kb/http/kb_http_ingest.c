@@ -10,7 +10,7 @@
 #include "kb_doc_hash.h"
 #include "kb_document_inspector.h"
 #include "kb_ingest_normalize.h"
-#include "modules/db2/c/kb_docs.h"
+#include "modules/kb/c/kb_docs.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
 #include "kb_ocr_sidecar.h"

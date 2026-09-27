@@ -662,7 +662,25 @@ def go_module_main(module_id: str, principal_ref: int,
 """
     if module_id == "postgres":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/postgres/storage"\n'
-        watchdog = "\tif handled, code := storage.Bootstrap(os.Args); handled { os.Exit(code) }\n"
+        handler = "moduleHandler"
+        watchdog = """\tif len(os.Args) == 2 && os.Args[1] == "__aimee_postgres_local_session" {
+\t\tif err := handler.ServeLocalSession(context.Background(), os.Stdin, os.Stdout); err != nil {
+\t\t\tfmt.Fprintln(os.Stderr, "PostgreSQL local session failed"); os.Exit(1)
+\t\t}
+\t\treturn
+\t}
+\tif handled, code := storage.Bootstrap(os.Args); handled { os.Exit(code) }
+"""
+        process_setup = """\tsqlHandler := handler.NewSQLHandler()
+\tsessionHandler := handler.NewSessionHandler(ctx)
+\tmoduleHandler := func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+\t\tswitch invocation.StageID {
+\t\tcase handler.StageSQL: return sqlHandler(invocation, frame)
+\t\tcase handler.StageSession: return sessionHandler(invocation, frame)
+\t\tdefault: return handler.Handle(invocation, frame)
+\t\t}
+\t}
+"""
     if module_id in {"server", "kb"}:
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"\n'
         handler = "moduleHandler"
@@ -763,6 +781,14 @@ def go_process_shared_sources(module_id: str) -> list[str]:
             (module_id == "config" and directory == "server-go/config")
         )
     if module_id == "memory":
+        # Integration tests drive the real PostgreSQL provider's encoded
+        # contract. Include that test dependency under its own owner directory;
+        # the memory runtime still imports only the bus-facing db contract.
+        sources.extend(
+            path.relative_to(ROOT).as_posix()
+            for path in (ROOT / "server-go/modules/postgres").glob("*.go")
+            if not path.name.endswith("_test.go")
+        )
         # Frozen corpora are data dependencies of exported Go tests, not native
         # executable test registrations in the module descriptor.
         sources.extend([

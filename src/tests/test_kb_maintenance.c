@@ -1,11 +1,11 @@
 /* test_kb_maintenance.c: DB-backed tests for KB temporal confidence decay. */
 
 #include "config.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "artifacts.h"
 #include "kb_maintenance.h"
 #include "db_postgres.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_internal.h"
 #include "support/test_time.h"
 
 #include <assert.h>

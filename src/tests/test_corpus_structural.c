@@ -2,8 +2,8 @@
 
 #include "artifacts.h"
 #include "corpus_structural.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "db_postgres.h"
 #include "kb_docs.h"
 

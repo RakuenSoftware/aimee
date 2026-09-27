@@ -5,7 +5,7 @@
 #include "curiosity_resolve.h"
 
 #include "log.h"
-#include "modules/db2/c/curiosity.h"
+#include "modules/kb/c/curiosity.h"
 
 #include <stddef.h>
 #include <string.h>

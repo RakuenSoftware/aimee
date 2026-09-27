@@ -1,9 +1,9 @@
 /* Real-PostgreSQL proof for the KB side of the SQLite WORM bridge. Producers
  * submit immutable intents; the worker API claims and acknowledges delivery
  * without constructing or storing a PostgreSQL hash chain. */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "kb_audit_worm.h"
 #include "config_embedder_dims.h"
 

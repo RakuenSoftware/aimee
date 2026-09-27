@@ -71,6 +71,33 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertEqual(absent.returncode, 1)
             self.assertIn("no store backend", absent.stderr)
 
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_postgres_export_serves_private_sessions(self) -> None:
+        import struct
+        import time
+        contract = exporter.process_contracts.validate()["postgres"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "postgres", "required", contract,
+                                   exporter.source_timestamp(),
+                                   exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-postgres"
+            binary = module / "postgres"
+            build = subprocess.run(["go", "build", "-o", str(binary), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            # Invalid op is refused before a connection. The framed reply proves
+            # that the independent executable supports the private provider ABI.
+            credential = struct.pack("<I", 0) + b"postgres://fixture@127.0.0.1:1/fixture?sslmode=disable"
+            request = struct.pack("<QIQ", time.monotonic_ns() + 2_000_000_000, 0, 0)
+            wire = b"".join(struct.pack("<I", len(part)) + part for part in (credential, request))
+            result = subprocess.run([str(binary), "__aimee_postgres_local_session"],
+                                    input=wire, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertGreater(len(result.stdout), 12)
+            self.assertEqual(struct.unpack_from("<I", result.stdout)[0], len(result.stdout) - 4)
+            self.assertIn(b"08006", result.stdout)
+
     def test_audit_publication_is_not_an_arbitrary_request_grant(self) -> None:
         client = {"id": "memory-postgres", "principal_ref": 73,
                   "executable": "/module", "placements": ["server", "kb"],
@@ -119,9 +146,9 @@ class CProcessBuildTests(unittest.TestCase):
     def descriptor(self) -> dict[str, object]:
         return {
             "sources": [
-                "src/modules/db2/c/db2_init.c",
-                "src/modules/db2/c/db_postgres.c",
-                "src/modules/db2/module_adapter.c",
+                "src/modules/kb/c/db2_init.c",
+                "src/modules/kb/c/db_postgres.c",
+                "src/modules/kb/module_adapter.c",
             ],
             "c_build": {
                 "compile_definitions": [
@@ -130,10 +157,10 @@ class CProcessBuildTests(unittest.TestCase):
                 ],
                 "include_roots": [
                     "src",
-                    "src/modules/db2/c",
-                    "src/modules/db2/include",
+                    "src/modules/kb/c",
+                    "src/modules/kb/include",
                 ],
-                "pkg_config": ["libpq"],
+                "pkg_config": ["libssl"],
                 "system_libraries": [
                     "OpenSSL::Crypto",
                     "Threads::Threads",
@@ -146,12 +173,12 @@ class CProcessBuildTests(unittest.TestCase):
 
     def test_owned_files_include_contract_sources(self) -> None:
         descriptor = self.descriptor()
-        descriptor["contracts"] = ["src/modules/db2/eventcontract/operations.json"]
-        owned = exporter.module_owned_files("db2", descriptor)
-        self.assertIn("src/modules/db2/eventcontract/operations.json", owned)
-        descriptor["contracts"] = "src/modules/db2/eventcontract/operations.json"
+        descriptor["contracts"] = ["src/modules/kb/eventcontract/operations.json"]
+        owned = exporter.module_owned_files("kb", descriptor)
+        self.assertIn("src/modules/kb/eventcontract/operations.json", owned)
+        descriptor["contracts"] = "src/modules/kb/eventcontract/operations.json"
         with self.assertRaisesRegex(exporter.ExportError, "contracts must be a string array"):
-            exporter.module_owned_files("db2", descriptor)
+            exporter.module_owned_files("kb", descriptor)
 
     def test_external_module_pin_tracks_the_canonical_go_dependency(self) -> None:
         descriptor = exporter.load_json(REPO_ROOT / "src/modules/config/module.yaml")
@@ -172,22 +199,22 @@ class CProcessBuildTests(unittest.TestCase):
         descriptor = self.descriptor()
         descriptor["c_build"]["generated_headers"] = [{
             "entries": [
-                {"source": "src/modules/db2/c/schema.sql",
+                {"source": "src/modules/kb/c/schema.sql",
                  "symbol": "AIMEE_DB2_SCHEMA_SQL"},
-                {"source": "src/modules/db2/c/schema_sqlite.sql",
+                {"source": "src/modules/kb/c/schema_sqlite.sql",
                  "symbol": "AIMEE_DB2_SCHEMA_SQLITE_SQL"},
             ],
             "output": "schema_data.h",
         }]
-        owned = exporter.module_owned_files("db2", descriptor)
-        self.assertIn("src/modules/db2/c/schema.sql", owned)
-        self.assertIn("src/modules/db2/c/schema_sqlite.sql", owned)
-        cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+        owned = exporter.module_owned_files("kb", descriptor)
+        self.assertIn("src/modules/kb/c/schema.sql", owned)
+        self.assertIn("src/modules/kb/c/schema_sqlite.sql", owned)
+        cmake = exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
         self.assertIn("find_package(Python3 REQUIRED COMPONENTS Interpreter)", cmake)
         self.assertIn("scripts/generate_c_embedded_header.py", cmake)
         self.assertIn("${MODULE_GENERATED_DIR}/schema_data.h", cmake)
         self.assertIn("--entry AIMEE_DB2_SCHEMA_SQL", cmake)
-        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/db2/c/schema.sql", cmake)
+        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/kb/c/schema.sql", cmake)
         self.assertIn("${MODULE_GENERATED_DIR}", cmake)
 
     def test_header_dependencies_are_materialized_but_not_compiled(self) -> None:
@@ -196,20 +223,20 @@ class CProcessBuildTests(unittest.TestCase):
             "src/headers/aimee.h",
             "src/headers/config_embedder_dims.h",
         ]
-        files = exporter.module_repository_files("db2", descriptor)
+        files = exporter.module_repository_files("kb", descriptor)
         self.assertIn("src/headers/aimee.h", files)
         self.assertIn("src/headers/config_embedder_dims.h", files)
         self.assertNotIn(
-            "src/headers/aimee.h", exporter.module_owned_files("db2", descriptor)
+            "src/headers/aimee.h", exporter.module_owned_files("kb", descriptor)
         )
         cmake = exporter.c_process_cmake(
-            "db2", "aimee-module-db2", "1.2.3", descriptor
+            "kb", "aimee-module-kb", "1.2.3", descriptor
         )
         self.assertNotIn("src/headers/aimee.h", cmake)
 
         for dependencies, message in (
             (["../outside.h"], "unsafe header dependency"),
-            (["src/modules/db2/c/db2.h"], "must be owned"),
+            (["src/modules/kb/c/db2.h"], "must be owned"),
             (["src/headers/z.h", "src/headers/a.h"], "sorted and unique"),
         ):
             mutated = self.descriptor()
@@ -218,22 +245,22 @@ class CProcessBuildTests(unittest.TestCase):
                 exporter.ExportError, message
             ):
                 exporter.c_process_cmake(
-                    "db2", "aimee-module-db2", "1.2.3", mutated
+                    "kb", "aimee-module-kb", "1.2.3", mutated
                 )
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is not installed")
     def test_generated_header_cmake_builds_from_a_clean_source_tree(self) -> None:
         descriptor = self.descriptor()
-        descriptor["sources"] = ["src/modules/db2/store.c"]
+        descriptor["sources"] = ["src/modules/kb/store.c"]
         descriptor["c_build"] = {
             "generated_headers": [{
                 "entries": [{
-                    "source": "src/modules/db2/schema.sql",
+                    "source": "src/modules/kb/schema.sql",
                     "symbol": "AIMEE_DB2_SCHEMA_SQL",
                 }],
                 "output": "schema_data.h",
             }],
-            "include_roots": ["src/modules/db2"],
+            "include_roots": ["src/modules/kb"],
             "pkg_config": [],
             "system_libraries": [],
         }
@@ -244,7 +271,7 @@ class CProcessBuildTests(unittest.TestCase):
             (module / "runtime").mkdir(parents=True)
             (module / "scripts").mkdir()
             (module / "grants").mkdir()
-            (module / "src/modules/db2").mkdir(parents=True)
+            (module / "src/modules/kb").mkdir(parents=True)
             prefix.mkdir(parents=True)
             (module / "runtime/main.c").write_text(
                 "int embedded_value(void); int main(void) { return embedded_value(); }\n",
@@ -253,14 +280,14 @@ class CProcessBuildTests(unittest.TestCase):
             (module / "grants/module.grant.in").write_text(
                 "version=1\n", encoding="utf-8"
             )
-            (module / "src/modules/db2/store.c").write_text(
+            (module / "src/modules/kb/store.c").write_text(
                 '#include "schema_data.h"\n'
                 "int embedded_value(void) { return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n"
                 "extern int retired_other_module(void);\n"
                 "int unused_legacy_surface(void) { return retired_other_module(); }\n",
                 encoding="utf-8",
             )
-            (module / "src/modules/db2/schema.sql").write_text(
+            (module / "src/modules/kb/schema.sql").write_text(
                 "select 1;\n", encoding="utf-8"
             )
             shutil.copy2(
@@ -268,7 +295,7 @@ class CProcessBuildTests(unittest.TestCase):
                 module / "scripts/generate_c_embedded_header.py",
             )
             (module / "CMakeLists.txt").write_text(
-                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor),
+                exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor),
                 encoding="utf-8",
             )
             (prefix / "aimee-coreConfig.cmake").write_text(
@@ -297,7 +324,7 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
             self.assertTrue((build / "generated/schema_data.h").is_file())
             self.assertFalse((module / "schema_data.h").exists())
-            ran = subprocess.run([str(build / "aimee-module-db2")], check=False)
+            ran = subprocess.run([str(build / "aimee-module-kb")], check=False)
             self.assertEqual(ran.returncode, 0)
             # Garbage collection must not mask a missing implementation that
             # the process actually calls. Make the live entry depend on it.
@@ -325,19 +352,19 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("handler.ModelServicesBootstrap(os.Args)", exporter.go_module_main("providers", 17, []))
 
     def test_cmake_compiles_every_owned_source_once(self) -> None:
-        cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", self.descriptor())
+        cmake = exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", self.descriptor())
         for source in self.descriptor()["sources"]:
             self.assertEqual(cmake.count(source), 1)
         self.assertIn("find_package(aimee-core 1.2.3 EXACT CONFIG REQUIRED)", cmake)
         self.assertIn("find_package(OpenSSL REQUIRED)", cmake)
         self.assertIn("find_package(Threads REQUIRED)", cmake)
         self.assertIn("find_package(ZLIB REQUIRED)", cmake)
-        self.assertIn("pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET libpq)", cmake)
+        self.assertIn("pkg_check_modules(MODULE_PKG REQUIRED IMPORTED_TARGET libssl)", cmake)
         self.assertIn("PkgConfig::MODULE_PKG", cmake)
-        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/db2/c", cmake)
-        self.assertIn("target_compile_definitions(aimee-module-db2 PRIVATE", cmake)
+        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/src/modules/kb/c", cmake)
+        self.assertIn("target_compile_definitions(aimee-module-kb PRIVATE", cmake)
         self.assertIn("AIMEE_DB1_DISABLED", cmake)
-        self.assertNotIn("runtime/main.c src/modules/db2/module_adapter.c", cmake)
+        self.assertNotIn("runtime/main.c src/modules/kb/module_adapter.c", cmake)
 
     def test_descriptor_order_is_required_for_reproducible_cmake(self) -> None:
         for field in ("sources", "compile_definitions", "include_roots", "pkg_config",
@@ -350,23 +377,23 @@ class CProcessBuildTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(
                 exporter.ExportError, "sorted and unique"
             ):
-                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+                exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
     def test_missing_build_contract_or_sources_fails_closed(self) -> None:
         descriptor = self.descriptor()
         descriptor.pop("c_build")
         with self.assertRaisesRegex(exporter.ExportError, "exact c_build fields"):
-            exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+            exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
         descriptor = self.descriptor()
         descriptor["sources"] = []
         with self.assertRaisesRegex(exporter.ExportError, "descriptor-owned sources"):
-            exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+            exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
     def test_non_c_source_and_cmake_injection_are_rejected(self) -> None:
         descriptor = self.descriptor()
-        descriptor["sources"][0] = "src/modules/db2/c/provider.cpp"
+        descriptor["sources"][0] = "src/modules/kb/c/provider.cpp"
         with self.assertRaisesRegex(exporter.ExportError, "must all be .c"):
-            exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+            exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
         for field, value in (
             ("compile_definitions", "BAD=1"),
@@ -378,13 +405,13 @@ class CProcessBuildTests(unittest.TestCase):
             descriptor["c_build"][field].append(value)
             descriptor["c_build"][field].sort()
             with self.subTest(field=field), self.assertRaisesRegex(exporter.ExportError, "unsafe"):
-                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+                exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
         descriptor = self.descriptor()
         descriptor["c_build"]["system_libraries"].append("Unknown::Target")
         descriptor["c_build"]["system_libraries"].sort()
         with self.assertRaisesRegex(exporter.ExportError, "unsupported imported CMake target"):
-            exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+            exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
         for generated, message in (
             ([{"output": "../schema.h", "entries": [
@@ -402,13 +429,13 @@ class CProcessBuildTests(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(
                 exporter.ExportError, message
             ):
-                exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+                exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
 
     def test_repeated_imported_targets_discover_each_package_once(self) -> None:
         descriptor = self.descriptor()
         descriptor["c_build"]["system_libraries"].append("OpenSSL::SSL")
         descriptor["c_build"]["system_libraries"].sort()
-        cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", descriptor)
+        cmake = exporter.c_process_cmake("kb", "aimee-module-kb", "1.2.3", descriptor)
         self.assertEqual(cmake.count("find_package(OpenSSL REQUIRED)"), 1)
         self.assertIn("OpenSSL::Crypto", cmake)
         self.assertIn("OpenSSL::SSL", cmake)
@@ -440,16 +467,16 @@ class CProcessBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
             bundle = Path(temporary) / "bundle"
-            descriptor_path = root / "src/modules/db2/module.yaml"
+            descriptor_path = root / "src/modules/kb/module.yaml"
             descriptor_path.parent.mkdir(parents=True)
             descriptor = {
-                "id": "db2",
+                "id": "kb",
                 **self.descriptor(),
             }
             descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
             inventory = root / "inventory.json"
             inventory.write_text(
-                json.dumps({"required": ["db2"], "optional": []}), encoding="utf-8"
+                json.dumps({"required": ["kb"], "optional": []}), encoding="utf-8"
             )
             contracts_path = root / "process-contracts.json"
             contracts_path.write_text(json.dumps({"clients": [{
@@ -468,7 +495,7 @@ class CProcessBuildTests(unittest.TestCase):
                     mock.patch.object(exporter, "INVENTORY", inventory), \
                     mock.patch.object(exporter.process_contracts, "CONTRACTS", contracts_path), \
                     mock.patch.object(exporter.process_contracts, "validate",
-                                      return_value={"db2": contract}):
+                                      return_value={"kb": contract}):
                 self.assertEqual(exporter.export_runtime_bundle(bundle), 1)
 
             for placement in ("server", "kb"):
@@ -480,16 +507,16 @@ class CProcessBuildTests(unittest.TestCase):
 
             build = json.loads((bundle / "c-build.json").read_text(encoding="utf-8"))
             self.assertEqual(build["modules"], [{
-                "id": "db2",
-                "binary": "aimee-module-db2",
-                "main": "src/aimee-module-db2.c",
+                "id": "kb",
+                "binary": "aimee-module-kb",
+                "main": "src/aimee-module-kb.c",
                 **self.descriptor()["c_build"],
                 "sources": self.descriptor()["sources"],
             }])
-            main = (bundle / "src/aimee-module-db2.c").read_text(encoding="utf-8")
+            main = (bundle / "src/aimee-module-kb.c").read_text(encoding="utf-8")
             self.assertIn("extern aimee_module_status_t aimee_module_handler", main)
             self.assertNotIn("db2_init", main)
-            self.assertIn("db2\t/usr/local/libexec/aimee-modules/aimee-module-db2",
+            self.assertIn("kb\t/usr/local/libexec/aimee-modules/aimee-module-kb",
                           (bundle / "kb.modules").read_text(encoding="utf-8"))
 
 

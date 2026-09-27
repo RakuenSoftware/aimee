@@ -35,7 +35,7 @@ func TestCognifiedRuleInputsPostgres(t *testing.T) {
 		}
 	}
 	exec(`SET LOCAL jit=off; SELECT set_config('aimee.memory_scope_all','1',true); DELETE FROM rules`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

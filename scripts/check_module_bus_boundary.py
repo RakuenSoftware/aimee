@@ -10,7 +10,6 @@ from pathlib import Path
 
 
 MODULES = "src/modules"
-DB2_C_BOUNDARY = "src/modules/db2/c/"
 # The shared core contract every module is allowed to depend on. It is not a
 # peer module and carries no peer's domain types.
 CORE = "core"
@@ -22,7 +21,7 @@ MODULE_ROOTS = ("aimee", "modules")
 # Including a bus client header IS bus communication, not direct coupling.
 # Scoped to the exact header: audit_action.h and audit_worm.h are the audit
 # module's own domain API and stay debt below.
-BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h"}
+BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # Exact direct module-to-module coupling on testing, each entry a peer header a
 # module reaches for in-process instead of over the bus. Closed list: nothing may
 # join it, and an entry whose include is gone must be deleted, so it only shrinks.
@@ -149,8 +148,117 @@ FLAT_ROOT_REACH = {
     ("src/modules/workflows/wfe_panel_roundtable.h", "roundtable/delegate_ensemble.h"),
     ("src/modules/workspace/workspace.c", "kb_client/kb_client.h"),
 }
+# Native knowledge algorithms were already linked by the KB host. Their exact
+# existing header edges moved with ownership from the retired DB2 provider.
+# This closed set replaces the former blanket DB2 C-tree exemption; adding a
+# new peer include or retaining a removed edge now fails this checker.
+KNOWLEDGE_HOST_REACH = {
+    ('src/modules/guardrails/guardrails_semantic.c', 'modules/kb/c/bandit.h'),
+    ('src/modules/kb-synthesis/kb_curator_contradictions.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_contradictions.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_contradictions.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/cross_repo_build.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/cross_repo_identity.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/cross_repo_route.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/cross_repo_stats.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/db2.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/db2_tenant.h'),
+    ('src/modules/kb-synthesis/kb_curator_drain.c', 'modules/kb/c/decision_log.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract.c', 'modules/kb/c/db2_tenant.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract.c', 'modules/kb/c/feature_rows.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract_code.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract_code.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_extract_code.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_claims.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_claims.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_claims.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_claims.c', 'modules/kb/c/pgvec_transport.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/kb_payload.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/kb_runtime_state.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_code_unit.c', 'modules/kb/c/pgvec_transport.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_narrative.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_narrative.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_narrative.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_index_narrative.c', 'modules/kb/c/pgvec_transport.h'),
+    ('src/modules/kb-synthesis/kb_curator_link_artifacts.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_link_artifacts.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_link_artifacts.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_link_artifacts.c', 'modules/kb/c/pgvec_transport.h'),
+    ('src/modules/kb-synthesis/kb_curator_promote.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_promote.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_promote.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_queue.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_queue.c', 'modules/kb/c/db2_tenant.h'),
+    ('src/modules/kb-synthesis/kb_curator_queue.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_queue.c', 'modules/kb/c/kb_payload.h'),
+    ('src/modules/kb-synthesis/kb_curator_resolve_entities.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_resolve_entities.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_resolve_entities.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_resolve_entities.c', 'modules/kb/c/pgvec_transport.h'),
+    ('src/modules/kb-synthesis/kb_curator_serve.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_serve.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_synthesize.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_synthesize.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/kb-synthesis/kb_curator_synthesize.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/kb-synthesis/kb_curator_version.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/kb-synthesis/kb_curator_version.c', 'modules/kb/c/kb_payload.h'),
+    ('src/modules/kb-synthesis/kb_curator_version.c', 'modules/kb/c/kb_runtime_state.h'),
+    ('src/modules/kb/c/canonical_index.h', 'css/css_analyze.h'),
+    ('src/modules/kb/c/css_graph.h', 'css/css_analyze.h'),
+    ('src/modules/kb/c/db2_learning.h', 'aimee/learning/learning.h'),
+    ('src/modules/kb/c/db2_vault_witness_provider.h', 'modules/vault/vault_witness_checkpoint.h'),
+    ('src/modules/kb/c/db2_vault_witness_provider.h', 'modules/vault/vault_witness_merkle.h'),
+    ('src/modules/kb/c/db2_vault_witness_provider.h', 'modules/vault/vault_witness_record.h'),
+    ('src/modules/kb/c/db2_witness_checkpoint.c', 'modules/vault/vault_witness_checkpoint.h'),
+    ('src/modules/kb/c/db2_witness_checkpoint.c', 'modules/vault/vault_witness_export.h'),
+    ('src/modules/kb/c/db2_witness_checkpoint.c', 'modules/vault/vault_witness_merkle.h'),
+    ('src/modules/kb/c/db2_witness_checkpoint.c', 'modules/vault/vault_witness_record.h'),
+    ('src/modules/kb/c/db2_witness_emit.c', 'modules/vault/vault_witness_checkpoint.h'),
+    ('src/modules/kb/c/db2_witness_emit.c', 'modules/vault/vault_witness_record.h'),
+    ('src/modules/kb/c/db2_witness_emit.h', 'modules/vault/vault_witness_export.h'),
+    ('src/modules/kb/c/kb_audit_worm.c', 'aimee/audit/audit_worm_chain.h'),
+    ('src/modules/kb/c/org_vault_rewrap.h', 'vault/vault_crypto.h'),
+    ('src/modules/kb/c/org_vault_rewrap.h', 'vault/vault_reseal_receipt.h'),
+    ('src/modules/kb/c/vault_pg.c', 'vault/vault_crypto.h'),
+    ('src/modules/kb/c/vault_pg.c', 'vault/vault_principal.h'),
+    ('src/modules/kb/c/vault_pg.c', 'vault/vault_store.h'),
+    ('src/modules/kb/c/vault_pg.h', 'vault/vault_internal.h'),
+    ('src/modules/learning/learning_bundle.c', 'modules/kb/c/evidence_vectors.h'),
+    ('src/modules/learning/learning_endogeneity.c', 'modules/kb/c/db2_learning.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/anti_patterns.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/demotion.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/entity_nodes.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/evidence_vectors.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/kb_service_backend.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/learning_synth_ops.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/rules.h'),
+    ('src/modules/learning/learning_evidence.c', 'modules/kb/c/workflow_patterns.h'),
+    ('src/modules/learning/learning_regret.c', 'modules/kb/c/db2_learning.h'),
+    ('src/modules/learning/learning_router.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/learning/learning_router.c', 'modules/kb/c/collab_rules.h'),
+    ('src/modules/learning/learning_router.c', 'modules/kb/c/db2_learning.h'),
+    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/roadmap/roadmap_auto.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/roadmap/roadmap_milestone.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/roadmap/roadmap_reassess.c', 'modules/kb/c/db_postgres.h'),
+    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/artifacts.h'),
+    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/db2_internal.h'),
+    ('src/modules/roadmap/roadmap_report.c', 'modules/kb/c/db_postgres.h'),
+}
 ALLOWED = (IR_SHARED_TYPE | PENDING_BUS_MIGRATION | PRIVATE_HEADER_REACH |
-           CORE_LINKED_REACH | FLAT_ROOT_REACH)
+           CORE_LINKED_REACH | FLAT_ROOT_REACH | KNOWLEDGE_HOST_REACH)
 # Both bracket styles: a quoted include couples exactly as hard as an angled one,
 # and the tree uses quoted form for every `modules/` reach and for three
 # `aimee/protocols/` ones.
@@ -213,12 +321,6 @@ def included_module(header: str) -> str | None:
     parts = header.split("/")
     if len(parts) < 2 or parts[0] not in MODULE_ROOTS:
         return None
-    # DB2's intact C implementation has moved under its future module root, but
-    # remains the in-process lower storage layer until the generated bus clients
-    # replace every direct include. The separate DB2 source-boundary checker
-    # freezes and shrink-ratchets that exact compatibility surface.
-    if parts[0] == "modules" and parts[1:3] == ["db2", "c"]:
-        return None
     return parts[1]
 
 
@@ -232,8 +334,6 @@ def crossings(root: Path):
     found: set[tuple[str, str]] = set()
     for path in sorted((*modules.rglob("*.c"), *modules.rglob("*.h"))):
         relative = path.relative_to(root).as_posix()
-        if relative.startswith(DB2_C_BOUNDARY):
-            continue
         owner = owning_module(relative)
         for header in INCLUDE.findall(path.read_text(encoding="utf-8")):
             if "/" not in header:

@@ -13,9 +13,9 @@
 #include "kb.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/pgvec_kb_service.h"
 #include <aimee/learning/learning.h>
 #include "curiosity_resolve.h"
 #include "kb_bandit.h"

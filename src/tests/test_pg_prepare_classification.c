@@ -1,5 +1,5 @@
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <sqlite3.h>

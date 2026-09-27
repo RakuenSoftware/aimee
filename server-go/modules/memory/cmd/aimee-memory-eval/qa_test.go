@@ -25,7 +25,7 @@ func moduleEvaluationFixture(t *testing.T) (string, string) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nprintf '[1,0,0]\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return "../../../../../src/modules/db2/c/schema.sql", script
+	return "../../../../../src/modules/kb/c/schema.sql", script
 }
 
 func TestQADatasetValidation(t *testing.T) {

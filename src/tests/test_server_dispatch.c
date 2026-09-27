@@ -2234,7 +2234,7 @@ static void test_init_route_through_server_to_kb(void)
        dispatch_json(ctx, conn, "{\"method\":\"init.run\"}", strlen("{\"method\":\"init.run\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);
    assert(strstr(g_last_exec_cmd, "aimee-kb") != NULL);
-   assert(strstr(g_last_exec_cmd, "--bootstrap-db2 --json") != NULL);
+   assert(strstr(g_last_exec_cmd, "--bootstrap-postgres --json") != NULL);
    assert(g_exec_timeout_ms == 300000);
    cJSON_Delete(json);
 

@@ -5,10 +5,10 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "css_render_oracle.h"
-#include "modules/db2/c/css_graph.h"
-#include "modules/db2/c/css_insights.h"
-#include "modules/db2/c/css_migration.h"
-#include "modules/db2/c/css_render.h"
+#include "modules/kb/c/css_graph.h"
+#include "modules/kb/c/css_insights.h"
+#include "modules/kb/c/css_migration.h"
+#include "modules/kb/c/css_render.h"
 #include "kb_service_css.h"
 
 #include <string.h>

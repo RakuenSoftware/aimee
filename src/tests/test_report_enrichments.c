@@ -5,7 +5,7 @@
 
 #include "report_enrichment.h"
 #include "report_enrichments.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "support/json_canonical.h"
 
 static void open_db(void)

@@ -9,7 +9,7 @@
 #include "cJSON.h"
 #include "kb_client.h"
 #include "log.h"
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/db2_learning.h"
 
 #include "approach_store.h"
 #include "platform_path.h"

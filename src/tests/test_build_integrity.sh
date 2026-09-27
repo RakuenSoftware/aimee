@@ -114,171 +114,11 @@ else
     fail "server entrypoint continued after Vault bootstrap failure"
 fi
 
-# The KB entrypoint can remain PID 1 while supervising its embedded PostgreSQL,
-# so it must replace its process image after scrubbing inherited credentials.
-# Use the external-DB lane to avoid starting PostgreSQL while proving that both
-# the injected DB URL and an unrelated credential are absent in the final KB.
-kb_entrypoint_test_dir=$(mktemp -d /tmp/aimee-kb-entrypoint.XXXXXX)
-cat >"$kb_entrypoint_test_dir/aimee-kb" <<'SH'
-#!/bin/sh
-case "${1:-}" in
-    --bootstrap-vault-env)
-        [ -z "${ENTRYPOINT_BOOTSTRAP_LOG:-}" ] || printf x >>"$ENTRYPOINT_BOOTSTRAP_LOG"
-        exit 0
-        ;;
-    --vault-db2-external) exit 0 ;;
-    # The entrypoint asks the binary which embedder is selected instead of parsing
-    # aimee.yaml. Exit 1 = nothing selected, so this stub starts no embedder; without
-    # the case the stub would fall through and print "clean", which the entrypoint
-    # would take as a MODEL NAME.
-    --print-embedding-model) exit 1 ;;
-    --list-credential-env-names)
-        [ -n "${AIMEE_DB2_URL:-}" ] && printf '%s\n' AIMEE_DB2_URL
-        [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] && printf '%s\n' ENTRYPOINT_TEST_API_KEY
-        exit 0
-        ;;
-esac
-if [ -n "${AIMEE_DB2_URL:-}" ]; then
-    printf '%s\n' dirty-db-url
-elif [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ]; then
-    printf '%s\n' dirty-api-key
+# The legacy KB launcher shares the canonical immutable-role and Vault boundary.
+if sh tests/test_kb_entrypoint.sh; then
+    pass "KB launcher delegates to the unified PostgreSQL composition"
 else
-    printf '%s\n' clean
-fi
-SH
-chmod +x "$kb_entrypoint_test_dir/aimee-kb"
-# stderr is captured separately, not folded in: the entrypoint legitimately logs
-# operator diagnostics there (which embedder it is using), and folding them into
-# stdout would turn this into an assertion that the entrypoint is silent. What must
-# hold is that no credential VALUE reaches either stream, and that the final process
-# image is credential-free.
-#
-# EMBEDDER_URL is set because a serving kb with no embedder refuses to start, and
-# these two checks are about credential scrubbing, not embedder selection. The gate
-# itself is covered by tests/test_kb_entrypoint.sh.
-kb_entrypoint_stderr="$kb_entrypoint_test_dir/stderr.log"
-kb_entrypoint_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
-    AIMEE_HOME="$kb_entrypoint_test_dir/home" \
-    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
-    ENTRYPOINT_TEST_API_KEY=first-boot-only \
-    EMBEDDER_URL=http://embedder.invalid \
-    sh ../deploy/container/aimee-kb-entrypoint.sh 2>"$kb_entrypoint_stderr")
-if [ "$kb_entrypoint_output" = "clean" ] &&
-    ! grep -qE 'first-boot-only|external\.invalid' "$kb_entrypoint_stderr"; then
-    pass "KB entrypoint clean-reexec removes inherited first-boot credentials"
-else
-    fail "KB entrypoint left first-boot credentials in its long-lived process image ($kb_entrypoint_output, stderr=$(tr '\n' ' ' <"$kb_entrypoint_stderr"))"
-fi
-
-# Treat the internal bootstrap marker as untrusted input. A container runtime
-# can supply entrypoint arguments, so inheriting any credential must force one
-# more credential-free exec even when that marker was present at first boot.
-kb_bootstrap_log="$kb_entrypoint_test_dir/bootstrap.log"
-kb_marked_stderr="$kb_entrypoint_test_dir/stderr-marked.log"
-kb_marked_output=$(env -i PATH="$kb_entrypoint_test_dir:/usr/bin:/bin" \
-    AIMEE_HOME="$kb_entrypoint_test_dir/home-marked" \
-    AIMEE_DB2_URL=postgresql://external.invalid/aimee \
-    ENTRYPOINT_TEST_API_KEY=first-boot-only \
-    ENTRYPOINT_BOOTSTRAP_LOG="$kb_bootstrap_log" \
-    EMBEDDER_URL=http://embedder.invalid \
-    sh ../deploy/container/aimee-kb-entrypoint.sh \
-    --aimee-internal-vault-bootstrapped-external-db 2>"$kb_marked_stderr")
-kb_bootstrap_count=$(wc -c <"$kb_bootstrap_log")
-kb_marked_stderr_text=$(tr '\n' ' ' <"$kb_marked_stderr")
-kb_marked_stderr_dirty=0
-grep -qE 'first-boot-only|external\.invalid' "$kb_marked_stderr" && kb_marked_stderr_dirty=1
-if [ "$kb_marked_output" = "clean" ] && [ "$kb_bootstrap_count" -eq 2 ] &&
-    [ "$kb_marked_stderr_dirty" -eq 0 ]; then
-    pass "KB entrypoint ignores a spoofed bootstrap marker when credentials are inherited"
-else
-    fail "KB entrypoint trusted a bootstrap marker before a clean re-exec ($kb_marked_output, bootstraps=$kb_bootstrap_count, stderr=$kb_marked_stderr_text)"
-fi
-
-# A one-shot sharing the kb's volume (the managed deploy's aimee-server-identity
-# job) finds the cluster already running and must CONNECT to it, not provision a
-# second one over the same data directory. That job runs as root deliberately, and
-# refusing it there -- PostgreSQL forbids running the server as root, not
-# connecting as one -- failed managed server identity enrollment on every clean
-# install. Stub pg_isready as "a cluster is up" and assert the entrypoint reaches
-# the binary instead of exiting.
-kb_shared_dir=$(mktemp -d /tmp/aimee-kb-shared.XXXXXX)
-mkdir -p "$kb_shared_dir/bin" "$kb_shared_dir/pgbin"
-cat >"$kb_shared_dir/bin/aimee-kb" <<'SH'
-#!/bin/sh
-case "${1:-}" in
-    --bootstrap-vault-env|--list-credential-env-names) exit 0 ;;
-    --vault-db2-external) exit 1 ;;   # embedded lane: the path that provisions
-    --print-embedding-model) exit 1 ;;
-esac
-printf 'reached-binary:%s\n' "${1:-none}"
-SH
-cat >"$kb_shared_dir/pgbin/pg_isready" <<'SH'
-#!/bin/sh
-printf '%s\n' "$*" >"$PG_ISREADY_LOG"
-exit 0
-SH
-cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
-#!/bin/sh
-echo "initdb-must-not-run" >&2
-exit 1
-SH
-cat >"$kb_shared_dir/bin/module-supervisor.sh" <<'SH'
-#!/bin/sh
-echo "module-supervisor-must-not-run" >&2
-exit 1
-SH
-chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
-    "$kb_shared_dir/pgbin/initdb" "$kb_shared_dir/bin/module-supervisor.sh"
-kb_shared_stderr="$kb_shared_dir/stderr.log"
-kb_shared_pg_isready="$kb_shared_dir/pg-isready.log"
-kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
-    AIMEE_HOME="$kb_shared_dir/home" \
-    AIMEE_DB2_PG_BIN="$kb_shared_dir/pgbin" \
-    PG_ISREADY_LOG="$kb_shared_pg_isready" \
-    sh ../deploy/container/aimee-kb-entrypoint.sh \
-    managed-server-identity 2>"$kb_shared_stderr" || true)
-rm -rf "$kb_entrypoint_test_dir"
-if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
-    grep -q -- '--username=aimee' "$kb_shared_pg_isready" &&
-    grep -q -- '--dbname=postgres' "$kb_shared_pg_isready" &&
-    ! grep -Eq 'initdb-must-not-run|module-supervisor-must-not-run' "$kb_shared_stderr"; then
-    pass "KB one-shot reuses the running cluster with an explicit database identity"
-else
-    fail "KB entrypoint did not reuse the running cluster cleanly ($kb_shared_output, pg_isready=$(tr '\n' ' ' <"$kb_shared_pg_isready"), stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
-fi
-rm -rf "$kb_shared_dir"
-
-# pg_ctl --wait defaults to a 60s deadline, and crash recovery after an unclean
-# stop routinely exceeds it: fsyncing the data directory alone measured 65s on a
-# 27k-vector corpus. Timing out makes the entrypoint exit, `restart:
-# unless-stopped` start the container again, and recovery replay FROM SCRATCH --
-# a livelock where every attempt is killed at a deadline it could never meet.
-# Assert the timeout is raised, and raised BEFORE the start it has to govern.
-kb_pgctltimeout_line=$(grep -nE '^[[:space:]]+export PGCTLTIMEOUT=' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
-kb_pgctl_start_line=$(grep -nF '"$PGBIN/pg_ctl" --pgdata="$PGDATA" --wait --silent' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
-kb_pgctltimeout_default=$(sed -n 's/.*export PGCTLTIMEOUT="\${AIMEE_DB2_PGCTLTIMEOUT:-\([0-9]*\)}".*/\1/p' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1)
-if [ -n "$kb_pgctltimeout_line" ] && [ -n "$kb_pgctl_start_line" ] &&
-    [ -n "$kb_pgctltimeout_default" ] &&
-    [ "$kb_pgctltimeout_line" -lt "$kb_pgctl_start_line" ] &&
-    [ "$kb_pgctltimeout_default" -gt 60 ]; then
-    pass "KB entrypoint waits past pg_ctl's 60s default so crash recovery can finish"
-else
-    fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
-fi
-
-# An ordinary docker stop/restart must terminate the supervising shell after it
-# forwards the signal and must stop embedded PostgreSQL before Docker's timeout
-# escalates to SIGKILL. Merely trapping TERM without exiting returns to the
-# monitor loop and makes every routine restart depend on WAL recovery.
-if grep -qF 'shutdown_embedded() {' ../deploy/container/aimee-kb-entrypoint.sh &&
-   grep -qF 'trap - EXIT HUP INT TERM' ../deploy/container/aimee-kb-entrypoint.sh &&
-   grep -qF "trap 'shutdown_embedded; exit 0' HUP INT TERM" ../deploy/container/aimee-kb-entrypoint.sh; then
-    pass "KB entrypoint makes signal-driven embedded PostgreSQL shutdown terminal"
-else
-    fail "KB entrypoint can return to its monitor loop after Docker requests shutdown"
+    fail "KB launcher bypasses the canonical entrypoint"
 fi
 
 # The export path starts the same cluster in a stopped container, so it is
@@ -321,36 +161,6 @@ if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
     pass "server image Vault-ingests and scrubs before any unrelated child or PID 1 subreaper"
 else
    fail "server image must seal and scrub credentials before spawning unrelated children"
-fi
-
-# The KB entrypoint has the same invariant. In particular, it must not seed a
-# config, initialize PostgreSQL, or pipe environment values through text tools
-# before the Vault bootstrap and parent-environment scrub have completed.
-kb_vault_bootstrap_line=$(grep -nF 'aimee-kb --bootstrap-vault-env' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
-kb_credential_unset_line=$(grep -nF 'unset "$_secret_name"' \
-    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
-kb_clean_reexec_first=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
-kb_clean_reexec_last=$(grep -nF 'exec /bin/sh "$0" --aimee-internal-vault-bootstrapped-' \
-    ../deploy/container/aimee-kb-entrypoint.sh | tail -1 | cut -d: -f1)
-kb_credential_reexec_condition=$(grep -nF 'if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then' \
-    ../deploy/container/aimee-kb-entrypoint.sh | cut -d: -f1)
-kb_first_unrelated_child_line=$(grep -nF 'mkdir -p "$AIMEE_HOME"' \
-    ../deploy/container/aimee-kb-entrypoint.sh | head -1 | cut -d: -f1)
-if [ -n "$kb_vault_bootstrap_line" ] && [ -n "$kb_credential_unset_line" ] &&
-   [ -n "$kb_clean_reexec_first" ] && [ -n "$kb_clean_reexec_last" ] &&
-   [ -n "$kb_credential_reexec_condition" ] &&
-   [ -n "$kb_first_unrelated_child_line" ] &&
-   [ "$kb_vault_bootstrap_line" -lt "$kb_credential_unset_line" ] &&
-   [ "$kb_credential_unset_line" -lt "$kb_clean_reexec_first" ] &&
-   [ "$kb_clean_reexec_last" -lt "$kb_first_unrelated_child_line" ] &&
-   [ "$kb_credential_unset_line" -lt "$kb_first_unrelated_child_line" ] &&
-   ! grep -qF 'export AIMEE_DB2_URL' ../deploy/container/aimee-kb-entrypoint.sh &&
-   ! grep -qF 'env | sed' ../deploy/container/aimee-kb-entrypoint.sh; then
-    pass "KB image Vault-ingests, scrubs, and re-execs before any unrelated child"
-else
-    fail "KB image must seal, scrub, and clean-reexec before spawning unrelated children"
 fi
 
 # Core images can contain request credentials. Disable them in the supervising
@@ -1538,13 +1348,13 @@ _group_dynlink() {
                 fi
             done
         fi
-        # KB owns DB2 only (incl. pgvector): libpq yes, sqlite3 no.
+        # KB reaches its PostgreSQL provider over the bus; no database driver is linked.
         if ldd "$DLKB" | grep -q 'libsqlite3'; then
             fail "aimee-kb: libsqlite3 linked into DB2-only kb"
             dl_fail=1
         fi
-        if ! ldd "$DLKB" | grep -q 'libpq'; then
-            fail "aimee-kb: libpq not dynamically linked"
+        if ldd "$DLKB" | grep -q 'libpq'; then
+            fail "aimee-kb: native libpq driver bypasses the PostgreSQL module"
             dl_fail=1
         fi
         if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'db1_|sqlite3_'; then

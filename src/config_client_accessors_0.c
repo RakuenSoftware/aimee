@@ -3,18 +3,6 @@
 #include "config_client.h"
 #include <stdio.h>
 
-int config_db2_pool_size(void)
-{
-   double value = 0;
-   (void)config_client_read_number("db2_pool_size", &value);
-   return (int)value;
-}
-
-int config_set_db2_pool_size(int value)
-{
-   return config_client_set_number("db2_pool_size", (double)value);
-}
-
 int config_memory_maintenance_summarize_enabled(void)
 {
    double value = 0;

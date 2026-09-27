@@ -14,10 +14,10 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/db2/c/code_project_lifecycle.h"
-#include "modules/db2/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
-#include "modules/db2/c/cross_repo_classify.h"
-#include "modules/db2/c/lifecycle.h" /* db2_is_initialized */
+#include "modules/kb/c/code_project_lifecycle.h"
+#include "modules/kb/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
+#include "modules/kb/c/cross_repo_classify.h"
+#include "modules/kb/c/lifecycle.h" /* db2_is_initialized */
 #include "kb_reqctx.h"
 
 #include <stdio.h>

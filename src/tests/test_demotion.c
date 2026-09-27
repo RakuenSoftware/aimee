@@ -15,9 +15,9 @@
 #include <string.h>
 #include "demotion.h"
 #include "json_fluent.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "support/json_canonical.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
 

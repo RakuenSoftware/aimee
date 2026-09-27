@@ -28,15 +28,15 @@
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_scope.h"
 
-#include "modules/db2/c/db2.h" /* db2_lease_release_idle */
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/canonical_index.h"
-#include "modules/db2/c/kb_runtime_state.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/kb/c/db2.h" /* db2_lease_release_idle */
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/canonical_index.h"
+#include "modules/kb/c/kb_runtime_state.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/lifecycle.h"
+#include "modules/kb/c/pgvec_kb_service.h"
 #include "code_collect.h" /* git_resolve_default_sha, code_index_source_is_worktree */
 #include "kb_doc_hash.h"
 #include "integrity.h"

@@ -9,7 +9,7 @@
 #include "learning_bundle.h"
 
 #include "aimee.h"
-#include "modules/db2/c/evidence_vectors.h"
+#include "modules/kb/c/evidence_vectors.h"
 
 #include <math.h>
 #include <stdio.h>

@@ -232,4 +232,22 @@ for role in server kb; do
     cmp -s "$target" "$tmp/edited-grant" && ok "$role pre-record edit retained" || bad "$role pre-record edit overwritten"
 done
 
+echo "11. KB retires Db2 identity without expanding PostgreSQL policy"
+setup
+mkdir -p "$AIMEE_HOME/modules.d/kb"
+old="$AIMEE_HOME/modules.d/kb/db2.grant"
+write_module_grant "$old" 29 /retired/aimee-module-db2 11521
+cp "$old" "$tmp/retired-policy"
+write_module_grant "$AIMEE_MODULE_GRANT_SRC/postgres.grant" 28 "$real_exe" 11265,11266,11267
+sh "$tmp/kb-seeding.sh" 2>"$tmp/grant-warning"
+[ ! -e "$old" ] && ok "retired grant inactive" || bad "retired grant still blocks startup"
+archive=$(find "$AIMEE_HOME/modules.d/kb/.retired" -type f)
+cmp -s "$tmp/retired-policy" "$archive" && ok "retired policy preserved" || bad "retired policy lost"
+cmp -s "$AIMEE_MODULE_GRANT_SRC/postgres.grant" "$AIMEE_HOME/modules.d/kb/postgres.grant" \
+    && ok "PostgreSQL receives only its own capabilities" || bad "retired capabilities transferred"
+# A reused filename with another principal is not the retired identity.
+write_module_grant "$old" 240 "$real_exe" 65537
+sh "$tmp/kb-seeding.sh" 2>"$tmp/grant-warning"
+[ -f "$old" ] && ok "unrelated principal preserved" || bad "filename mistaken for identity"
+
 exit "$fail"

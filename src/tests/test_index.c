@@ -6,11 +6,11 @@
 #include <utime.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/db2.h"
 #include "canonical_index.h"
 #include "entity_edges.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/db2_internal.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
 #include "util.h"

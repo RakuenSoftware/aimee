@@ -22,7 +22,7 @@
 #include "artifacts.h"
 #include "evidence_vectors.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "modules/learning/learning_bundle.h"
 
 /* Stub embedder: query vector is the unit basis e0 = [1,0,0,...]. Cosine with a

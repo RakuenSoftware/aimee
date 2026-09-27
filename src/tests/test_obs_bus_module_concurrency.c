@@ -15,6 +15,7 @@
  *      exhaustion is reported as a deadline instead of becoming a hang. */
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,6 +108,32 @@ static void test_expired_deadline_does_not_block(void)
    assert(elapsed < 1000000000ULL);
 }
 
+/* A production KB durability sink reaches PostgreSQL through this same bus.
+ * Calling it on the pump thread makes even a typed refusal time out. */
+static atomic_int durable_ready;
+static atomic_int durable_writes;
+static int durable_module_sink(const char *role, const char *principal, const char *action,
+                               const char *subject, const char *verdict, const char *detail,
+                               void *context)
+{
+   (void)role;
+   (void)principal;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+   (void)context;
+   if (!atomic_load(&durable_ready))
+      return -1;
+   char reply[16];
+   uint32_t length = 0;
+   assert(obs_bus_module_call(11267, 3, 1, now_ns() + 1000000000ULL, "probe", 5, reply,
+                              sizeof reply, &length, NULL,
+                              NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   if (strcmp(action, "test.provider.audit") == 0)
+      atomic_fetch_add(&durable_writes, 1);
+   return 0;
+}
+
 int main(void)
 {
    printf("obs_bus_module_concurrency:\n");
@@ -119,16 +146,25 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
+   assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
    {
       fprintf(stderr, "FAIL: obs_bus_start\n");
       return 1;
    }
 
+   obs_bus_emit_durable_event("test.provider.audit", "startup", "ok", "{}");
    test_calls_overlap();
    test_expired_deadline_does_not_block();
 
+   atomic_store(&durable_ready, 1);
+   obs_bus_flush();
+   assert(atomic_load(&durable_writes) == 1);
+   for (int i = 0; i < 8; i++)
+      obs_bus_emit_durable_event("test.provider.audit", "shutdown", "ok", "{}");
    obs_bus_stop();
+   assert(atomic_load(&durable_writes) == 9);
+   assert(obs_bus_dropped() == 0);
    printf("ok\n");
    return 0;
 }

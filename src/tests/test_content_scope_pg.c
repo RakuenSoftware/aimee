@@ -35,11 +35,11 @@
  *     each sees only their own project in every covered table, and a caller-less
  *     search sees neither.
  */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/project.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/db2_tenant.h"
+#include "modules/kb/c/project.h"
 #include "cJSON.h"
 #include "kb.h"
 #include "kb_identity.h"

@@ -6,13 +6,13 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "kb_service_backend.h"
 #include "memory.h"
-#include "../modules/db2/c/curiosity.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/db2_internal.h"
+#include "../modules/kb/c/curiosity.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/db2_internal.h"
 #include "support/store_module_fixture.h"
 
 /* Each test block needs the curiosity_items, memories, memory_directives,

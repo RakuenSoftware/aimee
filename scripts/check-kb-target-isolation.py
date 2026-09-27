@@ -24,22 +24,22 @@ ALLOWED_TRANSPORT_SHIMS = {
 
 ALLOWED_AGENT_NAMED_SOURCES = {
     "kb_service_agent.c",
-    "modules/db2/c/agent_hints.c",
-    "modules/db2/c/agent_outcomes.c",
+    "modules/kb/c/agent_hints.c",
+    "modules/kb/c/agent_outcomes.c",
     "kb/db2_adapters/kb_service_backend_agent.c",
     "kb/db2_adapters/kb_service_backend_runtime.c",
-    "modules/db2/c/server_registry.c",
+    "modules/kb/c/server_registry.c",
 }
 
 STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_custody.c",
-    "modules/db2/c/management_status_key.c",
-    "modules/db2/c/management_status_runtime.c",
+    "modules/kb/c/management_status_key.c",
+    "modules/kb/c/management_status_runtime.c",
 }
 
 STATUS_PROVISIONER_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_provision.c",
-    "modules/db2/c/management_status_provision.c",
+    "modules/kb/c/management_status_provision.c",
 }
 
 STATUS_AUTHORITY_PRIVATE_SOURCES = (
@@ -211,8 +211,8 @@ def check_makefile(makefile: Path) -> list[str]:
     l_kb = make_var(makefile, "L_KB")
     if "-lsqlite3" in l_kb:
         violations.append("L_KB links sqlite3; aimee-kb must not link DB1/sqlite")
-    if "-lpq" not in l_kb and "libpq" not in l_kb:
-        violations.append("L_KB does not link libpq; aimee-kb must own DB2/Postgres")
+    if "-lpq" in l_kb or "libpq" in l_kb or "PQ_LIB" in l_kb:
+        violations.append("L_KB links libpq; PostgreSQL connections must belong to the provider")
 
     return violations
 
@@ -278,7 +278,7 @@ def plant_test() -> int:
             "DB2_SRCS = db2/db2_init.c\n"
             "DB2_PG_SRCS = db2/db_postgres.c\n"
             "KB_PLATFORM_OBJS = build/obj/posix/agent_bridge.o build/obj/delegate_driver.o\n"
-            "L_KB = -lsqlite3 -lm\n",
+            "L_KB = -lsqlite3 -lpq -lm\n",
             encoding="utf-8",
         )
         for src in (
@@ -324,7 +324,7 @@ def plant_test() -> int:
             "CMakeLists.txt references missing source ${AIMEE_SRC_DIR}/missing_from_cmake.c",
             "KB_PLATFORM_OBJS includes forbidden object build/obj/delegate_driver.o",
             "L_KB links sqlite3; aimee-kb must not link DB1/sqlite",
-            "L_KB does not link libpq; aimee-kb must own DB2/Postgres",
+            "L_KB links libpq; PostgreSQL connections must belong to the provider",
             "CMake aimee-kb target includes forbidden source db1/db.c",
             "CMake aimee-kb target links SQLite::SQLite3",
         }

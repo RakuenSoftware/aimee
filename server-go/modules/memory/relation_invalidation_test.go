@@ -90,7 +90,7 @@ func TestRelationInvalidationDurableConsumer(t *testing.T) {
 	}
 
 	// Reapplying the migration repairs stale/default grants on private progress.
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

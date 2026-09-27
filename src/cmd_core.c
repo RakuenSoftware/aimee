@@ -7,7 +7,7 @@
 #include "config_database.h"
 #include "db1_client/db1.h"
 #include <aimee/delegates/delegate_credentials.h>
-#include "modules/db2/c/lifecycle.h"
+#include "modules/kb/c/lifecycle.h"
 #include "kb_client.h"
 #include <aimee/workspace/workspace.h>
 #include "commands.h"
@@ -28,34 +28,16 @@
 #include <ctype.h>
 #include <time.h>
 
-/* Bootstrap the DB2 postgres connection during `aimee init`. This is the
- * non-interactive "is the database reachable + healthy" gate documented
- * in docs/STORAGE_TIERS.md. We do not provision
- * a postgres role/database here (those typically need superuser privileges
- * and platform-specific commands); we only run db2_init against the
- * configured db2_url and report a clear remediation if it fails.
- *
- * Returns 0 when DB2 was reachable and pg_trgm is installed, or when
- * db2_url is unset (operator has opted out of DB2 wiring).
- * Returns -1 when DB2 was configured but unreachable / unhealthy. */
+/* Apply KB-owned schema through the PostgreSQL provider's migration role. */
 static int bootstrap_db2(int json_output)
 {
-   char db2_url[2048] = "";
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      if (!json_output)
-         fprintf(stderr, "Note: AIMEE_DB2_URL is not available from the runtime secret store; "
-                         "the project/workspace knowledge tier is disabled.\n");
-      return 0;
-   }
-
    db2_set_embedding_dim_default(config_embedder_dims_default());
    db2_set_embedding_dim(config_embedder_dims_current());
    db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
    /* unified-llm-container §2: activate the model-identity drift guard with the
     * configured embedder identity (empty => no-op, back-compat). */
    db2_set_embedder_model_id(config_embedder_model());
-   if (db2_init(db2_url) == 0)
+   if (db2_init_migration() == 0)
    {
       int schema_ok = 0;
       int have_pg_trgm = 0;
@@ -64,11 +46,9 @@ static int bootstrap_db2(int json_output)
          if (!json_output)
             fprintf(stderr, "DB2 reachable: schema applied, pg_trgm installed.\n");
          db2_shutdown();
-         runtime_secret_wipe(db2_url, sizeof(db2_url));
          return 0;
       }
       db2_shutdown();
-      runtime_secret_wipe(db2_url, sizeof(db2_url));
       if (!json_output)
          fprintf(stderr, "DB2 reachable but health probe failed (schema=%d trgm=%d).\n", schema_ok,
                  have_pg_trgm);
@@ -82,14 +62,13 @@ static int bootstrap_db2(int json_output)
       fprintf(stderr, "DB2 init failed.\n"
                       "Common fixes:\n"
                       "  - Ensure the postgres server is running and reachable from this host.\n"
-                      "  - Ensure the role and database in db2_url exist:\n"
+                      "  - Ensure the PostgreSQL runtime and migration roles exist:\n"
                       "      CREATE ROLE aimee LOGIN PASSWORD '...';\n"
                       "      CREATE DATABASE aimee OWNER aimee;\n"
                       "  - Connect as a privileged role and install the trigram extension:\n"
                       "      \\c aimee\n"
                       "      CREATE EXTENSION pg_trgm;\n"
                       "  - Re-run `aimee init` once the above succeeds.\n");
-   runtime_secret_wipe(db2_url, sizeof(db2_url));
    return -1;
 }
 
@@ -182,7 +161,7 @@ void cmd_init(app_ctx_t *ctx, int argc, char **argv)
       cJSON *root = cJSON_CreateObject();
       cJSON_AddStringToObject(root, "db1_path", config_db1_path());
       cJSON_AddBoolToObject(root, "db2_ready", db2_ok);
-      cJSON_AddBoolToObject(root, "db2_configured", runtime_secret_has("AIMEE_DB2_URL"));
+      cJSON_AddBoolToObject(root, "postgres_configured", runtime_secret_has("AIMEE_STORE_URL"));
       emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
       cJSON_Delete(root);
    }

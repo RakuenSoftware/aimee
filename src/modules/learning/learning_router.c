@@ -1,9 +1,9 @@
 /* learning_router.c: explicit-signal capture, proposal gate, and sink routing. */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/collab_rules.h"
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/collab_rules.h"
+#include "modules/kb/c/db2_learning.h"
 #include "dogfood.h"
 #include "cJSON.h"
 #include "integrity.h"

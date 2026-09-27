@@ -7,10 +7,10 @@
 
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "platform_test_util.h"
-#include "modules/db2/c/entity_edges.h"
+#include "modules/kb/c/entity_edges.h"
 
 static char g_db_path[512];
 

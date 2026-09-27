@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "notes.h"
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"

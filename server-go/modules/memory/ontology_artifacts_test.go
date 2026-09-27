@@ -43,7 +43,7 @@ func TestOntologySeedPostgres(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set AIMEE_MEMORY_EVAL_URL")
 	}
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

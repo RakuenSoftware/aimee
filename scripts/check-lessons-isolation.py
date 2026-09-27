@@ -19,16 +19,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # these means the ledger has leaked into normal recall or the prune schedule.
 GUARDED = [
     "server-go/modules/memory/data.go",            # shared scoped memory CRUD + recall
-    "server-go/modules/db2/memory_pg.go",
-    "server-go/modules/db2/memory_lifecycle.go",
-    "server-go/modules/db2/memory_sweeps.go",
-    "server-go/modules/db2/memory_aggregates.go",
     "server-go/modules/memory/fact_recall.go",
     "server-go/modules/memory/assertion_search.go",
     "server-go/modules/memory/typed_context.go",
-    "src/modules/db2/c/kb_maintenance.c",          # decay / prune sweep
+    "src/modules/kb/c/kb_maintenance.c",          # decay / prune sweep
     "server-go/modules/memory/fact_maintenance.go",
-    "src/modules/db2/c/demotion.c",
+    "src/modules/kb/c/demotion.c",
 ]
 
 # A `lessons_` token that denotes a table reference (SQL identifier), not an

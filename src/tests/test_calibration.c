@@ -18,8 +18,8 @@
 #include <string.h>
 #include "calibration.h"
 #include "artifacts.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
 #include "kb_calibrate.h"

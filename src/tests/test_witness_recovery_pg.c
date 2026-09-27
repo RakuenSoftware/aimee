@@ -35,11 +35,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_witness_checkpoint.h"
-#include "modules/db2/c/db2_witness_emit.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db2_witness_checkpoint.h"
+#include "modules/kb/c/db2_witness_emit.h"
+#include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */

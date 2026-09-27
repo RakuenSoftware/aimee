@@ -17,11 +17,11 @@
 #include "anti_patterns.h"
 #include "evidence_vectors.h"
 #include "feature_rows.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_internal.h"
 #include "support/embedding_literal.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/db_postgres.h"
-#include <aimee/db2/host_contracts.h>
+#include "modules/kb/c/db2_test_shim.h"
+#include "modules/kb/c/db_postgres.h"
+#include <aimee/kb/host_contracts.h>
 #include "cJSON.h"
 #include "kb_mdl.h"
 #include "modules/learning/learning_evidence.h"

@@ -190,11 +190,11 @@ static void test_changes_table_canonicalizes_schema_paths(void)
 
    cJSON *packets = arr(plan, "packets");
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
-                           "src/modules/db2/c/schema_sqlite.sql"));
+                           "src/modules/kb/c/schema_sqlite.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "read_context"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_changes_table_canonicalizes_schema_paths\n");
 }
@@ -239,7 +239,7 @@ static void test_schema_path_canonicalization_ignores_near_misses(void)
                           "| File | Change |\n"
                           "|------|--------|\n"
                           "| `my_src/db2/db2_schema.sql` (new) | Leave unrelated path alone. |\n"
-                          "| `src/modules/db2/c/schema.sql` | Already canonical. |\n"
+                          "| `src/modules/kb/c/schema.sql` | Already canonical. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
                           "- [ ] Only exact legacy schema paths are rewritten.\n";
@@ -253,7 +253,7 @@ static void test_schema_path_canonicalization_ignores_near_misses(void)
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
                            "my_src/db2/db2_schema.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_schema_path_canonicalization_ignores_near_misses\n");
 }

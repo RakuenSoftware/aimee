@@ -1,4 +1,4 @@
-#include "modules/db2/c/vault_operator_status_runtime.h"
+#include "modules/kb/c/vault_operator_status_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -110,30 +110,7 @@ int main(void)
    db2_vault_operator_runtime_t runtime;
    db2_vault_operator_status_t status;
    char error[128] = "";
-   int tcp = -1;
-   assert(db2_vault_operator_conninfo_allowed_for_test("host=/run/postgresql dbname=aimee", &tcp) ==
-              0 &&
-          tcp == 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=192.0.2.10 sslmode=verify-full dbname=aimee", &tcp) == 0 &&
-          tcp == 1);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=db.example.test hostaddr=192.0.2.10 sslmode=verify-full dbname=aimee", &tcp) ==
-              0 &&
-          tcp == 1);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=db.example.test sslmode=verify-full dbname=aimee", &tcp) != 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=192.0.2.10 sslmode=require dbname=aimee", &tcp) != 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=192.0.2.10,192.0.2.11 sslmode=verify-full dbname=aimee", &tcp) != 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=/run/postgresql hostaddr=127.0.0.1 dbname=aimee", &tcp) != 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "hostaddr=127.0.0.1 sslmode=verify-full dbname=aimee", &tcp) != 0);
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=db.example.test hostaddr=address.example sslmode=verify-full dbname=aimee",
-              &tcp) != 0);
+   /* Transport policy cases live with the PostgreSQL provider in operator_policy_test.go. */
    assert(db2_vault_operator_runtime_open_with_vtable(&runtime, "postgres://operator", &ops, NULL,
                                                       error, sizeof(error)) == 0);
    base(1);

@@ -6,7 +6,7 @@
 /* agent_policy.c: validation, policy, trace, metrics, env, manifest, contract */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/tool_registry.h"
+#include "modules/kb/c/tool_registry.h"
 #include "agent.h"
 #include <aimee/tools/agent_tools.h>
 #include "kb_client.h"

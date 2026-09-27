@@ -653,25 +653,6 @@
       ]
     },
     {
-      "id": "db2",
-      "classification": "optional",
-      "repository": "https://github.com/RakuenSoftware/aimee-module-db2.git",
-      "ref": "v0.3.0",
-      "version": "0.3.0",
-      "commit": "6950c838030fc7a72557671e8106fed547f987f6",
-      "execution": "process",
-      "placements": [
-        "kb"
-      ],
-      "source_sha256": "521777b6613e7e61e31bd72993e3d7e59a6ce077b4de03b6b4d52718b754b9e6",
-      "runtime": "c",
-      "principal_class": 1,
-      "principal_ref": 29,
-      "serve": [
-        11521
-      ]
-    },
-    {
       "id": "observability",
       "classification": "optional",
       "repository": "https://github.com/RakuenSoftware/aimee-module-observability.git",

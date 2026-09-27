@@ -29,7 +29,7 @@ The hard part, and the only part worth designing carefully, is this:
 > **Which of the things Aimee persists contain data about a person, and where
 > does the derived copy live?**
 
-Aimee persists a lot. `src/modules/db2/c/schema.sql` declares **241 tables**
+Aimee persists a lot. `src/modules/kb/c/schema.sql` declares **241 tables**
 (the SQLite mirror declares 237). DB1 is a separate store behind its own module
 boundary, and its table count **could not be established by inspection at all**:
 there is no single schema file to count, which is itself an instance of the
@@ -69,7 +69,7 @@ Verified against `a397223849`.
 | --- | --- | --- |
 | Per-memory removal, split by authority | `memory_delete_as` (`memory_core_crud.c:621`): MODEL authority retires (row survives as `key#vN`, `valid_until` stamped, readable via `memory_fact_history`); USER authority hard-deletes through `memory_delete` (`:632`), which wipes `memory_provenance`, drops the record's own and every unit-scoped pgvector point, and deletes the row | **exists**: the right primitive, at the wrong granularity for a subject |
 | Destructive-edit gate | `memory_authority_t` (`src/headers/memory_authority.h`) plus `CAP_MEMORY_ADMIN` (`headers/server.h:156`) | **exists**: a model cannot destroy what a user stated |
-| Cascade fan-out | **23** `REFERENCES memories(id) ON DELETE CASCADE` children in `src/modules/db2/c/schema.sql`: chunks, units, aliases, entities, episodes, relations, summaries, temporal refs, event frames, scopes, workspaces, links, conflicts and more | **exists**: derived rows follow the parent, **if** the parent is found |
+| Cascade fan-out | **23** `REFERENCES memories(id) ON DELETE CASCADE` children in `src/modules/kb/c/schema.sql`: chunks, units, aliases, entities, episodes, relations, summaries, temporal refs, event frames, scopes, workspaces, links, conflicts and more | **exists**: derived rows follow the parent, **if** the parent is found |
 | Scope columns | `memories.scope_type` / `memories.scope_value` (default `global` / `_global`), plus `memory_workspaces`, `memory_scopes`, `memory_entities`, `entity_profiles.entity_id` | **exists**: candidate subject-key paths |
 | Persisted write provenance | `memories.provenance_category`, fail-closed to `agent_message` (`schema.sql:605`), written from the calling surface's authority via `MEMORY_PROVENANCE_FOR` (`memory_core_crud.c:493`) | **exists and is populated** |
 | Lineage | `memory_lineage(object_type, object_id, source_kind, source_ref, …)` | **exists**: how a record entered, per assertion |

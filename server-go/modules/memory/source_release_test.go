@@ -570,7 +570,7 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	for _, name := range names {
 		exec(admin, "CREATE TABLE "+name+"(id integer PRIMARY KEY,value integer NOT NULL DEFAULT 0,use_count integer NOT NULL DEFAULT 0)")
 	}
-	raw, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	raw, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

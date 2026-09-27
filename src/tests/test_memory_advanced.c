@@ -8,15 +8,15 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "support/test_time.h"
-#include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
-#include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
-#include "aimee/db2/graph_kinds.h"
-#include "../modules/db2/c/bandit.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "modules/kb/c/memory_lifecycle.h" /* db2_memory_valid_at */
+#include "modules/kb/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
+#include "aimee/kb/graph_kinds.h"
+#include "../modules/kb/c/bandit.h"
+#include "../modules/kb/c/db2_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static void reset_db(void)
 {

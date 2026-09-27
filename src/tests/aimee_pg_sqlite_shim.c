@@ -33,8 +33,8 @@
 #endif
 
 #include "db_postgres.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_internal.h"
+#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/db2_internal.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -681,6 +681,22 @@ void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
    return db;
 }
 
+void *aimee_pg_open_runtime(char *error, size_t capacity)
+{
+   return aimee_pg_open("shim", error, capacity);
+}
+void *aimee_pg_open_configured(char *error, size_t capacity)
+{
+   return aimee_pg_open_runtime(error, capacity);
+}
+void *aimee_pg_open_migration(char *error, size_t capacity)
+{
+   return aimee_pg_open_runtime(error, capacity);
+}
+void aimee_pg_discard(void *connection)
+{
+   aimee_pg_close(connection);
+}
 void aimee_pg_close(void *pg_conn)
 {
    /* Test owns the sqlite lifecycle. */

@@ -1,9 +1,9 @@
 /* test_kb_audit_worm.c: the KB producer contract against the DB2 SQLite shim.
  * The producer owns an immutable outbox only; the separately tested worker
  * writes the shared audit_worm SQLite chain. */
-#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/kb/c/db2_test_shim.h"
 #include "artifacts.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/db2_internal.h"
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 

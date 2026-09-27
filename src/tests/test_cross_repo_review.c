@@ -5,10 +5,10 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/cross_repo_review.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2_test_shim.h"
+#include "../modules/kb/c/cross_repo_review.h"
+#include "../modules/kb/c/db2.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static int up(const char *sym, const char *caller, const char *definer, double score, int qmax)
 {

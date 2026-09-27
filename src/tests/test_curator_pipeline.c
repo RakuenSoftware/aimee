@@ -14,7 +14,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/db2_test_shim.h"
 #include "kb_curator_resolve_entities.h"
 #include "kb_curator_index_code_unit.h"
 #include "kb_curator_link_artifacts.h"

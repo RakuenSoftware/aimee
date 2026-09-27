@@ -3,9 +3,9 @@
 #include "kb_learning_version.h"
 
 #include "aimee.h"
-#include "modules/db2/c/evidence_vectors.h"
-#include "modules/db2/c/kb_runtime_state.h"
-#include "modules/db2/c/learning_synth_ops.h"
+#include "modules/kb/c/evidence_vectors.h"
+#include "modules/kb/c/kb_runtime_state.h"
+#include "modules/kb/c/learning_synth_ops.h"
 #include "log.h"
 
 #include <string.h>

@@ -9,8 +9,8 @@
 #include "json_fluent.h"
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <stdio.h>
 #include <stdlib.h>

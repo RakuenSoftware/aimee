@@ -14,8 +14,8 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else "schema_data.h"
 ROOT = Path(__file__).resolve().parent
 
 SCHEMAS = [
-    ("modules/db2/c/schema.sql", "AIMEE_DB2_SCHEMA_SQL"),
-    ("modules/db2/c/schema_sqlite.sql", "AIMEE_DB2_SCHEMA_SQLITE_SQL"),
+    ("modules/kb/c/schema.sql", "AIMEE_DB2_SCHEMA_SQL"),
+    ("modules/kb/c/schema_sqlite.sql", "AIMEE_DB2_SCHEMA_SQLITE_SQL"),
 ]
 
 lines = [

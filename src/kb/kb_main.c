@@ -8,14 +8,14 @@
 #include "config_client.h"
 #include "config_database.h"
 #include "css_render_cmd.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/db2.h"
 #include "kb_witness_cadence.h"
 #include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/db2_tenant.h"
 #include "team.h"
 #include "membership.h"
 #include "kb_insights_util.h"
@@ -44,15 +44,15 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "modules/db2/c/memory_vectors.h"
-#include "modules/db2/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
-#include "kb/kb_vault_policy.h"     /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "modules/kb/c/memory_vectors.h"
+#include "modules/kb/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h"    /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
 #include "kb/kb_vault_operator_runtime.h"
 #include "kb_vault_operator_status.h"
 #include "kb_vault_tpm_runtime_lock.h"
-#include "modules/db2/c/kb_audit_worm.h"
-#include "modules/db2/c/vault_operator_status_runtime.h"
+#include "modules/kb/c/kb_audit_worm.h"
+#include "modules/kb/c/vault_operator_status_runtime.h"
 #include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
@@ -322,9 +322,6 @@ static int kb_cmd_vault(int argc, char **argv)
    return client;
 }
 
-#define AIMEE_DB2_BOOTSTRAP_DB  "aimee_shared"
-#define AIMEE_DB2_BOOTSTRAP_URL "postgres:///aimee_shared"
-
 #ifndef _WIN32
 static void kb_signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
@@ -366,269 +363,44 @@ static void kb_install_signal_handlers(void)
 }
 #endif
 
-static void bootstrap_add_step(cJSON *steps, const char *step, int rc, const char *output)
+/* Reapply host-owned embedding policy after an isolated migration session is
+ * closed: lifecycle shutdown deliberately clears these process-local values. */
+static void kb_configure_knowledge_store(void)
 {
-   if (!steps)
-      return;
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return;
-   cJSON_AddStringToObject(obj, "step", step ? step : "");
-   cJSON_AddNumberToObject(obj, "exit_code", rc);
-   if (output && output[0])
-   {
-      char snippet[512];
-      snprintf(snippet, sizeof(snippet), "%s", output);
-      cJSON_AddStringToObject(obj, "output", snippet);
-   }
-   cJSON_AddItemToArray(steps, obj);
+   db2_set_embedding_dim_default(config_embedder_dims_default());
+   db2_set_embedding_dim(config_resolve_embedder_dims_current());
+   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
+   db2_set_embedder_model_id(config_embedder_model());
+   embedder_probe_register(config_embedder_command_current(NULL));
 }
 
-static int bootstrap_run_cmd(cJSON *steps, const char *step, const char *cmd)
+/* The owner credential stays in the PostgreSQL module. Bootstrap applies only
+ * KB-owned schema; normal service traffic acquires the separate runtime role. */
+static int kb_bootstrap_postgres_resolve(cJSON *resp)
 {
-   int rc = -1;
-   /* Run with stdin from /dev/null: createdb/psql/sudo must never block waiting
-    * on a tty prompt. A blocked child orphans, and the setuid-root `sudo` steps
-    * cannot be reaped by this non-root process, so they accumulate. */
-   char guarded[1152];
-   snprintf(guarded, sizeof(guarded), "%s </dev/null", cmd);
-   char *out = run_cmd(guarded, &rc);
-   bootstrap_add_step(steps, step, rc, out);
-   free(out);
-   return rc;
-}
-
-/* Single-flight + cooldown guard for the local-tools DB2 bootstrap (the sudo
- * createdb/createuser/psql steps). Those steps connect to Postgres and can
- * block on catalog locks; without a guard, every kb autostart re-issues them
- * and they pile up as orphaned, un-killable setuid-root `sudo` children
- * (observed: 4000+ stuck `sudo -n -u postgres createdb` processes exhausting PG
- * connection slots). Returns a held lock fd (>=0; caller releases it via
- * bootstrap_local_tools_end) to proceed; -1 to skip because another attempt
- * holds the lock or one ran within the cooldown window; -2 on guard-infra
- * failure (proceed once, unguarded) so a missing config dir never permanently
- * blocks provisioning. */
-#define DB2_BOOTSTRAP_COOLDOWN_SECS 300
-
-/* Shell preamble that bounds each provisioning step with coreutils `timeout`
- * when available. The single-flight guard caps concurrent attempts to one, but
- * a `createdb`/`psql` can still block server-side on a catalog lock; without a
- * bound that one attempt holds the lock indefinitely (and, pre-guard, piled up).
- * Sets $TMO; place "$TMO " immediately before the binary so `timeout` is its
- * direct parent (for sudo steps, sudo relays the signal to the child). */
-#define DB2_BOOTSTRAP_TMO "TMO=$(command -v timeout >/dev/null 2>&1 && echo 'timeout -k 5 30'); "
-#ifndef _WIN32
-static int bootstrap_local_tools_begin(void)
-{
-   /* The lock must be HOST-GLOBAL per user, not per-AIMEE_HOME: the local
-    * tools provision the same shared Postgres database (aimee_shared) on the
-    * host regardless of which config dir the process runs under. Keying the
-    * lock to config_default_dir() let processes with different homes — notably
-    * the many short-lived aimee-kb instances tests spin up under /tmp temp
-    * homes — each take their own lock and hammer the same DB concurrently, the
-    * exact runaway this guard exists to prevent. Key it to the uid + target DB
-    * in a host-global temp dir so every aimee process for this user serializes. */
-   const char *tmp = getenv("TMPDIR");
-   if (!tmp || !tmp[0])
-      tmp = "/tmp";
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee-db2-bootstrap-%u-%s.lock", tmp, (unsigned)getuid(),
-            AIMEE_DB2_BOOTSTRAP_DB);
-   /* O_EXCL first, so we can tell "we just created the lock" from "a previous
-    * attempt left it behind". This matters: open(O_CREAT) stamps a NEW file
-    * with the current time, so the cooldown check below saw `now - mtime == 0`
-    * and skipped — meaning the very FIRST bootstrap on a fresh host, the one
-    * case the fallback exists for, never ran. It only became reachable once the
-    * cooldown had expired, five minutes into a crash loop. */
-   int created = 1;
-   int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
-   if (fd < 0)
-   {
-      created = 0;
-      fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-   }
-   if (fd < 0)
-      return -2;
-   if (flock(fd, LOCK_EX | LOCK_NB) != 0)
-   {
-      close(fd); /* another bootstrap is in flight */
-      return -1;
-   }
-   struct stat st;
-   time_t now = time(NULL);
-   if (!created && fstat(fd, &st) == 0 && st.st_mtime > 0 &&
-       now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
-   {
-      flock(fd, LOCK_UN); /* attempted within the cooldown window — skip */
-      close(fd);
-      return -1;
-   }
-   (void)futimens(fd, NULL); /* stamp the attempt time; keep the lock held */
-   return fd;
-}
-static void bootstrap_local_tools_end(int lockfd)
-{
-   if (lockfd >= 0)
-   {
-      flock(lockfd, LOCK_UN);
-      close(lockfd);
-   }
-}
-#else
-static int bootstrap_local_tools_begin(void)
-{
-   return -2;
-}
-static void bootstrap_local_tools_end(int lockfd)
-{
-   (void)lockfd;
-}
-#endif
-
-static int bootstrap_db2_try_url(const char *url, cJSON *resp)
-{
-   if (!url || !url[0])
-      return -1;
-
-   /* Supply the width BEFORE db2_init, as the daemon and doctor do; bootstrap
-    * was the one path that skipped it, so first provisioning refused. */
    db2_set_embedding_dim_default(config_embedder_dims_default());
    db2_set_embedding_dim(config_embedder_dims_current());
-   if (db2_init(url) != 0)
-      return -1;
-
-   int schema_ok = 0;
-   int have_pg_trgm = 0;
-   int ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
-   db2_shutdown();
+   int initialized = db2_init_migration() == 0;
+   int schema_ok = 0, have_pg_trgm = 0;
+   int ok =
+       initialized && db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm;
+   if (initialized)
+      db2_shutdown();
+   cJSON_AddStringToObject(resp, "status", ok ? "ok" : "error");
+   cJSON_AddBoolToObject(resp, "knowledge_ready", ok);
    if (!ok)
-      return -1;
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddBoolToObject(resp, "knowledge_ready", 1);
-   cJSON_AddStringToObject(resp, "db2_url", url);
-   /* Database credentials belong to Vault.  The config module deliberately
-    * rejects this key, so bootstrap verifies the resolved secret without ever
-    * copying it into public configuration. */
-   cJSON_AddBoolToObject(resp, "config_saved", 0);
-   return 0;
+      cJSON_AddStringToObject(
+          resp, "message",
+          "PostgreSQL knowledge bootstrap failed; provision the PostgreSQL module's "
+          "runtime and migration credentials and run aimee init");
+   return ok ? 0 : 1;
 }
 
-static int bootstrap_db2_with_local_tools(cJSON *steps)
-{
-   int lockfd = bootstrap_local_tools_begin();
-   if (lockfd == -1)
-   {
-      bootstrap_add_step(
-          steps, "local_tools_guard", 0,
-          "skipped: a DB2 bootstrap is in progress or ran within the cooldown window");
-      return -1;
-   }
-
-   char *db = shell_quote(AIMEE_DB2_BOOTSTRAP_DB);
-   const char *user_env = getenv("USER");
-   if (!user_env || !user_env[0])
-      user_env = getenv("USERNAME");
-   if (!user_env || !user_env[0])
-      user_env = "aimee";
-   char *user = shell_quote(user_env);
-
-   char cmd[1024];
-
-   snprintf(cmd, sizeof(cmd), DB2_BOOTSTRAP_TMO "$TMO createdb %s 2>&1", db);
-   (void)bootstrap_run_cmd(steps, "createdb", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO
-            "$TMO psql -d %s -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>&1",
-            db);
-   int rc = bootstrap_run_cmd(steps, "create_extension", cmd);
-   if (rc == 0)
-   {
-      free(db);
-      free(user);
-      bootstrap_local_tools_end(lockfd);
-      return 0;
-   }
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres createuser --createdb %s 2>/dev/null "
-                              "|| true",
-            user);
-   (void)bootstrap_run_cmd(steps, "sudo_create_role", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres createdb -O %s %s 2>&1",
-            user, db);
-   (void)bootstrap_run_cmd(steps, "sudo_createdb", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres psql -d %s -v ON_ERROR_STOP=1 "
-                              "-c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>&1",
-            db);
-   rc = bootstrap_run_cmd(steps, "sudo_create_extension", cmd);
-
-   free(db);
-   free(user);
-   bootstrap_local_tools_end(lockfd);
-   return rc == 0 ? 0 : -1;
-}
-
-/* Resolve and bootstrap DB2 from the runtime-secret store. `resp` collects
- * step-level details (used by the init RPC; pass a
- * throwaway object when calling from startup). Returns 0 on success, 1 on
- * failure. */
-static int kb_bootstrap_db2_resolve(cJSON *resp)
-{
-   cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
-
-   /* AIMEE_DB2_URL is a credential-shaped value sourced exclusively from the
-    * runtime secret store. Public configuration never contains a database URL.
-    *
-    * `url` is a stable copy because try_url used to write the winner back through
-    * the buffer it was reading, and snprintf onto itself is undefined -- glibc
-    * truncated it to empty, leaving db2_init() with an empty URL. */
-   char url[CONFIG_DB2_URL_LEN];
-   int have_url = config_db2_url_effective(url, sizeof(url));
-
-   if (have_url && bootstrap_db2_try_url(url, resp) == 0)
-      return 0;
-
-   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
-   {
-      (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
-      return 0;
-   }
-
-   if (!have_url)
-   {
-      (void)bootstrap_db2_with_local_tools(steps);
-      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
-      {
-         (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
-         return 0;
-      }
-   }
-
-   cJSON_AddStringToObject(resp, "status", "error");
-   cJSON_AddBoolToObject(resp, "knowledge_ready", 0);
-   cJSON_AddStringToObject(resp, "message",
-                           "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL");
-   cJSON_AddStringToObject(
-       resp, "remediation",
-       "Install PostgreSQL, start the service, then run: createdb " AIMEE_DB2_BOOTSTRAP_DB
-       " && psql -d " AIMEE_DB2_BOOTSTRAP_DB " -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'");
-   return 1;
-}
-
-static int kb_bootstrap_db2(int json_output)
+static int kb_bootstrap_postgres(int json_output)
 {
    cJSON *resp = cJSON_CreateObject();
 
-   (void)kb_bootstrap_db2_resolve(resp);
+   (void)kb_bootstrap_postgres_resolve(resp);
 
    int ok = 0;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
@@ -736,12 +508,6 @@ static int kb_run_fusion_probe(const char *query)
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
 static int kb_cmd_tenancy_init_db2(void)
 {
-   char db2_url[CONFIG_DB2_URL_LEN];
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
-      return -1;
-   }
    db2_set_embedding_dim_default(config_embedder_dims_default());
    db2_set_embedding_dim(config_embedder_dims_current());
    /* Tenant entry delegates canonical key construction to the identity owner.
@@ -754,7 +520,7 @@ static int kb_cmd_tenancy_init_db2(void)
     * concurrently updated", which surfaced below as "DB2 not reachable" against a
     * KB that was reachable and healthy. Verify instead. */
    db2_set_schema_readonly(1);
-   if (db2_init(db2_url) != 0)
+   if (db2_init_configured() != 0)
    {
       fputs("aimee-kb: DB2 not reachable (check the Vault connection credential)\n", stderr);
       return -1;
@@ -1617,27 +1383,6 @@ int main(int argc, char **argv)
                     strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
       return 0;
 
-   /* Entrypoint decision probe: presence only, never the DB credential. A KB
-    * restarted without first-boot environment metadata must still select the
-    * external database whose URL is held exclusively in Vault. */
-   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
-   {
-      char db2_url[4096];
-      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
-      char embedded[4096];
-      const char *home = aimee_home();
-      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
-                              home)
-                   : -1;
-      size_t embedded_len = n > 0 ? (size_t)n : 0;
-      int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
-                             strncmp(db2_url, embedded, embedded_len) == 0 &&
-                             (db2_url[embedded_len] == '\0' || db2_url[embedded_len] == '&');
-      int external = present && !matches_embedded;
-      runtime_secret_wipe(db2_url, sizeof(db2_url));
-      runtime_secret_wipe(embedded, sizeof(embedded));
-      return external ? 0 : 1;
-   }
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
@@ -1666,7 +1411,7 @@ int main(int argc, char **argv)
       return kb_cmd_vault(argc, argv);
 
    log_level_t log_level = LOG_INFO;
-   int bootstrap_db2 = 0;
+   int bootstrap_postgres = 0;
    int json_output = 0;
    int http_port_override = -1; /* -1 = use config */
    kb_metrics_listener_config_t metrics_listener_config;
@@ -1681,8 +1426,8 @@ int main(int argc, char **argv)
          ; /* deprecated/ignored: HTTP is now the only transport */
       else if (strncmp(argv[i], "--fusion-probe=", 15) == 0)
          fusion_probe_query = argv[i] + 15;
-      else if (strcmp(argv[i], "--bootstrap-db2") == 0)
-         bootstrap_db2 = 1;
+      else if (strcmp(argv[i], "--bootstrap-postgres") == 0)
+         bootstrap_postgres = 1;
       else if (strcmp(argv[i], "--json") == 0)
          json_output = 1;
       else if (strncmp(argv[i], "--http-port=", 12) == 0)
@@ -1728,7 +1473,7 @@ int main(int argc, char **argv)
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
              "  --http-port=N        TCP port for /v1/* REST API (required; default 0 = off)\n"
              "  --log-level=LEVEL    Log level: error, warn, info, debug (default: info)\n"
-             "  --bootstrap-db2      Provision/verify the configured DB2 Postgres database\n"
+             "  --bootstrap-postgres      Provision/verify the configured DB2 Postgres database\n"
              "  --json               Emit JSON for bootstrap commands\n"
              "  --version            Print version\n"
              "  --help               Show this help\n";
@@ -1743,8 +1488,8 @@ int main(int argc, char **argv)
       }
    }
 
-   if (bootstrap_db2)
-      return kb_bootstrap_db2(json_output);
+   if (bootstrap_postgres)
+      return kb_bootstrap_postgres(json_output);
 
    log_init(log_level);
    agent_http_init();
@@ -1823,71 +1568,13 @@ int main(int argc, char **argv)
    db2_vault_operator_status_t vault_operator_startup_before;
    memset(&vault_operator_startup_before, 0, sizeof(vault_operator_startup_before));
 
-   /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
-    * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. EMBEDDER_DIMS
-    * overrides the configured value (containerized deploys without a writable
-    * aimee.yaml). */
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_resolve_embedder_dims_current());
-   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
-   /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
-    * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(config_embedder_model());
-   /* §2b: register the embedder probes. Unconditionally, for whatever embed command is
-    * configured: embedder_probe_register decides which probes that command supports.
-    * The distinction belongs to the module that knows what each probe requires, not to
-    * its caller. */
-   embedder_probe_register(config_embedder_command_current(NULL));
+   kb_configure_knowledge_store();
    /* S6: register the policy arms and install the bandit-backed sampler.
     * Without this nothing ever samples, and the registry only describes a
     * decision nobody makes. */
    kb_policy_arms_init();
-   db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
-   /* The database credential is hydrated from Vault. */
-   char db2_url[CONFIG_DB2_URL_LEN];
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      cJSON *resp = cJSON_CreateObject();
-      int rc = kb_bootstrap_db2_resolve(resp);
-      if (rc != 0)
-      {
-         /* kb_bootstrap_db2_resolve already recorded WHY each fallback failed —
-          * the per-step command outcomes plus a message and a remediation. That
-          * detail used to be discarded, so the only thing an operator saw was
-          * "bootstrap failed", which does not distinguish "Postgres is not
-          * running" from "this image ships no Postgres at all" (the published
-          * aimee-kb:latest predating the embedded-DB2 packaging is exactly the
-          * latter). Print it: this message is the whole diagnosis for a KB that
-          * will not start. */
-         fprintf(stderr, "aimee-kb: db2_url not configured and bootstrap failed; "
-                         "run `aimee init` or set AIMEE_DB2_URL\n");
-         const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         if (cJSON_IsString(msg) && msg->valuestring[0])
-            fprintf(stderr, "aimee-kb:   cause: %s\n", msg->valuestring);
-         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(resp, "steps");
-         const cJSON *step = NULL;
-         cJSON_ArrayForEach(step, steps)
-         {
-            char *one = cJSON_PrintUnformatted(step);
-            if (one)
-            {
-               fprintf(stderr, "aimee-kb:   step: %s\n", one);
-               free(one);
-            }
-         }
-         const cJSON *fix = cJSON_GetObjectItemCaseSensitive(resp, "remediation");
-         if (cJSON_IsString(fix) && fix->valuestring[0])
-            fprintf(stderr, "aimee-kb:   remediation: %s\n", fix->valuestring);
-         cJSON_Delete(resp);
-         agent_http_cleanup();
-         return 1;
-      }
-      cJSON_Delete(resp);
-   }
-
-   /* Re-read the runtime secret after bootstrap. */
-   (void)config_db2_url_effective(db2_url, sizeof(db2_url));
+   /* Runtime credentials and connection acquisition belong exclusively to the
+    * PostgreSQL module. Schema provisioning is a separate owner operation. */
 
    /* DB2 owns project, workspace, and global knowledge for aimee-kb.
     *
@@ -1904,8 +1591,19 @@ int main(int argc, char **argv)
       const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
       const int db2_retry_secs = 5;
       int attempt = 1;
-      while (db2_init(db2_url) != 0)
+      while (db2_init_runtime() != 0)
       {
+         /* A published installation can require newer KB schema even when
+          * memory's own migrations have completed. Apply it in a separate
+          * provider-owned migration session, close that authority, then verify
+          * and serve exclusively through the supervised runtime role. */
+         if (db2_init_migration() == 0)
+         {
+            db2_shutdown();
+            kb_configure_knowledge_store();
+            if (db2_init_runtime() == 0)
+               break;
+         }
          if (attempt >= db2_max_attempts)
          {
             fprintf(stderr, "aimee-kb: DB2 init failed after %d attempts (%ds)\n", attempt,

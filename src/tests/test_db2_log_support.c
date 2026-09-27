@@ -1,4 +1,4 @@
-#include "../modules/db2/support/db2_log.h"
+#include "../modules/kb/support/db2_log.h"
 
 #include <stdio.h>
 #include <string.h>

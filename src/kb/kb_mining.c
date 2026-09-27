@@ -10,13 +10,13 @@
 #include "log.h"
 #include "cJSON.h"
 #include "config.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/db2_learning.h"
 #include <aimee/learning/learning.h>
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/feature_rows.h"
-#include "modules/db2/c/mining.h"
+#include "modules/kb/c/db2_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/feature_rows.h"
+#include "modules/kb/c/mining.h"
 #include "kb_mdl.h"
 
 #include <pthread.h>
