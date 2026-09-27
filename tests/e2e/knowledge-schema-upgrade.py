@@ -49,14 +49,17 @@ ROLLBACK;
 
 def main():
     env = dict(os.environ)
-    env['PGDATABASE'] = env['AIMEE_KB_STORE_REPLAY_URL']
-    result = subprocess.run(['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
+    # psql expands a URI supplied as dbname; PGDATABASE is only a literal
+    # database-name default and does not select the URI's host or credentials.
+    result = subprocess.run(['psql', '--dbname', env['AIMEE_KB_STORE_REPLAY_URL'],
+                             '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
                             input=migration_test_sql(), text=True, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     print(('PASS' if result.returncode == 0 else 'FAIL') +
           ' schema 45 migration, reapply, saved counts and erasure replay')
     if result.returncode:
-        print('PostgreSQL rejected the schema upgrade regression transaction')
+        print('PostgreSQL connection failed' if result.returncode == 2 else
+              'PostgreSQL rejected the schema upgrade regression transaction')
     return result.returncode
 
 
