@@ -4245,6 +4245,83 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/serve:
+    post:
+      summary: Serve a named authorized memory view
+      description: >-
+        Runs in the selected memory owner. Recomputes eligibility and temporal
+        selection on every request, including projection-cache reuse. Returns
+        exact memory-envelope byte accounting and an invocation receipt;
+        provider dispatch is a separate operation. Unavailable placement
+        capabilities are explicit omissions, never filled from another store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [view, task]
+              properties:
+                view:
+                  type: string
+                  enum: [briefing, active_constraints, current_state, recent_decisions, relevant_context, known_failures, reviewed_procedures, open_contradictions, historical_context]
+                task: { type: string, minLength: 1, maxLength: 8192 }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+                valid_at: { type: string }
+                believed_at: { type: string }
+                limit: { type: integer, minimum: 0, maximum: 64 }
+                context_limits: { type: object }
+                evidence_requirements: { type: object }
+      responses:
+        "200":
+          description: Authorized projection or explicit empty/degraded result
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid view or unsupported budget/temporal request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/claim-card:
+    post:
+      summary: Inspect a canonical memory claim card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, pattern: '^[1-9][0-9]*$' }
+                expand_evidence: { type: boolean, default: false }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200":
+          description: Version-bound card and governed canonical correction descriptor
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Claim unavailable in the current authorized scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/evidence:
     post:
       summary: Inspect authorized memory evidence lineage

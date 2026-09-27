@@ -11,6 +11,8 @@ type commandRoute struct {
 }
 
 var sharedCommandRoutes = []commandRoute{
+	{"memory", "serve", "Serve a named scoped memory view with exact projection accounting.", handleServedViewCommand, true},
+	{"memory", "claim_card", "Inspect a canonical memory claim and its governed correction descriptor.", handleServedViewCommand, true},
 	{"memory", "evidence", "Inspect scoped origin families and independent-support uncertainty.", handleLineageCommand, true},
 	{"memory", "validity", "Inspect the scoped serving decision for one record.", handleValidityCommand, true},
 	{"memory", "verify_receipt", "Compare a supplied prepared receipt with optional exact payload bytes.", handleReceiptVerification, true},

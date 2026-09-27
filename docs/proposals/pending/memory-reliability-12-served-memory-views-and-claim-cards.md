@@ -1,6 +1,6 @@
 # MR-12: Named served-memory views and inspectable claim cards
 
-- **State:** Proposed
+- **State:** In progress — Go owner and transport implementation; acceptance pending
 - **Priority:** P1: task-oriented access to existing memory
 - **Owner:** Go memory API and views, with host/operator interfaces
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)
@@ -69,3 +69,5 @@ The briefing packer protects constraints, preserves coherent evidence bundles an
 Add views without changing existing endpoint names. Canary task-start briefing before expanding automatic injection. Rollback can disable automatic use while leaving explicit view access and canonical data intact.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+[Implementation and validation record](../../validation/memory-mr12-views-2026-09-27.md)

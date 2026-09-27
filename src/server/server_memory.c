@@ -118,7 +118,13 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory request unavailable", NULL);
-   static const char *fields[] = {"key",
+   static const char *fields[] = {"expand_evidence",
+                                  "task",
+                                  "valid_at",
+                                  "believed_at",
+                                  "context_limits",
+                                  "evidence_requirements",
+                                  "key",
                                   "content",
                                   "tier",
                                   "kind",
@@ -147,7 +153,12 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
       if (value)
          cJSON_AddItemToObject(request, fields[i], cJSON_Duplicate(value, 1));
    }
-   cJSON_AddStringToObject(request, "view", "server");
+   int served_view = !strcmp(method, "memory.serve") || !strcmp(method, "memory.claim_card");
+   const cJSON *requested_view = cJSON_GetObjectItemCaseSensitive(req, "view");
+   if (served_view && requested_view)
+      cJSON_AddItemToObject(request, "view", cJSON_Duplicate(requested_view, 1));
+   else if (!served_view)
+      cJSON_AddStringToObject(request, "view", "server");
    if (authority == MEMORY_AUTHORITY_USER)
       cJSON_AddStringToObject(request, "authority", "user");
    server_memory_scope_begin((cJSON *)req);
@@ -159,8 +170,10 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                        : NULL;
    cJSON *reply = NULL;
    const cJSON *field = cJSON_GetObjectItemCaseSensitive(parsed, required);
-   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") && field &&
-       (field->type & 0xff) == expected_type &&
+   if (cJSON_IsObject(parsed) &&
+       (!strcmp(jo_cstr(parsed, "status"), "ok") ||
+        (served_view && !strcmp(jo_cstr(parsed, "status"), "degraded"))) &&
+       field && (field->type & 0xff) == expected_type &&
        (strcmp(method, "memory.search") ||
         cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "windows"))) &&
        (expected_type != cJSON_Number || (isfinite(field->valuedouble) && field->valuedouble > 0 &&
@@ -268,7 +281,9 @@ static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *r
                        : NULL;
    const char *status = jo_cstr(parsed, "status");
    cJSON *reply = NULL;
-   if (cJSON_IsObject(parsed) && !strcmp(status, "ok") &&
+   if (cJSON_IsObject(parsed) &&
+       (!strcmp(status, "ok") ||
+        (!strcmp(operation, "user-serve") && !strcmp(status, "degraded"))) &&
        (!strcmp(operation, "user-search") || !strcmp(jo_cstr(parsed, "store"), "user")))
       reply = cJSON_CreateRaw(raw);
    else if (cJSON_IsObject(parsed) && !strcmp(status, "error") &&
@@ -556,6 +571,40 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    return send_and_free(conn, memory_get_command(req));
+}
+
+static cJSON *memory_served_command(cJSON *req, int card)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (selection)
+      return kb_memory_owner_command(card ? "memory.claim_card" : "memory.serve", req,
+                                     MEMORY_AUTHORITY_MODEL, card ? "claim" : "receipt",
+                                     cJSON_Object);
+   return user_memory_owner_command(card ? "user-claim-card" : "user-serve", req);
+}
+
+cJSON *memory_serve_command(cJSON *req)
+{
+   return memory_served_command(req, 0);
+}
+
+cJSON *memory_claim_card_command(cJSON *req)
+{
+   return memory_served_command(req, 1);
+}
+
+int handle_memory_serve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_serve_command(req));
+}
+
+int handle_memory_claim_card(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_claim_card_command(req));
 }
 
 cJSON *memory_evidence_command(cJSON *req)

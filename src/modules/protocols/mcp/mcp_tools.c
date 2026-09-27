@@ -316,6 +316,46 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                               s));
    }
 
+   /* Explicit served views and canonical claim cards share the HTTP/CLI owner. */
+   for (int card = 0; card < 2; card++)
+   {
+      cJSON *schema = cJSON_CreateObject();
+      cJSON_AddStringToObject(schema, "type", "object");
+      cJSON *props = cJSON_AddObjectToObject(schema, "properties");
+      cJSON *required = cJSON_AddArrayToObject(schema, "required");
+      if (card)
+      {
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "id"), "type", "string");
+         cJSON_AddItemToArray(required, cJSON_CreateString("id"));
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "expand_evidence"), "type",
+                                 "boolean");
+      }
+      else
+      {
+         const char *strings[] = {"view", "task", "valid_at", "believed_at", NULL};
+         for (int i = 0; strings[i]; i++)
+            cJSON_AddStringToObject(cJSON_AddObjectToObject(props, strings[i]), "type", "string");
+         cJSON_AddItemToArray(required, cJSON_CreateString("view"));
+         cJSON_AddItemToArray(required, cJSON_CreateString("task"));
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "limit"), "type", "integer");
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "context_limits"), "type",
+                                 "object");
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(props, "evidence_requirements"), "type",
+                                 "object");
+      }
+      mcp_add_memory_scope_properties(props);
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new(card ? "memory_claim_card" : "memory_serve",
+                       card ? "Inspect a versioned canonical claim, authorized evidence and "
+                              "governed correction."
+                            : "Serve briefing, active_constraints, current_state, "
+                              "recent_decisions, relevant_context, known_failures, "
+                              "reviewed_procedures, open_contradictions or historical_context for "
+                              "a task. Returns exact projection accounting and explicit gaps.",
+                       schema));
+   }
+
    /* memory_briefing */
    {
       cJSON *s = cJSON_CreateObject();

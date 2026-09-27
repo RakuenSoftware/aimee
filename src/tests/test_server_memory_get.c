@@ -187,7 +187,8 @@ static const char *hygiene_reply;
 static cJSON *hygiene_request;
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   if (!strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity") ||
+   if (!strcmp(method, "memory.serve") || !strcmp(method, "memory.claim_card") ||
+       !strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity") ||
        !strcmp(method, "memory.evidence"))
    {
       cJSON_Delete(hygiene_request);
@@ -962,6 +963,45 @@ static void test_evidence_transport(void)
    hygiene_request = NULL;
 }
 
+static void test_served_view_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"view\":\"historical_context\",\"task\":"
+                                "\"atlas\",\"valid_at\":\"2025-01-01T00:00:00Z\",\"context_"
+                                "limits\":{\"schema_version\":1,\"max_context_bytes\":0}}");
+   hygiene_reply = "{\"status\":\"degraded\",\"store\":\"kb\",\"receipt\":{"
+                   "\"id\":9007199254740993},\"rendered_context\":\"\"}";
+   handle_memory_serve(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "view")),
+                  "historical_context"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "task")),
+                  "atlas"));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "valid_at")),
+               "2025-01-01T00:00:00Z"));
+   assert(
+       cJSON_GetObjectItemCaseSensitive(
+           cJSON_GetObjectItemCaseSensitive(hygiene_request, "context_limits"), "max_context_bytes")
+           ->valuedouble == 0);
+   cJSON_Delete(request);
+   request = cJSON_Parse("{\"store\":\"user\",\"view\":\"briefing\",\"task\":\"atlas\"}");
+   private_command_operation = "user-serve";
+   private_command_reply = "{\"status\":\"degraded\",\"store\":\"user\",\"receipt\":{},"
+                           "\"omissions\":[\"unsupported_channel\"]}";
+   handle_memory_serve(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   private_command_operation = "user-claim-card";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"claim\":{"
+                           "\"id\":9007199254740993}}";
+   cJSON_AddStringToObject(request, "id", "9007199254740993");
+   handle_memory_claim_card(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   cJSON_Delete(request);
+   private_command_operation = private_command_reply = hygiene_reply = NULL;
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -1027,5 +1067,6 @@ int main(void)
    test_shared_supersede_authority();
    test_private_verified_context();
    test_private_correction_review_transport();
+   test_served_view_transport();
    return 0;
 }

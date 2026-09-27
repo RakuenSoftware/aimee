@@ -2041,7 +2041,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "57a1b8ff0649e66f81ef290b0ae0ddf3c2300279890f94b0486f568112a88279"
+      "sha256": "697315b904d039aa5acd341bea5fd9db8a935615fb0f97a32bc331c7176d8dae"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2053,7 +2053,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "a6766b285f0d9912505d9a3d7625b3cc2bb02177e08ddd42bcace8595b168bb0"
+      "sha256": "85175c0ba7c8a20cd80398bef0303fda23c1eb6198f58c850df066f6c0d44a62"
     },
     "src/modules/tools/agent_tools_dispatch.c": {
       "disposition": "host-context",
@@ -2138,7 +2138,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "d81f880fbca8ecb153a8dd1be9267c674d6f78630c15af6de2402198dcbc9816"
+      "sha256": "17b35c6e76af73e1f695b7044ef457b5dc422195337af356fd93b9831b1dcea7"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2159,7 +2159,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "777591c25a4bdb8c783499eff38a06c1b7157f3f7de11072c7e53320fe55bce9"
+      "sha256": "66465fc352701b371adc129c3d820265fb8edb0c6e39818de294621d10b11a0b"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2184,7 +2184,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "8a8ef87ddd55c56ccfb14440ad4e10bb141e33aec98b13645caf21a6186cfb0d"
+      "sha256": "5f12d0c1e61cf7d48eb841e7b3e114c2441f338ed2461a826be8939d32cf5d0c"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2193,7 +2193,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "a58c89cdec21e95427c0fc05f65c52d17bee6abfc2f66ed217bd4a991275bbfc"
+      "sha256": "78387d0e52db987b01caafeaf7b482f4a8646879d05f8e89ad25f82556e47365"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2530,7 +2530,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "0804b3f1ab57a7cfcc3c26f676d41ee1283f623309b764460cfe8df45203bb01"
+      "sha256": "fadfa99bf773c9d14303e9a1adcaf58c1bb9eb63c2f6cd6c77a1ba405d455fe8"
     },
     "src/tests/test_server_prospective.c": {
       "disposition": "host-fixture",
@@ -2606,7 +2606,7 @@
       "sha256": "19d190a778402939297a89eaff296d5cba8fef540dd30b4d2dce56b8c580efde",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "d2a1dd5c4697387d01ae289f865c1c1f0395d9cf898a340275bded279de1e760"
+        "api/openapi-server-v1.yaml": "8fea0e27c52f8803d6b0786ba3e7b165edcde1f140c44e2d2299f278610439db"
       }
     }
   }

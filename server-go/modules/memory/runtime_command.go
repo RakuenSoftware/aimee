@@ -138,6 +138,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleIngressTaskState(&options.gateway.tasks, args)
 	case "gateway-plan", "gateway-recall", "gateway-outcome", "gateway-metrics", "gateway-enabled":
 		return handleGatewayCommand(options, invocation, args)
+	case "user-serve":
+		return runtimeJSONText(handleServedViewCommand(options, invocation, "serve", args))
+	case "user-claim-card":
+		return runtimeJSONText(handleServedViewCommand(options, invocation, "claim_card", args))
 	case "user-evidence":
 		return runtimeJSONText(handleLineageCommand(options, invocation, "evidence", args))
 	case "user-review-list":

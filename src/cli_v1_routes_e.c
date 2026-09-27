@@ -659,6 +659,49 @@ cJSON *marshal_memory_get(int argc, char **argv)
    return req;
 }
 
+cJSON *marshal_memory_serve(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("memory.serve");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "view", opts.positional[0]);
+   const char *fields[] = {"task", "valid_at", "believed_at", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, fields[i]);
+      if (value)
+         cJSON_AddStringToObject(req, fields[i], value);
+   }
+   const char *structured[] = {"limit", "context_limits", "evidence_requirements", NULL};
+   for (int i = 0; structured[i]; i++)
+   {
+      const char *value = cli_args_get(&opts, structured[i]);
+      if (value)
+      {
+         cJSON *parsed = cJSON_ParseWithOpts(value, NULL, 1);
+         /* Preserve invalid input for the owner's typed validation. */
+         cJSON_AddItemToObject(req, structured[i], parsed ? parsed : cJSON_CreateString(value));
+      }
+   }
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
+cJSON *marshal_memory_claim_card(int argc, char **argv)
+{
+   cli_args_t opts;
+   const char *bool_flags[] = {"expand-evidence", NULL};
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("memory.claim_card");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
+   if (cli_args_has_flag(&opts, "expand-evidence"))
+      cJSON_AddBoolToObject(req, "expand_evidence", 1);
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
 cJSON *marshal_memory_evidence(int argc, char **argv)
 {
    cli_args_t opts;

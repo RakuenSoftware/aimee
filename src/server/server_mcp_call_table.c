@@ -135,6 +135,26 @@ static cJSON *mcph_list_facts(struct mcp_call *c)
 {
    return tool_list_facts(c->jargs);
 }
+static cJSON *mcph_served_memory(struct mcp_call *c, int card)
+{
+   cJSON *reply = card ? memory_claim_card_command(c->jargs) : memory_serve_command(c->jargs);
+   char *raw = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   cJSON *content = text_content(raw ? raw : "{\"status\":\"error\",\"kind\":\"unavailable\"}");
+   free(raw);
+   cJSON_Delete(reply);
+   return content;
+}
+
+static cJSON *mcph_memory_serve(struct mcp_call *c)
+{
+   return mcph_served_memory(c, 0);
+}
+
+static cJSON *mcph_memory_claim_card(struct mcp_call *c)
+{
+   return mcph_served_memory(c, 1);
+}
+
 static cJSON *mcph_memory_briefing(struct mcp_call *c)
 {
    return tool_memory_briefing(c->jargs);
@@ -2119,6 +2139,8 @@ static const struct
     {"memory_get", mcph_memory_get, NULL},
     {"list_facts", mcph_list_facts, NULL},
     {"memory_briefing", mcph_memory_briefing, NULL},
+    {"memory_serve", mcph_memory_serve, "core,review_indexed"},
+    {"memory_claim_card", mcph_memory_claim_card, "core,review_indexed"},
     {"get_identity", mcph_get_identity, NULL},
     {"list_curiosity_items", mcph_list_curiosity_items, NULL},
     {"create_prospective_memory", mcph_create_prospective_memory, NULL},

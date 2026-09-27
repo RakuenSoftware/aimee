@@ -32,6 +32,7 @@ const (
 )
 
 type DataRequest struct {
+	ServedView          *servedViewRequest `json:"served_view,omitempty"`
 	recoveryActor       string
 	recoveryRole        *evidenceRecoveryAction
 	FilteredExport      *filteredExportRequest `json:"filtered_export,omitempty"`
@@ -1087,6 +1088,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.FilteredExport != nil && request.Operation != "export-filtered" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if request.ServedView != nil && request.Operation != "served-view" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	if request.HygienePreview != nil && request.Operation != "hygiene-preview" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -1377,14 +1381,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	privateRead := options.placement == PlacementServer && (request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
+	privateRead := options.placement == PlacementServer && (request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
 	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || privateRead) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
-			if request.Operation == "evidence" || (request.Operation == "typed-context" && request.TypedContext != nil && request.TypedContext.Requirements.needsOriginGroups()) {
+			if request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || (request.Operation == "typed-context" && request.TypedContext != nil && request.TypedContext.Requirements.needsOriginGroups()) {
 				if _, err = transaction.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
 					_ = transaction.Rollback(context.Background())
 					return nil, bus.ModuleStatusInternal
@@ -2198,6 +2202,34 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		allowed := ShouldInject(RelSensitivity(request.Sensitivity), *request.Confidence,
 			request.TurnRequestsSensitive)
 		response.Allowed = &allowed
+	case "served-view", "claim-card":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "claim-card" {
+			if request.ID <= 0 {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			var result map[string]any
+			cardScope := Scope{}
+			if explicitScope {
+				cardScope = request.Scope
+			}
+			result, err = backend.claimCard(ctx, request.ID, cardScope)
+			if err == nil && request.Detail && result["status"] == "ok" {
+				err = backend.expandClaimEvidence(ctx, result)
+			}
+			if err == nil {
+				response.Payload, err = json.Marshal(result)
+			}
+		} else {
+			var result servedViewResult
+			result, err = backend.serveView(ctx, request, explicitScope)
+			if err == nil {
+				response.Payload, err = json.Marshal(result)
+			}
+		}
 	case "evidence":
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest

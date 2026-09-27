@@ -467,6 +467,8 @@ static const struct fam_def MCP_FAMILIES[] = {
      "Operate on stored memories (the per-record lifecycle + introspection). Use search_memory / "
      "memory_recall for retrieval. Set 'command'.",
      {{"get", "memory_get"},
+      {"serve", "memory_serve"},
+      {"claim_card", "memory_claim_card"},
       {"list", "list_facts"},
       {"mutate", "mutate"},
       {"history", "memory_fact_history"},

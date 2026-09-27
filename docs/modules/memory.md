@@ -895,3 +895,60 @@ release-time checks; diagnostics are not transferable authorization.
 The default stays off. Domain durations require separate historical-task and
 outcome evidence before operator promotion. No learned duration, universal
 expiration, or automatic policy tuning is installed by this implementation.
+
+## Served views and claim cards (MR-12)
+
+`aimee memory serve briefing --task "review the deployment" --store kb --json`
+requests an explicit projection from the selected memory owner. The other views
+are `active_constraints`, `current_state`, `recent_decisions`, `relevant_context`,
+`known_failures`, `reviewed_procedures`, `open_contradictions`, and
+`historical_context`. Historical requests require `--valid_at` or `--believed_at`
+with second-precision UTC coordinates. The default store is private (`user`);
+shared views require `--store kb`. An unavailable private capability is reported
+as an omission, without reading shared data to fill it.
+
+The Go owner applies current eligibility and scope before candidate limits.
+Briefings protect hard rules and scoped constraints ahead of discretionary
+context. Contradiction sides travel as one bundle; a budget cannot retain half
+a contradiction. `--limit 0` and
+`--context_limits '{"schema_version":1,"max_context_bytes":0}'` retain no model
+text. Byte accounting covers the exact rendered memory envelope. Provider-bound
+hard token limits remain explicitly unsupported by this operation, consistent
+with the existing context-budget contract.
+
+HTTP clients use `POST /v1/memory/serve` with `view`, `task`, and the same typed
+options. KB clients use `memory.serve` through the existing Go module action.
+MCP tools `memory_serve` and `memory_claim_card` use the same owner; the
+`memory` family and native core/review toolsets expose them too.
+The named CLI command requires a client with its compiled view marshaller:
+current served argument specs cannot encode nested budget/requirement JSON, so
+no partial spec is published that could silently discard those fields.
+
+Responses separate minimal `rendered_context` from versioned selected-record,
+coverage, omission, freshness and per-channel bundle-count diagnostics. A
+projection receipt binds exact bytes and source versions for this invocation;
+it is not a durable provider-dispatch receipt. Provider handoff must still use
+the normal source-release and MR-06 dispatch receipt gates. Without explicit
+`evidence_requirements`, task sufficiency is unknown, not inferred from a
+nonempty result. Reviewed procedure candidates retain their scope and review
+record; unknown applicability/outcomes are labeled explicitly. Known failures
+require complete recorded origin lineage; a failure label alone is omitted
+with an evidence gap, and does not establish causal generalization.
+
+Projection caching never skips owner reads. Each invocation recomputes current
+scope, eligibility, temporal selection, collection dependencies and coverage on
+the owner. A cache hit reuses serialization only. Request identity includes the
+principal, scope, view, task, exact temporal coordinates, effective budgets,
+requirements, renderer/eligibility policy, collection and selected versions.
+Standby databases cannot certify current views. Empty selections retain their
+collection dependencies, and each invocation receives a new receipt identifier.
+
+`aimee memory claim_card <id> --store kb --json` projects a canonical memory
+record, exact version, authorship, authority, lineage uncertainty, visible
+contradictions and current freshness. `--expand-evidence` additionally reads up
+to sixteen accessible exact-version lineage records within a 16 KiB expansion
+allocation. It does not serve stale copied evidence. The card's `correction`
+descriptor targets the existing `memory.supersede` expected-version operation;
+that owner still decides whether replacement or a review proposal is authorized.
+Cards have no separately editable canonical text. Confidence calibration remains
+unknown unless the underlying owner can establish it.
