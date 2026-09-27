@@ -572,6 +572,35 @@ class BoundaryTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_exact_retrieval_codec_transition_does_not_admit_other_growth(self) -> None:
+        source = "src/modules/db2/c/demotion.c"
+        previous = {"consumers": [], "source_files": {"c": [source]},
+                    "outbound_dependencies": []}
+        current = json.loads(json.dumps(previous))
+        current["outbound_dependencies"] = [{
+            "source": source, "header": "json_int64.h",
+            "resolved": "src/headers/json_int64.h", "count": 1,
+            "classification": "host-api"}]
+        checker.enforce_shrink_only(previous, current)
+        fidelity_before, fidelity_after = json.loads(json.dumps(previous)), json.loads(json.dumps(current))
+        for item in (fidelity_before, fidelity_after):
+            item["source_files"]["c"] = ["src/modules/db2/c/fidelity.c"]
+        fidelity_after["outbound_dependencies"][0]["source"] = "src/modules/db2/c/fidelity.c"
+        checker.enforce_shrink_only(fidelity_before, fidelity_after)
+        for field, value in [("count", 2), ("source", "src/modules/db2/c/store.c"),
+                             ("header", "other.h"), ("resolved", "src/kb/json_int64.h"),
+                             ("classification", "kb-authority-leak")]:
+            with self.subTest(field=field):
+                changed = json.loads(json.dumps(current))
+                changed["outbound_dependencies"][0][field] = value
+                with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                    checker.enforce_shrink_only(previous, changed)
+        for manifest in ("previous", "current"):
+            old, new = json.loads(json.dumps(previous)), json.loads(json.dumps(current))
+            (old if manifest == "previous" else new)["source_files"]["c"] = []
+            with self.assertRaisesRegex(checker.BoundaryError, "new outbound dependency"):
+                checker.enforce_shrink_only(old, new)
+
     def test_duplicate_json_key_is_rejected(self) -> None:
         tmp = self.repo()
         try:

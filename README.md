@@ -20,7 +20,8 @@ modules supervise the standard modules around the existing C resource and event-
 ## What you get
 
 - **Memory that survives the session.** The curator extracts facts, joins evidence, catches
-  contradictions, and lets stale detail decay. See [Knowledge](docs/KNOWLEDGE.md).
+  contradictions, and lets stale detail decay. Source revisions and final dispatch checks prevent
+  changed or erased evidence from reusing an old binding. See [Knowledge](docs/KNOWLEDGE.md).
 - **Your code as a graph.** Symbols, callers, imports, and cross-repo dependencies feed search and
   blast-radius checks. See [Code intelligence](docs/CODE_INTELLIGENCE.md).
 - **Delegates that cut the bill.** Send review, diagnosis, and routine implementation to the
