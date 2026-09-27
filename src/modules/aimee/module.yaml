@@ -127,7 +127,8 @@
     "server-go/modules/aimee/process/directory_test.go",
     "server-go/modules/aimee/families/session_exploration_live_test.go",
     "server-go/modules/aimee/families/task_projection_test.go",
-    "server-go/modules/aimee/families/governed_actions_test.go"
+    "server-go/modules/aimee/families/governed_actions_test.go",
+    "server-go/modules/aimee/families/clean_retry_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"
@@ -172,6 +173,7 @@
     "server-go/modules/aimee/families/schema_workflow.sql",
     "server-go/modules/aimee/families/schema_session_exploration.sql",
     "server-go/modules/aimee/families/schema_task_projection.sql",
-    "server-go/modules/aimee/families/schema_governed_actions.sql"
+    "server-go/modules/aimee/families/schema_governed_actions.sql",
+    "server-go/modules/aimee/families/schema_clean_retry.sql"
   ]
 }

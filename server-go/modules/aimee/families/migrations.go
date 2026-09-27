@@ -114,6 +114,7 @@ var schemaHistory = []struct {
 	{40, "schema_personal_embedding_cutover.sql"},
 	{41, "schema_task_projection.sql"},
 	{42, "schema_governed_actions.sql"},
+	{43, "schema_clean_retry.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

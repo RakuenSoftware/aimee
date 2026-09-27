@@ -19,6 +19,10 @@
 #include <time.h>
 #include <unistd.h>
 
+extern int server_clean_retry_begin(const primary_session_request_t *, cJSON **, char **, char[65],
+                                    char *, size_t) __attribute__((weak));
+extern int server_clean_retry_finish(int, const agent_result_t *) __attribute__((weak));
+
 /* Route compaction through the active context engine.
  * Falls back to session_compact() when the active engine is the compactor. */
 static int primary_compact(cJSON *messages, session_compact_result_t *result)
@@ -266,9 +270,65 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    cJSON *updated_messages = NULL;
    int max_tokens = req->max_tokens > 0 ? req->max_tokens : AGENT_DEFAULT_MAX_TOKENS;
    double temperature = req->temperature >= 0.0 ? req->temperature : 0.3;
-   int rc = agent_execute_session_with_tools(req->agent, req->network, req->system_prompt,
-                                             req->user_prompt, max_tokens, temperature,
-                                             initial_messages, &updated_messages, out);
+   char retry_attempt[65] = {0};
+   char *retry_summary = NULL, *retry_system = NULL;
+   int rc = 0;
+   if (cJSON_GetObjectItemCaseSensitive(req->task_request, "clean_retry"))
+   {
+      if (!server_clean_retry_begin)
+      {
+         snprintf(out->error, sizeof(out->error), "clean retry runtime unavailable");
+         rc = -1;
+      }
+      else
+         rc = server_clean_retry_begin(req, &initial_messages, &retry_summary, retry_attempt,
+                                       out->error, sizeof(out->error));
+   }
+   const char *system = req->system_prompt;
+   if (rc == 0 && retry_summary && retry_summary[0])
+   {
+      const char *base = system ? system : "";
+      size_t size = strlen(base) + strlen(retry_summary) + 64;
+      retry_system = malloc(size);
+      if (!retry_system)
+         rc = -1;
+      else
+      {
+         snprintf(retry_system, size, "%s\n<host-retry-summary>\n%s\n</host-retry-summary>", base,
+                  retry_summary);
+         system = retry_system;
+      }
+   }
+   cJSON *retry_task = NULL;
+   if (rc == 0 && retry_attempt[0])
+   {
+      retry_task = req->task_request ? cJSON_Duplicate(req->task_request, 1) : cJSON_CreateObject();
+      cJSON *requirements = cJSON_GetObjectItemCaseSensitive(retry_task, "evidence_requirements");
+      if (cJSON_IsObject(requirements))
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(requirements, "task_revision");
+         cJSON_AddStringToObject(requirements, "task_revision", retry_attempt);
+      }
+      ingress_preinject_set_task_requirements(retry_task);
+   }
+   if (rc == 0)
+      rc = agent_execute_session_with_tools(req->agent, req->network, system, req->user_prompt,
+                                            max_tokens, temperature, initial_messages,
+                                            &updated_messages, out);
+   if (retry_attempt[0])
+   {
+      snprintf(out->clean_retry_attempt, sizeof(out->clean_retry_attempt), "%s", retry_attempt);
+      if (!server_clean_retry_finish || server_clean_retry_finish(rc, out) != 0)
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "retry outcome persistence unavailable; reconciliation required");
+         rc = -1;
+      }
+   }
+   ingress_preinject_set_task_requirements(NULL);
+   cJSON_Delete(retry_task);
+   free(retry_summary);
+   free(retry_system);
 
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */

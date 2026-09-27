@@ -45,6 +45,7 @@ type toolRule struct {
 }
 
 type operatorPolicy struct {
+	CleanRetry          RetryPolicy             `json:"clean_retry"`
 	Actions             ActionCompositionPolicy `json:"actions"`
 	AdaptiveExploration explorationLimits       `json:"adaptive_exploration"`
 	Exploration         explorationLimits       `json:"exploration"`

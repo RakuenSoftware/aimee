@@ -277,8 +277,11 @@ int ingress_preinject_acquire_send_guard(void **state)
 }
 void ingress_preinject_release_send_guard(void *state)
 {
-   assert(state == &send_acquires);
-   send_releases++;
+   if (state)
+   {
+      assert(state == &send_acquires);
+      send_releases++;
+   }
 }
 int agent_http_post_stream_guarded_bytes(const char *url, const char *auth, const void *body,
                                          size_t length, agent_http_stream_cb callback, void *data,
@@ -395,8 +398,56 @@ static void test_stream_receipt_admission_and_commitment(void)
    puts("stream admission and exact incremental commitments survive partial/failed observations");
 }
 
+static int retry_calls, retry_refuse, retry_transport_calls;
+int server_clean_retry_admit(const void *body, size_t length, const char *receipt)
+{
+   assert(length == 3 && !memcmp(body, "abc", 3));
+   assert(receipt != NULL);
+   retry_calls++;
+   return retry_refuse && retry_calls >= retry_refuse ? -1 : 0;
+}
+int http_retry_post_observed_bytes(const char *url, const char *auth, const void *body,
+                                   size_t length, char **response, int timeout, const char *extra,
+                                   int max_attempts, int base_ms, int max_ms, const char *provider,
+                                   const char *model, const char *session,
+                                   http_retry_admit_cb_t admit,
+                                   const http_retry_observer_t *observer)
+{
+   for (int n = 0; n < 2; n++)
+   {
+      if (observer->before(observer->context, body, length) != 0)
+         return HTTP_RETRY_ADMISSION_REFUSED;
+      retry_transport_calls++;
+   }
+   return 200;
+}
+static void test_retry_reserves_every_actual_provider_attempt(void)
+{
+   memset(&context, 0, sizeof(context));
+   have_context = 1;
+   strcpy(context.retry_attempt, "host-attempt");
+   assert(wire_fence_external_backend() == -1);
+   for (int memory = 0; memory < 2; memory++)
+      for (int refuse = 0; refuse <= 2; refuse++)
+      {
+         context.memory_receipt_required = memory;
+         stream_refuse = 0;
+         retry_calls = retry_transport_calls = 0;
+         retry_refuse = refuse;
+         char *response = NULL;
+         int rc = wire_fence_post("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0, "fixture",
+                                  "fixture-model", "session", WIRE_FENCE_OPENAI_CHAT);
+         assert(rc == (refuse ? HTTP_RETRY_ADMISSION_REFUSED : 200));
+         assert(retry_calls == (refuse ? refuse : 2));
+         assert(retry_transport_calls == (refuse ? refuse - 1 : 2));
+      }
+   memset(&context, 0, sizeof(context));
+   retry_refuse = 0;
+}
+
 int main(void)
 {
+   test_retry_reserves_every_actual_provider_attempt();
    test_external_backend_cannot_ignore_hard_limits();
    test_stream_receipt_admission_and_commitment();
    operator_policy(NULL);

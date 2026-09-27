@@ -5108,7 +5108,7 @@ paths:
       summary: Native streaming chat (aimee event stream)
       description: >
         Stream a chat turn as newline-delimited aimee events
-        (turn_start / text / thinking / turn_end / session / usage / done /
+        (turn_start / text / thinking / turn_end / session / retry_attempt / usage / done /
         error), the same event shape the NDJSON socket emits. Used by the
         first-party webchat UI; distinct from the OpenAI-shaped
         /chat/completions. Requires CAP_CHAT (UDS, or an unscoped TCP bearer).
@@ -5124,6 +5124,18 @@ paths:
                 aimee_session_id: { type: string }
                 claude_session_id: { type: string }
                 cwd: { type: string }
+                clean_retry:
+                  type: object
+                  additionalProperties: false
+                  description: >
+                    Opt in to operator-enabled durable native retry tracking. An empty
+                    object starts an attempt. To retry a failed attempt, provide the
+                    retry_attempt event ID and complete current constraints in message.
+                    History speculation is omitted; workspace effects are not restored.
+                    Unsupported providers, unavailable baselines and unknown writes refuse.
+                  properties:
+                    previous_attempt: { type: string }
+                    replace_constraints: { type: boolean }
       responses:
         "200":
           description: Newline-delimited aimee chat events (read until close)

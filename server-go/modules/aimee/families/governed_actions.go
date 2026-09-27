@@ -3,6 +3,7 @@ package families
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -13,6 +14,7 @@ import (
 // host supplies tool-owner classifications and guarded source observations;
 // none of these fields are public tool arguments or client assertions.
 type governedActionRequest struct {
+	Retry         executionpolicy.RetryRequest    `json:"retry"`
 	ActionID      string                          `json:"action_id,omitempty"`
 	Arguments     json.RawMessage                 `json:"arguments,omitempty"`
 	Operation     string                          `json:"operation"`
@@ -82,6 +84,41 @@ func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint
 	var journal string
 	if err = q.QueryRow(ctx, `SELECT journal FROM governed_action_roots WHERE principal=$1 AND root_id=$2 FOR UPDATE`, principal, root).Scan(&journal); err != nil {
 		return 0, nil, err
+	}
+	if strings.HasPrefix(req.Operation, "retry_") {
+		var retryState string
+		if err = q.QueryRow(ctx, `SELECT retry_journal FROM governed_action_roots WHERE principal=$1 AND root_id=$2`, principal, root).Scan(&retryState); err != nil {
+			return 0, nil, err
+		}
+		policy, generation, e := executionpolicy.CurrentRetryPolicy()
+		if e != nil {
+			return store.StatusInvalid, nil, nil
+		}
+		req.Retry.Operation = strings.TrimPrefix(req.Operation, "retry_")
+		// Projection revisions are read from the current task owner, never the caller.
+		if req.Retry.Operation == "begin" {
+			if e = q.QueryRow(ctx, `SELECT COALESCE((SELECT task_projection_state FROM session_state WHERE session_id=$1),'')`, sid).Scan(&req.Retry.Projection); e != nil {
+				return 0, nil, e
+			}
+			var projection struct {
+				Revision string `json:"revision"`
+			}
+			if req.Retry.Projection != "" && json.Unmarshal([]byte(req.Retry.Projection), &projection) != nil {
+				return store.StatusInvalid, nil, nil
+			}
+			req.Retry.Projection = projection.Revision
+		}
+		next, decision, e := executionpolicy.CleanRetry(principal, root, []byte(retryState), []byte(journal), req.Retry, policy, generation, time.Now().UTC())
+		if e != nil {
+			return store.StatusInvalid, nil, nil
+		}
+		if string(next) != retryState {
+			if _, e = q.Exec(ctx, `UPDATE governed_action_roots SET retry_journal=$3,updated_at=now() WHERE principal=$1 AND root_id=$2`, principal, root, string(next)); e != nil {
+				return 0, nil, e
+			}
+		}
+		reply, e := json.Marshal(decision)
+		return store.StatusOK, []string{string(reply)}, e
 	}
 	if req.Operation == "root" {
 		reply, _ := json.Marshal(map[string]any{"allowed": true, "root_id": root})

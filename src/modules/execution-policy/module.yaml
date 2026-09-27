@@ -21,7 +21,8 @@
     "server-go/modules/execution-policy/exploration_experiment.go",
     "server-go/modules/execution-policy/action_intent.go",
     "server-go/modules/execution-policy/action_journal.go",
-    "server-go/modules/execution-policy/action_policy.go"
+    "server-go/modules/execution-policy/action_policy.go",
+    "server-go/modules/execution-policy/clean_retry.go"
   ],
   "go_tests": [
     "server-go/modules/execution-policy/execution_policy_test.go",
@@ -31,7 +32,9 @@
     "server-go/modules/execution-policy/exploration_worktree_test.go",
     "server-go/modules/execution-policy/exploration_calibration_test.go",
     "server-go/modules/execution-policy/exploration_experiment_test.go",
-    "server-go/modules/execution-policy/action_intent_test.go"
+    "server-go/modules/execution-policy/action_intent_test.go",
+    "server-go/modules/execution-policy/clean_retry_test.go",
+    "server-go/modules/execution-policy/action_benchmark_test.go"
   ],
   "public_headers": [
     "src/modules/execution-policy/include/aimee/execution-policy/module_api.h"

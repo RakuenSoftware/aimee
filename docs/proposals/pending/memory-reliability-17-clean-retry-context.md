@@ -1,10 +1,12 @@
 # MR-17: Clean retry context with preserved real-world state
 
-- **State:** Proposed
+- **State:** Implementation in validation; native opt-in retry path and durable owner implemented
 - **Priority:** P2: task recovery
 - **Owner:** Turn runtime, context and existing workspace-recovery owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md), [MR-13](memory-reliability-13-disposable-task-projections.md), [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md)
 - **Delivery:** Three implementation slices
+
+Operator contract, supported limits and current scope: [Clean native retries](../../clean-retries.md).
 
 ## Problem and intended result
 

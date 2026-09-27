@@ -18,6 +18,7 @@ extern econ_request_budget_result_t
 econ_module_request_budget_with_policy(unsigned, const void *, size_t, const char *, const char *)
     __attribute__((weak));
 extern int server_error_kind_http_status(const char *) __attribute__((weak));
+extern int server_clean_retry_admit(const void *, size_t, const char *) __attribute__((weak));
 static _Thread_local const char *last_error;
 const char *wire_fence_last_error(void)
 {
@@ -117,6 +118,11 @@ int wire_fence_external_backend(void)
    {
       last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
       return WIRE_FENCE_CONTEXT_REFUSED;
+   }
+   if (context && context->retry_attempt[0])
+   {
+      last_error = "retry_external_backend_unavailable";
+      return -1;
    }
    const char *policy = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
    if ((policy && *policy) || (context && context->request_budget_present))
@@ -266,7 +272,13 @@ static int wire_attempt_before(void *opaque, const void *body, size_t length)
    if (context->context_refused)
       goto refused;
    if (!context->memory_source_release[0] && !context->memory_receipt_required)
-      return 0;
+   {
+      if (!context->retry_attempt[0])
+         return 0;
+      if (server_clean_retry_admit && server_clean_retry_admit(body, length, "") == 0)
+         return 0;
+      goto refused;
+   }
    const char *route = attempt->route == WIRE_FENCE_OPENAI_CHAT          ? "openai_chat"
                        : attempt->route == WIRE_FENCE_OPENAI_RESPONSES   ? "openai_responses"
                        : attempt->route == WIRE_FENCE_ANTHROPIC_MESSAGES ? "anthropic_messages"
@@ -274,7 +286,12 @@ static int wire_attempt_before(void *opaque, const void *body, size_t length)
    if (ingress_preinject_prepare_attempt &&
        ingress_preinject_prepare_attempt(body, length, route, attempt->provider, attempt->model,
                                          attempt->attempt) == 0)
-      return 0;
+   {
+      if (!context->retry_attempt[0] ||
+          (server_clean_retry_admit &&
+           server_clean_retry_admit(body, length, attempt->attempt) == 0))
+         return 0;
+   }
 refused:
    last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
    return -1;

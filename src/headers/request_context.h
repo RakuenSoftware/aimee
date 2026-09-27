@@ -64,6 +64,9 @@ typedef struct
    int memory_receipt_required;
    /* Host-issued task binding; never parsed from transport headers. */
    char exploration_binding[4096];
+   /* Host-issued retry identity; copied into delegated/async requests. */
+   char retry_attempt[65];
+   char retry_session[129];
    int aimee_tool_calls; /* cumulative calls observed in this API transcript */
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];

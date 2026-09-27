@@ -526,6 +526,7 @@ typedef struct
    /* Provider stop/finish reason for the turn (e.g. "end_turn", "tool_use",
     * "stop", "length"), when the parser captured it. Empty otherwise. */
    char stop_reason[32];
+   char clean_retry_attempt[65];
    char *response;
    int prompt_tokens;
    int completion_tokens;

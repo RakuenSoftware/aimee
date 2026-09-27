@@ -1059,6 +1059,8 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   if (result.clean_retry_attempt[0])
+      stream_event(cctx, "retry_attempt", "id", result.clean_retry_attempt);
    workspace_turn_unbind_active();
    free(system_prompt);
 
@@ -1293,6 +1295,14 @@ void chat_stream_worker(void *arg)
    if (aimee_sid && aimee_sid[0] &&
        session_primary_get(aimee_sid, primary_buf, sizeof(primary_buf)) && primary_buf[0])
       provider = primary_buf;
+   if (cJSON_GetObjectItemCaseSensitive(req, "clean_retry") &&
+       (compact || !chat_provider_uses_primary_session(provider)))
+   {
+      compute_error(cctx, "clean retry requires a native primary turn; compaction and external CLI "
+                          "backends are unsupported");
+      compute_ctx_free(cctx);
+      return;
+   }
    if (chat_provider_uses_codex_cli(provider))
    {
       compute_ctx_release_budget(cctx);
