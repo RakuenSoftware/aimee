@@ -1,0 +1,24 @@
+PASS owned retry session created
+MR17_SESSION b6924e20-6500-227e-a7f5-368a6d003340
+PASS before controlled native provider selected
+PASS before final provider request has durable receipt
+PASS before retained exact current controlled procedure
+PASS initial read is governed
+PASS failed attempt really completed a verified write
+PASS before host emits durable attempt identity
+PASS controlled provider failure is not reported as completion
+actual server restart healthy; authoritative procedure correction committed
+PASS actual file survives server restart
+MR17_SESSION b6924e20-6500-227e-a7f5-368a6d003340
+PASS after controlled native provider selected
+PASS after final provider request has durable receipt
+PASS after retained exact current controlled procedure
+PASS failed speculation absent from clean provider payload
+PASS replaced user constraints are absent
+PASS corrected procedure replaces prior source
+PASS bounded host summary preserves actual write receipt
+PASS retry verifies preserved file without repeating write
+PASS after host emits durable attempt identity
+PASS clean retry completes with a new attempt
+PASS clean retry never restores or repeats original write
+PASS durable shared reservations and new plan survive restart

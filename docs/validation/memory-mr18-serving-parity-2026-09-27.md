@@ -1,8 +1,9 @@
 # MR-18 serving parity matrix
 
 This matrix describes the PR #2990 candidate after MR-17 (`53d49b031`) and the
-MR-18 unit-semantic source-version repair. The final release report pins the
-built MR-18 revision. The linked earlier process runs retain their original
+MR-18 unit-semantic source-version repair. The [final release report](memory-mr18-release-2026-09-27.md) pins executable
+`1fac4f35c`, fresh CLI/MCP/HTTP view, action and clean-retry execution and the
+173-Go/40-Python frozen gate. The linked earlier process runs retain their original
 image identities; they are not measurements of a later image. Source review and
 current automated execution are separate evidence classes.
 

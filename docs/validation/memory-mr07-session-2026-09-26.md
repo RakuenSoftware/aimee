@@ -1,7 +1,10 @@
 # MR-07 durable session integration
 
-MR-07 remains in progress. This implementation replaces the injected-store-only
-checkpoint with authenticated PostgreSQL session ownership and real host calls.
+MR-07 observe-mode implementation is complete under the [operator-approved
+closeout](#operator-approved-observe-completion) recorded below. Earlier checkpoints
+retain their original pending-gate statements. The implementation replaces the
+injected-store-only checkpoint with authenticated PostgreSQL session ownership
+and real host calls.
 It does not enable adaptive enforcement or claim a paired quality result.
 
 Migration 38 adds bounded exploration state to the existing session row.

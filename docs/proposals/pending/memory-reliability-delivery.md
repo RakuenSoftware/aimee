@@ -11,14 +11,26 @@ Full DB2 retirement is deferred to the [future proposal TODO](db2-as-a-go-module
 G0 removes native memory behavior; it does not retire unrelated DB2 consumers
 or replace the C bus.
 
+## Current closeout — 2026-09-27
+
+**MR-01–18 implementation is complete** within the supported operator contracts,
+including the explicitly approved MR-07 observe scope. The
+[final program report](../../validation/memory-mr18-release-2026-09-27.md) links all
+18 closeouts and pins executable `1fac4f35c`, the frozen 173-Go/40-Python gate and
+fresh CT109 upgrade/restart acceptance. MR-07 enforcement, MR-09 adaptive ranking
+and MR-10 domain tuning remain unpromoted; optional retry remains disabled and
+MR-15 attribution/cost reports remain observe-only. Production CT100 remains on
+released 0.4.5. Live-model quality/cost promotion and merge/release of PR #2990
+remain separate.
+
 ## Authorized work
 
 | Work | Current evidence | Remaining acceptance |
 |---|---|---|
 | 1. G0 language/ownership cutover | Pure Go shared memory owner and module-side bus transport; native implementations and dead console retired; original file/API and external-owner ledger | [Closeout evidence](memory-reliability-g0-closeout.md). Go/PostgreSQL race, actual C-bus placements/restart, native transport, HTTP and P1 isolation pass. [Fresh `.253` release evidence](../../validation/memory-g0-2026-09-19.md) records T1/T2/T3, 0.4.1 upgrade/rollback, exploratory concurrency/int64/failure recovery and tested-revision CI. Whole-DB2 retirement is deferred. |
-| 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; the [paired quality/latency run](../../validation/memory-g0-2026-09-19.md) is recorded. [Performance follow-up](../../validation/memory-performance-2026-09-20.md) records reduced overhead and unchanged Go rankings. Extend the frozen corpus to the full adversarial matrix. |
-| 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; fresh-image paired quality/performance and bounded CLI/MCP/HTTP restart/failure coverage are [recorded](../../validation/memory-g0-2026-09-19.md). The complete MR-18 adversarial/cross-surface matrix remains. |
-| 4. MR-01–18 | MR-01–06 complete; MR-07 observe implementation complete; MR-08–14 functional implementation complete; optional promotion gates remain | [MR-01 final closeout](../../validation/memory-mr01-closeout-2026-09-24.md). [MR-02 final closeout](../../validation/memory-mr02-closeout-2026-09-24.md). [MR-03 final closeout](../../validation/memory-mr03-closeout-2026-09-24.md). [MR-04 final closeout](../../validation/memory-mr04-closeout-2026-09-25.md). [MR-05 final closeout](../../validation/memory-mr05-closeout-2026-09-25.md). [MR-06 final closeout](../../validation/memory-mr06-closeout-2026-09-25.md). MR-07 promotion is deferred by user direction; MR-09 adaptive promotion is unqualified. [MR-10 closeout](../../validation/memory-mr10-horizons-2026-09-26.md) records 109 deployed checks. [MR-11 closeout](../../validation/memory-mr11-generations-2026-09-27.md) records generation and upgrade acceptance. [MR-12 closeout](../../validation/memory-mr12-views-2026-09-27.md) records 43 deployed checks. [MR-13 closeout](../../validation/memory-mr13-task-projections-2026-09-27.md) records 31 canary checks. [MR-14 closeout](../../validation/memory-mr14-hygiene-2026-09-27.md) records 22 canary checks and administrator-bootstrap/rollback validation. MR-15–18 implementation remains. |
+| 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; the [paired quality/latency run](../../validation/memory-g0-2026-09-19.md) is recorded. [Performance follow-up](../../validation/memory-performance-2026-09-20.md) records reduced overhead and unchanged Go rankings. The [MR-18 frozen gate](../../validation/memory-mr18-release-2026-09-27.md) extends coverage across all 12 adversarial groups. |
+| 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; fresh-image paired quality/performance and bounded CLI/MCP/HTTP restart/failure coverage are [recorded](../../validation/memory-g0-2026-09-19.md). The [MR-18 frozen adversarial gate and serving matrix](../../validation/memory-mr18-release-2026-09-27.md) now pass deterministic and fresh deployment acceptance; optional model-quality promotion remains separately gated. |
+| 4. MR-01–18 | All 18 implementation closeouts complete within documented supported modes; MR-07 observe scope approved by operator | [Final program report and all proposal evidence](../../validation/memory-mr18-release-2026-09-27.md). Optional adaptive promotion is unqualified/off; no live-model quality or cost benefit is asserted. |
 
 The [MR-02 closeout checklist](memory-reliability-02-closeout.md) records its eight
 unchanged acceptance gates and completed validation.
@@ -28,13 +40,9 @@ unchanged acceptance gates and completed verification.
 
 ## Post-merge execution
 
-Completion of all MR-01–18 implementation and acceptance work is the active goal.
-Execution is sequential by proposal, as requested on 2026-09-24: complete MR-01,
-then MR-02, continuing numerically through MR-18. MR-01–14 functional implementation has now been addressed, with MR-07 in
-observe mode and MR-09/MR-10 optional policies disabled pending promotion
-evidence. MR-14 proposal-only hygiene acceptance is complete; MR-15 outcome attribution is next. Previously implemented work for later proposals is retained, but new
-work on those proposals waits for the preceding proposal's closeout. Integration
-work required to satisfy the active proposal and its validation remains in scope.
+Sequential implementation through MR-18 is complete. The final executable and
+validation evidence are recorded above. Optional policies retain the proposal
+promotion requirements and the operator-approved observe defaults.
 The [MR-01 closeout checklist](memory-reliability-01-closeout.md) maps its seven
 frozen acceptance clauses and required diagnostics to completed evidence.
 The remaining entries below are historical implementation checkpoints, not
@@ -48,6 +56,11 @@ pins 123 acceptance clauses from the merged proposal revision and the measured
 Go performance baseline. It is an inventory, not a claim that those gates pass.
 The requirement text remains bound to that source revision while implementation
 and validation evidence are added here.
+
+## Historical implementation checkpoints
+
+The statements of remaining work below describe their original checkpoint, not
+the current program status. The closeout above is authoritative for completion.
 
 The [creation retry implementation](../../validation/memory-creation-retries-2026-09-21.md)
 extends both Go placements with durable store keys, preserving replacement,

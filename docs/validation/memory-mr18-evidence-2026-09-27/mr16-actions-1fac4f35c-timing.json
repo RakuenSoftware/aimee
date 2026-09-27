@@ -1,0 +1,7 @@
+{
+  "kind": "synthetic local tool API end-to-end wall time, not isolated admission overhead",
+  "samples": 12,
+  "median_ms": 394.49926803354174,
+  "max_ms": 494.659652991686,
+  "initial_write_ms": 292.65746899181977
+}
