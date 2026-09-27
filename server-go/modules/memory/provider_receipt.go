@@ -477,7 +477,7 @@ func inspectProviderReceipts(args commandArgs) ([]byte, bus.ModuleStatus) {
 				actions = append(actions, map[string]string{"attempt_id": id, "action": "read"})
 			}
 		}
-		out = append(out, map[string]any{"attempt_id": id, "prepared_sequence": strconv.FormatUint(a.PreparedSequence, 10), "state": state, "dispatch_ownership": ownership, "stages": a.Stages, "prepared_receipt": a.Prepared, "assembly": a.Projection, "dispatch_receipt": a.StartedEvent,
+		out = append(out, map[string]any{"attempt_id": id, "prepared_sequence": strconv.FormatUint(a.PreparedSequence, 10), "procedure_exposures": procedureExposures(a.Prepared, a.Acknowledged), "state": state, "dispatch_ownership": ownership, "stages": a.Stages, "prepared_receipt": a.Prepared, "assembly": a.Projection, "dispatch_receipt": a.StartedEvent,
 			"evidence":       map[string]any{"schema_valid": true, "authenticated_producer": "local_host_ledger", "source_version_available": "not_checked", "payload_verifiable": payloadState, "decision_replayed": false, "chain_included": true, "externally_compared": "unavailable", "effect_confirmed": false},
 			"retention_mode": a.Prepared.Binding.Retention, "replay": replay, "payload_base64": encoded, "local_acceptance": "durable", "checkpoint_state": args.stringOr("checkpoint_state", "unknown")})
 	}

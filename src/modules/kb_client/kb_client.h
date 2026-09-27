@@ -1131,4 +1131,7 @@ void kb_client_memory_scope_context_apply(cJSON *req);
 /* Consumes req; optional host file is bounded and sent as unchanged text. */
 char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path);
 
+/* Host-constructed receipt attribution; consumes the request object. */
+char *kb_client_learning_application_json(cJSON *request);
+
 #endif /* DEC_KB_CLIENT_H */

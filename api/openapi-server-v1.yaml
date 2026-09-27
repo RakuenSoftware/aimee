@@ -3657,6 +3657,55 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /learning/application:
+    post:
+      summary: Attribute explicit user feedback to a delivered procedure version
+      description: >-
+        The server reads the authenticated principal's existing provider receipt.
+        It accepts no caller-supplied exposure or chain-integrity claim. Learning
+        validates application and verifier evidence, records immutable events,
+        and returns versioned experience. Model self-reports cannot establish
+        application or success. No fitted policy or canonical procedure is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+                event: { type: object, description: Version 1 learning ProcedureEvent with authority user_feedback. }
+                event_json: { type: string, maxLength: 65536, description: CLI encoding of event; use event for structured clients. }
+      responses:
+        "200":
+          description: Governed event reference and experience, or explicit refusal
+          content:
+            application/json:
+              schema: { type: object }
+  /learning/task_cost:
+    post:
+      summary: Report declared complete-task costs through economizer
+      description: >-
+        Returns actual and estimated nanodollars separately, every unpriced call,
+        stage coverage and attempt identities. Integer amounts are decimal strings.
+        Caller-declared completeness is not independently verified completeness.
+        This observe-only report never admits a cost intervention or claims savings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cost: { type: object, description: Economizer version 1 TaskCostRequest. }
+                cost_json: { type: string, maxLength: 2097152, description: CLI encoding of cost. }
+      responses:
+        "200":
+          description: Cost report or explicit refusal
+          content:
+            application/json:
+              schema: { type: object }
   /memory/receipt:
     post:
       summary: Inspect the authenticated principal's durable provider attempt receipts

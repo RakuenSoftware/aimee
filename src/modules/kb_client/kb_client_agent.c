@@ -823,3 +823,8 @@ int kb_client_anti_pattern_bump(int64_t id)
    cJSON_Delete(resp);
    return rc;
 }
+
+char *kb_client_learning_application_json(cJSON *request)
+{
+   return kb_v1_action_request("learning.record_application", request);
+}

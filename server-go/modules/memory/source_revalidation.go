@@ -123,6 +123,9 @@ func auxiliarySourceRevalidationSQL() string {
  (CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END)->>'scope_id' AS scope_id
  FROM learning_proposals) p WHERE id=(r.ref->>'stable_id')::bigint
  AND record_revision::text=r.ref#>>'{source_version,version,record_revision}'
+ AND (COALESCE(r.ref#>>'{source_version,procedure_experience_revision}','')='' OR
+ COALESCE(learning_procedure_experience(r.ref#>>'{source_version,version,owner_id}',
+ r.ref->>'stable_id',record_revision::text)->>'revision','0')=r.ref#>>'{source_version,procedure_experience_revision}')
  AND state='committed' AND sink='artifact' AND action_json IS JSON OBJECT AND `+auxiliarySourceScopeSQL+`)
  WHEN 'memory_relation' THEN EXISTS (
  SELECT 1 FROM memory_relations relation WHERE id=(r.ref#>>'{source_version,version,record_id}')::bigint

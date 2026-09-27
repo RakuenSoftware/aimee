@@ -1475,6 +1475,8 @@ static const struct
     {"memory.validity", marshal_memory_validity},
     {"memory.health", marshal_memory_health},
     {"memory.receipt", marshal_memory_receipt},
+    {"learning.application", marshal_learning_application},
+    {"learning.task_cost", marshal_learning_task_cost},
     {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
     {"memory.evidence", marshal_memory_evidence},

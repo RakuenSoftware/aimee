@@ -18907,6 +18907,9 @@ BEGIN
   GRANT SELECT(observation_id,scope_kind,scope_id,observation_type,title,summary,status,
     confidence,evidence_count,refreshed_at,memory_record_id,record_revision) ON learning_observations TO aimee_store_runtime;
   GRANT SELECT(id,sink,state,target_key,action_json,record_revision) ON learning_proposals TO aimee_store_runtime;
+  IF to_regprocedure('learning_procedure_experience(text,text,text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) TO aimee_store_runtime;
+  END IF;
   GRANT SELECT(id,from_id,into_id,undone), INSERT(from_id,into_id), UPDATE(undone) ON entity_merges TO aimee_store_runtime;
   GRANT USAGE,SELECT ON SEQUENCE entity_merges_id_seq TO aimee_store_runtime;
   GRANT SELECT(id,name_norm,status,priority), INSERT(name_norm,status,priority), UPDATE(status,priority) ON entity_name_conflicts TO aimee_store_runtime;
@@ -19673,3 +19676,131 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION learning_hygiene_finish(BIGINT,BOOLEAN,TEXT,BIGINT,BIGINT) TO aimee_memory_hygiene;
+
+-- MR15: retain availability features without manufacturing a task reward.
+ALTER TABLE bandit_decisions ADD COLUMN IF NOT EXISTS result_count BIGINT;
+ALTER TABLE bandit_decisions ADD COLUMN IF NOT EXISTS result_truncated BOOLEAN;
+
+-- MR-15: governed procedure observations reuse the learning application ledger.
+-- Legacy mining observations remain unverified; they are never part of these
+-- projections. Source-event IDs are optional only for receipt-backed v2 rows.
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS governed_event JSONB;
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS experience_projection JSONB;
+ALTER TABLE learning_application_events ADD COLUMN IF NOT EXISTS governed_sequence BIGINT;
+ALTER TABLE learning_application_events ALTER COLUMN source_event_id DROP NOT NULL;
+CREATE SEQUENCE IF NOT EXISTS learning_procedure_event_sequence;
+CREATE INDEX IF NOT EXISTS learning_procedure_experience_lookup ON learning_application_events
+ ((governed_event->>'actor'),(governed_event->'procedure'->>'owner_id'),
+ (governed_event->'procedure'->>'procedure_id'),(governed_event->'procedure'->>'revision'),governed_sequence DESC)
+ WHERE governed_event IS NOT NULL;
+CREATE OR REPLACE FUNCTION learning_procedure_immutable_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF TG_OP='UPDATE' AND OLD.governed_event IS NOT NULL AND NEW IS DISTINCT FROM OLD
+ AND NOT (NEW.experience_projection IS NULL AND (to_jsonb(NEW)-'experience_projection')=(to_jsonb(OLD)-'experience_projection')) THEN
+  RAISE EXCEPTION 'governed application events are immutable';
+ END IF;
+ IF NEW.source_event_id IS NULL AND NEW.governed_event IS NULL THEN
+  RAISE EXCEPTION 'application requires mining or governed receipt evidence';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS learning_procedure_immutable ON learning_application_events;
+CREATE TRIGGER learning_procedure_immutable BEFORE INSERT OR UPDATE ON learning_application_events
+ FOR EACH ROW EXECUTE FUNCTION learning_procedure_immutable_guard();
+
+-- Learning owns persistence. Caller context is supplied by the verified host
+-- adapter, independently of public event arguments. The host holds a cohort
+-- advisory transaction lock across reading, Go-owner projection and admission.
+CREATE OR REPLACE FUNCTION learning_procedure_admit(p_event JSONB,p_projection JSONB,p_scope_kind TEXT,p_scope_id TEXT)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+DECLARE actor TEXT:=current_setting('aimee.principal',true); event_key TEXT; old_event JSONB;
+BEGIN
+ IF actor IS NULL OR actor='' OR actor IS DISTINCT FROM p_event->>'actor'
+ OR p_event->>'schema_version' IS DISTINCT FROM '1' OR COALESCE(p_event->>'event_id','')=''
+ OR COALESCE(p_event->>'receipt_ref','')='' OR COALESCE(p_event->>'trial_id','')=''
+ OR jsonb_typeof(p_projection) IS DISTINCT FROM 'array'
+ OR p_scope_kind NOT IN ('project','workspace','global') OR (p_scope_kind<>'global' AND p_scope_id='') THEN
+  RAISE EXCEPTION 'invalid governed procedure admission';
+ END IF;
+ event_key:='mr15:'||encode(sha256(convert_to(jsonb_build_array(actor,p_event->>'event_id')::text,'UTF8')),'hex');
+ SELECT governed_event INTO old_event FROM learning_application_events WHERE application_id=event_key;
+ IF FOUND THEN
+  IF old_event IS DISTINCT FROM p_event THEN RAISE EXCEPTION 'conflicting immutable application'; END IF;
+  RETURN jsonb_build_object('status','ok','event_ref',event_key,'duplicate',true);
+ END IF;
+ INSERT INTO learning_application_events(application_id,source_event_id,scope_kind,scope_id,
+  procedure_artifact_id,governed_event,experience_projection,governed_sequence)
+ VALUES(event_key,NULL,p_scope_kind,p_scope_id,p_event->'procedure'->>'procedure_id',p_event,p_projection,
+  nextval('learning_procedure_event_sequence'));
+ RETURN jsonb_build_object('status','ok','event_ref',event_key,'duplicate',false);
+END $$;
+
+-- The native learning adapter reads only the authenticated actor's cohort.
+CREATE OR REPLACE FUNCTION learning_procedure_events(p_procedure JSONB)
+RETURNS SETOF JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ SELECT governed_event FROM learning_application_events
+ WHERE governed_event->>'actor'=NULLIF(current_setting('aimee.principal',true),'')
+ AND governed_event->'procedure'=p_procedure
+ ORDER BY governed_sequence LIMIT 4097
+$$;
+ALTER FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) SECURITY DEFINER;
+ALTER FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) SET search_path=pg_catalog,public;
+REVOKE ALL ON FUNCTION learning_procedure_events(JSONB) FROM PUBLIC;
+
+-- This read does not blend procedure versions or principals. Memory may expose
+-- the learning-owned projection, but cannot rewrite or fit it.
+CREATE OR REPLACE FUNCTION learning_procedure_experience(p_owner TEXT,p_procedure TEXT,p_revision TEXT)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+ SELECT jsonb_build_object('revision',governed_sequence::text||CASE WHEN experience_projection IS NULL THEN ':erased' ELSE '' END,
+  'cohorts',COALESCE(experience_projection,'[]'::jsonb),
+  'state',CASE WHEN experience_projection IS NULL THEN 'invalidated_by_erasure' ELSE 'observed' END)
+ FROM learning_application_events
+ WHERE governed_event->>'actor'=current_setting('aimee.principal',true)
+ AND governed_event->'procedure'->>'owner_id'=p_owner
+ AND governed_event->'procedure'->>'procedure_id'=p_procedure
+ AND governed_event->'procedure'->>'revision'=p_revision
+ ORDER BY governed_sequence DESC LIMIT 1
+$$;
+
+-- Erasure invalidates cached projections that could retain the removed evidence.
+CREATE OR REPLACE FUNCTION learning_procedure_erase_projection() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.governed_event IS NOT NULL THEN
+  PERFORM pg_advisory_xact_lock(hashtextextended((OLD.governed_event->>'actor') || (OLD.governed_event->'procedure')::text,15));
+  UPDATE learning_application_events SET experience_projection=NULL
+  WHERE governed_event->>'actor'=OLD.governed_event->>'actor'
+  AND governed_event->'procedure'=OLD.governed_event->'procedure';
+ END IF;
+ RETURN OLD;
+END $$;
+DROP TRIGGER IF EXISTS learning_procedure_erase ON learning_application_events;
+CREATE TRIGGER learning_procedure_erase AFTER DELETE ON learning_application_events
+ FOR EACH ROW EXECUTE FUNCTION learning_procedure_erase_projection();
+ALTER FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) SECURITY DEFINER;
+ALTER FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) SET search_path=pg_catalog,public;
+REVOKE ALL ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) FROM PUBLIC;
+DO $procedure_experience_grants$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT EXECUTE ON FUNCTION learning_procedure_experience(TEXT,TEXT,TEXT),
+   learning_procedure_events(JSONB),learning_procedure_admit(JSONB,JSONB,TEXT,TEXT) TO aimee_store_runtime;
+ END IF;
+END $procedure_experience_grants$;
+-- Experience metadata is part of the rendered source snapshot. Its writes and
+-- erasures participate in the same final-send barrier as canonical versions.
+DROP TRIGGER IF EXISTS memory_send_governed_insert ON learning_application_events;
+CREATE TRIGGER memory_send_governed_insert BEFORE INSERT ON learning_application_events
+ FOR EACH ROW WHEN (NEW.governed_event IS NOT NULL) EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_governed_update ON learning_application_events;
+CREATE TRIGGER memory_send_governed_update BEFORE UPDATE ON learning_application_events
+ FOR EACH ROW WHEN (NEW.governed_event IS NOT NULL OR OLD.governed_event IS NOT NULL)
+ EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_governed_delete ON learning_application_events;
+CREATE TRIGGER memory_send_governed_delete BEFORE DELETE ON learning_application_events
+ FOR EACH ROW WHEN (OLD.governed_event IS NOT NULL) EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_application_events;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_application_events
+ FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();

@@ -6,6 +6,8 @@
 
 #include "kb_service_backend.h"
 #include "kb_service.h"
+#include "kb_reqctx.h"
+#include <aimee/learning/module_api.h>
 #include "module_commands.h"
 
 #include "aimee.h"
@@ -554,8 +556,142 @@ static int kbs_propose_unstable_procedure(const learning_application_event_t *ap
    return proposal_id;
 }
 
+/* The only v2 writer accepts receipt-reader attestations from an authenticated
+ * Server transport. Public bearer requests cannot manufacture host exposure.
+ * The Server endpoint constructs exposure itself; no generic public forwarding
+ * surface publishes this internal envelope. */
+static cJSON *kbs_governed_application(const cJSON *req)
+{
+   const kb_request_context_t *resolved = kb_reqctx_resolved();
+   cJSON *context = kb_service_command_context();
+   cJSON *event = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(req, "governed_event"), 1);
+   cJSON *exposure = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(req, "exposure"), 1);
+   cJSON *args = NULL, *admitted = NULL, *projected = NULL, *reply = NULL;
+   void *conn = db2_conn();
+   char err[256] = "";
+   int begun = 0;
+   aimee_pg_stmt_t *st = NULL;
+   char *raw = NULL, *cohort = NULL, *projection = NULL;
+   const char *actor = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "principal"));
+   if (!resolved || !resolved->has_transport || resolved->transport.kind != KB_PRIN_CERT ||
+       !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")) || !actor ||
+       !cJSON_IsObject(event) || !cJSON_IsObject(exposure) || !conn || aimee_pg_is_shim() ||
+       strcmp(kbs_req_string(event, "authority"), "user_feedback"))
+      goto done;
+   /* Attribution is to the verified caller, never a JSON actor or host claim. */
+   cJSON_DeleteItemFromObjectCaseSensitive(event, "actor");
+   cJSON_AddStringToObject(event, "actor", actor);
+   cJSON_DeleteItemFromObjectCaseSensitive(event, "authority");
+   cJSON_AddStringToObject(event, "authority", "user_feedback");
+   args = cJSON_CreateObject();
+   cJSON_AddItemToObject(args, "event", cJSON_Duplicate(event, 1));
+   cJSON_AddItemToObject(args, "exposure", cJSON_Duplicate(exposure, 1));
+   admitted = aimee_module_command_call_context(
+       AIMEE_LEARNING_EVENT_EXPERIENCE, AIMEE_LEARNING_STAGE_EXPERIENCE, "admit", args, context);
+   if (!cJSON_IsObject(admitted))
+      goto done;
+   raw = cJSON_PrintUnformatted(admitted);
+   cohort = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(admitted, "procedure"));
+   if (!raw || !cohort || aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      goto done;
+   begun = 1;
+   st = aimee_pg_prepare(
+       conn,
+       "SELECT pg_advisory_xact_lock(hashtextextended(?1 || (?2::jsonb)::text, 15)),"
+       " set_config('aimee.principal',?1,true)",
+       err, sizeof(err));
+   if (!st)
+      goto done;
+   aimee_pg_bind_text(st, "?1", actor);
+   aimee_pg_bind_text(st, "?2", cohort);
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+      goto done;
+   aimee_pg_finalize(st);
+   st = aimee_pg_prepare(conn, "SELECT learning_procedure_events(?1::jsonb)::text", err,
+                         sizeof(err));
+   if (!st)
+      goto done;
+   aimee_pg_bind_text(st, "?1", cohort);
+   cJSON_Delete(args);
+   args = cJSON_CreateObject();
+   cJSON *events = cJSON_AddArrayToObject(args, "events");
+   int duplicate = 0;
+   int rc;
+   while ((rc = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      const char *row = aimee_pg_column_text(st, 0);
+      cJSON *item = row ? cJSON_ParseWithOpts(row, NULL, 1) : NULL;
+      if (!item || cJSON_GetArraySize(events) >= 4096)
+      {
+         cJSON_Delete(item);
+         goto done;
+      }
+      if (cJSON_Compare(item, admitted, 1))
+         duplicate = 1;
+      cJSON_AddItemToArray(events, item);
+   }
+   if (rc != AIMEE_PG_DONE)
+      goto done;
+   aimee_pg_finalize(st);
+   st = NULL;
+   if (!duplicate)
+      cJSON_AddItemToArray(events, cJSON_Duplicate(admitted, 1));
+   projected = aimee_module_command_call_context(
+       AIMEE_LEARNING_EVENT_EXPERIENCE, AIMEE_LEARNING_STAGE_EXPERIENCE, "project", args, context);
+   if (!cJSON_IsArray(projected))
+      goto done;
+   projection = cJSON_PrintUnformatted(projected);
+   if (!projection)
+      goto done;
+   st = aimee_pg_prepare(conn, "SELECT learning_procedure_admit(?1::jsonb,?2::jsonb,?3,?4)::text",
+                         err, sizeof(err));
+   if (!st)
+      goto done;
+   aimee_pg_bind_text(st, "?1", raw);
+   aimee_pg_bind_text(st, "?2", projection);
+   aimee_pg_bind_text(st, "?3", kbs_req_string(req, "scope_kind"));
+   aimee_pg_bind_text(st, "?4", kbs_req_string(req, "scope_id"));
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+      goto done;
+   const char *result = aimee_pg_column_text(st, 0);
+   reply = result ? cJSON_ParseWithOpts(result, NULL, 1) : NULL;
+   aimee_pg_finalize(st);
+   st = NULL;
+   if (!reply || aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      cJSON_Delete(reply);
+      reply = NULL;
+      goto done;
+   }
+   begun = 0;
+   cJSON_AddItemToObject(reply, "experience", cJSON_Duplicate(projected, 1));
+done:
+   if (st)
+      aimee_pg_finalize(st);
+   if (begun)
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   free(raw);
+   free(cohort);
+   free(projection);
+   cJSON_Delete(event);
+   cJSON_Delete(exposure);
+   cJSON_Delete(context);
+   cJSON_Delete(args);
+   cJSON_Delete(admitted);
+   cJSON_Delete(projected);
+   if (!reply)
+   {
+      reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "status", "error");
+      cJSON_AddStringToObject(reply, "message", "governed application unavailable or conflicting");
+   }
+   return reply;
+}
+
 cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
 {
+   if (cJSON_GetObjectItemCaseSensitive(req, "governed_event"))
+      return kbs_governed_application(req);
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
@@ -661,6 +797,7 @@ cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
 
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "application_id", application.application_id);
+   cJSON_AddStringToObject(resp, "verification", "unverified_legacy_signal");
    cJSON_AddBoolToObject(resp, "direct_mutation", 0);
    if (application.applied && strcmp(application.outcome, "failure") == 0 &&
        application.procedure_artifact_id[0])
@@ -680,7 +817,7 @@ cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
       snprintf(title, sizeof(title), "Unstable procedure: %s", application.procedure_artifact_id);
       char summary[512];
       snprintf(summary, sizeof(summary),
-               "Procedure %s was explicitly applied and failed in task family '%s' (%s).",
+               "Unverified report: procedure %s was applied and failed in task family '%s' (%s).",
                application.procedure_artifact_id, application.task_family,
                application.failure_class);
       learning_observation_evidence_input_t evidence = {application.source_event_id, "",

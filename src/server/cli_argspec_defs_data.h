@@ -1036,3 +1036,7 @@
 {"memory.receipt", "{\"bool_flags\":[\"replay\"],\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"replay\",\"from\":\"flag\",\"flag\":\"replay\",\"type\":\"bool\"}]}"},
 
 {"memory.health", "{\"fields\":[{\"json\":\"window\",\"from\":\"flag\",\"flag\":\"window\",\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"},{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"},{\"json\":\"purpose\",\"from\":\"flag\",\"flag\":\"purpose\",\"empty\":\"emit\"},{\"json\":\"query_class\",\"from\":\"flag\",\"flag\":\"query-class\",\"empty\":\"emit\"},{\"json\":\"stage\",\"from\":\"flag\",\"flag\":\"stage\",\"empty\":\"emit\"},{\"json\":\"traces\",\"flag\":\"traces\",\"type\":\"bool\",\"from\":\"flag\"}],\"bool_flags\":[\"traces\"]}"},
+
+{"learning.application", "{\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"event_json\",\"from\":\"flag\",\"flag\":\"event-json\",\"required\":true}]}"},
+
+{"learning.task_cost", "{\"fields\":[{\"json\":\"cost_json\",\"from\":\"flag\",\"flag\":\"cost-json\",\"required\":true}]}"},

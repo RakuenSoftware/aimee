@@ -958,8 +958,8 @@ func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
 	}
 	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
  GRANT USAGE ON SCHEMA public TO aimee_store_runtime;GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
- GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO aimee_store_runtime;
- SELECT set_config('aimee.memory_scope_all','1',true),set_config('jit','off',true)`)
+ GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT),learning_procedure_experience(TEXT,TEXT,TEXT) TO aimee_store_runtime;
+ SELECT set_config('aimee.principal','auxiliary-procedure',true),set_config('aimee.memory_scope_all','1',true),set_config('jit','off',true)`)
 	const key = "typed-auxiliary-source"
 	var parent, relation, signal, procedure int64
 	insert := func(q string, id *int64, args ...any) {
@@ -1021,6 +1021,20 @@ func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
 		}
 	}
 	check(true)
+	exec("SAVEPOINT experience_change;RESET ROLE")
+	var procedureRef typedProjectionRef
+	for _, ref := range refs {
+		if ref.Source.Kind == "learning_procedure" {
+			procedureRef = ref
+		}
+	}
+	event := map[string]any{"schema_version": 1, "event_id": "auxiliary-event", "actor": "auxiliary-procedure", "trial_id": "trial", "receipt_ref": "fixture-receipt", "procedure": map[string]string{"owner_id": procedureRef.Source.Version.OwnerID, "procedure_id": procedureRef.ID, "revision": procedureRef.Source.Version.RecordRevision}}
+	rawEvent, _ := json.Marshal(event)
+	exec(`SELECT learning_procedure_admit($1::jsonb,'[]'::jsonb,'project',$2)`, string(rawEvent), key)
+	exec("SET LOCAL ROLE aimee_store_runtime")
+	check(false) // Experience changed without changing canonical procedure text.
+	exec("ROLLBACK TO SAVEPOINT experience_change;RELEASE SAVEPOINT experience_change")
+	check(true)
 	for _, q := range []string{
 		`UPDATE learning_observations SET summary='changed' WHERE observation_id='` + key + `'`,
 		`UPDATE learning_observations SET status='retired' WHERE observation_id='` + key + `'`,
@@ -1043,6 +1057,11 @@ func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
 	if ok, e := backend.guardedSourceRevalidation(ctx, request, Scope{}); e != nil || !ok {
 		t.Fatal("auxiliary guard", ok, e)
 	}
+	exec("SAVEPOINT refused_experience;RESET ROLE")
+	if _, e := tx.Exec(ctx, `SELECT learning_procedure_admit($1::jsonb,'[]'::jsonb,'project',$2)`, string(rawEvent), key); e == nil || !strings.Contains(e.Error(), "55P03") {
+		t.Fatal("experience changed during guarded send", e)
+	}
+	exec("ROLLBACK TO SAVEPOINT refused_experience;RELEASE SAVEPOINT refused_experience;SET LOCAL ROLE aimee_store_runtime")
 	for _, q := range []string{`UPDATE learning_observations SET summary='raced' WHERE observation_id='` + key + `'`, fmt.Sprintf(`UPDATE learning_proposals SET state='archived' WHERE id=%d`, procedure), fmt.Sprintf(`UPDATE memory_relations SET fact_text='raced' WHERE id=%d`, relation)} {
 		exec("SAVEPOINT refused_auxiliary;RESET ROLE")
 		if _, e := tx.Exec(ctx, q); e == nil || !strings.Contains(e.Error(), "55P03") {

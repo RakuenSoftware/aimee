@@ -759,6 +759,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
                $(TESTPREFIX)/unit-test-bandit \
+               $(TESTPREFIX)/unit-test-learning-application \
                $(TESTPREFIX)/unit-test-planner \
                $(TESTPREFIX)/unit-test-roadmap \
                $(TESTPREFIX)/unit-test-roadmap-decompose \
@@ -7963,4 +7964,8 @@ $(TESTPREFIX)/unit-test-server-erasure-protocol: $(OBJDIR)/tests/test_server_era
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-task-projection: $(OBJDIR)/tests/test_server_task_projection.o $(OBJDIR)/server/server_task_projection.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-learning-application: $(OBJDIR)/tests/test_learning_application.o \
+                     $(OBJDIR)/server/server_state_audit.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

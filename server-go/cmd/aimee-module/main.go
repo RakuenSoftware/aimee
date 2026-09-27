@@ -210,7 +210,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
-		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}}
+		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}, {EventKind: learning.EventExperience, StageID: learning.StageExperience}}
 		config.Handler = learning.Handle
 	case "providers":
 		config.ModuleName = name
@@ -398,6 +398,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: economizer.EventPostStatus, StageID: economizer.StagePostStatus},
 			{EventKind: economizer.EventStats, StageID: economizer.StageStats},
 			{EventKind: economizer.EventRequestBudget, StageID: economizer.StageRequestBudget},
+			{EventKind: economizer.EventTaskCost, StageID: economizer.StageTaskCost},
 		}
 		// Per-conversation reducer state is the module's own, kept in DB1 over
 		// the bus. An unreachable store is not a failure mode before serving:

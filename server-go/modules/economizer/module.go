@@ -40,6 +40,8 @@ const (
 	StageRequestBudget uint32 = 8
 	EventStats         uint32 = 11015
 	StageStats         uint32 = 7
+	EventTaskCost      uint32 = 11017
+	StageTaskCost      uint32 = 9
 )
 
 // StatsRequest asks for the published snapshot.
@@ -191,6 +193,8 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 			return nil, bus.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
+		case StageTaskCost:
+			return handleTaskCost(request)
 		case StageRequestBudget:
 			return handleRequestBudget(invocation, request)
 		case StageStats:

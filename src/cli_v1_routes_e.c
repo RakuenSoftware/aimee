@@ -1010,3 +1010,27 @@ cJSON *marshal_task_projection(int argc, char **argv)
    }
    return req;
 }
+
+cJSON *marshal_learning_application(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   const char *event = cli_args_get(&opts, "event-json");
+   if (opts.pos_count < 1 || !opts.positional[0][0] || !event || !event[0])
+      return NULL;
+   cJSON *req = marshal_no_args("learning.application");
+   cJSON_AddStringToObject(req, "request_id", opts.positional[0]);
+   cJSON_AddStringToObject(req, "event_json", event);
+   return req;
+}
+cJSON *marshal_learning_task_cost(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   const char *cost = cli_args_get(&opts, "cost-json");
+   if (!cost || !cost[0])
+      return NULL;
+   cJSON *req = marshal_no_args("learning.task_cost");
+   cJSON_AddStringToObject(req, "cost_json", cost);
+   return req;
+}

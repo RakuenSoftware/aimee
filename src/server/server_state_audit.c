@@ -6,6 +6,8 @@
 #include "server.h"
 #include "ingress_preinject.h"
 #include "module_commands.h"
+#include "module_json_call.h"
+#include "modules/economizer/economizer_module_client.h"
 #include "request_context.h"
 #include <aimee/audit/audit_worm.h>
 #include "dashboard.h"
@@ -234,4 +236,93 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_Delete(requests);
    return result ? send_and_free(conn, result)
                  : server_send_error(conn, "health owner unavailable", NULL);
+}
+
+/* Explicit user feedback is bound to a principal-owned final-payload receipt.
+ * The public body supplies only an event and a request locator. It cannot supply
+ * exposure, authority, ledger rows or chain-integrity claims. */
+int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *event = cJSON_GetObjectItemCaseSensitive(req, "event");
+   const char *event_json = jo_str(req, "event_json", "");
+   if (!event && event_json[0] && strlen(event_json) <= 65536)
+   {
+      event = cJSON_ParseWithOpts(event_json, NULL, 1);
+      if (event)
+         cJSON_AddItemToObject(req, "event", event);
+   }
+   const char *request_id = jo_str(req, "request_id", "");
+   if (!cJSON_IsObject(event) || !request_id[0])
+      return server_send_error(conn, "event and receipt request_id required", NULL);
+   cJSON *ledger = ingress_preinject_receipt(request_id);
+   if (!ledger || strcmp(jo_str(ledger, "status", ""), "ok"))
+   {
+      cJSON_Delete(ledger);
+      return server_send_error(conn, "principal-owned receipt unavailable", NULL);
+   }
+   cJSON *receipts = cJSON_GetObjectItemCaseSensitive(ledger, "receipts");
+   cJSON *receipt = NULL, *exposure = NULL, *matched = NULL, *binding = NULL;
+   cJSON_ArrayForEach(receipt, receipts)
+   {
+      if (strcmp(jo_str(receipt, "attempt_id", ""), jo_str(event, "attempt_id", "")))
+         continue;
+      cJSON *items = cJSON_GetObjectItemCaseSensitive(receipt, "procedure_exposures");
+      cJSON_ArrayForEach(exposure, items)
+      {
+         cJSON *procedure = cJSON_GetObjectItemCaseSensitive(exposure, "procedure");
+         cJSON *requested = cJSON_GetObjectItemCaseSensitive(event, "procedure");
+         if (!cJSON_Compare(procedure, requested, 1) ||
+             strcmp(jo_str(exposure, "receipt_ref", ""), jo_str(event, "receipt_ref", "")))
+            continue;
+         matched = exposure;
+         binding = cJSON_GetObjectItemCaseSensitive(
+             cJSON_GetObjectItemCaseSensitive(receipt, "prepared_receipt"), "binding");
+      }
+   }
+   if (!matched || !binding)
+   {
+      cJSON_Delete(ledger);
+      return server_send_error(conn, "procedure version absent from receipt", NULL);
+   }
+   cJSON *payload = cJSON_CreateObject();
+   cJSON_AddItemToObject(payload, "governed_event", cJSON_Duplicate(event, 1));
+   cJSON_AddItemToObject(payload, "exposure", cJSON_Duplicate(matched, 1));
+   const char *workspace = jo_str(binding, "workspace", "");
+   const char *project = jo_str(binding, "project", "");
+   cJSON_AddStringToObject(payload, "scope_kind",
+                           workspace[0] ? "workspace"
+                           : project[0] ? "project"
+                                        : "global");
+   cJSON_AddStringToObject(payload, "scope_id", workspace[0] ? workspace : project);
+   cJSON_Delete(ledger);
+   char *raw = kb_client_learning_application_json(payload);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   return reply ? send_and_free(conn, reply)
+                : server_send_error(conn, "learning application owner unavailable", NULL);
+}
+
+/* Cost reports remain owner-labeled, caller-declared observations. */
+int handle_learning_task_cost(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *cost = cJSON_GetObjectItemCaseSensitive(req, "cost");
+   const char *raw = jo_str(req, "cost_json", "");
+   cJSON *body = cost ? cJSON_Duplicate(cost, 1)
+                      : (strlen(raw) <= 2097152 ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL);
+   if (!cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return server_send_error(conn, "task cost declaration required", NULL);
+   }
+   cJSON *report =
+       aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_TASK_COST, AIMEE_ECONOMIZER_STAGE_TASK_COST,
+                              body, 2097152, 5000, NULL);
+   if (!report)
+      return server_send_error(conn, "task cost owner refused declaration", NULL);
+   cJSON *reply = cJSON_CreateObject();
+   cJSON_AddStringToObject(reply, "status", "ok");
+   cJSON_AddItemToObject(reply, "report", report);
+   return send_and_free(conn, reply);
 }

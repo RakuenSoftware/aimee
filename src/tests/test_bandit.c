@@ -124,6 +124,8 @@ static void test_bandit_sample_respects_selected_arm(void)
    int chosen = kb_bandit_sample("test_policy", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids,
                                  3, decision_id);
    assert(chosen == 1);
+   assert(kb_bandit_sample("kb_fusion_mode", NULL, (const char(*)[KB_BANDIT_MAX_ARM_ID])arm_ids, 3,
+                           decision_id) == -1);
    assert(decision_id[0] != '\0');
 
    /* Do not leave the client-side config snapshot carrying this test's
@@ -219,8 +221,8 @@ static void test_bandit_registry(void)
    const kb_bandit_decision_point_t *dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
    assert(dp != NULL);
    assert(strcmp(dp->id, "kb_memory_retrieval_limit") == 0);
-   assert(strcmp(dp->status, "live") == 0);
-   assert(strcmp(dp->reward_fn, "recall_sufficiency_v1") == 0);
+   assert(strcmp(dp->status, "observe") == 0);
+   assert(strcmp(dp->reward_fn, "verified_task_outcome_pending_v1") == 0);
    assert(dp->n_arms == 2);
    assert(strcmp(dp->arms[0], "10") == 0);
    assert(strcmp(dp->arms[1], "20") == 0);
@@ -230,7 +232,7 @@ static void test_bandit_registry(void)
    assert(fm != NULL);
    assert(fm->n_arms == 3);
    assert(strcmp(fm->arms[0], "rrf") == 0);
-   assert(strcmp(fm->status, "live") == 0);
+   assert(strcmp(fm->status, "observe") == 0);
 
    /* Preserve historical tier evidence without applying it to the new policy. */
    const kb_bandit_decision_point_t *old_dr = kb_bandit_registry_get("delegate_routing");
@@ -265,26 +267,42 @@ static void test_bandit_registry(void)
    printf("  bandit_registry: ok\n");
 }
 
-/* ---- recall-sufficiency reward (pure) ---- */
+/* Counts never produce a correctness or sufficiency reward. */
 static void test_bandit_recall_reward(void)
 {
-   /* Empty recall is bad at any limit. */
-   assert(kb_bandit_recall_sufficiency_reward(0, 10) == 0.0);
-   assert(kb_bandit_recall_sufficiency_reward(0, 20) == 0.0);
-
-   /* Sufficient, non-truncated recall scores 1.0 — and is not biased toward the
-    * larger arm: 8 results satisfy both the 10 and 20 arms. */
-   assert(kb_bandit_recall_sufficiency_reward(8, 10) == 1.0);
-   assert(kb_bandit_recall_sufficiency_reward(8, 20) == 1.0);
-
-   /* Hitting the cap is a truncation signal (a larger limit might help). */
-   assert(kb_bandit_recall_sufficiency_reward(10, 10) == 0.5);
-   assert(kb_bandit_recall_sufficiency_reward(20, 20) == 0.5);
-
-   /* 10 results: truncated for the 10-arm, sufficient for the 20-arm. */
-   assert(kb_bandit_recall_sufficiency_reward(10, 20) == 1.0);
-
-   printf("  bandit_recall_reward: ok\n");
+   kb_bandit_result_count_t empty = kb_bandit_result_count_availability(0, 10);
+   kb_bandit_result_count_t irrelevant = kb_bandit_result_count_availability(1, 10);
+   kb_bandit_result_count_t capped = kb_bandit_result_count_availability(10, 10);
+   assert(empty.result_count == 0 && !empty.truncated);
+   assert(irrelevant.result_count == 1 && !irrelevant.truncated);
+   assert(capped.result_count == 10 && capped.truncated);
+   open_db();
+   const char *id = "availability-only-decision";
+   assert(db2_bandit_decision_insert(id, "availability", "arm", "", 1.0, 0) == 0);
+   db2_bandit_arm_stats_t before, after;
+   assert(db2_bandit_arm_stats_read("availability", "arm", &before) == 0);
+   assert(kb_bandit_record_result_count(id, 1, 10) == 0);
+   assert(kb_bandit_record_result_count(id, 10, 10) == 0);
+   assert(db2_bandit_arm_stats_read("availability", "arm", &after) == 0);
+   assert(before.n_rewards == after.n_rewards);
+   assert(before.posterior_alpha == after.posterior_alpha);
+   assert(before.posterior_beta == after.posterior_beta);
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT result_count, result_truncated, reward IS NULL, closed_at = '' "
+                        "FROM bandit_decisions WHERE id = ?1",
+                        err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", id);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int(st, 0) == 1);
+   assert(aimee_pg_column_int(st, 1) == 0);
+   assert(aimee_pg_column_int(st, 2) == 1);
+   assert(aimee_pg_column_int(st, 3) == 1);
+   aimee_pg_finalize(st);
+   close_db();
+   printf("  bandit_result_count_availability: ok\n");
 }
 
 /* ---- 7. decision_points_list / arms_list ---- */

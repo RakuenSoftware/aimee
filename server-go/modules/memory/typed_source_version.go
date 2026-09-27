@@ -10,14 +10,15 @@ import (
 // from the same snapshot. It does not attest to transitive dependencies, current
 // authorization, or final release. Kind separates assertion, episode and memory IDs.
 type typedSourceVersion struct {
-	UtilityHorizonPolicyDigest string                `json:"utility_horizon_policy_digest,omitempty"`
-	CollectionValidUntil       string                `json:"collection_valid_until,omitempty"`
-	CollectionAudience         []Scope               `json:"collection_audience,omitempty"`
-	Kind                       string                `json:"record_kind"`
-	Version                    MemoryRecordVersion   `json:"version"`
-	MemoryParents              []MemoryRecordVersion `json:"memory_parents,omitempty"`
-	MemoryParentState          string                `json:"memory_parent_state,omitempty"`
-	ReadPolicy                 *sourceReadPolicy     `json:"read_policy,omitempty"`
+	ProcedureExperienceRevision string                `json:"procedure_experience_revision,omitempty"`
+	UtilityHorizonPolicyDigest  string                `json:"utility_horizon_policy_digest,omitempty"`
+	CollectionValidUntil        string                `json:"collection_valid_until,omitempty"`
+	CollectionAudience          []Scope               `json:"collection_audience,omitempty"`
+	Kind                        string                `json:"record_kind"`
+	Version                     MemoryRecordVersion   `json:"version"`
+	MemoryParents               []MemoryRecordVersion `json:"memory_parents,omitempty"`
+	MemoryParentState           string                `json:"memory_parent_state,omitempty"`
+	ReadPolicy                  *sourceReadPolicy     `json:"read_policy,omitempty"`
 }
 
 func directiveSourceParentsSQL(table string) string {
@@ -83,6 +84,13 @@ func validTypedSource(ref typedProjectionRef) bool {
 		// Older projections and channels without owner version contracts cannot
 		// claim source-version evidence. Their byte commitments still apply.
 		return true
+	}
+	if revision := ref.Source.ProcedureExperienceRevision; revision != "" {
+		value := strings.TrimSuffix(revision, ":erased")
+		n, e := strconv.ParseInt(value, 10, 64)
+		if ref.Source.Kind != "learning_procedure" || e != nil || n < 0 || strconv.FormatInt(n, 10) != value || (n == 0 && revision != "0") {
+			return false
+		}
 	}
 	if p := ref.Source.ReadPolicy; p != nil {
 		if ref.Source.Kind == "memory_reminder" {
@@ -218,9 +226,13 @@ func validTypedSourceItem(ref typedProjectionRef, raw json.RawMessage) bool {
 		return json.Unmarshal(raw, &item) == nil && item.ID == ref.ID
 	case "learning_procedure":
 		var item struct {
-			ID json.Number `json:"proposal_id"`
+			ID         json.Number `json:"proposal_id"`
+			Experience *struct {
+				Revision string `json:"revision"`
+			} `json:"experience"`
 		}
-		return json.Unmarshal(raw, &item) == nil && item.ID.String() == ref.ID
+		return json.Unmarshal(raw, &item) == nil && item.ID.String() == ref.ID &&
+			(ref.Source.ProcedureExperienceRevision == "" || (item.Experience != nil && item.Experience.Revision == ref.Source.ProcedureExperienceRevision))
 	case "memory_relation":
 		var item struct {
 			Entity string `json:"entity"`

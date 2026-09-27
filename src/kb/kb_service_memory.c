@@ -38,47 +38,41 @@ int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
  * Returns {status:ok, retrieval_event_id} on success. */
 int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
 {
-   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
-   cJSON *role_j = cJSON_GetObjectItemCaseSensitive(req, "role");
-   cJSON *fp_j = cJSON_GetObjectItemCaseSensitive(req, "query_fingerprint");
-   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_ids");
-   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
-      return kb_send_error(fd, "evidence.emit_retrieval_event requires turn_id");
-   const char *role =
-       cJSON_IsString(role_j) && role_j->valuestring[0] ? role_j->valuestring : "Recall";
-   const char *fp = cJSON_IsString(fp_j) ? fp_j->valuestring : "";
-
-   int n = cJSON_IsArray(ids_j) ? cJSON_GetArraySize(ids_j) : 0;
-   int64_t *ids = NULL;
-   int n_ids = 0;
-   if (n > 0)
+   cJSON *args = cJSON_Duplicate(req, 1), *plan = NULL;
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "operation");
+   cJSON_AddStringToObject(args, "operation", "legacy-exposure-plan");
+   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &plan);
+   cJSON_Delete(args);
+   if (dispatched != 1 || strcmp(jo_str(plan, "status", ""), "ok"))
    {
-      ids = (int64_t *)calloc((size_t)n, sizeof(int64_t));
-      if (!ids)
-         return kb_send_error(fd, "out of memory");
-      for (int i = 0; i < n; i++)
+      cJSON_Delete(plan);
+      return kb_send_error(fd, "memory exposure owner unavailable or invalid identifiers");
+   }
+   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(plan, "surfaced_ids");
+   int n = cJSON_GetArraySize(ids_j);
+   int64_t *ids = n > 0 ? calloc((size_t)n, sizeof(*ids)) : NULL;
+   if (n > 0 && !ids)
+   {
+      cJSON_Delete(plan);
+      return kb_send_error(fd, "out of memory");
+   }
+   for (int i = 0; i < n; i++)
+   {
+      if (!jo_read_i64_exact(cJSON_GetArrayItem(ids_j, i), &ids[i]))
       {
-         cJSON *e = cJSON_GetArrayItem(ids_j, i);
-         int64_t id;
-         if (!jo_read_i64_exact(e, &id))
-         {
-            free(ids);
-            return kb_send_error(
-                fd,
-                "source ids require exact integers; use decimal strings above the JSON safe range");
-         }
-         if (id > 0)
-            ids[n_ids++] = id;
+         free(ids);
+         cJSON_Delete(plan);
+         return kb_send_error(fd, "invalid owner identifier envelope");
       }
    }
-
    char ev_id[64] = "";
-   int rc = db2_demotion_retrieval_event_write_turn(turn_j->valuestring, fp, role, ids, n_ids,
-                                                    ev_id, sizeof(ev_id));
+   int rc = db2_demotion_retrieval_event_write_turn(
+       jo_str(plan, "turn_id", ""), jo_str(plan, "query_fingerprint", ""),
+       jo_str(plan, "role", "Recall"), ids, n, ev_id, sizeof(ev_id));
    free(ids);
+   cJSON_Delete(plan);
    if (rc != 0)
       return kb_send_error(fd, "failed to write retrieval_event");
-
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);

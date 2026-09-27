@@ -24,9 +24,9 @@ extern "C"
       const char *description; /* one-line human summary */
       const char *arms[KB_BANDIT_MAX_ARMS];
       int n_arms;
-      const char *reward_fn; /* reward function id, e.g. "recall_sufficiency_v1" */
-      const char *status;    /* "live" (sampled now) | "static" (knob, not yet sampled)
-                              * | "planned" (declared, not wired) */
+      const char *reward_fn; /* reward function id, e.g. "verified_task_outcome_pending_v1" */
+      const char *status; /* "observe" (unpromoted) | "live" (sampled now) | "static" (knob, not yet
+                           * sampled) | "planned" (declared, not wired) */
    } kb_bandit_decision_point_t;
 
    /* Number of registered decision points. */

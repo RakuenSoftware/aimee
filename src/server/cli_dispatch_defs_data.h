@@ -270,3 +270,6 @@
     {"delegate-backend", "list", "delegate.backend_list", NULL, "backends", 0},
     {"delegate-backend", "exec", "delegate.backend_exec", NULL, NULL, 90000},
     {NULL, NULL, NULL, NULL, NULL, 0},
+
+{"learning", "application", "learning.application", NULL, NULL, 60000},
+{"learning", "task-cost", "learning.task_cost", NULL, NULL, 10000},

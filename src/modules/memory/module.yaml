@@ -235,7 +235,8 @@
     "server-go/modules/memory/retrieval_health_typed.go",
     "server-go/modules/memory/retrieval_health_positions.go",
     "server-go/modules/memory/task_promotion.go",
-    "server-go/modules/memory/hygiene_run.go"
+    "server-go/modules/memory/hygiene_run.go",
+    "server-go/modules/memory/procedure_exposure.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -414,7 +415,8 @@
     "server-go/modules/memory/retrieval_health_native_test.go",
     "server-go/modules/memory/retrieval_health_release_test.go",
     "server-go/modules/memory/retrieval_health_typed_test.go",
-    "server-go/modules/memory/retrieval_health_positions_test.go"
+    "server-go/modules/memory/retrieval_health_positions_test.go",
+    "server-go/modules/memory/procedure_exposure_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

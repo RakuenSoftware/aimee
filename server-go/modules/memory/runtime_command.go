@@ -128,6 +128,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handlePersonalSourceRevalidation(options, invocation, args)
 	case "health-plan", "health-import", "health-report":
 		return handleRetrievalHealth(options, invocation, args)
+	case "legacy-exposure-plan":
+		return legacyExposurePlan(args)
 	case "provider-receipt-inspect":
 		return inspectProviderReceipts(args)
 	case "health-turn-finish", "source-release-plan", "source-release-result", "source-release-finish", "source-release-discard", "exploration-owner-observe", "exploration-owner-generation", "provider-receipt-plan", "provider-receipt-observe", "provider-receipt-stored", "provider-receipt-started":

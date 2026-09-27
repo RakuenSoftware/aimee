@@ -1,6 +1,6 @@
 # MR-15: Procedure experience, delayed outcomes and total task cost
 
-- **State:** Proposed
+- **State:** In progress — implementation and owner tests complete; upgrade acceptance pending
 - **Priority:** P1 for reward correctness; P2 for experience projections and tuning
 - **Owner:** Learning/outcome attribution and economizer
 - **Depends on:** [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate with [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
@@ -44,6 +44,9 @@ Use integer monetary units and retain existing exact-token/exact-request provena
 2. Add idempotent application/outcome events and versioned procedure experience projections with unknown states.
 3. Add complete task-cost attribution and paired reporting while preserving the economizer admission contract.
 4. Tune routing/ranking/reward policies only after frozen evaluation and minimum useful feedback coverage; keep the previous policy artifact available.
+
+See the [operator contract](../../procedure-experience.md) for admission authority,
+trial identity, cost declarations, and observe-only limits.
 
 ## Acceptance gates
 

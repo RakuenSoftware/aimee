@@ -14,8 +14,8 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
                        "caller gives no explicit limit.",
         .arms = {"10", "20"},
         .n_arms = 2,
-        .reward_fn = "recall_sufficiency_v1",
-        .status = "live",
+        .reward_fn = "verified_task_outcome_pending_v1",
+        .status = "observe",
     },
     {
         .id = "kb_fusion_mode",
@@ -23,8 +23,8 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
                        "results are combined when no explicit mode is requested.",
         .arms = {"rrf", "static_alpha", "dynamic_alpha"},
         .n_arms = 3,
-        .reward_fn = "recall_sufficiency_v1",
-        .status = "live",
+        .reward_fn = "verified_task_outcome_pending_v1",
+        .status = "observe",
     },
     {
         .id = "delegate_routing",

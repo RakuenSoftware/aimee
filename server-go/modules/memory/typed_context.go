@@ -665,7 +665,7 @@ func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataReq
 		targetSQL = " AND target_key=$6"
 		params = append(params, request.recoveryRole.Subject)
 	}
-	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,record_revision,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+targetSQL+` ORDER BY id DESC LIMIT 32`, params...)
+	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,record_revision,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),COALESCE(learning_procedure_experience((SELECT owner_id::text FROM memory_collection_owner WHERE id=1),id::text,record_revision::text),'{"revision":"0","cohorts":[],"state":"unobserved"}'::jsonb)::text FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+targetSQL+` ORDER BY id DESC LIMIT 32`, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -673,15 +673,20 @@ func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataReq
 	var items []typedItem
 	for rows.Next() {
 		var id int64
-		var key, action, revision, owner string
-		if err = rows.Scan(&id, &key, &action, &revision, &owner); err != nil {
+		var key, action, revision, owner, experience string
+		if err = rows.Scan(&id, &key, &action, &revision, &owner, &experience); err != nil {
 			return nil, err
 		}
 		source, err := structuredSource("learning_procedure", owner, revision, "[]", id)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, typedItem{source: source, value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action)}, id: strconv.FormatInt(id, 10), text: action})
+		boundedExperience, experienceRevision, err := compactProcedureExperience(experience)
+		if err != nil {
+			return nil, err
+		}
+		source.ProcedureExperienceRevision = experienceRevision
+		items = append(items, typedItem{source: source, value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action), "experience": boundedExperience}, id: strconv.FormatInt(id, 10), text: action})
 	}
 	return items, rows.Err()
 }

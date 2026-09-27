@@ -1289,6 +1289,7 @@
     },
     {
       "consumers": [
+        "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
         "src/modules/kb-synthesis/kb_curator_extract.c",
@@ -1389,6 +1390,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -1582,6 +1584,7 @@
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_artifacts.c",
+        "src/tests/test_bandit.c",
         "src/tests/test_code_index_ops.c",
         "src/tests/test_context_assembly.c",
         "src/tests/test_corpus_jobs.c",
@@ -1714,6 +1717,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -1906,6 +1910,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -2048,6 +2053,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
         "src/tests/test_embedding_dim.c",
@@ -2063,7 +2069,7 @@
       ],
       "signature": "int aimee_pg_is_shim ( void )",
       "signature_sha256": "6f2163845b1b9e375249e8be5cac81cf8facaa87a29e51d6b04861d7f0e6f331",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "aimee_pg_is_shim"
     },
     {
@@ -2105,6 +2111,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -2283,6 +2290,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -19933,15 +19941,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fd6ed7c67ef87b4df214156e233489d9851d43ecb527a4a8cdc81e89b15bc55e",
+  "fingerprint": "ebd97c4d99f440887150461758df128a229ed8700709d50c3e9864e3efbd913e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 423,
+    "audit_pending": 424,
     "declarations": 1096,
     "headers": 126,
     "internal_unconsumed": 203,
-    "private_test_only": 281,
+    "private_test_only": 280,
     "reviewed": 189
   }
 }

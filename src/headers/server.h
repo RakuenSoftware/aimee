@@ -578,6 +578,8 @@ int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_task_cost(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
