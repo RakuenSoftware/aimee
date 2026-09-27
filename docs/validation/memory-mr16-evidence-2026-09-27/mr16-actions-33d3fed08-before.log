@@ -1,0 +1,10 @@
+PASS owned action session created
+FAIL native read receives durable acknowledgement
+Traceback (most recent call last):
+  File "/tmp/mr16-live.py", line 35, in <module>
+    r,_=tool(session,'read_file',dict(path=str(target)),prefix+'-read');check('native read receives durable acknowledgement',r.get('completion_claim')=='provider_acknowledged')
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/mr16-live.py", line 8, in check
+    if not ok:raise RuntimeError(name)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: native read receives durable acknowledgement

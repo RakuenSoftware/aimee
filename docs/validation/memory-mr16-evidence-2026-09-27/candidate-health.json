@@ -1,0 +1,44 @@
+[
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-server-1",
+    "image": "aimee-pr2990:d49bf0d07",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-kb-1",
+    "image": "aimee-pr2990:d49bf0d07",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-server-397b0ae557-aimee-store-db-1",
+    "image": "aimee-pr2990-postgres:d0e3c5752",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-embedder-1",
+    "image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-e2e-kb-c8590d560c-aimee-store-db-1",
+    "image": "aimee-pr2990-postgres:d0e3c5752",
+    "health": "healthy",
+    "optional_flags": []
+  },
+  {
+    "name": "/aimee-pr2990-test-pg",
+    "image": "aimee-pr2990-postgres:686b99ea0",
+    "health": null,
+    "optional_flags": []
+  }
+]

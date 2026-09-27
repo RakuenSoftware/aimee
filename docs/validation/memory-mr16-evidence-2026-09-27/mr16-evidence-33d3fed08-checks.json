@@ -1,0 +1,26 @@
+[
+  {
+    "name": "owned evidence action session created",
+    "passed": true
+  },
+  {
+    "name": "controlled provider selected",
+    "passed": true
+  },
+  {
+    "name": "fresh actual provider request has a durable receipt",
+    "passed": true
+  },
+  {
+    "name": "fresh exact provider payload retained controlled procedure",
+    "passed": true
+  },
+  {
+    "name": "memory-bound native read is acknowledged",
+    "passed": false
+  },
+  {
+    "name": "fresh governed model turn completes",
+    "passed": false
+  }
+]
