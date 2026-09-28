@@ -2063,7 +2063,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
       /* The backend response is Connection: close, including truncated transfers. */
       server_http_keepalive_set(0);
       int response_status = 0;
-      int forwarded = server_native_delivery_forward(fd, method, path,
+      int forwarded = server_native_delivery_forward_query(fd, method, path, query,
           server_http_identity_principal(), body, body_len, &response_status);
       server_http_log_access(method, path, forwarded ? forwarded :
           (response_status ? response_status : 502), request_id);
