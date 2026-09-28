@@ -58,7 +58,8 @@ static inline int server_native_send(int fd, const void *data, size_t n)
 /* Returns an HTTP error before any bytes have been relayed, or zero once the
  * backend response has started. A truncated response is closed, never appended
  * to with a second HTTP response. Constant 64 KiB transfer memory per request. */
-static inline int server_native_delivery_forward(int client, const char *method, const char *path,
+static inline int server_native_delivery_forward_query(int client, const char *method, const char *path,
+                                                 const char *query,
                                                  const char *principal, const char *body,
                                                  size_t body_len, int *response_status)
 {
@@ -67,6 +68,13 @@ static inline int server_native_delivery_forward(int client, const char *method,
 #if defined(__linux__)
    if (!server_native_delivery_route(method, path))
       return 404;
+   if (!query)
+      query = "";
+   if (strlen(query) > 1024)
+      return 400;
+   for (const unsigned char *p = (const unsigned char *)query; *p; p++)
+      if (*p <= 32 || *p >= 127 || *p == '#')
+         return 400;
    if (!principal || !*principal || strlen(principal) > 1024)
       return 403;
    if (body_len > 131072)
@@ -113,9 +121,9 @@ static inline int server_native_delivery_forward(int client, const char *method,
    char headers[4096];
    int len =
        snprintf(headers, sizeof(headers),
-                "%s %s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: "
+                "%s %s%s%s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: "
                 "application/json\r\nContent-Length: %zu\r\nX-Aimee-Native-Principal: %s\r\n\r\n",
-                method, path, body_len, encoded);
+                method, path, *query ? "?" : "", query, body_len, encoded);
    if (len < 0 || (size_t)len >= sizeof(headers) || server_native_send(fd, headers, (size_t)len) ||
        (body_len && server_native_send(fd, body, body_len)))
    {
@@ -162,10 +170,18 @@ static inline int server_native_delivery_forward(int client, const char *method,
    (void)client;
    (void)method;
    (void)path;
+   (void)query;
    (void)principal;
    (void)body;
    (void)body_len;
    return 503; /* Linux SO_PEERCRED preview only. */
 #endif
+}
+static inline int server_native_delivery_forward(int client, const char *method, const char *path,
+                                                 const char *principal, const char *body,
+                                                 size_t body_len, int *response_status)
+{
+   return server_native_delivery_forward_query(client, method, path, "", principal, body,
+                                                body_len, response_status);
 }
 #endif
