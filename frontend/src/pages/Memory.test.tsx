@@ -101,3 +101,19 @@ it('shows backend conflicts without claiming approval', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('revision conflict');
   expect(screen.getByText('protected original')).toBeTruthy();
 });
+
+it('discards personal proposal responses after switching to the KB', async () => {
+  let resolvePrivate!: (value: unknown) => void;
+  vi.stubGlobal('fetch', vi.fn((path, init) => {
+    const body = JSON.parse(String(init?.body));
+    if (path === '/v1/memory/correction_proposals' && body.store === 'user') return new Promise((resolve) => { resolvePrivate = resolve; });
+    return Promise.resolve({ ok: true, json: async () => ({ status: 'ok', memories: [], proposals: [] }) });
+  }));
+  render(<Memory />);
+  fireEvent.change(screen.getByLabelText('Memory view'), { target: { value: 'corrections' } });
+  await waitFor(() => expect(resolvePrivate).toBeDefined());
+  fireEvent.change(screen.getByLabelText('Memory store'), { target: { value: 'kb' } });
+  fireEvent.change(screen.getByLabelText('Memory view'), { target: { value: 'corrections' } });
+  resolvePrivate({ ok: true, json: async () => ({ status: 'ok', proposals: [proposal] }) });
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Inspect proposal-a' })).toBeNull());
+});

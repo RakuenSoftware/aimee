@@ -237,3 +237,21 @@ Database-role controls do not constrain a database administrator. UI tests exerc
 API contract with mocked transport; they do not certify a deployed authentication stack.
 Audit correlation does not replace worker restart/redelivery or chain-verification tests.
 No production database, deployment, or retrieval-quality benchmark was changed or run.
+
+## Validation performed
+
+- The Go memory unit suite passed. PostgreSQL 18 replay passed for the complete runtime
+  role path, fact mutations, both correction-proposal owners, public store admission,
+  actual runtime-login refusal privileges, and audit correlation.
+- An existing refusal survived upgrade with a populated canonical identity. DELETE and
+  TRUNCATE remained denied after two full schema replays. This was a disposable local
+  database with UTF-8 encoding and UTC session time, not a production migration.
+- Frontend tests cover both review placements, exact decimal-string versions, stale
+  revisions, backend conflicts, store-switch response isolation, and closing due decisions.
+  Runtime and console production builds passed.
+- Documentation generation left generated pages unchanged. The full documentation check
+  passed in a clean PR checkout. Untracked user drafts were excluded from the PR.
+
+The migration adds a stored generated column and builds an index on the refusal table;
+its initial backfill takes a table lock. Plan that schema replay using the existing
+migration-owner deployment procedure. Historical intents retain their original metadata.

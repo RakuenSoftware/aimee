@@ -145,6 +145,7 @@ function CorrectionReview({ scope }: { scope: { store: string; cwd?: string } })
     setSelected(undefined); setSource(undefined); setError(''); setBusy(true);
     try {
       const result = await memoryPost<{ proposals: Proposal[] }>('/v1/memory/correction_proposals', { ...scope, proposal_id: proposal.proposal_id });
+      if (request !== generation.current) return;
       const full = result.proposals[0];
       if (!full?.draft) throw new Error('Proposal draft is unavailable.');
       const current = await memoryPost<{ memory: { content: string; version?: RecordVersion } }>('/v1/memory/get', {
