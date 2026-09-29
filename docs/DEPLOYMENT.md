@@ -1,5 +1,9 @@
 # Deployment
 
+Deploy Server for a human's runtime and personal memory; deploy KB separately for a shared corpus.
+They use the same application image and module implementations with independent identities,
+Vaults, databases, and models. [Server and KB](SERVER_AND_KB.md) defines the ownership contract.
+
 ## Standard local Server
 
 `compose.yaml` starts a KB-free Server, standardized PostgreSQL, and a local embedder.
@@ -48,6 +52,10 @@ The last command returns a sensitive, single-use `aimee://` enrollment string. E
 Server's **Settings → Knowledge base** together with the two matching service credentials, then
 restart Server when Settings requests it. The connection is optional: an unreachable KB does not
 move personal data to shared storage or prevent local personal-memory operations.
+
+The same volume suffixes appear in both Compose files for compatibility. The distinct Compose
+project is what separates their actual volumes. A shared image, volume suffix, or PostgreSQL
+schema implementation does not make it safe to reuse another instance's state.
 
 ## Model services
 

@@ -2,6 +2,11 @@
 
 ## Purpose and non-goals
 
+One Go implementation runs independently in Server and KB. Server owns durable personal memory;
+KB owns the shared corpus. [Server and KB](../SERVER_AND_KB.md) defines instance, store, and
+scope boundaries. PostgreSQL access in both placements belongs to the Go provider; the native
+DB2 provider is retired.
+
 The [memory behavior guide](../MEMORY.md) details Go ownership, retrieval validity,
 mutation admission, evaluation and caller migration.
 
@@ -68,8 +73,10 @@ JSON so the native parser cannot round record IDs or error receipts. Private
 get/delete/supersede accept canonical positive decimal-string int64 IDs;
 unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
 Go response. The host adds HTTP error classification through its existing
-runtime-web provider without rewriting owner tokens. This transport change does
-not implement personal version history or durable mutation receipts.
+runtime-web provider without rewriting owner tokens. Personal retained history now lives in
+`personal_versions.go`; `include_version`, `at_version`, and `expected_version` select its explicit
+read/mutation contracts. Both placements also support correction proposals and verified user
+review, described in the [behavior guide](../MEMORY.md#current-ownership-and-review).
 
 Personal review-list rendering now belongs to the Go owner through the private
 `user-review-list` runtime operation. It retains the Server envelope, both

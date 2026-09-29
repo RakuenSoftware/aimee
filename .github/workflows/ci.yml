@@ -920,6 +920,7 @@ jobs:
     timeout-minutes: 30
     env:
       AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+      AIMEE_MEMORY_RUNTIME_URL: postgres://aimee_store_runtime:runtime_fixture@127.0.0.1:5432/aimee_postgres_ci
       # Temp-table tests must not fall through to packaged owner relations when
       # they deliberately drop a relation to exercise unavailable storage.
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
@@ -969,6 +970,11 @@ jobs:
         run: |
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
+          # Disposable CI credentials; exercise the same login used by Compose.
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" <<'SQL'
+          CREATE ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS PASSWORD 'runtime_fixture';
+          GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+          SQL
           sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f -
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
       - name: Verify persisted erasure state upgrade and idempotence

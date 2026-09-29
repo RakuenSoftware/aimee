@@ -50,3 +50,54 @@ it('discards an old response when switching stores with colliding IDs', async ()
   await waitFor(() => expect(screen.queryByText('private fixture')).toBeNull());
   expect(screen.getByText('shared fixture')).toBeTruthy();
 });
+
+const version = { schema_version: 1, owner_id: 'owner', record_id: '9007199254740993', record_revision: '9007199254740995' };
+const proposal = { proposal_id: 'proposal-a', target_version: version, payload_digest: 'digest-a', state: 'pending', proposer: 'model',
+  draft: { content: '<script>proposed</script>', tier: 'L2', confidence: 0.5, use_cases: 'testing', epistemic_kind: 'fact' } };
+function proposalFetch(currentVersion = version, failReview = false) {
+  return vi.fn(async (path: RequestInfo | URL) => ({ ok: !(failReview && path === '/v1/memory/review_correction'), json: async () => {
+    if (path === '/v1/memory/correction_proposals') return { status: 'ok', proposals: [proposal] };
+    if (path === '/v1/memory/get') return { status: 'ok', memory: { content: 'protected original', version: currentVersion } };
+    if (failReview && path === '/v1/memory/review_correction') return { status: 'error', message: 'revision conflict' };
+    return { status: 'ok', memories: [] };
+  } }));
+}
+
+it.each(['user', 'kb'])('reviews corrections with exact versions and explicit %s placement', async (store) => {
+  vi.stubGlobal('fetch', proposalFetch());
+  render(<Memory />);
+  if (store === 'kb') fireEvent.change(screen.getByLabelText('Memory store'), { target: { value: store } });
+  fireEvent.change(screen.getByLabelText('Memory view'), { target: { value: 'corrections' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect proposal-a' }));
+  expect(await screen.findByText('protected original')).toBeTruthy();
+  expect(screen.getByText('<script>proposed</script>')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Approve correction' }));
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([p]) => p === '/v1/memory/review_correction')).toBe(true));
+  const call = vi.mocked(fetch).mock.calls.find(([p]) => p === '/v1/memory/review_correction')!;
+  expect(JSON.parse(String(call[1]?.body))).toEqual({ store, ...(store === 'kb' ? { cwd: '/work/project-a' } : {}),
+    proposal_id: 'proposal-a', payload_digest: 'digest-a', expected_version: version, action: 'approve' });
+  expect(call[1]?.headers).toMatchObject({ 'X-CSRF-Token': 'csrf-test' });
+  const read = vi.mocked(fetch).mock.calls.find(([p]) => p === '/v1/memory/get')!;
+  expect(JSON.parse(String(read[1]?.body)).id).toBe(version.record_id);
+});
+
+it('disables decisions on stale proposals', async () => {
+  vi.stubGlobal('fetch', proposalFetch({ ...version, record_revision: '9007199254740996' }));
+  render(<Memory />);
+  fireEvent.change(screen.getByLabelText('Memory view'), { target: { value: 'corrections' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect proposal-a' }));
+  await screen.findByText('protected original');
+  expect((screen.getByRole('button', { name: 'Approve correction' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('alert').textContent).toContain('source revision has changed');
+});
+
+it('shows backend conflicts without claiming approval', async () => {
+  vi.stubGlobal('fetch', proposalFetch(version, true));
+  render(<Memory />);
+  fireEvent.change(screen.getByLabelText('Memory view'), { target: { value: 'corrections' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect proposal-a' }));
+  await screen.findByText('protected original');
+  fireEvent.click(screen.getByRole('button', { name: 'Approve correction' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('revision conflict');
+  expect(screen.getByText('protected original')).toBeTruthy();
+});

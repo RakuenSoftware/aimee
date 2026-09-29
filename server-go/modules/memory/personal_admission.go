@@ -64,6 +64,11 @@ func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string
 	if actor.principal == "" {
 		actor = personalCaller(nil, AuthorityModel)
 	}
+	if operation == "store" || operation == "supersede" {
+		if err := screenModelMemory(actor.authority, wanted.Key, wanted.Content); err != nil {
+			return Record{}, err
+		}
+	}
 	authority, category := "model", "agent_message"
 	if actor.authority == AuthorityUser {
 		authority, category = "user", "user_stated"

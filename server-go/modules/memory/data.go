@@ -3134,6 +3134,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
+		if code == MutationInstructionRefused {
+			rollbackOnly = true
+		}
 		proposal := proposedCorrection(err)
 		response = DataResponse{Code: &code, Proposal: proposal}
 		// Canonical admission has not written a version. The linked draft and

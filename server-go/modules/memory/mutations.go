@@ -21,6 +21,7 @@ const (
 	MutationVersionConflict     = -5
 	MutationIdempotencyConflict = -6
 	MutationReplayUnavailable   = -7
+	MutationInstructionRefused  = -8
 )
 
 var validEpistemicKinds = map[string]bool{
@@ -58,6 +59,9 @@ func (s *postgresDataStore) prepareKBStore(ctx context.Context, request DataRequ
 	}
 	if strings.TrimSpace(request.Scope.Value) == missingScopeValue {
 		return plan, errors.New("memory: cannot store without active scope context")
+	}
+	if err := screenModelMemory(request.Authority, request.Key, request.Content, request.UseCases); err != nil {
+		return plan, err
 	}
 	var screenErr error
 	request.Content, screenErr = screenMemoryWrite(request.Key, request.Content)
@@ -171,6 +175,8 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 
 func mutationRefusal(err error) int {
 	switch {
+	case errors.Is(err, errInstructionMemory):
+		return MutationInstructionRefused
 	case errors.Is(err, errIdempotencyConflict):
 		return MutationIdempotencyConflict
 	case errors.Is(err, errReplayUnavailable):
@@ -314,6 +320,14 @@ func (s *postgresDataStore) prepareKBCorrection(ctx context.Context, id int64, c
 		confidence = *requestedConfidence
 		if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
 			return preparedKBCorrection{}, errors.New("memory: invalid confidence")
+		}
+	}
+	if err := screenModelMemory(authority, content); err != nil {
+		return preparedKBCorrection{}, err
+	}
+	if metadata != nil {
+		if err := screenModelMemory(authority, metadata.UseCases); err != nil {
+			return preparedKBCorrection{}, err
 		}
 	}
 	var screenErr error

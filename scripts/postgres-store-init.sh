@@ -147,6 +147,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
 -- the provider applies the same rule atomically when first creating it.
 DO $ledger$
 BEGIN
+  IF to_regclass('public.memory_rejection_tombstones') IS NOT NULL THEN
+    REVOKE DELETE, TRUNCATE ON TABLE public.memory_rejection_tombstones FROM aimee_store_runtime, PUBLIC;
+  END IF;
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
     REVOKE ALL ON TABLE public.schema_migrations FROM aimee_store_runtime, PUBLIC;
   END IF;

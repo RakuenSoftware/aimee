@@ -169,36 +169,15 @@ func (s *postgresDataStore) legacyFactMatches(ctx context.Context, in factAssert
 }
 
 // Rejection survives alternate Unicode/case spellings as well as exact replay.
-func (s *postgresDataStore) factTombstoned(ctx context.Context, in factAssertion, identity string) (bool, error) {
-	afterID := int64(0)
-	for {
-		rows, err := s.db.Query(ctx, `SELECT id,source,relation,target FROM memory_rejection_tombstones WHERE object_kind='fact' AND active=1 AND id>$1 ORDER BY id LIMIT 256`, afterID)
-		if err != nil {
-			return false, err
-		}
-		count := 0
-		for rows.Next() {
-			var source, relation, target string
-			if err = rows.Scan(&afterID, &source, &relation, &target); err != nil {
-				rows.Close()
-				return false, err
-			}
-			count++
-			key, _ := factIdentity(source, relation, target)
-			if (identity != "" && key == identity) || (source == in.Subject && relation == in.Relation && target == in.Object) {
-				rows.Close()
-				return true, nil
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return false, err
-		}
-		if count < 256 {
-			return false, nil
-		}
-	}
+func (s *postgresDataStore) factTombstoned(ctx context.Context, in factAssertion, _ string) (bool, error) {
+	var rejected bool
+	err := s.db.QueryRow(ctx, `SELECT EXISTS (
+ SELECT 1 FROM memory_rejection_tombstones
+ WHERE object_kind='fact' AND active=1 AND
+ ((source=$1 AND relation=$2 AND target=$3) OR
+  (fact_identity_v1<>'' AND fact_identity_v1=memory_fact_rejection_identity_v1($1,$2,$3))))`,
+		in.Subject, in.Relation, in.Object).Scan(&rejected)
+	return rejected, err
 }
 
 // assertFact runs inside the memory owner's transaction. Its caller must roll
@@ -211,6 +190,11 @@ func (s *postgresDataStore) assertFact(ctx context.Context, in factAssertion) (f
 	}
 	if !validMutationActor(in.Actor) || in.Subject == "" || in.Relation == "" || in.Object == "" || len(in.Subject) > 4096 || len(in.Object) > 4096 || math.IsNaN(in.Confidence) || math.IsInf(in.Confidence, 0) {
 		return result, errors.New("memory: invalid assertion")
+	}
+	if in.Actor.Rank == 10 {
+		if err := screenModelMemory(AuthorityModel, in.Subject, in.Object); err != nil {
+			return result, err
+		}
 	}
 	switch in.AssertionKind {
 	case "":
