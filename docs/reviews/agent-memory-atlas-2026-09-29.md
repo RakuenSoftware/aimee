@@ -217,7 +217,7 @@ transports, runtime roles, and deployed configurations.
 
 | Finding | Resolution |
 | --- | --- |
-| Runtime refusal erasure | Schema replay and legacy bootstrap revoke DELETE and TRUNCATE from the configured store role and PUBLIC. Actual-login regression verifies denial and attributed restore. |
+| Runtime refusal erasure | Schema replay and current role provisioning revoke DELETE and TRUNCATE from the configured store role and PUBLIC. Actual-login regression verifies denial and attributed restore. |
 | Canonical rejection | A versioned database function supplies the indexed generated refusal identity to both Go lookup and the direct-writer guard. Existing rows are backfilled; equivalent historical refusals remain separate. |
 | Admission versus instruction trust | Shared bounded admission refuses direct model-authored instruction overrides before durable writes. Quoted evidence and verified user text remain admissible; serving-time integrity checks remain mandatory. |
 | Obsolete capability claims | Current guides link to owning implementations and behavior tests, checked by the existing documentation link gate. Historical evaluation results are explicitly dated. |
@@ -255,3 +255,9 @@ No production database, deployment, or retrieval-quality benchmark was changed o
 The migration adds a stored generated column and builds an index on the refusal table;
 its initial backfill takes a table lock. Plan that schema replay using the existing
 migration-owner deployment procedure. Historical intents retain their original metadata.
+
+Legacy database adoption was subsequently removed from this PR. Startup requires the
+current `postgres` administrator and configured database. It no longer discovers the
+old `aimee` administrator, renames `aimee_shared`, transfers application objects, or
+regrants existing tables and routines. Current credential refresh and fresh provisioning
+remain, and the deployment gate now tests fresh startup and restart ACL preservation.

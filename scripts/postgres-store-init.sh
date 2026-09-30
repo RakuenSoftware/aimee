@@ -5,14 +5,15 @@ set -euo pipefail
 : "${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}"
 : "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
-# docker-entrypoint invokes this as POSTGRES_USER on a fresh cluster. The secure
-# wrapper also invokes it against an existing pre-role-split cluster, where the
-# historical superuser is `aimee`; in that case it supplies the discovered role
-# explicitly. Keeping one idempotent reconciliation prevents fresh installs and
-# upgrades from acquiring subtly different grants.
-admin_user="${AIMEE_STORE_ADMIN_USER:-$POSTGRES_USER}"
+# Provision the current administrator/migrator/runtime layout. Existing stores
+# retain their application ownership and grants; domain migrations own those.
+: "${POSTGRES_USER:?POSTGRES_USER is required}"
+if [[ "$POSTGRES_USER" != postgres ]]; then
+  echo "aimee store: POSTGRES_USER must be postgres" >&2
+  exit 1
+fi
 
-psql --set=ON_ERROR_STOP=1 --username "$admin_user" --dbname "$POSTGRES_DB" \
+psql --set=ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --set=admin_password="$POSTGRES_PASSWORD" \
   --set=migrator_password="$AIMEE_STORE_MIGRATOR_PASSWORD" \
   --set=runtime_password="$AIMEE_STORE_RUNTIME_PASSWORD" <<'SQL'
@@ -20,8 +21,6 @@ psql --set=ON_ERROR_STOP=1 --username "$admin_user" --dbname "$POSTGRES_DB" \
 SELECT format('CREATE EXTENSION IF NOT EXISTS %I', name)
 FROM pg_available_extensions WHERE name IN ('vector','vectorscale','pg_trgm')
 ORDER BY CASE name WHEN 'vector' THEN 1 WHEN 'vectorscale' THEN 2 ELSE 3 END \gexec
-SELECT format('CREATE ROLE postgres LOGIN SUPERUSER PASSWORD %L', :'admin_password')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') \gexec
 SELECT format('ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD %L', :'admin_password') \gexec
 SELECT format('CREATE ROLE aimee_store_migrator LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'migrator_password')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_store_migrator') \gexec
@@ -40,101 +39,6 @@ REVOKE CONNECT ON DATABASE aimee_store FROM PUBLIC;
 GRANT CONNECT ON DATABASE aimee_store TO aimee_store_runtime;
 GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
 
--- Only legacy-owned objects need baseline runtime grants. Modern migrations
--- deliberately restrict journals, history and privileged helpers. Regranting
--- every existing object on a PostgreSQL restart would undo those restrictions.
--- Grant before ownership transfer so a repeated reconciliation preserves ACLs.
-DO $legacy_runtime_grants$
-DECLARE object record;
-BEGIN
-  FOR object IN
-    SELECT c.relkind,n.nspname,c.relname FROM pg_class c
-    JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')
-      AND pg_get_userbyid(c.relowner) IN ('aimee','postgres')
-      AND NOT EXISTS (SELECT 1 FROM pg_depend d
-        WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
-  LOOP
-    IF object.relkind='S' THEN
-      EXECUTE format('GRANT USAGE, SELECT, UPDATE ON SEQUENCE %I.%I TO aimee_store_runtime',
-        object.nspname,object.relname);
-    ELSE
-      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO aimee_store_runtime',
-        object.nspname,object.relname);
-    END IF;
-  END LOOP;
-  FOR object IN
-    SELECT p.oid::regprocedure AS signature FROM pg_proc p
-    JOIN pg_namespace n ON n.oid=p.pronamespace
-    WHERE n.nspname='public' AND pg_get_userbyid(p.proowner) IN ('aimee','postgres')
-      AND NOT EXISTS (SELECT 1 FROM pg_depend d
-        WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e')
-  LOOP
-    EXECUTE format('GRANT EXECUTE ON ROUTINE %s TO aimee_store_runtime',object.signature);
-  END LOOP;
-END
-$legacy_runtime_grants$;
-
--- A fresh cluster has no application objects yet; an upgraded one does.
--- Transfer existing ownership before disabling the old bootstrap owner.
-DO $reconcile$
-DECLARE
-  object record;
-  object_kind text;
-BEGIN
-  -- These two private KB API schemas are part of the legacy application.
-  -- Move their migration authority without granting runtime schema access.
-  FOR object IN
-    SELECT nspname FROM pg_namespace
-     WHERE nspname IN ('aimee_kb_vault_orchestrator_api', 'aimee_kb_worm_api')
-       AND pg_get_userbyid(nspowner) IN ('aimee', 'postgres', 'aimee_store_migrator')
-  LOOP
-    EXECUTE format('ALTER SCHEMA %I OWNER TO aimee_store_migrator', object.nspname);
-  END LOOP;
-  FOR object IN
-    SELECT c.relkind, n.nspname, c.relname
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public'
-       AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
-       AND NOT EXISTS (SELECT 1 FROM pg_depend d
-         WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
-       -- ALTER TABLE transfers its SERIAL/IDENTITY sequences atomically. A
-       -- second ALTER SEQUENCE is rejected because an owned sequence may not
-       -- have a different owner from its table; only standalone sequences
-       -- need their own pass here.
-       AND (c.relkind <> 'S' OR NOT EXISTS (
-         SELECT 1 FROM pg_depend d
-          WHERE d.objid = c.oid AND d.deptype IN ('a', 'i')
-       ))
-  LOOP
-    object_kind := CASE object.relkind
-      WHEN 'r' THEN 'TABLE'
-      WHEN 'p' THEN 'TABLE'
-      WHEN 'v' THEN 'VIEW'
-      WHEN 'm' THEN 'MATERIALIZED VIEW'
-      WHEN 'S' THEN 'SEQUENCE'
-      WHEN 'f' THEN 'FOREIGN TABLE'
-    END;
-    EXECUTE format('ALTER %s %I.%I OWNER TO aimee_store_migrator',
-                   object_kind, object.nspname, object.relname);
-  END LOOP;
-  -- Schema replay replaces legacy helpers, including overloaded pg_now_text.
-  -- Transfer by signature, preserving bodies and ACLs. Extension members stay
-  -- under their administrative owner rather than the domain migration role.
-  FOR object IN
-    SELECT p.oid::regprocedure AS signature
-      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname IN ('public', 'aimee_kb_vault_orchestrator_api', 'aimee_kb_worm_api')
-       AND pg_get_userbyid(p.proowner) IN ('aimee', 'postgres', 'aimee_store_migrator')
-       AND NOT EXISTS (SELECT 1 FROM pg_depend d
-         WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
-  LOOP
-    EXECUTE format('ALTER ROUTINE %s OWNER TO aimee_store_migrator', object.signature);
-  END LOOP;
-END
-$reconcile$;
-
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
@@ -142,9 +46,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;
 
--- The version ledger is migration authority, not an application table. Keep
--- an existing ledger private immediately after legacy ownership adoption;
--- the provider applies the same rule atomically when first creating it.
+-- Preserve explicit protections when refreshing current role credentials.
+-- Domain migrations apply the same restrictions when creating these tables.
 DO $ledger$
 BEGIN
   IF to_regclass('public.memory_rejection_tombstones') IS NOT NULL THEN

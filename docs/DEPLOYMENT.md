@@ -196,3 +196,14 @@ authenticates over SSH.
 See [Upgrading](UPGRADING.md). Role changes and PostgreSQL storage migration are distinct from
 replacing an application image. Keep the old deployment and its backups until the new one has
 passed a restore and application-data check.
+
+## PostgreSQL provisioning
+
+The store image requires `POSTGRES_USER=postgres`. Fresh databases provision separate
+`aimee_store_migrator` and `aimee_store_runtime` roles. On restart, the image refreshes
+those credentials before opening TCP and preserves application object ownership and
+restricted grants. Domain schema changes run through the migration owner.
+
+Automatic adoption of older database layouts is removed. Startup does not rename
+`aimee_shared`, discover an `aimee` administrator, or transfer existing application
+objects. Existing volumes must already use the current database and role layout.
