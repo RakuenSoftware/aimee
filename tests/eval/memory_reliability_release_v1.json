@@ -1187,7 +1187,7 @@
     "server-go/modules/memory/receipt_verification_test.go": "32a4cf63c756ea3d9d0f76f7f29c9cf6233d3c9acf0d19fa8bc1d3af2ea74d55",
     "server-go/modules/memory/retrieval_eval_test.go": "70ea7e4870b4dd03b8a9512b876e61cb706be54c9129a07540455993edd506a6",
     "server-go/modules/memory/runtime_command_test.go": "f228c912eb47e4ce85e14ad8ec92db09ce09ff0a8a7a9cafaf495c3025a5216d",
-    "server-go/modules/memory/runtime_role_test.go": "df496e682bfd96a78f2fd5c4346eb78213246897c4b2250ca36b95958733932b",
+    "server-go/modules/memory/runtime_role_test.go": "4fdf36c48f701c4ac77c0258daf8230449bf57665ffd9dfcb592fc9f6f4c85ec",
     "server-go/modules/memory/scope_owner_test.go": "7ba3d35d61e786dc0cb4183bb3444a960db0a518062c66946d3290e2a9fde4f4",
     "server-go/modules/memory/scope_pool_test.go": "60f3729a7fc1b9d855c9bf9d6843f2bc67cb7402c1da1c8ff22b998a6385a51a",
     "server-go/modules/memory/selection_policy_test.go": "7e522461b92c585204962cd78d2fb682f2754923bcbf215ad2f0d6c433f54ce5",

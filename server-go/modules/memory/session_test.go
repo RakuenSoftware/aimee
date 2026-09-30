@@ -116,7 +116,10 @@ func TestFoldOriginsRevocationAndErase(t *testing.T) {
 		}
 	}
 	exec(`SET LOCAL jit=off; SELECT set_config('aimee.memory_scope_all','1',true)`)
-	exec(`CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
+	exec(`DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+ CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS;
+ END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 	schema, e := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if e != nil {
 		t.Fatal(e)

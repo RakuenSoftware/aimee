@@ -2051,8 +2051,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        # Exercise the same pgvector extension used by private code retrieval.
-        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        # Match the PostgreSQL 18 schema and Unicode rejection identity contract.
+        image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
         env:
           POSTGRES_USER: aimee
           POSTGRES_PASSWORD: aimee
@@ -2196,7 +2196,7 @@ jobs:
               --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
-      - name: Upgrade and roll back the published 0.4.1 KB
+      - name: Recreate the current-layout KB and preserve scoped memory
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
