@@ -261,3 +261,7 @@ current `postgres` administrator and configured database. It no longer discovers
 old `aimee` administrator, renames `aimee_shared`, transfers application objects, or
 regrants existing tables and routines. Current credential refresh and fresh provisioning
 remain, and the deployment gate now tests fresh startup and restart ACL preservation.
+Fresh provisioning, repeated current-role provisioning, ownership/ACL preservation,
+runtime writes, and credential rotation passed against local PostgreSQL 18 after this
+removal. Shell syntax, test registration, and clean-checkout documentation checks passed.
+The replacement Docker restart/TLS test is wired into CI; Docker was unavailable locally.
