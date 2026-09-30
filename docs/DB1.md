@@ -1,7 +1,8 @@
 # Legacy DB1 storage boundary
 
-The canonical direction is the [shared database](DB.md). This page describes the
-remaining server-domain boundary; DB1 is a legacy name, not the target architecture.
+The [database contract](DB.md) describes shared implementation. This page describes the
+Server runtime domain still named DB1 in migration history and native interfaces.
+[Server and KB](SERVER_AND_KB.md) remain separate instance and storage boundaries.
 
 DB1 is the server's PostgreSQL data tier. In 0.4.0, `aimee` owns its domain behavior and `postgres`
 owns database access.

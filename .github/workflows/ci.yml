@@ -920,6 +920,7 @@ jobs:
     timeout-minutes: 30
     env:
       AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+      AIMEE_MEMORY_RUNTIME_URL: postgres://aimee_store_runtime:runtime_fixture@127.0.0.1:5432/aimee_postgres_ci
       # Temp-table tests must not fall through to packaged owner relations when
       # they deliberately drop a relation to exercise unavailable storage.
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
@@ -969,6 +970,11 @@ jobs:
         run: |
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
+          # Disposable CI credentials; exercise the same login used by Compose.
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" <<'SQL'
+          CREATE ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS PASSWORD 'runtime_fixture';
+          GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+          SQL
           sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f -
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
       - name: Verify persisted erasure state upgrade and idempotence
@@ -1708,8 +1714,8 @@ jobs:
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
 
-      - name: Historical store volume upgrades in place
-        run: cd src && make postgres-store-upgrade-test
+      - name: Current store provisioning and restart
+        run: cd src && make postgres-store-bootstrap-test
 
       # Cheap and image-free: the gate that decides whether a kb may start without an
       # embedder. Getting it wrong in either direction ships a broken deploy — too
@@ -2045,8 +2051,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        # Exercise the same pgvector extension used by private code retrieval.
-        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        # Match the PostgreSQL 18 schema and Unicode rejection identity contract.
+        image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
         env:
           POSTGRES_USER: aimee
           POSTGRES_PASSWORD: aimee
@@ -2190,7 +2196,7 @@ jobs:
               --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
-      - name: Upgrade and roll back the published 0.4.1 KB
+      - name: Recreate the current-layout KB and preserve scoped memory
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \

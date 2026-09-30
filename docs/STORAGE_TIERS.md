@@ -1,45 +1,65 @@
-# Storage tiers
+# Storage ownership
 
-aimee has two product data tiers. They are ownership boundaries, not interchangeable backends.
+Server and KB are independent instances. Both use PostgreSQL and the same Go storage provider;
+each retains its own database, credentials, Vault, and backup boundary. Personal memory is durable
+without a KB. See [Server and KB](SERVER_AND_KB.md) for deployment and request selection.
 
-| Tier | Owner | Engine | Contents |
+| Data domain | Behavior owner | Store | Contents |
 | --- | --- | --- | --- |
-| DB1 | `aimee` domain module through `postgres` | PostgreSQL | sessions, working memory, agent jobs, workflows, local policy/audit state, caches, same-user runtime data |
-| Server memory and code | `memory` module through `postgres` | PostgreSQL + pgvector | personal memories, private repository source, definitions, call edges, local embeddings |
-| KB_STORE | `aimee-kb` | PostgreSQL + pgvector | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
-| Server WORM | `aimee-server` | SQLite | append-only server evidence chain and checkpoints |
-| KB WORM | `aimee-kb-worm` | SQLite | append-only KB evidence chain and checkpoints |
+| Server runtime, historically DB1 | `aimee`; `aimee-wfe` owns workflow lifecycle | Server PostgreSQL | Sessions, working memory, jobs, workflows, policy, caches |
+| Personal memory and private code | Server placement of `memory` | Server PostgreSQL + pgvector | `user_memories`, retained revisions, correction proposals, private code and vectors |
+| Shared knowledge | KB placement of `memory` and KB knowledge domains | KB PostgreSQL + pgvector | `memories`, facts, documents, shared code, evidence, curation queues |
+| Server WORM | Server audit owner | Separate SQLite ledger | Append-only evidence chain and checkpoints |
+| KB WORM | `aimee-kb-worm` | Separate SQLite ledger | Append-only KB evidence chain and checkpoints |
 
-The Go workflow control plane uses DB1 for definitions, immutable snapshots, work items, artifacts,
-parks, and lifecycle events. `aimee-wfe` owns workflow behavior and is the only workflow writer.
+The table lists ownership domains, not five database containers. Standard Compose gives each
+instance one PostgreSQL service. The Server runtime and personal memory use that Server store.
+The optional KB has a different store even when both run on the same machine.
 
-## Rules
+## Database access
 
-- `aimee-server` sends SQL to nothing. Both stores are other processes: DB1 through the
-  store module over the event bus, KB_STORE through typed `/v1` calls.
-- `aimee-kb` never opens DB1.
-- thin clients and browser clients open neither store.
-- cross-tier work uses typed `/v1` operations.
-- provider vocabulary and storage handles stop at the owning module.
-- the two WORM owners share `modules/audit/audit_worm.c`, but use separate
-  processes, files, and keys; the KB main binary still links no SQLite.
+The Go `postgres` module owns database connections, pools, transactions, and migration transport in
+both roles. Memory calls it through the local event bus. Native KB knowledge algorithms use the
+PostgreSQL session transport; they no longer own a libpq driver or pool. Thin clients and browser
+clients never open either database. Server-to-KB requests use authenticated typed `/v1` operations.
 
-Build and dependency checks enforce these rules.
+The former DB2 process, driver, and namespace are retired. The knowledge schema is now
+[`src/modules/kb/c/schema.sql`](../src/modules/kb/c/schema.sql). The retained DB1 migration-owner
+identifier and old report names are compatibility/history details. They do not require a numbered
+database architecture or authorize sharing a store between independent instances.
 
-## Deployment
+`AIMEE_STORE_URL` supplies runtime access and `AIMEE_STORE_MIGRATION_URL` supplies separate migration
+authority. Both profiles are vaulted. The restricted WORM worker uses `AIMEE_WORM_POSTGRES_URL`
+through the same provider implementation. See [Database](DB.md) and [PostgreSQL](modules/postgres.md).
 
-DB1 belongs to one server profile, and its module is told where to find it with
-`AIMEE_STORE_URL`. Being PostgreSQL does not make it shareable: one profile, one database.
-KB_STORE can serve one user, a team, or a company, but its contents
-must match that scope.
+## Memory and vector placement
 
-The default KB container runs a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An
-external PostgreSQL server is still KB_STORE; changing its location does not change ownership. Use the KB
-export helper or `pg_dump` before moving it.
+Personal rows use instance-local user scope. KB rows use global, workspace, and project scopes.
+The same Go executable enforces both placements. A scope or record ID cannot change the owner;
+ordinary memory operations require explicit `store=kb` to leave Server's personal store.
 
-KB_STORE PostgreSQL contains an immutable KB audit outbox and delivery ledger, not the
-WORM chain. The separately deployed KB WORM worker persists that chain in its
-own SQLite volume.
+Dense vectors remain with their source rows. Each instance configures its own embedder and optional
+synthesis endpoint. Go memory uses versioned embedding generations; KB document/code vector
+maintenance has its own schema and rebuild contract. See [Retrieval](retrieval-stack.md).
 
-Dense vectors live beside their source rows in the owning instance: local memory and code vectors on the server, shared knowledge vectors on the KB. The old Qdrant sidecar is not part of the
-current topology.
+## Audit evidence
+
+KB mutations submit an immutable PostgreSQL outbox intent in the row transaction. The separately
+credentialed WORM worker appends committed intents to its SQLite chain and records delivery.
+PostgreSQL commit and completed chain delivery are separate milestones. A worker outage leaves
+pending intents; a failure to submit the required transactional intent fails the mutation.
+
+The Server and KB worker share the WORM implementation but keep separate files, keys, and process
+compartments. Detailed provenance and immutable content-free audit metadata have different retention
+contracts. The [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records the remaining runtime
+privilege discrepancy for rejection records; do not infer least privilege from a role's name.
+
+## Deployment and recovery
+
+Standard Server and KB Compose projects each provision a separate PostgreSQL container with
+pgvector. Ordinary persistent storage is the default; LUKS is opt-in. An external database changes
+location, not ownership. Never reuse a Server home or database volume for a KB role.
+
+Back up each instance's home, Vault, PostgreSQL data, workspaces, and audit evidence together.
+Use consistent PostgreSQL dumps or coordinated snapshots, and preserve the original identity when
+restoring. Follow [Deployment](DEPLOYMENT.md#volumes-and-backup) and [WORM worker](WORM_WORKER.md).

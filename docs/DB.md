@@ -1,9 +1,13 @@
 # Database
 
-The target is one database used by KB and server, not numbered database tiers.
-Runtime/session state and shared knowledge are domain responsibilities, not separate
-database products. Shared storage does not imply shared authorization: caller identity,
-workspace/project scope, runtime roles, and migration authority remain explicit.
+Server and KB share a database implementation and caller contract. Their standard deployments
+retain independent PostgreSQL stores, credentials, and instance identities. See
+[Server and KB](SERVER_AND_KB.md) for the product boundary.
+
+The consolidation work removes duplicate database machinery and proves that domain schemas can
+coexist. The shared-schema replay below is an implementation test; it does not change deployment
+ownership or permit two installations to share a DSN. Runtime/session state, personal memory, and
+shared knowledge remain separate domain responsibilities with explicit caller and scope checks.
 
 ## Shared contract
 

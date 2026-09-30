@@ -45,7 +45,7 @@ export default function Governance() {
 
 function Decisions() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('revisit_due');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ subject: '', options: '', chosen: '', rationale: '' });
@@ -115,11 +115,22 @@ function Decisions() {
     }
   }
 
+  async function closeReview(d: Decision) {
+    setBusy(true);
+    try {
+      await apiSend('POST', `/v1/decisions/${d.id}/status`, { status: 'superseded' });
+      setNotice(`Closed review for #${d.id}; decision marked superseded.`);
+      await refresh();
+    } catch (e) { setNotice(`Close review failed: ${e}`); }
+    finally { setBusy(false); }
+  }
+
   const canCreate = form.subject && form.options && form.chosen && !busy;
 
   return (
     <div>
       <h3>Decision records</h3>
+      <p>Due decisions form an operator review queue. They are not automatically added to model context. Closing a review marks the decision superseded.</p>
       {err && <p className="kbc-error">{err}</p>}
 
       <div className="kbc-form">
@@ -174,7 +185,7 @@ function Decisions() {
               <th>Chosen</th>
               <th>Status</th>
               <th>Outcome</th>
-              <th>Created</th>
+              <th>Revisit</th><th>Created</th>
               <th></th>
             </tr>
           </thead>
@@ -189,8 +200,9 @@ function Decisions() {
                   {d.supersedes_id > 0 && <span className="kbc-muted"> ← #{d.supersedes_id}</span>}
                 </td>
                 <td>{d.outcome || '—'}</td>
-                <td>{d.created_at}</td>
+                <td>{d.revisit_when || '—'}</td><td>{d.created_at}</td>
                 <td>
+                  {d.status === 'revisit_due' && <button disabled={busy} onClick={() => void closeReview(d)}>Close review</button>}
                   {d.status === 'active' && <button onClick={() => supersede(d)}>Supersede</button>}
                 </td>
               </tr>

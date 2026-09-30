@@ -137,6 +137,8 @@ has_table_privilege(current_user,'org_vault_secret','SELECT') OR
 has_column_privilege(current_user,'files','path','SELECT') OR
 has_column_privilege(current_user,'work_outcomes','resulting_action','SELECT') OR
 has_schema_privilege(current_user,'public','CREATE') OR
+has_table_privilege(current_user,'memory_rejection_tombstones','DELETE') OR
+has_table_privilege(current_user,'memory_rejection_tombstones','TRUNCATE') OR
 (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user)`).Scan(&forbidden); err != nil || forbidden {
 		t.Fatalf("runtime gained owner/secret privileges: forbidden=%v err=%v", forbidden, err)
 	}
@@ -391,5 +393,96 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 		if err := conn.QueryRow(ctx, `SELECT COALESCE(current_setting($1,true),'')`, setting).Scan(&retained); err != nil || retained != "" {
 			t.Fatalf("request setting %s retained after transaction: %q %v", setting, retained, err)
 		}
+	}
+}
+
+// This optional gate authenticates as the deployed role, rather than relying
+// solely on SET ROLE in an administrative session. Point it at a disposable DB.
+func TestAuthenticatedRejectionPrivileges(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_RUNTIME_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_MEMORY_RUNTIME_URL for actual runtime authentication")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var login, role string
+	var forbidden bool
+	err = tx.QueryRow(ctx, `SELECT session_user,current_user,
+ has_table_privilege(current_user,'memory_rejection_tombstones','DELETE') OR
+ has_table_privilege(current_user,'memory_rejection_tombstones','TRUNCATE')`).Scan(&login, &role, &forbidden)
+	if err != nil || login != "aimee_store_runtime" || role != login || forbidden {
+		t.Fatal(login, role, forbidden, err)
+	}
+	var id int64
+	err = tx.QueryRow(ctx, `INSERT INTO memory_rejection_tombstones(object_kind,source,relation,target,rejected_by)
+ VALUES('fact','authenticated refusal fixture','knows','protected value','test:operator') RETURNING id`).Scan(&id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`DELETE FROM memory_rejection_tombstones WHERE id=$1`, `TRUNCATE memory_rejection_tombstones`} {
+		if _, err := tx.Exec(ctx, `SAVEPOINT erase_attempt`); err != nil {
+			t.Fatal(err)
+		}
+		args := []any{id}
+		if strings.HasPrefix(statement, "TRUNCATE") {
+			args = nil
+		}
+		if _, err := tx.Exec(ctx, statement, args...); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Fatal("runtime refusal erasure", err)
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT erase_attempt`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &postgresDataStore{db: runtimeRoleTx{evalQueryer{tx}, t}, placement: PlacementKB}
+	assertion := factAssertion{FactCandidate: FactCandidate{Subject: "ＡＵＴＨＥＮＴＩＣＡＴＥＤ refusal fixture", Relation: "knows", Object: "protected value"}}
+	if found, err := backend.factTombstoned(ctx, assertion, ""); err != nil || !found {
+		t.Fatal(found, err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memory_rejection_tombstones SET active=0,restored_by='test:operator',restored_at=pg_now_text() WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := backend.factTombstoned(ctx, assertion, ""); err != nil || found {
+		t.Fatal("attributed restore", found, err)
+	}
+}
+
+func TestMemoryAuditCorrelation(t *testing.T) {
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var id int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content) VALUES('L2','fact','audit-correlation-canary','temporary fixture') RETURNING id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	var matched, pending int
+	err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE d.outbox_id IS NULL)
+ FROM kb_audit_outbox o JOIN memory_evidence_events e
+ ON e.event_id=o.detail::jsonb->>'evidence_event_id' AND e.changeset_id=o.detail::jsonb->>'changeset_id'
+ LEFT JOIN kb_audit_delivery d USING(outbox_id)
+ WHERE o.action LIKE 'memory.%' AND o.subject=$1`, fmt.Sprint(id)).Scan(&matched, &pending)
+	if err != nil || matched != 1 || pending != 1 {
+		t.Fatal("audit correlation", matched, pending, err)
 	}
 }

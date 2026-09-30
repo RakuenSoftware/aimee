@@ -1,183 +1,134 @@
 # Retrieval stack
 
-Retrieval is hybrid. Lexical, dense, graph, code, scope, recency, and confidence signals produce a
-candidate set; optional synthesis refines it.
+Retrieval runs in the instance that owns the selected data. Server serves personal memory and private
+code; KB serves its shared corpus. They use the same Go memory implementation with different tables,
+scopes, and capabilities. See [Server and KB](SERVER_AND_KB.md).
+
+## Current memory path
 
 ```text
-query -> normalize/rewrite -> parallel candidate sources -> fuse
-      -> evidence build -> confidence/abstain -> optional synthesis
+selected store + verified caller + scope
+  -> one owner transaction
+  -> eligible lexical / versioned semantic / graph candidates
+  -> rank fusion and bounded selection
+  -> evidence and source versions
+  -> budgeted context or served view
+  -> source revalidation at the consuming boundary
 ```
 
-No stage may claim it ran when its dependency was unavailable. Degraded results state which signals
-were used.
+The Go [memory owner](modules/memory.md) implements memory retrieval. Remaining native adapters
+handle transport and materialization. KB document/code retrieval has additional corpus-specific
+paths; a memory ranking guarantee should not be generalized to every search endpoint.
+
+## Eligibility before ranking
+
+The current shared-memory predicate, `current-validity-v18`, checks active lifecycle, suppression,
+world-valid time, configured utility horizon, and derived-input currency. It uses the transaction's
+clock. Scope, row security, embedding fingerprints, and source-evidence visibility add further gates.
+See [eligibility.go](../server-go/modules/memory/eligibility.go).
+
+Current reads exclude inactive and expired rows regardless of legacy lifecycle flags. Exact-ID
+history inspection uses a separate contract. Assertion search supports world-valid and belief-time
+queries; a legacy `get --as-of` response is not a reconstruction of belief time. Personal history
+selects an explicitly retained revision by owner/version identity.
+
+Ranking cannot turn an ineligible record into evidence. Unknown/malformed time values and required
+SQL failures remain errors rather than successful partial retrieval. Model unavailability is handled
+separately: an optional semantic lane may be unavailable while lexical retrieval still succeeds.
 
 ## Embedding
 
-One embedder identity and dimension applies to a corpus under one KB storage authority. The KB stores
-derived vectors in KB_STORE and owns the embedding role. The selected model can run inside its container
-or at a configured remote endpoint. The bundled `bekko-a25m` is 384-dimension.
+Standard [Server Compose](../compose.yaml) and [KB Compose](../compose.kb.yaml) deploy embedding as
+a separate sidecar. Each composition owns its model configuration and TLS identity. The default
+model is `bekko-a25m`, with dimension `384`; synthesis uses an optional profile. External endpoints
+are configurable. The standard deployment does not require an embedded model inside the application
+container or a KB for personal semantic recall.
 
-The embedder is selected in the wizard's Deploy topology step. Until one is selected the KB serves a
-builtin lexical embedder. Retrieval works, but it is keyword matching rather than vector search.
+A configured external endpoint receives the text to embed. Personal vectors stay in Server's store;
+shared vectors stay in KB's store. Model names, dimensions, pooling, and query/document prefixes all
+matter to the vector space. A same-width replacement can still invalidate the corpus.
 
-Check [KB model tiers](AIMEE_KB_SYNTH_TIERS.md) for sizing an internal synthesis role.
+### Memory generations
 
-The configured dimension must equal the model output. KB_STORE records the dimension used to create its
-vector columns and refuses startup on drift. Silent empty vector search is worse than a hard start
-failure.
+Go memory stores versioned embedding generations, including model identity, dimensions, source
+revision, and input fingerprint. Shared whole-record and derived-unit lanes require a pinned active
+version. They discard stale parent/unit vectors and invalid dimensions before ranking. One query
+embedding is reused across the qualifying shared semantic channels.
 
-### One bundled embedder, or your own
+Memory's generation columns are unconstrained `vector` columns with dimensions tracked per version.
+A KB fixed-width dimension reset does not own or drop these generations. Rebuild and cutover stay
+with Go memory. See [memory module](modules/memory.md) and
+[shared semantic retrieval](../server-go/modules/memory/shared_recall.go).
 
-`bekko-a25m` ships inside the `aimee-kb` container, with its weights baked into the image.
-After the wizard selects it, a fresh install embeds without an inference service, GPU, model
-download, or network access. Until that selection is saved, the KB uses its builtin lexical
-embedder. `bekko-a25m` is **384-dimensional**.
+### KB document and code vectors
 
-| | `bekko-a25m` (bundled) |
-| --- | ---: |
-| NDCG@10 (frozen-ab-v1) | 0.5909 |
-| dimension | 384 |
-| context | 8192 |
-| prefixes | none. Its card defines none, so its benchmark number carries into production unchanged |
-| vocab | 256k, multilingual |
+KB document/code schemas also have dimension and serving-identity checks. Their fixed-width reset
+has a different contract from memory generation cutover. Review the affected vector family before
+using a repair command. [Change the KB embedder](runbooks/change-embedder.md) covers that operational
+path; record source counts, model identity, dimensions, and recall canaries before changing a corpus.
 
-**For an embedder not included in the selected KB image, use a remote role.** Point
-`EMBEDDER_URL` (or the wizard's "External endpoint" option) at a GPU-served endpoint. That is
-the current profile's route to a wider or stronger embedder, and it is why the measurement winner is
-not bundled:
-`nomic-embed-text-v2-moe` scored 0.6075 against bekko's 0.5909, but it is 768-dim, ~6x
-slower on CPU, needs its card prefixes to reach that number at all, and cost 1.8GB of
-image. The evidence for both is in
-[the selection report](validation/embedder-selection-frozen-ab-v1.md).
-
-An external embedder needs its **dimension supplied**: the kb sizes its vector columns
-from it and cannot derive the width of an endpoint it does not serve. Nothing applies
-prefixes on that path either, so a prefix-dependent model must apply its own.
-
-Operators can declare additional models with `EMBEDDERS_EXTRA`, giving the pooling, width,
-context and prefixes. Nobody can infer those for you, and each one changes the vectors.
-An overlay entry whose weights are not baked is reachable only as an external endpoint.
-
-**Changing the embedder is destructive.** The wizard requires a typed acknowledgement because:
-
-- a different width requires rebuilding the pgvector columns and every derived vector;
-- the same width with different pooling or prefixes still invalidates every vector because those
-  settings define the vector space.
-
-The acknowledgement does not run a migration. The KB refuses to start when its recorded identity
-does not match the endpoint. Follow [Change the KB embedder](runbooks/change-embedder.md) before
-saving a different choice for an active corpus.
-
-### What defines the vector space
-
-Width is not identity. Pooling and the query/document prefixes change every vector while leaving
-both the dimension and the model name untouched: well-formed vectors, right width, right name,
-different space, collapsed recall and no error anywhere. Both have happened: nomic served with
-`last` pooling (from an earlier model contract), and nomic served prefix-free, which
-measured 0.5823 NDCG@10 against 0.6075 with its card prefixes.
-
-The selected embedding role publishes a `serving_id` on `/health` (the model key plus a digest over
-pooling and the prefix pair), and the KB records it in `kb_meta.schema_embedder_serving_id` on first start
-against a corpus. A later start whose endpoint reports a different `serving_id` **refuses** and
-names both values. The dimension-reset command cannot repair a same-dimension identity change;
-follow [Change the KB embedder](runbooks/change-embedder.md) for the supported replacement path.
-
-There is deliberately no compat list here, unlike the model-identity guard: two models can be shown
-to agree by measuring cosine, but a changed prefix pair is definitionally a different space. Two
-limits worth knowing:
-
-- An endpoint that reports no `serving_id` (a legacy or third-party embedder) leaves the guard
-  inactive rather than refusing, so upgrades do not strand existing deployments. The **builtin**
-  lexical embedder does declare one (`builtin/lexical-v1`) because it shares the bundled model's
-  384 width. Without an identity, switching between the two would be invisible to both guards.
-- A corpus embedded before the guard existed adopts the current identity on its first start, because
-  it is indistinguishable from a fresh one. If such a corpus was built while prefixes were disabled,
-  re-embed it once by hand: the guard cannot detect drift it never recorded a baseline for.
-
-## Changing dimension
-
-`aimee kb reembed` is a dimension-change reset. It does not rebuild a same-dimension corpus; when
-the target equals the recorded dimension, it reports that no dimension change is needed and exits.
-Use a fresh KB_STORE and re-ingest authoritative sources for same-dimension model or serving-identity
-changes.
-
-Before changing it:
-
-1. back up KB_STORE;
-2. stop KB writers;
-3. record the old model, dimension, and row counts;
-4. enable `kb.reembed_on_dim_change` in the KB's own configuration;
-5. review `aimee kb reembed --dry-run --target-dim <new-dimension>`;
-6. run `aimee kb reembed --confirm --target-dim <new-dimension>`;
-7. switch to the new embedder before allowing requeued work to complete;
-8. run `aimee memory embed --all` to restore memory vectors;
-9. compare source counts, vector counts, recall, and latency before reopening traffic.
-
-Do not merely delete vector rows. The PostgreSQL column still has its old dimension. Do not clear the
-dimension marker without rebuilding the columns.
-
-Do not maintain a hand-written table list. The server-side plan owns the current derived tables and
-refuses unknown half-vector or foreign-key conditions unless the operator makes the override explicit.
+The [frozen embedder selection report](validation/embedder-selection-frozen-ab-v1.md) records an
+older measured comparison. It explains the selection under its own corpus and configuration; it is
+not a fresh benchmark of the current Go owner.
 
 ## Fusion
 
-Lexical search covers exact names and identifiers. Dense search bridges wording. Entity and code
-graphs carry structure. Reciprocal-rank or the configured fusion mode combines ranked lists without
-pretending their raw scores share one scale.
+Lexical matching covers names, identifiers, and text. Versioned dense retrieval adds semantic-only
+candidates. Graph expansion adds bounded relationships whose source records remain visible and
+eligible. Reciprocal-rank fusion combines ranked lists without treating raw scores as comparable.
+Repeated IDs within one arm get one vote; agreement across distinct arms can contribute separately.
 
-Scope and authorization apply before candidates reach the result. A later filter is not sufficient
-because ranking and timing can leak excluded data.
+Shared scope ordering favors project, then workspace, then global evidence. Personal retrieval
+remains user-scoped. The owner deduplicates and bounds the result. Exact constants and channel
+behavior live in [fusion.go](../server-go/modules/memory/fusion.go) and the
+[module contract](modules/memory.md), which also describes semantic unit floors and PageRank.
 
 ## Sub-query fusion
 
-Recall expands a query into sub-queries two ways: an LLM rewrite
-(`memory_rewrite_decompose`) and a heuristic token-window split inside candidate
-generation. Each expansion runs its own retrieval pass and produces its own ranked list.
+The older C ranker used heuristic and LLM query decomposition with an interleaved candidate merge.
+That implementation has been retired. It must not be described as the current default Go retrieval
+path or configured through its old benchmark-only environment flag.
 
-Those lists are merged **interleaved**, by rank: rank 0 from every list, then rank 1, and so on.
-They are never concatenated, and their scores are never compared across lists, because the legs that
-produce them do not share a score scale.
+The [compatibility decisions](proposals/pending/memory-reliability-retrieval-compatibility.md)
+record retired query expansion and ranking behavior. Current evaluation must use the Go owner and
+its policy fingerprint. A historical result from the C candidate pool is not a baseline for a
+changed Go policy without a controlled comparison.
 
-This is a capacity decision before it is a ranking one. The candidate array is 96 slots and a single
-retrieval pass can fill it alone, so concatenating spends the budget on whichever list runs first:
-the second sub-query gets what is left, and the legs that run after the merge can get nothing.
-Nothing downstream can see that happen: the evicted rows never became candidates. Published paired
-measurements on multi-hop retrieval put naive parallel-and-pool sub-query expansion *below* running
-no expansion at all, with interleaved fusion well above both.
+## Reranking and optional policies
 
-Two ordering rules follow from the same reasoning:
+The current stack does not add a cross-encoder reranker. The
+[historical retrieval report](validation/retrieval-stack-report-2026-07-30.md) explains its removal
+under the measured configurations. Go still performs ranking, gating, and optional graph scoring;
+removing a cross-encoder does not remove those stages.
 
-- the heuristic stage runs **after** the dense leg, never before it, so fragments of the query cannot
-  consume the slots the query itself needs;
-- lane membership is snapshotted and restored across sub-query passes, so the two-lane floor is built
-  from the caller's query rather than from whichever fragment ran last. The HyDE pass is deliberately
-  excluded: it is a full-fidelity pass over the real query, not a fragment.
+PageRank is opt-in. Utility-horizon and selection policies also retain their own disabled/default
+modes; shipping an implementation does not activate it. See [Memory](MEMORY.md) and
+[release preparation](validation/release-0.4.6-preparation-2026-09-27.md). Do not claim quality gains
+from a policy without paired evaluation on the same corpus and model identity.
 
-The heuristic stage has not yet been ablated on its own. It is on by default and
-`AIMEE_MEMORY_DECOMPOSE_HEURISTIC=0` turns it off for a benchmark run, which is what that flag is
-for. The fusion policy itself is in `src/modules/memory/memory_candidate_fusion.c`, split out of the
-retrieval TU so it is reachable from a unit test without a store.
+## Evidence and delivery
 
-## No cross-encoder rerank stage
+Recall and served views preserve source identities and versions. The owner budgets serialized
+context, while source revalidation protects later materialization and provider dispatch against
+changed or erased inputs. A successful search is not proof that the same bytes were eventually
+sent to a model. Context composition across personal and shared stores is not one atomic snapshot.
 
-There is no reranker. Measured across 20 configurations and two embedders, the best cross-encoder
-result was +0.0032 NDCG@10 and most were negative. A reranker's ceiling sits below a strong dense
-ranking, so the effect shrank as the embedder improved. Hybrid BM25+RRF fusion measured +0.1168
-Recall@10 over dense alone, roughly 35x the best rerank result, which is where the remaining quality
-lives. See [the retrieval-stack report](validation/retrieval-stack-report-2026-07-30.md).
-
-## Evidence and abstention
-
-The evidence builder keeps source IDs, spans/pages, relationship paths, freshness, and score
-components. Confidence considers coverage and contradictions, not only the top similarity score.
-
-A weak or conflicting set may return an abstention. Optional synthesis receives the bounded evidence
-and must cite it.
+`memory serve` and claim cards expose bounded views with receipts and diagnostics. Optional synthesis
+uses the selected instance's configured endpoint and should retain evidence attribution. Support and
+abstention checks do not equate graph popularity or a high similarity score with corroboration.
 
 ## Configuration and checks
 
-Use the [generated configuration](gen/configuration.md) for embedder URL, dimension, fusion,
-top-k, and evidence gates.
+Use the [generated configuration](gen/configuration.md) and [command reference](gen/cli-commands.md)
+for supported settings and operations. A listed legacy key still needs a live consumer before it can
+be treated as an effective policy control.
 
-After a retrieval change, run lexical-only, dense-only, fused, degraded, scope-negative, dimension
-drift, and benchmark cases. Record corpus hash, model identity, config, and latency with the result.
+For a retrieval change, test each supported placement and public route. Pair an expected visible
+record with excluded foreign-scope, archived, suppressed, expired, stale-vector, and revoked-source
+records. Exercise an unavailable model and a failed required SQL read separately. Verify the final
+context and receipts, not just the candidate list.
+
+Evaluation reports must bind corpus hash, schema, effective policy, embedding identity, dimensions,
+case IDs, and latency scope. The isolated Go evaluator measures the owner; its latency does not
+include every client/Server/KB hop. See [Memory evaluation](MEMORY.md#isolated-go-evaluation-transport)
+and [Benchmarks](BENCHMARKS.md).

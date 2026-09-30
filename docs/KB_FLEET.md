@@ -1,18 +1,24 @@
 # KB fleet and model placement
 
-The target deployment has one or more `aimee-kb` containers. Each KB owns its storage boundary and
+Server works independently with its own personal store and models. A shared KB is optional and
+separately deployed. See [Server and KB](SERVER_AND_KB.md).
+
+The future fleet topology has one or more `aimee-kb` instances. Each KB owns its storage boundary and
 declares which model roles it can serve. An optional model-specific `aimee-llm` sidecar can execute
 local synthesis for one KB. It is part of that KB's placement and is never a server routing target.
 
-## Model roles belong to a KB
+## Shared-corpus model roles belong to their KB
 
 Each KB can configure the embedding and synthesis roles independently:
 
 | Role placement | Meaning |
 | --- | --- |
-| local | Embedding runs in the KB image or selected embedder sidecar; synthesis runs in the selected `aimee-llm-*` sidecar. |
+| local | Standard Compose runs embedding in a separate sidecar; synthesis runs in an optional selected `aimee-llm-*` sidecar. |
 | remote | The KB calls an explicitly configured remote model endpoint. |
 | off | The role is unavailable and dependent stages report degradation. |
+
+Server configures its own embedding and optional synthesis for personal data. Connecting a KB
+does not replace those roles or send personal vectors into the shared corpus.
 
 A KB may serve embedding, synthesis, or both roles. Local placement does not create a
 model service for the server to route to. Remote placement does not move role ownership
@@ -33,18 +39,18 @@ Every routed result needs to preserve:
 - honest role health and degradation;
 - request and audit correlation across the server-to-KB boundary.
 
-Several stateless KB replicas may share an explicitly configured KB_STORE when they have the same storage
-and schema authority. Separate corpora or trust boundaries use separate KB_STORE ownership. A deployment
+Several stateless KB replicas may share an explicitly configured knowledge store when they have the same storage
+and schema authority. Separate corpora or trust boundaries use separate knowledge store ownership. A deployment
 must not infer either arrangement from container names.
 
 ## Current implementation boundary
 
-The managed and split Compose profiles in this checkout deploy one named `aimee-kb`, and the server
-uses one `AIMEE_KB_API_URL`. They are the single-KB profile of the design. Fleet registration,
+The standard and managed Server Compose profiles install no KB. A distinct KB Compose project
+can be enrolled later, and Server uses one configured `AIMEE_KB_API_URL`. Fleet registration,
 selection, and multi-KB operator commands are not yet an integrated path, so current guides do not
 invent commands for them.
 
-Until that path lands, scale identical KB workers only where the shared KB_STORE, identity, and queue
+Until that path lands, scale identical KB workers only where the shared knowledge store, identity, and queue
 contracts already support it. Do not present independent KBs as one fleet by placing a generic load
 balancer in front of them; that would erase the routing authority described above.
 

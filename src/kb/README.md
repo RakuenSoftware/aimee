@@ -3,7 +3,9 @@
 This directory owns the knowledge service: memory, documents, code
 graph, retrieval, curation, and KB administration.
 
-It does not own DB1, workflow state, thin-client paths, or another KB's corpus.
+This is an optional instance separate from Server. It does not own Server personal memory,
+runtime state, workflow state, thin-client paths, or another KB's corpus. See
+[Server and KB](../../docs/SERVER_AND_KB.md).
 
 ## Boundaries
 
@@ -13,7 +15,7 @@ It does not own DB1, workflow state, thin-client paths, or another KB's corpus.
 - accepts typed `/v1` operations from server and authorized KB clients;
 - owns knowledge transactions and background queue claim;
 - owns embedding and synthesis role placement for this KB;
-- runs a selected role inside the KB container or calls its configured remote endpoint;
+- standard Compose runs embedding and optional synthesis in separate model sidecars; external endpoints are configurable;
 - degrades explicitly when an enabled role is unavailable;
 - publishes KB-side memory and tool audit through its own event bus;
 - treats scope as authorization, not a search filter applied after the query.
@@ -39,7 +41,7 @@ SQLite file; a session lock rejects concurrent WORM consumers.
 | --- | --- |
 | `http/` | public route boundary, auth, scopes, body limits, OpenAPI |
 | ingest | content validation, staging, document/PDF pipeline, commit |
-| memory | store, recall, dedupe, contradiction, temporal state, promotion/decay |
+| memory adapters | transport to the Go memory owner for store, recall, temporal state, mutation and review |
 | vectors | embedding records, index choice, reconcile and repair |
 | code | extraction, symbols, calls, cross-repo edges, blast radius |
 | curator | typed fact extraction, review, reflection, lifecycle |

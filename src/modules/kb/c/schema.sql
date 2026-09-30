@@ -152,6 +152,46 @@ CREATE TABLE IF NOT EXISTS memory_rejection_tombstones (
   active BIGINT NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   rejected_at TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')),
   restored_at TEXT NOT NULL DEFAULT '', restored_by TEXT NOT NULL DEFAULT '');
+-- Versioned rejection identity shared by owner lookup and direct-writer guard.
+-- PostgreSQL 18's Unicode collation supplies full folding (lower() does not).
+CREATE OR REPLACE FUNCTION memory_fact_rejection_identity_v1(src TEXT, rel TEXT, dst TEXT)
+RETURNS TEXT LANGUAGE plpgsql IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+DECLARE
+ a TEXT; b TEXT; r TEXT := ''; identity TEXT;
+ bytes BYTEA := convert_to(rel,'UTF8'); c INTEGER;
+ prev_separator BOOLEAN := true; prev_lower BOOLEAN := false;
+ whitespace TEXT := E'\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000';
+BEGIN
+ a := btrim(regexp_replace(casefold(normalize(src,NFKC) COLLATE pg_catalog.pg_unicode_fast), '[' || whitespace || ']+',' ','g'));
+ b := btrim(regexp_replace(casefold(normalize(dst,NFKC) COLLATE pg_catalog.pg_unicode_fast), '[' || whitespace || ']+',' ','g'));
+ IF a='' OR b='' OR octet_length(a)>=1024 OR octet_length(b)>=1024 THEN RETURN ''; END IF;
+ -- Match the owner's ASCII, 63-byte relation normalization, including camelCase.
+ FOR i IN 0..octet_length(bytes)-1 LOOP
+  EXIT WHEN length(r)>=63;
+  c := get_byte(bytes,i);
+  IF c BETWEEN 65 AND 90 OR c BETWEEN 97 AND 122 OR c BETWEEN 48 AND 57 THEN
+   IF c BETWEEN 65 AND 90 AND prev_lower AND NOT prev_separator THEN r := r || '_'; END IF;
+   IF length(r)<63 THEN r := r || chr(CASE WHEN c BETWEEN 65 AND 90 THEN c+32 ELSE c END); END IF;
+   prev_separator := false;
+   prev_lower := c BETWEEN 97 AND 122 OR c BETWEEN 48 AND 57;
+  ELSE
+   IF NOT prev_separator THEN r := r || '_'; prev_separator := true; END IF;
+   prev_lower := false;
+  END IF;
+ END LOOP;
+ r := rtrim(r,'_');
+ IF r='' THEN RETURN ''; END IF;
+ identity := a || chr(31) || r || chr(31) || b;
+ IF octet_length(identity)>=1024 THEN RETURN ''; END IF;
+ RETURN identity;
+END $$;
+-- Generated storage backfills legacy rows and prevents writers forging identity.
+-- Keep equivalent historic refusals separately: restoring one must not erase another.
+ALTER TABLE memory_rejection_tombstones ADD COLUMN IF NOT EXISTS fact_identity_v1 TEXT
+ GENERATED ALWAYS AS (memory_fact_rejection_identity_v1(source,relation,target)) STORED;
+CREATE INDEX IF NOT EXISTS idx_memory_rejection_fact_identity_v1
+ ON memory_rejection_tombstones(fact_identity_v1)
+ WHERE object_kind='fact' AND active=1 AND fact_identity_v1<>'';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_rejection_fact_active
   ON memory_rejection_tombstones(source,relation,target)
   WHERE object_kind='fact' AND active=1;
@@ -1912,13 +1952,15 @@ CREATE OR REPLACE FUNCTION fact_rejection_tombstone_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.edge_class='semantic' AND NEW.lifecycle_state IN ('candidate','persistent','promoted') AND
     EXISTS(SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='fact' AND t.active=1
-           AND t.source=NEW.source AND t.relation=NEW.relation AND t.target=NEW.target) THEN
+           AND ((t.source=NEW.source AND t.relation=NEW.relation AND t.target=NEW.target)
+             OR (t.fact_identity_v1<>'' AND t.fact_identity_v1=
+                 memory_fact_rejection_identity_v1(NEW.source,NEW.relation,NEW.target)))) THEN
    RAISE EXCEPTION 'fact value is protected by a rejection tombstone';
  END IF;
  RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS fact_rejection_tombstone_guard ON entity_edges;
-CREATE TRIGGER fact_rejection_tombstone_guard BEFORE INSERT OR UPDATE OF source,relation,target,lifecycle_state
+CREATE TRIGGER fact_rejection_tombstone_guard BEFORE INSERT OR UPDATE OF source,relation,target,lifecycle_state,edge_class
  ON entity_edges FOR EACH ROW EXECUTE FUNCTION fact_rejection_tombstone_guard();
 
 -- One row per independently auditable mention.  Confirmation is derived from
@@ -16482,7 +16524,9 @@ BEGIN
     PERFORM public.memory_mutation_worm_append(authority,actor,
       CASE WHEN new_state='rejected' AND old_state<>'rejected' THEN 'memory.reject'
            ELSE 'memory.'||op END,oid,
-      jsonb_build_object('changeset_id',cid,'operation',op,'before_lifecycle',old_state,
+      jsonb_build_object('changeset_id',cid,'evidence_event_id',
+                         (SELECT event_id FROM fact_graph_changes WHERE id=emitted_change),
+                         'operation',op,'before_lifecycle',old_state,
                          'after_lifecycle',new_state,'scope_type',rowj->>'scope_type',
                          'scope_value',rowj->>'scope_value')::TEXT);
   END IF;
@@ -18902,6 +18946,9 @@ BEGIN
   GRANT USAGE,SELECT ON SEQUENCE trace_mining_log_id_seq TO aimee_store_runtime;
   GRANT SELECT,INSERT ON memory_workspaces TO aimee_store_runtime;
   GRANT SELECT,INSERT ON fact_review_actions TO aimee_store_runtime;
+  -- Reconcile legacy/default DML grants on every schema replay. Restoration is
+  -- an attributed UPDATE; runtime refusal erasure is never a supported action.
+  REVOKE DELETE, TRUNCATE ON memory_rejection_tombstones FROM aimee_store_runtime, PUBLIC;
   GRANT USAGE,SELECT ON SEQUENCE fact_review_actions_id_seq TO aimee_store_runtime;
   GRANT SELECT(version,active) ON ontology_package_versions TO aimee_store_runtime;
   REVOKE SELECT,INSERT ON collab_rules FROM aimee_store_runtime;

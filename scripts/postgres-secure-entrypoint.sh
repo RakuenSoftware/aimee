@@ -3,6 +3,10 @@ set -euo pipefail
 
 : "${AIMEE_STORE_DB_HOSTNAME:=aimee-store-db}"
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
+if [[ "$POSTGRES_USER" != postgres ]]; then
+  echo "aimee store: POSTGRES_USER must be postgres" >&2
+  exit 1
+fi
 : "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 : "${POSTGRES_DB:?POSTGRES_DB is required}"
 : "${PGDATA:?PGDATA is required}"
@@ -48,93 +52,36 @@ EOF
 chown postgres:postgres "$secure_dir/pg_hba.conf"
 chmod 0600 "$secure_dir/pg_hba.conf"
 
-# The upstream image runs /docker-entrypoint-initdb.d only for an empty PGDATA.
-# Releases before the store role split therefore keep their `aimee` superuser
-# and never create the migrator/runtime roles when Compose replaces the image.
-# Reconcile an existing cluster through a Unix-socket-only temporary postmaster;
-# no TCP listener exists until the role split and password rotation have
-# completed successfully.
+# Existing current-layout stores refresh role credentials before opening TCP.
+# Fresh stores use the upstream initdb hooks. No old database names, owners, or
+# administrator identities are adopted during startup.
 if [[ -s "$PGDATA/PG_VERSION" ]]; then
-  migration_socket="$secure_dir/reconcile-socket"
-  migration_hba="$secure_dir/reconcile-pg_hba.conf"
-  migration_log="$secure_dir/reconcile.log"
-  install -d -o postgres -g postgres -m 0700 "$migration_socket"
-  printf '%s\n' 'local all all trust' >"$migration_hba"
-  chown postgres:postgres "$migration_hba"
-  chmod 0600 "$migration_hba"
-  touch "$migration_log"
-  chown postgres:postgres "$migration_log"
-  chmod 0600 "$migration_log"
+  provision_socket="$secure_dir/reconcile-socket"
+  provision_hba="$secure_dir/reconcile-pg_hba.conf"
+  provision_log="$secure_dir/reconcile.log"
+  install -d -o postgres -g postgres -m 0700 "$provision_socket"
+  printf '%s\n' 'local all all trust' >"$provision_hba"
+  chown postgres:postgres "$provision_hba"
+  chmod 0600 "$provision_hba"
+  touch "$provision_log"
+  chown postgres:postgres "$provision_log"
+  chmod 0600 "$provision_log"
 
-  migration_started=0
-  stop_migration_cluster() {
-    if [[ "$migration_started" == 1 ]]; then
+  provision_started=0
+  stop_provision_cluster() {
+    if [[ "$provision_started" == 1 ]]; then
       gosu postgres pg_ctl -D "$PGDATA" -m fast -w stop >/dev/null 2>&1 || true
-      migration_started=0
+      provision_started=0
     fi
   }
-  trap stop_migration_cluster EXIT INT TERM
-  gosu postgres pg_ctl -D "$PGDATA" -w -l "$migration_log" \
-    -o "-c listen_addresses='' -c unix_socket_directories='$migration_socket' -c hba_file='$migration_hba' -c ssl=off" start
-  migration_started=1
+  trap stop_provision_cluster EXIT INT TERM
+  gosu postgres pg_ctl -D "$PGDATA" -w -l "$provision_log" \
+    -o "-c listen_addresses='' -c unix_socket_directories='$provision_socket' -c hba_file='$provision_hba' -c ssl=off" start
+  provision_started=1
 
-  existing_admin=""
-  for candidate in postgres aimee; do
-    if gosu postgres psql --host "$migration_socket" --username "$candidate" \
-         --dbname postgres --tuples-only --no-align \
-         --command "SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper" \
-         2>/dev/null | grep -qx 1; then
-      existing_admin="$candidate"
-      break
-    fi
-  done
-  if [[ -z "$existing_admin" ]]; then
-    echo "aimee store: existing cluster has no supported administrative role (postgres or aimee)" >&2
-    exit 1
-  fi
+  PGHOST="$provision_socket" /docker-entrypoint-initdb.d/10-aimee-store-roles.sh
 
-  # Rename only the adopted copy of the embedded KB store, before opening
-  # TCP. Refuse ambiguous stores and preserve the read-only rollback source.
-  gosu postgres psql --host "$migration_socket" --username "$existing_admin" \
-    --dbname postgres --set=ON_ERROR_STOP=1 --set=store_db="$POSTGRES_DB" <<'SQL'
-SELECT set_config('aimee.store_db', :'store_db', false);
-DO $database$
-BEGIN
-  IF current_setting('aimee.store_db') = 'aimee_store'
-     AND EXISTS (SELECT 1 FROM pg_database WHERE datname = 'aimee_shared') THEN
-    IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'aimee_store') THEN
-      RAISE EXCEPTION 'both aimee_shared and aimee_store exist; select the intended store before upgrading';
-    END IF;
-    ALTER DATABASE aimee_shared RENAME TO aimee_store;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = current_setting('aimee.store_db')) THEN
-    RAISE EXCEPTION 'expected store database is absent; restore or select the intended store before upgrading';
-  END IF;
-END
-$database$;
-SQL
-
-  AIMEE_STORE_ADMIN_USER="$existing_admin" PGHOST="$migration_socket" \
-    /docker-entrypoint-initdb.d/10-aimee-store-roles.sh
-
-  # Historical releases shipped the network-reachable `aimee:aimee`
-  # superuser. Once its objects and ownership have moved, remove login and erase
-  # its verifier so enabling TLS does not preserve that known credential.
-  # Do this on every existing-cluster reconciliation, not only when `aimee`
-  # was the role used above. A prior interrupted reconciliation may already
-  # have created `postgres` but failed before revoking the legacy credential;
-  # the next boot must finish the security transition rather than treating the
-  # new role as proof that every later step committed.
-  gosu postgres psql --host "$migration_socket" --username postgres \
-    --dbname "$POSTGRES_DB" --set=ON_ERROR_STOP=1 <<'SQL'
--- PostgreSQL 18 does not allow the original bootstrap superuser to lose its
--- SUPERUSER attribute. NOLOGIN plus a NULL password is the supported durable
--- revocation: no HBA authentication method can use the historical identity.
-SELECT 'ALTER ROLE aimee NOLOGIN PASSWORD NULL'
-WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee') \gexec
-SQL
-
-  stop_migration_cluster
+  stop_provision_cluster
   trap - EXIT INT TERM
 fi
 
