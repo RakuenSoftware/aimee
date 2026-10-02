@@ -176,9 +176,9 @@ int kb_management_cert_candidate_transcript(const kb_management_cert_candidate_b
    if (begin_output(out, cap, out_len, &w))
       return -1;
    if (!v || v->not_before_epoch < 1 || v->not_after_epoch <= v->not_before_epoch ||
-       text_len(v->ca_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &ca_issuer_len) ||
-       text_len(v->leaf_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &leaf_issuer_len) ||
-       text_len(v->leaf_serial_norm, DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX, &serial_len) ||
+       text_len(v->ca_issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &ca_issuer_len) ||
+       text_len(v->leaf_issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &leaf_issuer_len) ||
+       text_len(v->leaf_serial_norm, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX, &serial_len) ||
        !exact_hex(v->leaf_serial_norm, serial_len) ||
        put(&w, candidate_domain, sizeof(candidate_domain) - 1) ||
        intent_fields(&v->intent, &w, 0) || put_field(&w, v->ca_issuer, ca_issuer_len) ||

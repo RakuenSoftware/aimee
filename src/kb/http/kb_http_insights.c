@@ -1,7 +1,7 @@
 /* kb_http_insights.c: /v1/insights/spend route (P3b org spend reporting).
  *
  * The authenticated actor comes from kb_reqctx (set by the router after verification);
- * the read runs inside a tenant scope (db2_tenant_scope_begin sets aimee.principal), so
+ * the read runs inside a tenant scope (kb_store_tenant_scope_begin sets aimee.principal), so
  * the SECURITY DEFINER org_spend_query() evaluates its admin/lead predicate against the
  * verified actor — a caller can never read a team they don't lead, and the org-wide
  * (team-absent) branch is admin-only, all enforced at the DB layer. The boundary
@@ -10,7 +10,7 @@
 
 #include "kb_http_insights.h"
 
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_insights_util.h"
 #include "kb_reqctx.h"
 #include "org_spend.h"
@@ -25,14 +25,14 @@ static int err(char *out, int cap, int status, const char *msg)
    return status;
 }
 
-/* Map a tenant-scope/db2 return into an HTTP status. */
+/* Map a tenant-scope/kb_store return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return 503;
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return 401;
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return 403;
    return 500;
 }
@@ -119,27 +119,27 @@ static int handle_spend(const char *method, const char *qs, char *out, int cap)
    const kb_principal_t *actor = kb_reqctx_actor();
    if (!actor)
       return err(out, cap, 401, "authentication required");
-   int rc = db2_tenant_scope_begin(actor, 0);
+   int rc = kb_store_tenant_scope_begin(actor, 0);
    if (rc != 0)
       return err(out, cap, tenant_http_status(rc), "tenant scope failed");
 
-   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
-   int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
-                               (int)(sizeof(rows) / sizeof(rows[0])));
+   kb_store_org_spend_row_t rows[KB_STORE_SPEND_MAX_ROWS];
+   int n = kb_store_org_spend_query(has_team, team, has_project, project, since, until, rows,
+                                    (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
    {
       /* A denied/bad-date definer RAISE aborts the txn; a TOOBIG is detected client-side
        * (no RAISE) but the read is complete either way — roll back rather than commit. */
-      db2_tenant_scope_rollback();
-      if (n == DB2_SPEND_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (n == KB_STORE_SPEND_ERR_DENIED)
          return err(out, cap, 403, "not authorized (org-admin or team-lead required)");
-      if (n == DB2_SPEND_ERR_BADDATE)
+      if (n == KB_STORE_SPEND_ERR_BADDATE)
          return err(out, cap, 400, "invalid date range");
-      if (n == DB2_SPEND_ERR_TOOBIG)
+      if (n == KB_STORE_SPEND_ERR_TOOBIG)
          return err(out, cap, 413, "report too large; narrow the team/project/date range");
       return err(out, cap, 500, "spend query failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
 
    char *json = kb_insights_spend_json(has_team, (long long)team, has_project, (long long)project,

@@ -328,7 +328,7 @@ int kb_client_memory_learn_style(void)
    return kb_client_v1_simple_count_request("maintenance.memory_learn_style", cJSON_CreateObject());
 }
 
-static void kbc_decision_row_from_json(cJSON *d, db2_decision_log_row_t *out)
+static void kbc_decision_row_from_json(cJSON *d, kb_store_decision_log_row_t *out)
 {
    memset(out, 0, sizeof(*out));
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(d, "id");
@@ -359,7 +359,7 @@ static void kbc_decision_row_from_json(cJSON *d, db2_decision_log_row_t *out)
 
 int kb_client_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
                                   const char *rationale, const char *assumptions,
-                                  db2_decision_log_row_t *out)
+                                  kb_store_decision_log_row_t *out)
 {
    if (!chosen)
       return -1;
@@ -401,7 +401,7 @@ int kb_client_decision_log_insert(int64_t task_id, const char *options, const ch
    return 0;
 }
 
-int kb_client_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out,
+int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max)
 {
    if (!out || max <= 0)

@@ -30,16 +30,18 @@ typedef struct
 } dispatch_mock_t;
 
 static dispatch_mock_t dispatch_mock;
-static db2_bedrock_target_result_t resolver_result = DB2_BEDROCK_TARGET_ERROR;
-static db2_bedrock_target_t resolver_target;
+static kb_store_bedrock_target_result_t resolver_result = KB_STORE_BEDROCK_TARGET_ERROR;
+static kb_store_bedrock_target_t resolver_target;
 
-/* The pure engine target intentionally does not link DB2.  Production resolution is exercised by
- * the live harness; this symbol only satisfies the production resolver held in the same object. */
-db2_bedrock_target_result_t db2_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
-                                                             db2_bedrock_target_t *out)
+/* The pure engine target intentionally does not link KB_STORE.  Production resolution is exercised
+ * by the live harness; this symbol only satisfies the production resolver held in the same object.
+ */
+kb_store_bedrock_target_result_t
+kb_store_model_bedrock_target_resolve(int64_t team_id, const char *model_id,
+                                      kb_store_bedrock_target_t *out)
 {
    assert(team_id == 42);
-   if (out && resolver_result == DB2_BEDROCK_TARGET_OK)
+   if (out && resolver_result == KB_STORE_BEDROCK_TARGET_OK)
    {
       assert(strcmp(model_id, resolver_target.model_id) == 0);
       *out = resolver_target;
@@ -138,9 +140,9 @@ static test_aws_es_header_t string_header(const char *name, const char *value)
    return h;
 }
 
-static db2_bedrock_target_t target(const char *partition, const char *region, const char *id)
+static kb_store_bedrock_target_t target(const char *partition, const char *region, const char *id)
 {
-   db2_bedrock_target_t t;
+   kb_store_bedrock_target_t t;
    memset(&t, 0, sizeof(t));
    snprintf(t.model_id, sizeof(t.model_id), "%s", id);
    snprintf(t.bedrock_api, sizeof(t.bedrock_api), "converse");
@@ -163,13 +165,13 @@ static kb_bedrock_credentials_t credentials(void)
    return c;
 }
 
-static kb_bedrock_authorized_target_t *authorized(const db2_bedrock_target_t *raw)
+static kb_bedrock_authorized_target_t *authorized(const kb_store_bedrock_target_t *raw)
 {
    kb_bedrock_authorized_target_t *result = NULL;
    resolver_target = *raw;
-   resolver_result = DB2_BEDROCK_TARGET_OK;
+   resolver_result = KB_STORE_BEDROCK_TARGET_OK;
    assert(kb_bedrock_authorized_target_resolve(42, raw->model_id, &result) == KB_BEDROCK_OK);
-   resolver_result = DB2_BEDROCK_TARGET_ERROR;
+   resolver_result = KB_STORE_BEDROCK_TARGET_ERROR;
    memset(&resolver_target, 0, sizeof(resolver_target));
    assert(result != NULL);
    return result;
@@ -188,7 +190,7 @@ static void request_tests(void)
    kb_bedrock_credentials_t c = credentials();
    for (int i = 0; i < 3; i++)
    {
-      db2_bedrock_target_t t = target(partitions[i], regions[i], "model/a:b");
+      kb_store_bedrock_target_t t = target(partitions[i], regions[i], "model/a:b");
       if (i == 1)
          snprintf(t.model_id, sizeof(t.model_id), "model:id");
       kb_bedrock_wire_request_t q;
@@ -206,7 +208,7 @@ static void request_tests(void)
       assert(q.body == NULL && q.body_len == 0 && q.host[0] == 0);
    }
 
-   db2_bedrock_target_t t = target("aws", "us-east-1", "model");
+   kb_store_bedrock_target_t t = target("aws", "us-east-1", "model");
    kb_bedrock_wire_request_t q;
    kb_bedrock_wire_request_init(&q);
    char invalid_text[] = {'x', (char)0xc0, (char)0xaf, 0};
@@ -932,7 +934,7 @@ static void dispatch_wrapper_tests(void)
    aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "hello"};
    aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_request_t request = {.messages = &message, .n_messages = 1};
-   db2_bedrock_target_t t = target("aws", "us-east-1", "model");
+   kb_store_bedrock_target_t t = target("aws", "us-east-1", "model");
    kb_bedrock_authorized_target_t *authorized_target = authorized(&t);
    kb_bedrock_credentials_t c = credentials();
    kb_bedrock_credential_view_t cv = {.access_key_id = (const unsigned char *)"AKIDEXAMPLE",
@@ -976,15 +978,15 @@ static void dispatch_wrapper_tests(void)
           dispatch_mock.body_calls > 1);
 
    int calls = dispatch_mock.calls;
-   db2_bedrock_target_t invalid = t;
+   kb_store_bedrock_target_t invalid = t;
    snprintf(invalid.endpoint, sizeof(invalid.endpoint), "https://forbidden.example");
    kb_bedrock_authorized_target_t *rejected = authorized_target;
    status = 888;
    resolver_target = invalid;
-   resolver_result = DB2_BEDROCK_TARGET_OK;
+   resolver_result = KB_STORE_BEDROCK_TARGET_OK;
    assert(kb_bedrock_authorized_target_resolve(42, invalid.model_id, &rejected) ==
           KB_BEDROCK_INVALID_TARGET);
-   resolver_result = DB2_BEDROCK_TARGET_ERROR;
+   resolver_result = KB_STORE_BEDROCK_TARGET_ERROR;
    memset(&resolver_target, 0, sizeof(resolver_target));
    assert(rejected == NULL && dispatch_mock.calls == calls);
 

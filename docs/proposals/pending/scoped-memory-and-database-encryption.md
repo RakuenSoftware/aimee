@@ -119,13 +119,13 @@ usable.
 ### 4. Protect retained body copies wherever Aimee writes them
 
 The [memory writer](../../../server-go/modules/memory/mutations.go) and
-[document writer](../../../src/modules/db2/c/kb_payload.c) bind plaintext into text
+[document writer](../../../src/modules/kb/c/kb_payload.c) bind plaintext into text
 columns. Add encrypted formats to their writes, updates, and reads. Cover originals
 in file/object storage, extracted text, chunks, memory units, quoted excerpts, and
 persisted caches. Inspect summaries, facts, provenance, and rejection tombstones
 for copied bodies or independently stored memories.
 
-The [schema](../../../src/modules/db2/c/schema.sql) also stores
+The [schema](../../../src/modules/kb/c/schema.sql) also stores
 `memories_code_fts_text = key || ' ' || content` for trigram search. Remove that
 complete body copy. Maintain token and vector indexes separately during authorized
 ingestion, keeping their versions consistent through updates and deletion.
@@ -157,7 +157,7 @@ Cleanse keys on expiry, shutdown, and fork. Define how in-flight operations fini
 so a completed lock prevents new uses of stale authority. Choose cache capacity,
 TTL, and batch limits before implementation and measure their cost.
 
-The hardened profile already has [runtime-role assertions](../../../src/modules/db2/c/db2_hardening.c).
+The hardened profile already has [runtime-role assertions](../../../src/modules/kb/c/db2_hardening.c).
 Extend them to search and payload roles wherever separated payload access is
 enabled, including personal deployments. Check effective memberships as well as
 direct privileges. Runtime identities cannot own protected tables, bypass row
@@ -289,7 +289,7 @@ fragment (`@>`). For example, `%crypt%` requires `cry`, `ryp`, and `ypt`; every 
 Fragment membership may admit false positives, which the payload reader rejects.
 
 Preserve each call site's current pattern construction. The
-[PDF search](../../../src/modules/db2/c/kb_payload.c) escapes user `%`, `_`, and
+[PDF search](../../../src/modules/kb/c/kb_payload.c) escapes user `%`, `_`, and
 backslash; several memory queries retain wildcard semantics. Union candidates
 for OR branches such as key, content, and use cases. Ordinary word-token matching
 cannot replace substring matching. `show_trgm(query)` also cannot supply the
@@ -300,7 +300,7 @@ PostgreSQL decrypts authorized candidates and evaluates the original `LIKE`,
 with no literal characters, negated predicates, or collation/case rules
 without a proven conservative fragment filter, scan the metadata-filtered,
 authorized rows. Preserve the original SQL semantics in that fallback. The
-[trigram compatibility rewriter](../../../src/modules/db2/c/db_postgres.c) currently
+[trigram compatibility rewriter](../../../src/modules/kb/c/db_postgres.c) currently
 uses `ILIKE` and `similarity`; replace that path with explicit candidate and
 authorized-verification operations, retaining its exact scoring expression.
 

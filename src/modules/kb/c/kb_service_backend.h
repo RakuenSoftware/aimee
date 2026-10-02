@@ -1,0 +1,221 @@
+#ifndef DEC_KB_STORE_KB_SERVICE_BACKEND_H
+#define DEC_KB_STORE_KB_SERVICE_BACKEND_H 1
+
+#include "vector_index_ops.h"
+#include "cJSON.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+   typedef struct
+   {
+      int pending;
+      int running;
+      int done;
+      int failed;
+      int total;
+      int processed;
+   } kb_store_kb_service_async_queue_stats_t;
+
+   typedef struct
+   {
+      int64_t id;
+      int64_t document_id;
+      char kind[64];
+      char project[256];
+      char status[32];
+      int attempts;
+      char last_error[512];
+      char claimed_by[128];
+      char claimed_at[64];
+      char created_at[64];
+      char updated_at[64];
+   } kb_store_kb_service_async_job_t;
+
+   typedef struct
+   {
+      char project[256];
+      int files;
+      int chunks;
+      int tokens;
+      int embeddings;
+      kb_store_kb_service_async_queue_stats_t queue;
+   } kb_store_kb_service_project_status_t;
+
+   int kb_store_kb_service_memory_record_exists(int64_t record_id);
+   int kb_store_kb_service_kb_document_exists(int64_t document_id);
+   /* Graph-derived code-health audit: dead exports, import cycles, clones. */
+   int kb_store_code_audit_edge_target_like(const char *relation, const char *project, char *out,
+                                            size_t cap);
+   cJSON *kb_store_kb_service_code_audit_json(const char *project, int limit);
+   cJSON *kb_store_kb_service_curiosity_list_json(const char *state, int max_rows);
+   cJSON *kb_store_kb_service_curiosity_create_json(const char *gap_type, const char *target_entity,
+                                                    const char *target_topic, const char *evidence,
+                                                    double importance, double novelty,
+                                                    const char *source_session);
+   cJSON *kb_store_kb_service_curiosity_sweep_json(void);
+   cJSON *kb_store_kb_service_curiosity_rescore_json(void);
+   cJSON *kb_store_kb_service_curiosity_get_json(int64_t id);
+   cJSON *kb_store_kb_service_curiosity_update_state_json(int64_t id, const char *new_state);
+   /* Pull the top-N open curiosity items, route each into an epistemic
+    * directive, and transition the source items to in_progress. Returns
+    * {"status":"ok","routed":N}. Implements the same logic as the
+    * server-side curiosity_route_top so callers can ship one RPC
+    * instead of orchestrating multiple round-trips. */
+   cJSON *kb_store_kb_service_curiosity_route_top_json(int limit, const char *source_session);
+   cJSON *kb_store_kb_service_note_create_json(const char *title, const char *content,
+                                               const char *tags, const char *author);
+   cJSON *kb_store_kb_service_note_list_json(const char *tag, int max_rows);
+   cJSON *kb_store_kb_service_note_search_json(const char *query, int max_rows);
+   cJSON *kb_store_kb_service_rules_list_json(int max_rules);
+   cJSON *kb_store_kb_service_rules_generate_json(void);
+   cJSON *kb_store_kb_service_rules_export_jsonl_json(const char *path);
+   cJSON *kb_store_kb_service_rules_insert_json(const char *polarity, const char *title,
+                                                const char *description, int weight);
+   cJSON *kb_store_kb_service_tool_registry_snapshot_json(void);
+   cJSON *kb_store_kb_service_tool_registry_lookup_json(const char *name);
+   cJSON *kb_store_kb_service_collab_rules_propose_json(const char *text, const char *reason,
+                                                        const char *proposed_by);
+   cJSON *kb_store_kb_service_collab_rules_list_json(void);
+   cJSON *kb_store_kb_service_collab_rules_list_active_json(void);
+   cJSON *kb_store_kb_service_collab_rules_approve_json(int rule_id);
+   cJSON *kb_store_kb_service_collab_rules_reject_json(int rule_id);
+   cJSON *kb_store_kb_service_collab_rules_retire_json(int rule_id);
+   cJSON *kb_store_kb_service_collab_rules_inject_json(int agent_last_epoch);
+   /* Run the learning-router record-signal pipeline against the
+    * fields in |req|.  Returns {"status":"ok","dispatch":{...}} or
+    * {"status":"error","message":"..."}.  Caller frees. */
+   cJSON *kb_store_kb_service_learning_propose_signal_json(const cJSON *req);
+   cJSON *kb_store_kb_service_learning_record_application_json(const cJSON *req);
+
+   cJSON *kb_store_kb_service_agent_outcome_record_json(const char *agent_name, const char *role,
+                                                        const char *outcome_kind,
+                                                        const char *reason, int turns_used,
+                                                        int tools_called, int64_t tokens_used,
+                                                        const char *tool_error_pattern);
+   cJSON *kb_store_kb_service_agent_hint_consume_json(const char *role, const char *prompt);
+   cJSON *kb_store_kb_service_task_list_json(const char *state, const char *session_id, int limit);
+   cJSON *kb_store_kb_service_task_create_json(const char *title, const char *session_id,
+                                               int64_t parent_id);
+   cJSON *kb_store_kb_service_task_update_state_json(int64_t id, const char *state);
+   cJSON *kb_store_kb_service_task_delete_json(int64_t id);
+   cJSON *kb_store_kb_service_task_add_edge_json(int64_t source, int64_t target,
+                                                 const char *relation);
+   cJSON *kb_store_kb_service_task_get_edges_json(int64_t task_id, int max);
+   /* Wrappers around memory_advanced.c maintenance routines so daemon
+    * and CLI-fork callers run them inside aimee-kb where KB_STORE is
+    * initialized.  Each returns {"status":"ok","count":N}. */
+   cJSON *kb_store_kb_service_rules_decay_json(void);
+   cJSON *kb_store_kb_service_decision_log_insert_json(int64_t task_id, const char *options,
+                                                       const char *chosen, const char *rationale,
+                                                       const char *assumptions);
+   cJSON *kb_store_kb_service_decision_log_list_json(const char *outcome, int limit);
+   cJSON *kb_store_kb_service_anti_pattern_list_json(int max);
+   cJSON *kb_store_kb_service_anti_pattern_insert_json(const char *pattern, const char *description,
+                                                       const char *source, const char *source_ref,
+                                                       double confidence);
+   cJSON *kb_store_kb_service_anti_pattern_delete_json(int64_t id);
+   cJSON *kb_store_kb_service_anti_pattern_check_json(const char *file_path, const char *command,
+                                                      int max);
+   cJSON *kb_store_kb_service_anti_pattern_bump_json(int64_t id);
+   cJSON *kb_store_kb_service_rules_delete_json(int id);
+   cJSON *kb_store_kb_service_rules_update_directive_type_json(int id, const char *directive_type);
+   cJSON *kb_store_kb_service_feedback_record_json(const char *polarity, const char *title,
+                                                   const char *description, int weight);
+   cJSON *kb_store_kb_service_directive_expire_session_json(void);
+   /* Dashboard endpoints that walk KB_STORE tables.  Each returns
+    * {"status":"ok","payload":<api_* output>}. */
+   cJSON *kb_store_kb_service_dashboard_memory_stats_json(void);
+   cJSON *kb_store_kb_service_dashboard_logs_json(void);
+   cJSON *kb_store_kb_service_dashboard_reminders_json(void);
+   cJSON *kb_store_kb_service_dashboard_recall_json(void);
+   cJSON *kb_store_kb_service_dashboard_directives_json(void);
+   cJSON *kb_store_kb_service_session_briefing_commitments_json(int limit);
+   cJSON *kb_store_kb_service_session_briefing_directives_json(int limit);
+   typedef struct
+   {
+      int64_t id;
+      char project[256];
+      char root_path[4096];
+      char workspace[256];
+      int force;
+   } kb_store_kb_ingest_job_t;
+
+   typedef struct
+   {
+      int pending;
+      int running;
+      int done_last_24h;
+      int failed_last_24h;
+   } kb_store_kb_ingest_queue_stats_t;
+
+   typedef struct
+   {
+      char project[256];
+      char status[32];
+      char completed_at[64]; /* COALESCE(completed_at, started_at) — always populated */
+      int files_indexed;
+      int chunks_added;
+      char error_message[512];
+   } kb_store_kb_ingest_recent_t;
+
+   int kb_store_kb_ingest_queue_reset_running(void);
+
+   /* Queue priority. The claim is ordered by priority first, then id, so a request
+    * someone is waiting on does not sit behind a full background sweep — a reindex
+    * of a large workspace enqueues thousands of rows, and strict FIFO made every
+    * later interactive ingest wait them out. Two levels only: work a caller is
+    * blocked on, and everything else. */
+   typedef enum
+   {
+      KB_STORE_KB_INGEST_PRIO_BULK = 0,        /* periodic sweep, inotify re-scan */
+      KB_STORE_KB_INGEST_PRIO_INTERACTIVE = 10 /* an explicit ingest request */
+   } kb_store_kb_ingest_priority_t;
+
+   int kb_store_kb_ingest_queue_enqueue(const char *project, const char *root_path,
+                                        const char *workspace, int force, int priority);
+   int kb_store_kb_ingest_queue_claim_next(kb_store_kb_ingest_job_t *out);
+   int kb_store_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
+                                         int embeddings_added);
+   int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message);
+   int kb_store_kb_ingest_queue_stats(kb_store_kb_ingest_queue_stats_t *out);
+   int kb_store_kb_ingest_queue_recent(kb_store_kb_ingest_recent_t *rows, int max_rows);
+
+   int kb_store_kb_file_index_upsert(const char *project, const char *file_path,
+                                     const char *file_hash, const char *content);
+   int kb_store_kb_file_index_get(const char *project, const char *file_path, char *hash_out,
+                                  size_t hash_cap, char *ingested_at_out, size_t ingested_at_cap);
+   char *kb_store_kb_file_index_get_content(const char *project, const char *file_path);
+   int kb_store_kb_file_index_delete_project(const char *project);
+   int kb_store_kb_file_index_delete_current_project(const char *project);
+   cJSON *kb_store_kb_file_index_snapshot_json(const char *project);
+
+   int kb_store_kb_service_async_queue_status(kb_store_kb_service_async_queue_stats_t *out);
+   int kb_store_kb_service_async_job_get(int64_t job_id, kb_store_kb_service_async_job_t *out);
+   int kb_store_kb_service_async_queue_spawn_worker(void);
+   typedef int (*kb_store_kb_service_vector_upsert_fn)(int64_t document_id, const float *vec,
+                                                       int dim, const char *payload_json,
+                                                       void *ctx);
+   int kb_store_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                             int timeout_secs, const char *vector_collection,
+                                             kb_store_kb_service_vector_upsert_fn vector_upsert,
+                                             void *vector_upsert_ctx,
+                                             kb_store_kb_service_async_queue_stats_t *out);
+   int kb_store_kb_service_collect_project_status(const char *project,
+                                                  kb_store_kb_service_project_status_t *out);
+   int kb_store_kb_service_clear_project(const char *project);
+   int kb_store_kb_service_clear_current_project(const char *project);
+   cJSON *kb_store_kb_service_learning_list_json(const char *state, const char *sink, int max_rows);
+   cJSON *kb_store_kb_service_learning_get_json(int id);
+   cJSON *kb_store_kb_service_learning_reject_json(int id);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DEC_KB_STORE_KB_SERVICE_BACKEND_H */

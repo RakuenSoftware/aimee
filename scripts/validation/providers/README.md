@@ -152,9 +152,9 @@ AIMEE_E2E_SKIP_BUILD=1 AIMEE_E2E_KEEP_RUN_ROOT=1 AIMEE_E2E_PROBE_ONLY=1 \
   bash scripts/aimee-local-stack-e2e.sh
 ```
 
-Set `AIMEE_DB2_URL`, `AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` first.
+Set `AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` first.
 Use an explicit matching `search_path` on both store URLs to retain schema parity;
-libpq's DB2 URL should omit that pgx-specific query parameter. Provision vector and
+libpq's KB_STORE URL should omit that pgx-specific query parameter. Provision vector and
 pg_trgm extensions before starting. Migration-owned objects must grant the runtime
 role their required DML privileges. The probe emits `routing-results.json` under the
 printed run root. Use `TMPDIR=/var/tmp` on guests whose `/tmp` is a small tmpfs.

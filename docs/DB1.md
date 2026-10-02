@@ -1,7 +1,8 @@
 # Legacy DB1 storage boundary
 
-The canonical direction is the [shared database](DB.md). This page describes the
-remaining server-domain boundary; DB1 is a legacy name, not the target architecture.
+The [database contract](DB.md) describes shared implementation. This page describes the
+Server runtime domain still named DB1 in migration history and native interfaces.
+[Server and KB](SERVER_AND_KB.md) remain separate instance and storage boundaries.
 
 DB1 is the server's PostgreSQL data tier. In 0.4.0, `aimee` owns its domain behavior and `postgres`
 owns database access.
@@ -26,9 +27,9 @@ database transport.
 DB1 contains server-local and same-user state. It includes sessions, working memory, agent jobs,
 workflow rows, checkpoints, policy and audit state, caches, and management state.
 
-`aimee-kb` owns DB2, a separate PostgreSQL and pgvector tier for shared knowledge. The server reaches
-DB2 through typed `/v1` requests. The server and KB also keep separate SQLite WORM evidence stores
-outside DB1 and DB2.
+`aimee-kb` owns KB_STORE, a separate PostgreSQL and pgvector tier for shared knowledge. The server reaches
+KB_STORE through typed `/v1` requests. The server and KB also keep separate SQLite WORM evidence stores
+outside DB1 and KB_STORE.
 
 ## Configuration and migrations
 

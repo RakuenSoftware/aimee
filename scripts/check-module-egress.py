@@ -91,8 +91,8 @@ def runtime_guard_failures() -> list[str]:
         "deploy/container/server-entrypoint.sh": (
             "AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server",
         ),
-        "deploy/container/aimee-kb-entrypoint.sh": (
-            "AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-kb",
+        "deploy/container/kb-role-runtime.sh": (
+            "AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server",
         ),
     }
     for relative, required_tokens in required_by_path.items():

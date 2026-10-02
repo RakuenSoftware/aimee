@@ -21,10 +21,10 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2.h"   /* db2_lease_release_idle */
-#include "kb_curator_llm.h"      /* kb_curator_llm_run — shared curator LLM path */
-#include "kb_curator_provider.h" /* KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, provider_for_stage */
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store.h" /* kb_store_lease_release_idle */
+#include "kb_curator_llm.h"        /* kb_curator_llm_run — shared curator LLM path */
+#include "kb_curator_provider.h"   /* KB_CURATOR_STAGE_SYNTHESIZE_REFLECTION, provider_for_stage */
 #include "kb_features.h"
 #include "kb_mdl.h"
 #include "kb_service.h"
@@ -53,7 +53,7 @@ static const char *const REFLECTION_SYNTH_SYSTEM_PROMPT =
 /* Declared in kb_service_workers.c */
 extern kb_service_ctx_t *g_kb_ctx;
 
-static int run_synthesis_pass(const db2_artifact_proposed_t *row)
+static int run_synthesis_pass(const kb_store_artifact_proposed_t *row)
 {
    int n_attempts = config_kb_synthesize_n_attempts() > 0 ? config_kb_synthesize_n_attempts() : 3;
    if (n_attempts > MDL_MAX_CANDIDATES)
@@ -112,11 +112,11 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
       char *req_str = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
 
-      /* Graph enrichment above may acquire a pooled DB2 connection. Reflection
+      /* Graph enrichment above may acquire a pooled KB_STORE connection. Reflection
        * synthesis can then spend up to the provider timeout waiting on each LLM
        * attempt; return that idle lease before network work so the scheduler
        * cannot shrink the bounded pool. Later durable writes re-acquire lazily. */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
 
       /* Route through the shared curator LLM path: a configured Tier-B provider
        * (provider_client) if present, else the legacy kb_synthesize_command
@@ -210,10 +210,11 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
    }
 
    char new_id[37];
-   db2_artifact_gen_id(new_id, sizeof(new_id));
+   kb_store_artifact_gen_id(new_id, sizeof(new_id));
 
-   int write_rc = db2_artifact_write_ex(new_id, "session_synthesis", "proposed", "system", "",
-                                        "kb_reflection", confidences[winner], n_valid, win_str);
+   int write_rc =
+       kb_store_artifact_write_ex(new_id, "session_synthesis", "proposed", "system", "",
+                                  "kb_reflection", confidences[winner], n_valid, win_str);
    free(win_str);
 
    if (write_rc == 0)
@@ -240,14 +241,14 @@ static int run_synthesis_pass(const db2_artifact_proposed_t *row)
 
 static void run_reflection_pass(void)
 {
-   db2_artifact_proposed_t rows[10];
+   kb_store_artifact_proposed_t rows[10];
    int batch = config_review_batch_cap() > 0 ? config_review_batch_cap() : 10;
    if (batch > 10)
       batch = 10;
 
    /* List proposed session_summary artifacts (target_surface NULL = all).
     * We filter by kind="session_summary" below. */
-   int n = db2_artifact_list_proposed(NULL, batch * 4, rows, 10);
+   int n = kb_store_artifact_list_proposed(NULL, batch * 4, rows, 10);
    if (n <= 0)
       return;
 
@@ -277,7 +278,7 @@ static void run_reflection_pass(void)
       aimee_log(LOG_INFO, "kb.reflection", "processing session artifact %s", rows[i].id);
 
       /* Stamp reflected_at to prevent re-processing */
-      if (db2_artifact_stamp_reflected(rows[i].id) != 0)
+      if (kb_store_artifact_stamp_reflected(rows[i].id) != 0)
       {
          aimee_log(LOG_WARN, "kb.reflection", "failed to stamp reflected_at on %s", rows[i].id);
          continue;
@@ -311,9 +312,9 @@ static kb_reflection_ctx_t *g_rctx = NULL;
 static void run_reflection_pass_releasing_lease(void)
 {
    run_reflection_pass();
-   /* A pass acquires DB2 even when there is no eligible work. Return the lazy
+   /* A pass acquires KB_STORE even when there is no eligible work. Return the lazy
     * lease before the scheduler's long half-window backoff. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
 }
 
 static void reflection_sleep_interruptible(kb_reflection_ctx_t *ctx, long seconds)
@@ -334,12 +335,12 @@ static void *reflection_thread_main(void *arg)
    while (!ctx->stop)
    {
       /* Return any pool connection a prior reflection pass acquired lazily
-       * (run_reflection_pass uses db2_conn() at lease depth 0, not an explicit
+       * (run_reflection_pass uses kb_store_conn() at lease depth 0, not an explicit
        * begin/end scope) before idling, so this long-lived thread does not pin
        * one pool member for its whole lifetime — the stuck-lease reaper flags it
        * and it permanently shrinks the bounded pool. Matches the curator drain
        * (kb_curator_drain.c) and the maintenance timer (kb_service_workers.c). */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       sleep(1);
       if (ctx->stop)
          break;

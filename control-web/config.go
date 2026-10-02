@@ -25,7 +25,7 @@ type config struct {
 }
 
 // oidcConfig is the read-only OIDC verifier config for S0 (loaded from a file).
-// S2b replaces the source of truth with a DB2-backed, editable config; the shape
+// S2b replaces the source of truth with a KB_STORE-backed, editable config; the shape
 // is kept identical so the parity test against auth_oidc.c holds across both.
 type oidcConfig struct {
 	Issuer      string   `json:"issuer"`
@@ -80,7 +80,7 @@ func (c *config) loadOIDC(path string) error {
 	return json.Unmarshal(b, &c.oidc)
 }
 
-// fetchOIDCFromKB populates the OIDC config from the kb's DB2-backed
+// fetchOIDCFromKB populates the OIDC config from the kb's KB_STORE-backed
 // /v1/config/oidc (S2b) when no local file configured it. The console reads this
 // once at startup; restart the console to re-apply an edited config. Best-effort:
 // a failure just leaves the console break-glass-only.

@@ -1,4 +1,4 @@
-/* db1_optional.h: DB1 domain calls that may be absent from DB2-only
+/* db1_optional.h: DB1 domain calls that may be absent from KB_STORE-only
  * binaries such as aimee-kb.
  *
  * Server builds link the real DB1 objects, so these weak references resolve.

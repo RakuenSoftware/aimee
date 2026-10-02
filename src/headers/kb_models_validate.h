@@ -1,7 +1,7 @@
 /* kb_models_validate.h: pure input validators for the P2a /v1/models routes.
  *
  * No storage or transport dependency (string logic only), so the admission checks
- * are unit-testable in isolation from the db2/PG layer. Shared by kb_http_models.c
+ * are unit-testable in isolation from the kb_store/PG layer. Shared by kb_http_models.c
  * (route admission) and the models-validate unit test. */
 #ifndef DEC_KB_MODELS_VALIDATE_H
 #define DEC_KB_MODELS_VALIDATE_H 1

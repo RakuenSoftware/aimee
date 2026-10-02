@@ -1,6 +1,6 @@
 #include "kb_vault_rotation_ops.h"
 
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_vault_policy.h"
 #include "kb_vault_rotation.h"
 #include "vault_crypto.h"
@@ -18,7 +18,7 @@
 
 typedef struct
 {
-   unsigned char secret[DB2_VAULT_ROTATION_SECRET_MAX];
+   unsigned char secret[KB_STORE_VAULT_ROTATION_SECRET_MAX];
    unsigned char kek[VAULT_KEK_LEN];
    unsigned char dek[VAULT_DEK_LEN];
 } rotation_secret_arena_t;
@@ -122,7 +122,7 @@ static int bounded_string(const char *value, size_t cap)
 static int scope_begin(const kb_principal_t *caller, int64_t team_id, char actor[576])
 {
    return caller && kb_identity_key(caller, actor, 576) == 0 &&
-                  db2_tenant_scope_begin(caller, team_id) == 0
+                  kb_store_tenant_scope_begin(caller, team_id) == 0
               ? 0
               : -1;
 }
@@ -131,18 +131,18 @@ static int scope_end(int rc)
 {
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit() == 0 ? 0 : -1;
+   return kb_store_tenant_scope_commit() == 0 ? 0 : -1;
 }
 
 static int load_row(const kb_principal_t *caller, int64_t team_id, int64_t id,
-                    db2_vault_rotation_row_t *row, char actor[576])
+                    kb_store_vault_rotation_row_t *row, char actor[576])
 {
    if (scope_begin(caller, team_id, actor) != 0)
       return -1;
-   return scope_end(db2_vault_rotation_get(id, row));
+   return scope_end(kb_store_vault_rotation_get(id, row));
 }
 
 static int operation_key(int64_t id, const char *step, char out[128])
@@ -156,7 +156,7 @@ static int claim(const kb_principal_t *caller, int64_t team_id, int64_t id, cons
 {
    if (scope_begin(caller, team_id, actor) != 0)
       return -1;
-   return scope_end(db2_vault_rotation_claim(actor, id, state, owner, ttl, token));
+   return scope_end(kb_store_vault_rotation_claim(actor, id, state, owner, ttl, token));
 }
 
 static void release_best_effort(const kb_principal_t *caller, int64_t team_id, int64_t id,
@@ -164,7 +164,7 @@ static void release_best_effort(const kb_principal_t *caller, int64_t team_id, i
 {
    char actor[576];
    if (scope_begin(caller, team_id, actor) == 0)
-      (void)scope_end(db2_vault_rotation_release(actor, id, owner, token));
+      (void)scope_end(kb_store_vault_rotation_release(actor, id, owner, token));
 }
 
 int kb_vault_rotation_ops_heartbeat(const kb_principal_t *caller, int64_t team_id,
@@ -174,7 +174,8 @@ int kb_vault_rotation_ops_heartbeat(const kb_principal_t *caller, int64_t team_i
    char actor[576];
    if (scope_begin(caller, team_id, actor) != 0)
       return -1;
-   return scope_end(db2_vault_rotation_heartbeat(actor, rotation_id, owner, token, ttl_seconds));
+   return scope_end(
+       kb_store_vault_rotation_heartbeat(actor, rotation_id, owner, token, ttl_seconds));
 }
 
 static int lease_heartbeat(void *opaque)
@@ -191,9 +192,9 @@ static kb_vault_rotation_lease_t lease_for(rotation_lease_ctx_t *ctx)
    return lease;
 }
 
-static int build_envelope(const db2_vault_rotation_row_t *row, const unsigned char *secret,
+static int build_envelope(const kb_store_vault_rotation_row_t *row, const unsigned char *secret,
                           size_t secret_len, rotation_secret_arena_t *arena,
-                          db2_vault_rotation_envelope_t *envelope)
+                          kb_store_vault_rotation_envelope_t *envelope)
 {
    uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
    size_t aad_len = 0;
@@ -215,8 +216,8 @@ static int build_envelope(const db2_vault_rotation_row_t *row, const unsigned ch
    return 0;
 }
 
-static int decrypt_envelope(const db2_vault_rotation_row_t *row,
-                            const db2_vault_rotation_envelope_t *envelope,
+static int decrypt_envelope(const kb_store_vault_rotation_row_t *row,
+                            const kb_store_vault_rotation_envelope_t *envelope,
                             rotation_secret_arena_t *arena)
 {
    uint8_t aad[VAULT_ENVELOPE_AAD_MAX];
@@ -242,8 +243,8 @@ static int fail_claimed(const kb_principal_t *caller, int64_t team_id, int64_t i
    char actor[576];
    if (scope_begin(caller, team_id, actor) != 0)
       return -1;
-   return scope_end(db2_vault_rotation_fail_claimed(actor, id, owner, token, state, phase,
-                                                    "definite provider failure"));
+   return scope_end(kb_store_vault_rotation_fail_claimed(actor, id, owner, token, state, phase,
+                                                         "definite provider failure"));
 }
 
 static int durable_failure(const kb_principal_t *caller, int64_t team_id, int64_t id,
@@ -255,11 +256,11 @@ static int durable_failure(const kb_principal_t *caller, int64_t team_id, int64_
 }
 
 static int provision_step(const kb_principal_t *caller, int64_t team_id,
-                          const db2_vault_rotation_row_t *row, const char *owner, int ttl,
+                          const kb_store_vault_rotation_row_t *row, const char *owner, int ttl,
                           const kb_vault_rotation_provider_t *provider, void *ctx)
 {
-   char actor[576], op[128], old_ref[DB2_VAULT_ROTATION_REF_MAX + 1] = "";
-   char new_ref[DB2_VAULT_ROTATION_REF_MAX + 1] = "";
+   char actor[576], op[128], old_ref[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
+   char new_ref[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
    int64_t token = 0;
    if (operation_key(row->id, "provision", op) != 0 ||
        claim(caller, team_id, row->id, "provision", owner, ttl, &token, actor) != 0)
@@ -277,12 +278,13 @@ static int provision_step(const kb_principal_t *caller, int64_t team_id,
       return durable_failure(caller, team_id, row->id, owner, token, "provision", "provision");
    }
    if (scope_begin(caller, team_id, actor) != 0 ||
-       scope_end(db2_vault_rotation_checkpoint_old_ref(actor, row->id, owner, token, old_ref)) != 0)
+       scope_end(
+           kb_store_vault_rotation_checkpoint_old_ref(actor, row->id, owner, token, old_ref)) != 0)
       return KB_VAULT_OP_RETRY;
 
    size_t mapped = 0, secret_len = 0;
    rotation_secret_arena_t *arena = arena_new(&mapped);
-   db2_vault_rotation_envelope_t envelope;
+   kb_store_vault_rotation_envelope_t envelope;
    int reconciled = 0;
    if (!arena)
    {
@@ -310,14 +312,14 @@ static int provision_step(const kb_principal_t *caller, int64_t team_id,
       OPENSSL_cleanse(&envelope, sizeof(envelope));
       return KB_VAULT_OP_RETRY;
    }
-   rc = db2_vault_rotation_stage_claimed(actor, row->id, owner, token, new_ref, &envelope);
+   rc = kb_store_vault_rotation_stage_claimed(actor, row->id, owner, token, new_ref, &envelope);
    OPENSSL_cleanse(&envelope, sizeof(envelope));
    (void)scope_end(rc);
    return KB_VAULT_OP_RETRY;
 }
 
 static int probe_step(const kb_principal_t *caller, int64_t team_id,
-                      const db2_vault_rotation_row_t *row, const char *owner, int ttl,
+                      const kb_store_vault_rotation_row_t *row, const char *owner, int ttl,
                       const kb_vault_rotation_provider_t *provider, void *ctx)
 {
    char actor[576], op[128];
@@ -327,9 +329,10 @@ static int probe_step(const kb_principal_t *caller, int64_t team_id,
       return KB_VAULT_OP_RETRY;
    rotation_lease_ctx_t lease_ctx = {caller, team_id, row->id, owner, token, ttl};
    kb_vault_rotation_lease_t lease = lease_for(&lease_ctx);
-   db2_vault_rotation_envelope_t envelope;
+   kb_store_vault_rotation_envelope_t envelope;
    if (scope_begin(caller, team_id, actor) != 0 ||
-       scope_end(db2_vault_rotation_probe_admit(actor, row->id, owner, token, op, &envelope)) != 0)
+       scope_end(
+           kb_store_vault_rotation_probe_admit(actor, row->id, owner, token, op, &envelope)) != 0)
       return KB_VAULT_OP_RETRY;
    size_t mapped = 0;
    rotation_secret_arena_t *arena = arena_new(&mapped);
@@ -359,16 +362,17 @@ static int probe_step(const kb_principal_t *caller, int64_t team_id,
    }
    if (scope_begin(caller, team_id, actor) != 0)
       return KB_VAULT_OP_RETRY;
-   rc = db2_vault_rotation_transition_claimed(actor, row->id, owner, token, "staged", "probed", "");
+   rc = kb_store_vault_rotation_transition_claimed(actor, row->id, owner, token, "staged", "probed",
+                                                   "");
    (void)scope_end(rc);
    return KB_VAULT_OP_RETRY;
 }
 
 static int revoke_step(const kb_principal_t *caller, int64_t team_id,
-                       const db2_vault_rotation_row_t *row, const char *owner, int ttl,
+                       const kb_store_vault_rotation_row_t *row, const char *owner, int ttl,
                        const kb_vault_rotation_provider_t *provider, void *ctx)
 {
-   char actor[576], op[128], receipt[DB2_VAULT_ROTATION_REF_MAX + 1] = "";
+   char actor[576], op[128], receipt[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
    int64_t token = 0;
    if (!row->old_vendor_ref[0] || operation_key(row->id, "revoke-old", op) != 0 ||
        claim(caller, team_id, row->id, "activated", owner, ttl, &token, actor) != 0)
@@ -383,14 +387,14 @@ static int revoke_step(const kb_principal_t *caller, int64_t team_id,
    }
    if (scope_begin(caller, team_id, actor) != 0)
       return KB_VAULT_OP_RETRY;
-   rc = db2_vault_rotation_transition_claimed(actor, row->id, owner, token, "activated", "revoked",
-                                              receipt);
+   rc = kb_store_vault_rotation_transition_claimed(actor, row->id, owner, token, "activated",
+                                                   "revoked", receipt);
    (void)scope_end(rc);
    return KB_VAULT_OP_RETRY;
 }
 
 static int retire_step(const kb_principal_t *caller, int64_t team_id,
-                       const db2_vault_rotation_row_t *row, const char *owner, int ttl)
+                       const kb_store_vault_rotation_row_t *row, const char *owner, int ttl)
 {
    char actor[576];
    int64_t token = 0;
@@ -398,8 +402,8 @@ static int retire_step(const kb_principal_t *caller, int64_t team_id,
       return KB_VAULT_OP_RETRY;
    if (scope_begin(caller, team_id, actor) != 0)
       return KB_VAULT_OP_RETRY;
-   int rc = db2_vault_rotation_transition_claimed(actor, row->id, owner, token, "revoked",
-                                                  "retired", "");
+   int rc = kb_store_vault_rotation_transition_claimed(actor, row->id, owner, token, "revoked",
+                                                       "retired", "");
    return scope_end(rc) == 0 ? KB_VAULT_OP_COMPLETE : KB_VAULT_OP_RETRY;
 }
 
@@ -411,7 +415,7 @@ int kb_vault_rotation_ops_step(const kb_principal_t *caller, int64_t team_id, in
    if (!caller || !owner || !*owner || ttl_seconds < 5 || ttl_seconds > 300 ||
        provider_snapshot(&provider, &provider_ctx) != 0 || !kb_vault_live_keys_allowed())
       return KB_VAULT_OP_DEFINITE_FAILURE;
-   db2_vault_rotation_row_t row;
+   kb_store_vault_rotation_row_t row;
    char actor[576];
    if (load_row(caller, team_id, rotation_id, &row, actor) != 0)
       return KB_VAULT_OP_RETRY;
@@ -444,10 +448,10 @@ int kb_vault_rotation_ops_remediate(const kb_principal_t *caller, int64_t team_i
    void *ctx = NULL;
    if (provider_snapshot(&provider, &ctx) != 0)
       return -1;
-   db2_vault_rotation_row_t row;
+   kb_store_vault_rotation_row_t row;
    char actor[576], provision_op[128], revoke_op[128];
-   char ref[DB2_VAULT_ROTATION_REF_MAX + 1] = "";
-   char evidence[DB2_VAULT_ROTATION_REF_MAX + 1] = "";
+   char ref[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
+   char evidence[KB_STORE_VAULT_ROTATION_REF_MAX + 1] = "";
    int64_t token = 0;
    if (load_row(caller, team_id, rotation_id, &row, actor) != 0 || row.compromise ||
        strcmp(row.state, "failed") ||
@@ -484,7 +488,7 @@ int kb_vault_rotation_ops_remediate(const kb_principal_t *caller, int64_t team_i
       release_best_effort(caller, team_id, rotation_id, owner, token);
       return -1;
    }
-   unsigned char att[DB2_VAULT_ROTATION_ATTEST_MAX];
+   unsigned char att[KB_STORE_VAULT_ROTATION_ATTEST_MAX];
    size_t att_len = 0;
    uint64_t anchor = 0;
    rc = vault_hwm_read(row.key_id, &anchor, att, sizeof(att), &att_len);
@@ -496,6 +500,6 @@ int kb_vault_rotation_ops_remediate(const kb_principal_t *caller, int64_t team_i
    }
    if (scope_begin(caller, team_id, actor) != 0)
       return -1;
-   return scope_end(
-       db2_vault_rotation_remediate(actor, rotation_id, owner, token, (int64_t)anchor, evidence));
+   return scope_end(kb_store_vault_rotation_remediate(actor, rotation_id, owner, token,
+                                                      (int64_t)anchor, evidence));
 }

@@ -20,7 +20,7 @@ createdb --maintenance-db="$AIMEE_TEST_PG_ADMIN" "$bench_db"
 admin_base="${AIMEE_TEST_PG_ADMIN%/*}"
 bench_url="$admin_base/$bench_db"
 psql "$bench_url" -v ON_ERROR_STOP=1 -q -c 'CREATE EXTENSION IF NOT EXISTS vector'
-sed "s/__EMBED_DIM__/${AIMEE_TEST_EMBED_DIM:-768}/g" src/modules/db2/c/schema.sql >"$schema_rendered"
+sed "s/__EMBED_DIM__/${AIMEE_TEST_EMBED_DIM:-768}/g" src/modules/kb/c/schema.sql >"$schema_rendered"
 PGOPTIONS="--client-min-messages=warning" psql "$bench_url" -v ON_ERROR_STOP=1 -q -f "$schema_rendered"
 PGOPTIONS="--client-min-messages=warning" psql "$bench_url" -v ON_ERROR_STOP=1 \
   -f scripts/evidence-lifecycle-benchmark.sql

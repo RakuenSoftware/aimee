@@ -26,7 +26,7 @@ int handle_get_code_context(const char *query_string, char *out_buf, int out_cap
       return scope_status;
 
    int64_t generation = 0;
-   if (db2_code_index_project_current_generation(project, &generation) != 0 || generation <= 0)
+   if (kb_store_code_index_project_current_generation(project, &generation) != 0 || generation <= 0)
    {
       snprintf(out_buf, (size_t)out_cap,
                "{\"error\":{\"type\":\"project_not_current\",\"message\":\"active project "

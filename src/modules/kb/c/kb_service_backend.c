@@ -1,0 +1,1268 @@
+/* kb_store/kb_service_backend.c: kb-service backend SQL primitives — Postgres via libpq. */
+
+#include "kb_service_backend.h"
+
+#include "aimee.h"
+#include "../support/kb_store_runtime_config.h"
+#include "curiosity.h"
+#include "notes.h"
+#include "kb_store_internal.h"
+#include "kb_payload.h"
+#include "kb_runtime_state.h"
+#include "pgvec_transport.h"
+#include "vector_index_ops.h"
+#include "code_index_ops.h"
+#include "db_postgres.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+/* The standalone KB_STORE process has no host command registry. Without a Go
+ * memory owner, leave the curiosity item pending for a later attempt. */
+extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
+
+#define KBS_ERRBUF 256
+
+/* The job kinds this drain handles — the single source of truth for BOTH the
+ * claim's IN-list and the dispatch in kb_store_kb_service_async_queue_drain. They
+ * must agree, and the failure mode when they drift is silent and destructive:
+ * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
+ * which own their own claim lifecycle, and the dispatch marks every kind it
+ * does not recognize 'failed'. An unfiltered claim therefore takes the
+ * lowest-id pending row of ANY kind, so a single call to the drain endpoint
+ * would destroy the curator's queued work. Adding a kind here without adding a
+ * dispatch branch fails those jobs; adding a dispatch branch without adding it
+ * here leaves them unclaimed forever. */
+#define KBS_ASYNC_DRAIN_KINDS_SQL "('embed_raw', 'embed_pdf')"
+
+static int kb_store_worker_identity_valid(const char *claimed_by)
+{
+   if (!claimed_by || !claimed_by[0])
+      return 0;
+   for (size_t i = 1; i < 128; i++)
+      if (claimed_by[i] == '\0')
+         return 1;
+   return 0;
+}
+
+static const char *KB_STORE_KB_LEARNING_SELECT_COLS =
+    "id, signal_id, sink, state, target_key, target_memory_id, action_json,"
+    " evidence_refs, corroboration_count, expires_at, committed_at, archive_reason,"
+    " created_at, updated_at";
+
+static void kb_store_kb_resolve_project(const char *project, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (project && project[0])
+      snprintf(out, out_len, "%s", project);
+}
+
+static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
+{
+   const char *t = aimee_pg_column_text(stmt, col);
+   return t ? t : "";
+}
+
+static cJSON *kb_store_kb_learning_json_from_stmt(aimee_pg_stmt_t *stmt)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return NULL;
+
+   cJSON_AddNumberToObject(obj, "id", aimee_pg_column_int(stmt, 0));
+   cJSON_AddNumberToObject(obj, "signal_id", aimee_pg_column_int(stmt, 1));
+   cJSON_AddStringToObject(obj, "sink", col_text_or_empty(stmt, 2));
+   cJSON_AddStringToObject(obj, "state", col_text_or_empty(stmt, 3));
+   cJSON_AddStringToObject(obj, "target_key", col_text_or_empty(stmt, 4));
+   cJSON_AddNumberToObject(obj, "target_memory_id", (double)aimee_pg_column_int64(stmt, 5));
+   cJSON_AddStringToObject(obj, "action_json", col_text_or_empty(stmt, 6));
+   cJSON_AddStringToObject(obj, "evidence_refs", col_text_or_empty(stmt, 7));
+   cJSON_AddNumberToObject(obj, "corroboration_count", aimee_pg_column_int(stmt, 8));
+   cJSON_AddStringToObject(obj, "expires_at", col_text_or_empty(stmt, 9));
+   cJSON_AddStringToObject(obj, "committed_at", col_text_or_empty(stmt, 10));
+   cJSON_AddStringToObject(obj, "archive_reason", col_text_or_empty(stmt, 11));
+   cJSON_AddStringToObject(obj, "created_at", col_text_or_empty(stmt, 12));
+   cJSON_AddStringToObject(obj, "updated_at", col_text_or_empty(stmt, 13));
+   return obj;
+}
+
+static void kb_store_kb_learning_archive_expired(void)
+{
+   void *conn = kb_store_conn();
+   if (!conn)
+      return;
+   char err[KBS_ERRBUF] = "";
+   /* pg_now_text() returns the KB_STORE canonical UTC text format. */
+   (void)aimee_pg_exec(
+       conn,
+       "UPDATE learning_proposals"
+       " SET state = 'archived', archive_reason = 'expired', updated_at = pg_now_text()"
+       " WHERE state = 'pending' AND expires_at != '' AND expires_at < pg_now_text()",
+       err, sizeof(err));
+}
+
+int kb_store_kb_service_async_queue_status(kb_store_kb_service_async_queue_stats_t *out)
+{
+   if (!out)
+      return -1;
+
+   memset(out, 0, sizeof(*out));
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
+       conn, "SELECT status, COUNT(*) FROM kb_async_jobs GROUP BY status", err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   while (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *status = col_text_or_empty(stmt, 0);
+      int count = aimee_pg_column_int(stmt, 1);
+      if (strcmp(status, "pending") == 0)
+         out->pending = count;
+      else if (strcmp(status, "running") == 0)
+         out->running = count;
+      else if (strcmp(status, "done") == 0)
+         out->done = count;
+      else if (strcmp(status, "failed") == 0)
+         out->failed = count;
+      out->total += count;
+   }
+
+   aimee_pg_finalize(stmt);
+   return 0;
+}
+
+int kb_store_kb_service_async_job_get(int64_t job_id, kb_store_kb_service_async_job_t *out)
+{
+   if (job_id <= 0 || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT id, kind, document_id, project, status, attempts, last_error,"
+                        " claimed_by, claimed_at, created_at, updated_at"
+                        " FROM kb_async_jobs WHERE id = ?1",
+                        err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_int64(stmt, "?1", job_id);
+   aimee_pg_step_t step = aimee_pg_step(stmt, err, sizeof(err));
+   if (step != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(stmt);
+      return step == AIMEE_PG_DONE ? 0 : -1;
+   }
+
+   out->id = aimee_pg_column_int64(stmt, 0);
+   kb_store_copy_text(out->kind, sizeof(out->kind), aimee_pg_column_text(stmt, 1));
+   out->document_id = aimee_pg_column_int64(stmt, 2);
+   kb_store_copy_text(out->project, sizeof(out->project), aimee_pg_column_text(stmt, 3));
+   kb_store_copy_text(out->status, sizeof(out->status), aimee_pg_column_text(stmt, 4));
+   out->attempts = aimee_pg_column_int(stmt, 5);
+   kb_store_copy_text(out->last_error, sizeof(out->last_error), aimee_pg_column_text(stmt, 6));
+   kb_store_copy_text(out->claimed_by, sizeof(out->claimed_by), aimee_pg_column_text(stmt, 7));
+   kb_store_copy_text(out->claimed_at, sizeof(out->claimed_at), aimee_pg_column_text(stmt, 8));
+   kb_store_copy_text(out->created_at, sizeof(out->created_at), aimee_pg_column_text(stmt, 9));
+   kb_store_copy_text(out->updated_at, sizeof(out->updated_at), aimee_pg_column_text(stmt, 10));
+   aimee_pg_finalize(stmt);
+   return 1;
+}
+
+static int kb_store_kb_service_async_queue_claim_next(const char *claimed_by, int64_t *job_id,
+                                                      int64_t *document_id, char *kind,
+                                                      size_t kind_len)
+{
+   void *conn = kb_store_conn();
+   if (!conn || !kb_store_worker_identity_valid(claimed_by) || !job_id || !document_id || !kind ||
+       kind_len == 0)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   /* Single-claim correctness comes from the follow-up UPDATE's WHERE
+    * id=?2 AND status='pending' guard plus the changes!=1 check below: if
+    * two workers race on the same row, only one UPDATE will see status =
+    * 'pending' and report changes==1; the loser ROLLBACKs and retries. */
+   aimee_pg_stmt_t *sel =
+       aimee_pg_prepare(conn,
+                        "SELECT id, document_id, kind"
+                        " FROM kb_async_jobs"
+                        " WHERE status = 'pending'"
+                        "   AND kind IN " KBS_ASYNC_DRAIN_KINDS_SQL " ORDER BY id ASC LIMIT 1",
+                        err, sizeof(err));
+   if (!sel)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+
+   aimee_pg_step_t step = aimee_pg_step(sel, err, sizeof(err));
+   if (step != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(sel);
+      (void)aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
+      return 0;
+   }
+
+   /* Materialize the SELECT row into locals before issuing the UPDATE on the
+    * same conn (libpq one-active-result-per-conn). */
+   int64_t id = aimee_pg_column_int64(sel, 0);
+   int64_t doc_id = aimee_pg_column_int64(sel, 1);
+   kb_store_copy_text(kind, kind_len, aimee_pg_column_text(sel, 2));
+   aimee_pg_finalize(sel);
+
+   aimee_pg_stmt_t *upd = aimee_pg_prepare(conn,
+                                           "UPDATE kb_async_jobs"
+                                           " SET status = 'running', claimed_by = ?1,"
+                                           "     claimed_at = pg_now_text(),"
+                                           "     attempts = attempts + 1,"
+                                           "     updated_at = pg_now_text()"
+                                           " WHERE id = ?2 AND status = 'pending'",
+                                           err, sizeof(err));
+   if (!upd)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+
+   aimee_pg_bind_text(upd, "?1", claimed_by);
+   aimee_pg_bind_int64(upd, "?2", id);
+   aimee_pg_step_t urc = aimee_pg_step(upd, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(upd);
+   aimee_pg_finalize(upd);
+   if (urc != AIMEE_PG_DONE || changes != 1)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return 0;
+   }
+
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      return -1;
+
+   *job_id = id;
+   *document_id = doc_id;
+   return 1;
+}
+
+static int kb_store_kb_service_async_queue_mark_job(int64_t job_id, const char *status,
+                                                    const char *error)
+{
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "UPDATE kb_async_jobs"
+                        " SET status = ?1, last_error = ?2, updated_at = pg_now_text()"
+                        " WHERE id = ?3",
+                        err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_text(stmt, "?1", status);
+   aimee_pg_bind_text(stmt, "?2", error ? error : "");
+   aimee_pg_bind_int64(stmt, "?3", job_id);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
+   aimee_pg_finalize(stmt);
+   return rc == AIMEE_PG_DONE ? 0 : -1;
+}
+
+static int kb_store_kb_service_async_process_embed_raw(
+    int64_t document_id, const char *embedding_cmd, const char *vector_collection,
+    kb_store_kb_service_vector_upsert_fn vector_upsert, void *vector_upsert_ctx, char *errbuf,
+    size_t errbuf_size)
+{
+   if (!vector_collection || !vector_collection[0] || !vector_upsert)
+   {
+      snprintf(errbuf, errbuf_size, "vector upsert callback missing");
+      return -1;
+   }
+
+   void *conn = kb_store_conn();
+   if (!conn)
+   {
+      snprintf(errbuf, errbuf_size, "no kb_store conn");
+      return -1;
+   }
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT d.heading_path,d.content FROM kb_documents d"
+                        " JOIN projects p ON p.name=d.project WHERE d.id=?1"
+                        " AND p.lifecycle_state='current' AND d.generation=p.current_generation",
+                        err, sizeof(err));
+   if (!stmt)
+   {
+      snprintf(errbuf, errbuf_size, "prepare failed");
+      return -1;
+   }
+
+   aimee_pg_bind_int64(stmt, "?1", document_id);
+   if (aimee_pg_step(stmt, err, sizeof(err)) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(stmt);
+      snprintf(errbuf, errbuf_size, "document %lld missing", (long long)document_id);
+      return -1;
+   }
+
+   /* Materialize heading + content into local buffers before issuing the
+    * follow-up pgvector write. */
+   char heading_buf[1024];
+   char content_buf[3072];
+   kb_store_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
+   kb_store_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
+   aimee_pg_finalize(stmt);
+
+   char embed_text[4096];
+   if (heading_buf[0])
+      snprintf(embed_text, sizeof(embed_text), "%s\n%s", heading_buf, content_buf);
+   else
+      snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
+
+   float vec[EMBED_MAX_DIM];
+   int dim = kb_store_kb_embed_text(embed_text, embedding_cmd, KB_STORE_EMBED_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+   if (dim <= 0)
+   {
+      snprintf(errbuf, errbuf_size, "embedding generation failed");
+      return -1;
+   }
+   char *payload_json = kb_store_kb_build_document_payload(document_id);
+   if (!payload_json)
+   {
+      kb_store_vector_index_op_record(document_id, vector_collection, 0, 0, "payload build failed");
+      snprintf(errbuf, errbuf_size, "payload build failed");
+      return -1;
+   }
+   int upsert_rc = vector_upsert(document_id, vec, dim, payload_json, vector_upsert_ctx);
+   free(payload_json);
+   kb_store_vector_index_op_record(document_id, vector_collection, 0, upsert_rc == 0,
+                                   upsert_rc ? "upsert failed" : NULL);
+   if (upsert_rc != 0)
+   {
+      snprintf(errbuf, errbuf_size, "vector upsert failed");
+      return -1;
+   }
+   return 0;
+}
+
+/* embed_pdf: structured-PDF Phase A1. Embeds a PDF chunk into the DEDICATED
+ * kb_pdf_embeddings relation (pgvec_kbpdf_upsert), never kb_embeddings — so PDF
+ * vectors stay structurally unreachable from general vector search. Two
+ * defense-in-depth guards before any vector is written: the row must still be a
+ * PDF chunk (doc_kind='pdf') and must NOT be quarantined-pending. A pending row is
+ * skipped (marked done, no vector); when it is later confirmed, the confirm path
+ * re-enqueues an embed_pdf job. Returns 0 on success or benign skip, -1 on error
+ * (which fails the job so kb_async_jobs retries the embed). */
+static int kb_store_kb_service_async_process_embed_pdf(int64_t document_id,
+                                                       const char *embedding_cmd, char *errbuf,
+                                                       size_t errbuf_size)
+{
+   void *conn = kb_store_conn();
+   if (!conn)
+   {
+      snprintf(errbuf, errbuf_size, "no kb_store conn");
+      return -1;
+   }
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT heading_path, content, doc_kind, quarantine_state, project"
+                        " FROM kb_documents d JOIN projects p ON p.name=d.project WHERE d.id=?1"
+                        " AND p.lifecycle_state='current' AND d.generation=p.current_generation",
+                        err, sizeof(err));
+   if (!stmt)
+   {
+      snprintf(errbuf, errbuf_size, "prepare failed");
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "?1", document_id);
+   if (aimee_pg_step(stmt, err, sizeof(err)) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(stmt);
+      /* The chunk was deleted/re-ingested before this job ran — nothing to embed.
+       * Treat as a benign skip so the job does not spin on a missing row. */
+      return 0;
+   }
+   char heading_buf[1024];
+   char content_buf[3072];
+   char doc_kind[32];
+   char quarantine[32];
+   char project_buf[256];
+   kb_store_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
+   kb_store_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
+   kb_store_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
+   kb_store_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
+   kb_store_copy_text(project_buf, sizeof(project_buf), aimee_pg_column_text(stmt, 4));
+   aimee_pg_finalize(stmt);
+
+   /* Defense-in-depth: never write a PDF vector for a non-PDF row or for ANY quarantined
+    * document (quarantine_state non-empty), not just 'pending'. Withholding strictly more
+    * can never leak; if a future state (e.g. legal_hold) is added, the embedder stays safe
+    * by default. The structural isolation (separate relation) is the primary control; this
+    * predicate is the second layer. */
+   if (strcmp(doc_kind, "pdf") != 0 || quarantine[0] != '\0')
+      return 0;
+
+   char embed_text[4096];
+   if (heading_buf[0])
+      snprintf(embed_text, sizeof(embed_text), "%s\n%s", heading_buf, content_buf);
+   else
+      snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
+
+   float vec[EMBED_MAX_DIM];
+   int dim = kb_store_kb_embed_text(embed_text, embedding_cmd, KB_STORE_EMBED_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+   if (dim <= 0)
+   {
+      snprintf(errbuf, errbuf_size, "embedding generation failed");
+      return -1;
+   }
+   char *payload_json = kb_store_kb_build_document_payload(document_id);
+   if (!payload_json)
+   {
+      kb_store_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, 0, "payload build failed");
+      snprintf(errbuf, errbuf_size, "payload build failed");
+      return -1;
+   }
+   /* Guarded transaction around the PDF vector write with the generation-
+    * fence check inside it (webchat-project-lifecycle slice 2): a job
+    * claimed pre-purge must not land a vector for a project being purged,
+    * and the advisory guard serializes this check+commit against the fence
+    * publish. Failing the job is safe — on retry after the purge the chunk
+    * row is gone (benign skip above). */
+   if (kb_store_kb_txn_begin() != 0)
+   {
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "pdf vector txn begin failed");
+      return -1;
+   }
+   if (project_buf[0] && (kb_store_kb_purge_txn_guard(project_buf) != 0 ||
+                          kb_store_kb_purge_fence_active(project_buf)))
+   {
+      kb_store_kb_txn_rollback();
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "purge fence active for project '%.200s'", project_buf);
+      return -1;
+   }
+   int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);
+   if (kb_store_kb_txn_commit() != 0)
+   {
+      kb_store_kb_txn_rollback();
+      upsert_rc = -1;
+   }
+   free(payload_json);
+   kb_store_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
+                                   upsert_rc ? "pdf upsert failed" : NULL);
+   if (upsert_rc != 0)
+   {
+      snprintf(errbuf, errbuf_size, "pdf vector upsert failed");
+      return -1;
+   }
+   return 0;
+}
+
+int kb_store_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                          int timeout_secs, const char *vector_collection,
+                                          kb_store_kb_service_vector_upsert_fn vector_upsert,
+                                          void *vector_upsert_ctx,
+                                          kb_store_kb_service_async_queue_stats_t *out)
+{
+   if (!kb_store_worker_identity_valid(claimed_by))
+      return -1;
+   const char *effective_cmd = config_embedder_command_current(embedding_cmd);
+   int processed = 0;
+
+   time_t started = time(NULL);
+   kb_store_kb_service_async_queue_stats_t stats;
+   memset(&stats, 0, sizeof(stats));
+
+   for (;;)
+   {
+      int64_t job_id = 0;
+      int64_t document_id = 0;
+      char kind[32];
+      kind[0] = '\0';
+      int claim = kb_store_kb_service_async_queue_claim_next(claimed_by, &job_id, &document_id,
+                                                             kind, sizeof(kind));
+      if (claim < 0)
+         return -1;
+      if (claim == 0)
+      {
+         if (kb_store_kb_service_async_queue_status(&stats) != 0)
+            return -1;
+         if (stats.running == 0)
+            break;
+         if (timeout_secs > 0 && (int)(time(NULL) - started) >= timeout_secs)
+            break;
+         usleep(100000);
+         continue;
+      }
+
+      char errbuf[256] = "";
+      int rc = -1;
+      if (strcmp(kind, "embed_raw") == 0)
+         rc = kb_store_kb_service_async_process_embed_raw(
+             document_id, effective_cmd, vector_collection, vector_upsert, vector_upsert_ctx,
+             errbuf, sizeof(errbuf));
+      else if (strcmp(kind, "embed_pdf") == 0)
+         rc = kb_store_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
+                                                          sizeof(errbuf));
+      else
+         /* Unreachable unless KBS_ASYNC_DRAIN_KINDS_SQL and this chain have
+          * drifted apart — the claim cannot hand us a kind not in that list. If
+          * it ever happens the job is about to be marked 'failed', so say so
+          * loudly rather than discarding another stage's work in silence. */
+         snprintf(errbuf, sizeof(errbuf),
+                  "unknown job kind: %s (claimed but not dispatchable — "
+                  "KBS_ASYNC_DRAIN_KINDS_SQL is out of sync with the dispatch)",
+                  kind);
+
+      if (rc == 0)
+         (void)kb_store_kb_service_async_queue_mark_job(job_id, "done", "");
+      else
+         (void)kb_store_kb_service_async_queue_mark_job(job_id, "failed", errbuf);
+      processed++;
+
+      if (timeout_secs > 0 && (int)(time(NULL) - started) >= timeout_secs)
+         break;
+   }
+
+   if (kb_store_kb_service_async_queue_status(&stats) != 0)
+      return -1;
+   stats.processed = processed;
+   if (out)
+      *out = stats;
+   return 0;
+}
+
+int kb_store_kb_service_collect_project_status(const char *project,
+                                               kb_store_kb_service_project_status_t *out)
+{
+   if (!out)
+      return -1;
+
+   memset(out, 0, sizeof(*out));
+
+   char proj[256];
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
+   snprintf(out->project, sizeof(out->project), "%s", proj);
+
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT COUNT(*), COALESCE(SUM(token_count), 0),"
+                        " COUNT(DISTINCT file_path)"
+                        " FROM kb_documents d JOIN projects p ON p.name=d.project"
+                        " WHERE (?1='' OR d.project=?1) AND p.lifecycle_state='current'"
+                        " AND d.generation=p.current_generation",
+                        err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_text(stmt, "?1", proj);
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      out->chunks = aimee_pg_column_int(stmt, 0);
+      out->tokens = aimee_pg_column_int(stmt, 1);
+      out->files = aimee_pg_column_int(stmt, 2);
+   }
+   aimee_pg_finalize(stmt);
+
+   stmt = aimee_pg_prepare(conn,
+                           "SELECT COUNT(*) FROM vector_index_ops q"
+                           " JOIN kb_documents d ON d.id = q.point_id"
+                           " JOIN projects p ON p.name=d.project"
+                           /* BOTH NAMES. The writer records general-corpus vectors under
+                            * 'kb_embeddings'; 'kb_chunks' is the older name and still
+                            * appears in existing stores, which is why
+                            * code_project_lifecycle.c matches the pair too. Matching only
+                            * the legacy name made this count ZERO on every current
+                            * deployment: `aimee kb health` reported embedding_count 0
+                            * beside pgvec_vectors 2, `aimee kb smoke` concluded
+                            * "0 embeddings; lexical search only" on a kb that was
+                            * embedding correctly, and hud.c warned forever because
+                            * embeddings < chunks*9/10 is always true at zero. Three
+                            * surfaces telling an operator the embedder was broken. */
+                           " WHERE (?1='' OR d.project=?1)"
+                           "   AND q.collection IN ('kb_chunks','kb_embeddings')"
+                           "   AND p.lifecycle_state='current'"
+                           "   AND d.generation=p.current_generation"
+                           "   AND q.status = 'ok'",
+                           err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_text(stmt, "?1", proj);
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+      out->embeddings = aimee_pg_column_int(stmt, 0);
+   aimee_pg_finalize(stmt);
+
+   return kb_store_kb_service_async_queue_status(&out->queue);
+}
+
+int kb_store_kb_service_clear_project(const char *project)
+{
+   void *conn = kb_store_conn();
+   if (!conn || !project || !project[0])
+      return -1;
+
+   char proj[256];
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
+
+   char err[KBS_ERRBUF] = "";
+
+   /* Clean up vector_index_ops for this project's docs before the rows
+    * disappear (no FK cascade from kb_documents to vector_index_ops). */
+   aimee_pg_stmt_t *ops_stmt =
+       aimee_pg_prepare(conn,
+                        "DELETE FROM vector_index_ops WHERE point_id IN"
+                        "  (SELECT id FROM kb_documents WHERE project = ?1)",
+                        err, sizeof(err));
+   if (ops_stmt)
+   {
+      aimee_pg_bind_text(ops_stmt, "?1", proj);
+      (void)aimee_pg_step(ops_stmt, err, sizeof(err));
+      aimee_pg_finalize(ops_stmt);
+   }
+
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn, "DELETE FROM kb_documents WHERE project = ?1", err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_text(stmt, "?1", proj);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
+   int deleted = aimee_pg_stmt_changes(stmt);
+   aimee_pg_finalize(stmt);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+
+   return deleted;
+}
+
+int kb_store_kb_service_clear_current_project(const char *project)
+{
+   void *conn = kb_store_conn();
+   if (!conn || !project || !project[0])
+      return -1;
+
+   char proj[256];
+   kb_store_kb_resolve_project(project, proj, sizeof(proj));
+   char err[KBS_ERRBUF] = "";
+   static const char *current_docs =
+       "SELECT d.id FROM kb_documents d JOIN projects p ON p.name=d.project"
+       " WHERE d.project=?1 AND p.lifecycle_state='current'"
+       " AND d.generation=p.current_generation";
+   char ops_sql[512];
+   snprintf(ops_sql, sizeof(ops_sql), "DELETE FROM vector_index_ops WHERE point_id IN (%s)",
+            current_docs);
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, ops_sql, err, sizeof(err));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "?1", proj);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
+   aimee_pg_finalize(stmt);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+
+   stmt = aimee_pg_prepare(conn,
+                           "DELETE FROM kb_documents WHERE project=?1"
+                           " AND generation=(SELECT current_generation FROM projects"
+                           " WHERE name=?1 AND lifecycle_state='current')",
+                           err, sizeof(err));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "?1", proj);
+   rc = aimee_pg_step(stmt, err, sizeof(err));
+   int deleted = aimee_pg_stmt_changes(stmt);
+   aimee_pg_finalize(stmt);
+   return rc == AIMEE_PG_DONE ? deleted : -1;
+}
+
+int kb_store_kb_service_memory_record_exists(int64_t record_id)
+{
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)"
+                        "    OR EXISTS(SELECT 1 FROM memory_units WHERE id = ?1)",
+                        err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_int64(stmt, "?1", record_id);
+   int exists = -1;
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+      exists = aimee_pg_column_int(stmt, 0);
+   aimee_pg_finalize(stmt);
+   return exists;
+}
+
+int kb_store_kb_service_kb_document_exists(int64_t document_id)
+{
+   void *conn = kb_store_conn();
+   if (!conn)
+      return -1;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
+       conn, "SELECT EXISTS(SELECT 1 FROM kb_documents WHERE id = ?1)", err, sizeof(err));
+   if (!stmt)
+      return -1;
+
+   aimee_pg_bind_int64(stmt, "?1", document_id);
+   int exists = -1;
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+      exists = aimee_pg_column_int(stmt, 0);
+   aimee_pg_finalize(stmt);
+   return exists;
+}
+
+cJSON *kb_store_kb_service_curiosity_list_json(const char *state, int max_rows)
+{
+   if (max_rows < 1)
+      return NULL;
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "items") : NULL;
+   if (!resp || !arr)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+
+   curiosity_item_t *rows = calloc((size_t)max_rows, sizeof(*rows));
+   if (!rows)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   int n = kb_store_curiosity_list((state && state[0]) ? state : NULL, rows, max_rows);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *obj = cJSON_CreateObject();
+      if (!obj)
+      {
+         free(rows);
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddNumberToObject(obj, "id", (double)rows[i].id);
+      cJSON_AddStringToObject(obj, "gap_type", rows[i].gap_type);
+      cJSON_AddStringToObject(obj, "target_entity", rows[i].target_entity);
+      cJSON_AddStringToObject(obj, "target_topic", rows[i].target_topic);
+      cJSON_AddStringToObject(obj, "evidence", rows[i].evidence);
+      cJSON_AddNumberToObject(obj, "importance", rows[i].importance);
+      cJSON_AddNumberToObject(obj, "novelty", rows[i].novelty);
+      cJSON_AddNumberToObject(obj, "progress", rows[i].progress);
+      cJSON_AddNumberToObject(obj, "routing_score", rows[i].routing_score);
+      cJSON_AddStringToObject(obj, "state", rows[i].state);
+      cJSON_AddStringToObject(obj, "created_at", rows[i].created_at);
+      cJSON_AddItemToArray(arr, obj);
+   }
+   free(rows);
+   return resp;
+}
+
+static cJSON *curiosity_to_json(const curiosity_item_t *it)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return NULL;
+   cJSON_AddNumberToObject(obj, "id", (double)it->id);
+   cJSON_AddStringToObject(obj, "gap_type", it->gap_type);
+   cJSON_AddStringToObject(obj, "target_entity", it->target_entity);
+   cJSON_AddStringToObject(obj, "target_topic", it->target_topic);
+   cJSON_AddStringToObject(obj, "evidence", it->evidence);
+   cJSON_AddNumberToObject(obj, "importance", it->importance);
+   cJSON_AddNumberToObject(obj, "novelty", it->novelty);
+   cJSON_AddNumberToObject(obj, "progress", it->progress);
+   cJSON_AddNumberToObject(obj, "routing_score", it->routing_score);
+   cJSON_AddStringToObject(obj, "state", it->state);
+   cJSON_AddStringToObject(obj, "source_session", it->source_session);
+   cJSON_AddStringToObject(obj, "created_at", it->created_at);
+   cJSON_AddStringToObject(obj, "updated_at", it->updated_at);
+   return obj;
+}
+
+cJSON *kb_store_kb_service_curiosity_create_json(const char *gap_type, const char *target_entity,
+                                                 const char *target_topic, const char *evidence,
+                                                 double importance, double novelty,
+                                                 const char *source_session)
+{
+   curiosity_item_t created;
+   int rc = kb_store_curiosity_create(gap_type, target_entity, target_topic, evidence, importance,
+                                      novelty, source_session, &created);
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (rc != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "curiosity create failed");
+      return resp;
+   }
+   cJSON *obj = curiosity_to_json(&created);
+   if (!obj)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddItemToObject(resp, "item", obj);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_curiosity_sweep_json(void)
+{
+   int created = kb_store_curiosity_sweep_failed_queries();
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "created", created);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_curiosity_rescore_json(void)
+{
+   int rescored = kb_store_curiosity_rescore_all();
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "rescored", rescored);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_curiosity_get_json(int64_t id)
+{
+   curiosity_item_t item;
+   int found = kb_store_curiosity_get(id, &item);
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (found <= 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message",
+                              found == 0 ? "curiosity item not found" : "curiosity get failed");
+      return resp;
+   }
+   cJSON *obj = curiosity_to_json(&item);
+   if (!obj)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddItemToObject(resp, "item", obj);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_curiosity_update_state_json(int64_t id, const char *new_state)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (!new_state || !kb_store_curiosity_state_is_valid(new_state))
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "invalid state");
+      return resp;
+   }
+   if (kb_store_curiosity_update_state(id, new_state) != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "curiosity update_state failed");
+      return resp;
+   }
+   /* Return the updated row so callers can render without a follow-up RPC. */
+   curiosity_item_t after;
+   if (kb_store_curiosity_get(id, &after) > 0)
+   {
+      cJSON *obj = curiosity_to_json(&after);
+      if (!obj)
+      {
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddItemToObject(resp, "item", obj);
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return resp;
+}
+
+static const char *route_curiosity_gap_to_cause(const char *gap_type)
+{
+   if (!gap_type)
+      return "missing_config";
+   if (strcmp(gap_type, CURIOSITY_GAP_CONTRADICTION) == 0)
+      return "contradiction";
+   if (strcmp(gap_type, CURIOSITY_GAP_MISSING_FACT) == 0)
+      return "retrieval_failure";
+   return "missing_config";
+}
+
+static void route_curiosity_build_question(const curiosity_item_t *it, char *out, size_t cap)
+{
+   const char *target = it->target_topic[0] ? it->target_topic : it->target_entity;
+   const char *evidence = it->evidence[0] ? it->evidence : "";
+   if (strcmp(it->gap_type, CURIOSITY_GAP_CONTRADICTION) == 0)
+      snprintf(out, cap, "Resolve contradiction about %s%s%s", target, evidence[0] ? ": " : "",
+               evidence);
+   else if (strcmp(it->gap_type, CURIOSITY_GAP_MISSING_FACT) == 0)
+      snprintf(out, cap, "Find a fact to answer: %s", target);
+   else if (strcmp(it->gap_type, CURIOSITY_GAP_STALE_FACT) == 0)
+      snprintf(out, cap, "Re-verify a stale fact about %s", target);
+   else if (strcmp(it->gap_type, CURIOSITY_GAP_WEAK_COVERAGE) == 0)
+      snprintf(out, cap, "Expand coverage of %s", target);
+   else if (strcmp(it->gap_type, CURIOSITY_GAP_UNVERIFIED_ASSUMPTION) == 0)
+      snprintf(out, cap, "Verify assumption about %s%s%s", target, evidence[0] ? ": " : "",
+               evidence);
+   else
+      snprintf(out, cap, "Investigate %s", target);
+}
+
+cJSON *kb_store_kb_service_curiosity_route_top_json(int limit, const char *source_session)
+{
+   if (limit <= 0)
+      limit = 5;
+   if (limit > 32)
+      limit = 32;
+
+   curiosity_item_t batch[32];
+   int n = kb_store_curiosity_list_top_open_by_score(batch, limit);
+
+   int routed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      const curiosity_item_t *it = &batch[i];
+      const char *cause = route_curiosity_gap_to_cause(it->gap_type);
+      char question[512];
+      route_curiosity_build_question(it, question, sizeof(question));
+      int priority = (int)(it->routing_score * 100.0);
+      if (priority < 0)
+         priority = 0;
+      if (priority > 100)
+         priority = 100;
+
+      cJSON *args = cJSON_CreateObject(), *response = NULL;
+      cJSON_AddStringToObject(args, "operation", "directive-create");
+      cJSON_AddStringToObject(args, "question", question);
+      cJSON_AddStringToObject(args, "topic", it->target_topic);
+      cJSON_AddStringToObject(args, "entity", it->target_entity);
+      cJSON_AddStringToObject(args, "cause", cause);
+      cJSON_AddNumberToObject(args, "priority", priority);
+      cJSON_AddStringToObject(args, "evidence", it->evidence);
+      cJSON_AddStringToObject(args, "session", source_session ? source_session : "");
+      int dispatched =
+          aimee_module_commands_dispatch_internal
+              ? aimee_module_commands_dispatch_internal("memory.runtime", args, &response)
+              : 0;
+      cJSON_Delete(args);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+      int rc = dispatched == 1 && status && strcmp(status, "ok") == 0 ? 0 : -1;
+      cJSON_Delete(response);
+      /* A successful Go result may be inserted or deduplicated. Both
+       * count as successfully routed for the purposes of moving
+       * the curiosity item along. */
+      if (rc == 0)
+      {
+         kb_store_curiosity_update_state(it->id, CURIOSITY_STATE_IN_PROGRESS);
+         routed++;
+      }
+   }
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddNumberToObject(resp, "routed", routed);
+   return resp;
+}
+
+static cJSON *note_to_json(const note_t *note)
+{
+   cJSON *obj = cJSON_CreateObject();
+   if (!obj)
+      return NULL;
+   cJSON_AddNumberToObject(obj, "id", (double)note->id);
+   cJSON_AddStringToObject(obj, "title", note->title);
+   cJSON_AddStringToObject(obj, "slug", note->slug);
+   cJSON_AddStringToObject(obj, "content", note->content);
+   cJSON_AddStringToObject(obj, "tags", note->tags);
+   cJSON_AddStringToObject(obj, "author", note->author);
+   cJSON_AddStringToObject(obj, "created_at", note->created_at);
+   cJSON_AddStringToObject(obj, "updated_at", note->updated_at);
+   return obj;
+}
+
+cJSON *kb_store_kb_service_note_create_json(const char *title, const char *content,
+                                            const char *tags, const char *author)
+{
+   note_t note;
+   if (kb_store_note_create(title, content, tags, author, &note) != 0)
+   {
+      cJSON *resp = cJSON_CreateObject();
+      if (!resp)
+         return NULL;
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "failed to create note");
+      return resp;
+   }
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *obj = note_to_json(&note);
+   if (!resp || !obj)
+   {
+      cJSON_Delete(resp);
+      cJSON_Delete(obj);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddItemToObject(resp, "note", obj);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_note_list_json(const char *tag, int max_rows)
+{
+   if (max_rows < 1)
+      return NULL;
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "notes") : NULL;
+   if (!resp || !arr)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+
+   note_t *rows = calloc((size_t)max_rows, sizeof(*rows));
+   if (!rows)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   int n = kb_store_note_list((tag && tag[0]) ? tag : NULL, max_rows, rows, max_rows);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *obj = note_to_json(&rows[i]);
+      if (!obj)
+      {
+         free(rows);
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddItemToArray(arr, obj);
+   }
+   free(rows);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_note_search_json(const char *query, int max_rows)
+{
+   if (max_rows < 1)
+      return NULL;
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "notes") : NULL;
+   if (!resp || !arr)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+
+   note_t *rows = calloc((size_t)max_rows, sizeof(*rows));
+   if (!rows)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   int n = kb_store_note_search(query ? query : "", rows, max_rows);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *obj = note_to_json(&rows[i]);
+      if (!obj)
+      {
+         free(rows);
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddItemToArray(arr, obj);
+   }
+   free(rows);
+   return resp;
+}
+
+/* Rules + collab_rules + agent_* + learning.propose_signal RPC backends
+ * live in kb_service_backend_agent.c */
+
+/* Memory-domain RPC backends (find_facts, list, get, insert, briefing,
+ * context_block, entity_profile, entity_edges) live in
+ * kb_store/kb_service_backend_memory.c so this file stays under the per-file
+ * line cap. */
+
+cJSON *kb_store_kb_service_learning_list_json(const char *state, const char *sink, int max_rows)
+{
+   if (max_rows < 1)
+      return NULL;
+
+   kb_store_kb_learning_archive_expired();
+
+   void *conn = kb_store_conn();
+   if (!conn)
+      return NULL;
+
+   char err[KBS_ERRBUF] = "";
+   char sql[1024];
+   snprintf(sql, sizeof(sql),
+            "SELECT %s FROM learning_proposals"
+            " WHERE (?1 = '' OR state = ?2) AND (?3 = '' OR sink = ?4)"
+            " ORDER BY id DESC LIMIT ?5",
+            KB_STORE_KB_LEARNING_SELECT_COLS);
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!stmt)
+      return NULL;
+
+   aimee_pg_bind_text(stmt, "?1", state ? state : "");
+   aimee_pg_bind_text(stmt, "?2", state ? state : "");
+   aimee_pg_bind_text(stmt, "?3", sink ? sink : "");
+   aimee_pg_bind_text(stmt, "?4", sink ? sink : "");
+   aimee_pg_bind_int(stmt, "?5", max_rows);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "proposals") : NULL;
+   if (!resp || !arr)
+   {
+      aimee_pg_finalize(stmt);
+      cJSON_Delete(resp);
+      return NULL;
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
+   while (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      cJSON *row = kb_store_kb_learning_json_from_stmt(stmt);
+      if (!row)
+      {
+         aimee_pg_finalize(stmt);
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddItemToArray(arr, row);
+   }
+
+   aimee_pg_finalize(stmt);
+   return resp;
+}
+
+cJSON *kb_store_kb_service_learning_get_json(int id)
+{
+   if (id <= 0)
+      return NULL;
+
+   kb_store_kb_learning_archive_expired();
+
+   void *conn = kb_store_conn();
+   if (!conn)
+      return NULL;
+
+   char sql[512];
+   snprintf(sql, sizeof(sql), "SELECT %s FROM learning_proposals WHERE id = ?1",
+            KB_STORE_KB_LEARNING_SELECT_COLS);
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!stmt)
+      return NULL;
+
+   aimee_pg_bind_int(stmt, "?1", id);
+   cJSON *row = NULL;
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+      row = kb_store_kb_learning_json_from_stmt(stmt);
+   aimee_pg_finalize(stmt);
+   return row;
+}
+
+cJSON *kb_store_kb_service_learning_reject_json(int id)
+{
+   if (id <= 0)
+      return NULL;
+
+   kb_store_kb_learning_archive_expired();
+
+   void *conn = kb_store_conn();
+   if (!conn)
+      return NULL;
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
+       conn, "SELECT state FROM learning_proposals WHERE id = ?1", err, sizeof(err));
+   if (!stmt)
+      return NULL;
+
+   aimee_pg_bind_int(stmt, "?1", id);
+   char state[32] = "";
+   int found = 0;
+   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      kb_store_copy_text(state, sizeof(state), aimee_pg_column_text(stmt, 0));
+      found = 1;
+   }
+   aimee_pg_finalize(stmt);
+   if (!found)
+      return NULL;
+
+   if (strcmp(state, "committed") != 0 && strcmp(state, "archived") != 0)
+   {
+      aimee_pg_stmt_t *upd =
+          aimee_pg_prepare(conn,
+                           "UPDATE learning_proposals"
+                           " SET state = 'archived', archive_reason = 'rejected',"
+                           " updated_at = pg_now_text()"
+                           " WHERE id = ?1 AND state = 'pending'",
+                           err, sizeof(err));
+      if (!upd)
+         return NULL;
+      aimee_pg_bind_int(upd, "?1", id);
+      if (aimee_pg_step(upd, err, sizeof(err)) != AIMEE_PG_DONE)
+      {
+         aimee_pg_finalize(upd);
+         return NULL;
+      }
+      aimee_pg_finalize(upd);
+   }
+
+   return kb_store_kb_service_learning_get_json(id);
+}

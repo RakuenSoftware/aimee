@@ -87,7 +87,7 @@ static int api_bearer_extra_count(void);
  * an unreachable kb is REPORTED rather than failing the call: a broken kb must
  * still let you run the command that tells you the kb is broken.
  *
- * Field names are deliberately tier-neutral (store_ok / vectors_ok, not db2_ok /
+ * Field names are deliberately tier-neutral (store_ok / vectors_ok, not postgres_ok /
  * pgvec_ok): these strings land in the thin client, which must not carry the
  * storage tier's vocabulary — build-integrity greps the client binary for exactly
  * that and fails the build. The client reports whether the kb's store and vector
@@ -193,7 +193,7 @@ void server_health_add_kb(cJSON *resp)
     * it -- the evidence exists and the summary does not carry it. */
    kb_health_add_lines(kbo, "blockers", kb.blockers);
    kb_health_add_lines(kbo, "warnings", kb.warnings);
-   cJSON_AddBoolToObject(kbo, "store_ok", kb.db2_ok ? 1 : 0);
+   cJSON_AddBoolToObject(kbo, "store_ok", kb.postgres_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "vectors_ok", kb.pgvec_ok ? 1 : 0);
    cJSON_AddBoolToObject(kbo, "embed_configured", kb.embed_ok ? 1 : 0);
    cJSON_AddNumberToObject(kbo, "vectors", kb.pgvec_vectors);

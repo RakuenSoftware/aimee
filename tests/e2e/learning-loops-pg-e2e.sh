@@ -12,9 +12,9 @@
 # throughout, because a unit test can prove a consumer reads a row correctly
 # without ever asking whether anything writes one.
 #
-# Second: the endogeneity gate is a DB2 reader, and DB2 lives in the KB. An
+# Second: the endogeneity gate is a KB_STORE reader, and KB_STORE lives in the KB. An
 # earlier version of it ran in aimee-server, which builds with
-# -DAIMEE_DB2_DISABLED, so it reported "open" by never having consulted a ledger
+# -DAIMEE_KB_STORE_DISABLED, so it reported "open" by never having consulted a ledger
 # at all. A gate that cannot see its own evidence is not a gate.
 #
 # Neither failure is visible without both services up and a real database
@@ -25,7 +25,7 @@
 #   AIMEE_SRC      the source tree, for build/obj                (default $AIMEE_ROOT/src)
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/learning-loops)
 #   PGDB           the throwaway database                        (default aimee_shared)
-#   AIMEE_DB2_URL  libpq URL reaching that database
+#   AIMEE_STORE_URL  libpq URL reaching that database
 #   AIMEE_STORE_URL non-owner PostgreSQL URL for the daemon store (required)
 #   AIMEE_STORE_MIGRATION_URL owner URL used only for schema migration
 #                             (required and must name a different role)
@@ -40,7 +40,6 @@ AIMEE_SRC="${AIMEE_SRC:-$AIMEE_ROOT/src}"
 WORKDIR="${WORKDIR:-/tmp/learning-loops}"
 KB_PORT="${KB_PORT:-18745}"
 PGDB="${PGDB:-aimee_shared}"
-export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///$PGDB?host=/var/run/postgresql}"
 export AIMEE_STORE_URL="${AIMEE_STORE_URL:-}"
 export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
 [ -n "$AIMEE_STORE_URL" ] || {
@@ -112,7 +111,7 @@ attach() { # attach <name> <home> <bus> <tag>
     local placement="$4"
     [ "$placement" != srv ] || placement=server
     env AIMEE_MODULE_PLACEMENT="$placement" HOME="$2" AIMEE_HOME="$2/.config/aimee" AIMEE_DB1_PATH="$2/.config/aimee/aimee.db" \
-        AIMEE_DB2_URL="$AIMEE_DB2_URL" AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
         "$2/.config/aimee/aimee-module-$1" "$3" > "$WORKDIR/mod-$4-$1.log" 2>&1 &
     MOD_PIDS="$MOD_PIDS $!"
@@ -199,7 +198,7 @@ printf '%s' "$KBGATE" | grep -q '"gate":"closed"' \
     || bad "the KB did not close the gate"
 
 # And the DAEMON must report the same thing. This is the defect that hid: the
-# gate ran server-side, where DB2 is compiled out, and answered "open" by never
+# gate ran server-side, where KB_STORE is compiled out, and answered "open" by never
 # having consulted the ledger at all.
 DGATE=$("$A" eval candidates --limit 1 2>&1 | head -1)
 printf '        via daemon: %s\n' "$DGATE"

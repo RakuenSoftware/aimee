@@ -7,6 +7,7 @@ Start here:
 | install aimee | [Quickstart](QUICKSTART.md) |
 | deploy or upgrade services | [Deployment](DEPLOYMENT.md) and [upgrading](UPGRADING.md) |
 | use the CLI and browser | [Manual](../MANUAL.md) |
+| understand Server versus KB | [Server and KB](SERVER_AND_KB.md) |
 | understand the system | [Architecture](ARCHITECTURE.md) |
 | understand the new runtime spine | [Event bus](EVENT_BUS.md) |
 | configure a deployment | [Settings](SETTINGS.md) and [generated configuration](gen/configuration.md) |
@@ -64,6 +65,7 @@ Start here:
 
 ## Engineering
 
+- [Agent Memory Atlas review and improvement priorities](reviews/agent-memory-atlas-2026-09-29.md)
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
 - [Observability module](modules/observability.md)

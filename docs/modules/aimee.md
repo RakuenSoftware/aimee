@@ -4,7 +4,7 @@
 
 `aimee` owns the server-specific DB1 domain model and peer-session behavior. It defines typed
 families, validation, and workflow persistence while `postgres` owns generic database execution.
-It does not own PostgreSQL pooling, KB data in DB2, or the shared event-bus runtime.
+It does not own PostgreSQL pooling, KB data in KB_STORE, or the shared event-bus runtime.
 
 ## Public contracts
 

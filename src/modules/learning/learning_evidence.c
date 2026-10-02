@@ -4,15 +4,15 @@
 #include "learning_evidence.h"
 #include "module_commands.h"
 #include "aimee.h" /* memory_directive_t and friends, TIER_* */
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/anti_patterns.h"
-#include "modules/db2/c/workflow_patterns.h"
-#include "modules/db2/c/rules.h"
-#include "modules/db2/c/entity_nodes.h"
-#include "modules/db2/c/evidence_vectors.h"
-#include "modules/db2/c/learning_synth_ops.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/demotion.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/anti_patterns.h"
+#include "modules/kb/c/workflow_patterns.h"
+#include "modules/kb/c/rules.h"
+#include "modules/kb/c/entity_nodes.h"
+#include "modules/kb/c/evidence_vectors.h"
+#include "modules/kb/c/learning_synth_ops.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/demotion.h"
 #include "log.h"
 #include "cJSON.h"
 
@@ -108,8 +108,8 @@ int learning_evidence_write_event(const char *source_kind, const char *scope_kin
             esc);
 
    char id[37] = "";
-   int rc = db2_artifact_write_evidence(source_kind, scope_kind, scope_id, operator_id,
-                                        content_hash, payload, id, sizeof(id));
+   int rc = kb_store_artifact_write_evidence(source_kind, scope_kind, scope_id, operator_id,
+                                             content_hash, payload, id, sizeof(id));
    if (rc != 0)
    {
       aimee_log(LOG_DEBUG, "learning_evidence", "evidence write failed (kind=%s)", source_kind);
@@ -121,10 +121,10 @@ int learning_evidence_write_event(const char *source_kind, const char *scope_kin
     * LLM on the capture hot path. */
    if (id[0])
    {
-      (void)db2_evidence_enqueue(id, "evidence");
+      (void)kb_store_evidence_enqueue(id, "evidence");
       /* Also enqueue it for candidate synthesis — drained on the kb scheduler,
        * so the LLM pass never touches this capture hot path. */
-      (void)db2_synth_enqueue(id);
+      (void)kb_store_synth_enqueue(id);
    }
 
    if (artifact_id_out && artifact_id_out_len > 0)
@@ -153,22 +153,22 @@ static void payload_first_string(const cJSON *payload, const char *const *keys, 
 
 /* Write the charter audit_events row recording a promotion to `surface` with
  * `target_id` (the surface row's natural id). Returns 0 on success, -1 on error. */
-static int promote_emit_audit(const db2_artifact_row_t *art, const char *surface,
+static int promote_emit_audit(const kb_store_artifact_row_t *art, const char *surface,
                               const char *target_id, int flagged)
 {
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char after_json[256];
    snprintf(after_json, sizeof(after_json), "{\"surface\":\"%s\",\"target_id\":\"%s\"}", surface,
             target_id);
-   return db2_audit_event_write(audit_id, art->id, surface, target_id, "kb.learning.promote",
-                                art->scope_kind, art->scope_id, art->confidence, flagged,
-                                "{\"surface\":null}", after_json);
+   return kb_store_audit_event_write(audit_id, art->id, surface, target_id, "kb.learning.promote",
+                                     art->scope_kind, art->scope_id, art->confidence, flagged,
+                                     "{\"surface\":null}", after_json);
 }
 
 /* Promote a committed anti_pattern/mistake_pattern candidate into the
  * anti_patterns target surface. */
-static int promote_anti_pattern(const db2_artifact_row_t *art, double threshold, int flagged)
+static int promote_anti_pattern(const kb_store_artifact_row_t *art, double threshold, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char pattern[512] = "", description[1024] = "";
@@ -185,28 +185,28 @@ static int promote_anti_pattern(const db2_artifact_row_t *art, double threshold,
 
    anti_pattern_t ap;
    memset(&ap, 0, sizeof(ap));
-   if (db2_anti_pattern_insert(pattern, description, "kb.learning.promote", art->id,
-                               art->confidence, &ap) != 0)
+   if (kb_store_anti_pattern_insert(pattern, description, "kb.learning.promote", art->id,
+                                    art->confidence, &ap) != 0)
       return -1;
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char target_id[32];
    snprintf(target_id, sizeof(target_id), "%lld", (long long)ap.id);
    char after_json[160];
    snprintf(after_json, sizeof(after_json), "{\"surface\":\"anti_pattern\",\"row_id\":%lld}",
             (long long)ap.id);
    (void)threshold;
-   if (db2_audit_event_write(audit_id, art->id, "anti_pattern", target_id, "kb.learning.promote",
-                             art->scope_kind, art->scope_id, art->confidence, flagged,
-                             "{\"surface\":null}", after_json) != 0)
+   if (kb_store_audit_event_write(audit_id, art->id, "anti_pattern", target_id,
+                                  "kb.learning.promote", art->scope_kind, art->scope_id,
+                                  art->confidence, flagged, "{\"surface\":null}", after_json) != 0)
       return -1;
    return 1;
 }
 
 /* Promote a committed preference candidate into the memory target surface,
  * through the canonical typed-verb store path (no bespoke memory mutation). */
-static int promote_memory(const db2_artifact_row_t *art, int flagged)
+static int promote_memory(const kb_store_artifact_row_t *art, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char key[256] = "", content[1024] = "";
@@ -245,20 +245,20 @@ static int promote_memory(const db2_artifact_row_t *art, int flagged)
       return -1;
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char target_id[32];
    snprintf(target_id, sizeof(target_id), "%lld", mem_id);
    char after_json[160];
    snprintf(after_json, sizeof(after_json), "{\"surface\":\"memory\",\"memory_id\":%lld}", mem_id);
-   if (db2_audit_event_write(audit_id, art->id, "memory", target_id, "kb.learning.promote",
-                             art->scope_kind, art->scope_id, art->confidence, flagged,
-                             "{\"surface\":null}", after_json) != 0)
+   if (kb_store_audit_event_write(audit_id, art->id, "memory", target_id, "kb.learning.promote",
+                                  art->scope_kind, art->scope_id, art->confidence, flagged,
+                                  "{\"surface\":null}", after_json) != 0)
       return -1;
    return 1;
 }
 
 /* Promote a committed workflow candidate into the workflow_patterns surface. */
-static int promote_workflow_pattern(const db2_artifact_row_t *art, int flagged)
+static int promote_workflow_pattern(const kb_store_artifact_row_t *art, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char pattern[512] = "", description[1024] = "";
@@ -275,26 +275,26 @@ static int promote_workflow_pattern(const db2_artifact_row_t *art, int flagged)
 
    workflow_pattern_t wp;
    memset(&wp, 0, sizeof(wp));
-   if (db2_workflow_pattern_insert(pattern, description, "kb.learning.promote", art->id,
-                                   art->confidence, &wp) != 0)
+   if (kb_store_workflow_pattern_insert(pattern, description, "kb.learning.promote", art->id,
+                                        art->confidence, &wp) != 0)
       return -1;
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char target_id[32];
    snprintf(target_id, sizeof(target_id), "%lld", (long long)wp.id);
    char after_json[160];
    snprintf(after_json, sizeof(after_json), "{\"surface\":\"workflow_pattern\",\"row_id\":%lld}",
             (long long)wp.id);
-   if (db2_audit_event_write(audit_id, art->id, "workflow_pattern", target_id,
-                             "kb.learning.promote", art->scope_kind, art->scope_id, art->confidence,
-                             flagged, "{\"surface\":null}", after_json) != 0)
+   if (kb_store_audit_event_write(audit_id, art->id, "workflow_pattern", target_id,
+                                  "kb.learning.promote", art->scope_kind, art->scope_id,
+                                  art->confidence, flagged, "{\"surface\":null}", after_json) != 0)
       return -1;
    return 1;
 }
 
 /* Promote a committed candidate into the rules surface (active rules table). */
-static int promote_rule(const db2_artifact_row_t *art, int flagged)
+static int promote_rule(const kb_store_artifact_row_t *art, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char title[256] = "", description[1024] = "";
@@ -310,13 +310,13 @@ static int promote_rule(const db2_artifact_row_t *art, int flagged)
       snprintf(title, sizeof(title), "%s", art->id);
 
    int weight = (int)(art->confidence * 100.0);
-   if (db2_rules_insert("positive", title, description, weight) != 0)
+   if (kb_store_rules_insert("positive", title, description, weight) != 0)
       return -1;
    return promote_emit_audit(art, "rule", title, flagged) == 0 ? 1 : -1;
 }
 
 /* Promote a committed candidate into the epistemic-directives surface. */
-static int promote_epistemic_directive(const db2_artifact_row_t *art, int flagged)
+static int promote_epistemic_directive(const kb_store_artifact_row_t *art, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char question[512] = "", topic[256] = "";
@@ -353,7 +353,7 @@ static int promote_epistemic_directive(const db2_artifact_row_t *art, int flagge
 }
 
 /* Promote a committed candidate into the entity-alias surface. */
-static int promote_entity(const db2_artifact_row_t *art, int flagged)
+static int promote_entity(const kb_store_artifact_row_t *art, int flagged)
 {
    cJSON *pl = cJSON_Parse(art->payload_json);
    char alias[256] = "", node_key[256] = "";
@@ -373,18 +373,19 @@ static int promote_entity(const db2_artifact_row_t *art, int flagged)
    const char *project = art->scope_id[0] ? art->scope_id : "";
    /* Ensure the canonical node exists (the alias FKs to it), then attach the
     * learned alias mapping to it. */
-   if (db2_entity_node_upsert(node_key, 0, project, alias, node_key, "", "", "learned", 0) != 0)
+   if (kb_store_entity_node_upsert(node_key, 0, project, alias, node_key, "", "", "learned", 0) !=
+       0)
       return -1;
-   if (db2_entity_node_alias_upsert(alias, node_key, "learned", project, 0) != 0)
+   if (kb_store_entity_node_alias_upsert(alias, node_key, "learned", project, 0) != 0)
       return -1;
    return promote_emit_audit(art, "entity", node_key, flagged) == 0 ? 1 : -1;
 }
 
 /* Promote a committed candidate into the guardrail-exemplar surface (register
  * the artifact as a case exemplar; its vector is embedded asynchronously). */
-static int promote_guardrail_exemplar(const db2_artifact_row_t *art, int flagged)
+static int promote_guardrail_exemplar(const kb_store_artifact_row_t *art, int flagged)
 {
-   if (db2_artifact_register_exemplar(art->id, "case_exemplars") != 0)
+   if (kb_store_artifact_register_exemplar(art->id, "case_exemplars") != 0)
       return -1;
    return promote_emit_audit(art, "guardrail_exemplar", art->id, flagged) == 0 ? 1 : -1;
 }
@@ -399,7 +400,7 @@ extern int db1_working_profile_local_observe(const char *field, const char *valu
 
 /* Promote a committed candidate into the working_profile surface, through the
  * DB1 working-profile field observer (no bespoke DB1 write). */
-static int promote_working_profile(const db2_artifact_row_t *art, int flagged)
+static int promote_working_profile(const kb_store_artifact_row_t *art, int flagged)
 {
    if (!db1_working_profile_local_observe)
       return -2; /* DB1 not present in this process (e.g. aimee-kb) */
@@ -427,8 +428,8 @@ int learning_promote(const char *candidate_id, double threshold)
    if (!candidate_id || !candidate_id[0])
       return -1;
 
-   db2_artifact_row_t art;
-   if (db2_artifact_read(candidate_id, &art, NULL, 0, NULL) != 0)
+   kb_store_artifact_row_t art;
+   if (kb_store_artifact_read(candidate_id, &art, NULL, 0, NULL) != 0)
       return -1;
    if (strcmp(art.state, "committed") != 0)
       return -1; /* only committed candidates promote */
@@ -437,7 +438,7 @@ int learning_promote(const char *candidate_id, double threshold)
     * generation, keyed per the charter promotion table); otherwise derive it
     * from the candidate kind for the substrate's own four kinds. */
    char ts[64] = "";
-   db2_artifact_target_surface(candidate_id, ts, sizeof(ts));
+   kb_store_artifact_target_surface(candidate_id, ts, sizeof(ts));
    const char *surface = ts[0] ? ts : learning_candidate_target_surface(art.kind);
    if (!surface || !surface[0])
       return -1;
@@ -522,13 +523,13 @@ int learning_review_rollback(const char *candidate_id, const char *verdict_tag,
    /* Roll back to the state captured in the candidate's most recent audit
     * before_snapshot; default to 'proposed' if none is recorded. */
    char before_json[128] = "";
-   db2_audit_read_latest_before(candidate_id, before_json, sizeof(before_json));
+   kb_store_audit_read_latest_before(candidate_id, before_json, sizeof(before_json));
    char restore_state[32] = "";
    if (!snapshot_state(before_json, restore_state, sizeof(restore_state)) || !restore_state[0])
       snprintf(restore_state, sizeof(restore_state), "proposed");
 
-   int rc = db2_artifact_review_rollback(candidate_id, restore_state, verdict_tag, verdict_scope,
-                                         counter_example);
+   int rc = kb_store_artifact_review_rollback(candidate_id, restore_state, verdict_tag,
+                                              verdict_scope, counter_example);
    if (rc != 0)
    {
       aimee_log(LOG_DEBUG, "learning_evidence", "review rollback failed for %s", candidate_id);
@@ -548,22 +549,22 @@ int learning_judge_commit(const char *candidate_id, const char *candidate_kind,
    if (!surface)
       return -1;
 
-   int corroboration = db2_artifact_citation_count(candidate_id);
+   int corroboration = kb_store_artifact_citation_count(candidate_id);
    if (corroboration < 0)
       return -1;
    if (corroboration < (min_corroboration > 0 ? min_corroboration : 1))
       return 0; /* not enough corroborating evidence — stays proposed */
 
-   if (db2_artifact_set_state(candidate_id, "committed") != 0)
+   if (kb_store_artifact_set_state(candidate_id, "committed") != 0)
       return -1;
 
    char audit_id[37];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
    char after_json[160];
    snprintf(after_json, sizeof(after_json), "{\"state\":\"committed\",\"corroboration\":%d}",
             corroboration);
-   if (db2_audit_event_write(audit_id, candidate_id, surface, "", "kb.learning.judge", "", "", 1.0,
-                             0, "{\"state\":\"proposed\"}", after_json) != 0)
+   if (kb_store_audit_event_write(audit_id, candidate_id, surface, "", "kb.learning.judge", "", "",
+                                  1.0, 0, "{\"state\":\"proposed\"}", after_json) != 0)
       return -1;
 
    aimee_log(LOG_DEBUG, "learning_evidence",
@@ -586,13 +587,13 @@ int learning_evidence_write_feedback(const char *polarity, const char *title,
        (strcmp(polarity, "positive") == 0) ? "feedback_positive" : "feedback_negative";
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    char payload[512];
    build_feedback_payload(polarity, title, description, payload, sizeof(payload));
 
-   int rc = db2_artifact_write(id, kind, "proposed", "user", operator_id ? operator_id : "",
-                               operator_id ? operator_id : "", 1.0, payload);
+   int rc = kb_store_artifact_write(id, kind, "proposed", "user", operator_id ? operator_id : "",
+                                    operator_id ? operator_id : "", 1.0, payload);
    if (rc != 0)
    {
       aimee_log(LOG_DEBUG, "learning_evidence", "feedback artifact write failed (kind=%s)", kind);
@@ -613,8 +614,8 @@ int learning_evidence_write_retrieval_event(const char *query_fingerprint, const
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
 
-   int rc = db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced,
-                                               id_out, id_out_len);
+   int rc = kb_store_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids,
+                                                    n_surfaced, id_out, id_out_len);
    if (rc != 0)
    {
       aimee_log(LOG_DEBUG, "learning_evidence", "retrieval_event write failed");
@@ -630,8 +631,8 @@ int learning_evidence_write_retrieval_attribution(const char *retrieval_event_id
    if (!retrieval_event_id || !retrieval_event_id[0])
       return -1;
 
-   int rc = db2_demotion_retrieval_attribution_write(retrieval_event_id, surfaced_row_id, verdict,
-                                                     weight);
+   int rc = kb_store_demotion_retrieval_attribution_write(retrieval_event_id, surfaced_row_id,
+                                                          verdict, weight);
    if (rc != 0)
    {
       aimee_log(LOG_DEBUG, "learning_evidence", "retrieval_attribution write failed (row=%lld)",

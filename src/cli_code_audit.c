@@ -135,16 +135,14 @@ int audit_count_db_in_routes(const char *path, const char *content)
        path_starts_with(path, "controllers/") || path_starts_with(path, "handlers/");
    if (!route_like)
       return 0;
-   static const char *markers[] = {"aimee_pg_", "pg_query", "mysql_",      "SELECT ",
-                                   "INSERT ",   "UPDATE ",  "DELETE FROM "};
+   static const char *markers[] = {"kb_store_", "aimee_pg_", "pg_query", "mysql_",
+                                   "SELECT ",   "INSERT ",   "UPDATE ",  "DELETE FROM "};
    int count = 0;
    for (size_t m = 0; m < sizeof(markers) / sizeof(markers[0]); m++)
       count += audit_count_marker(content, markers[m]);
 
    char marker[16];
    snprintf(marker, sizeof(marker), "%s%s%s", "sqli", "te3", "_");
-   count += audit_count_marker(content, marker);
-   snprintf(marker, sizeof(marker), "%s%s%s", "db", "2", "_");
    count += audit_count_marker(content, marker);
    return count;
 }

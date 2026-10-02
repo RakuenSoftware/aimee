@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Datalog sidecar for graph reasoning over DB2 artifacts.
+"""Datalog sidecar for graph reasoning over KB_STORE artifacts.
 
 Implements semi-naive bottom-up evaluation of stratified Datalog rules
 over a read-only fact snapshot supplied by the C caller.

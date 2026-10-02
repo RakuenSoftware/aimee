@@ -19,7 +19,7 @@ explicit targets.
 
 ## Important gates
 
-- `check_tier_deps.sh`: DB1/DB2 ownership and forbidden storage vocabulary.
+- `check_tier_deps.sh`: DB1/KB_STORE ownership and forbidden storage vocabulary.
 - route/API checks: descriptor, handler, OpenAPI, and thin-client parity.
 - module checks: public headers, dependencies, descriptors, and documentation.
 - event-bus checks: wire conformance, one host, isolation, flow control, capture, blast radius, and

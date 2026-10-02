@@ -1,6 +1,6 @@
 /* util_url.h: canonical URL handling for project/workspace identity.
  *
- * Implements the URL normalization pipeline from the DB1/DB2 storage split
+ * Implements the URL normalization pipeline from the DB1/KB_STORE storage split
  * (docs/STORAGE_TIERS.md). The goal
  * is that two clones of the same repo on different machines — via different
  * transports, with different casing, and with or without a trailing .git —

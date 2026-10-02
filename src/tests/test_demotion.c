@@ -1,5 +1,5 @@
 #include "json_int64.h"
-/* test_demotion.c — unit tests for the demotion DB2 module.
+/* test_demotion.c — unit tests for the demotion KB_STORE module.
  *
  * Tests:
  *   1. retrieval_event_write: writes a retrieval_event artifact.
@@ -15,21 +15,21 @@
 #include <string.h>
 #include "demotion.h"
 #include "json_fluent.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "support/json_canonical.h"
-#include "modules/db2/c/db2_internal.h"
+#include "modules/kb/c/kb_store_internal.h"
 #include "db_postgres.h"
 #include "config.h"
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* ---- 1. retrieval_event_write ---- */
@@ -39,7 +39,8 @@ static void test_retrieval_event_write(void)
 
    int64_t ids[3] = {101, 202, 303};
    char ev_id[64];
-   int rc = db2_demotion_retrieval_event_write("fp123", "Recall", ids, 3, ev_id, sizeof(ev_id));
+   int rc =
+       kb_store_demotion_retrieval_event_write("fp123", "Recall", ids, 3, ev_id, sizeof(ev_id));
    assert(rc == 0);
    assert(strlen(ev_id) == 36);
 
@@ -54,57 +55,58 @@ static void test_retrieval_event_turn(void)
 
    int64_t ids[2] = {11, 22};
    char ev_id[64];
-   assert(db2_demotion_retrieval_event_write_turn("turn-abc", "fp", "Recall", ids, 2, ev_id,
-                                                  sizeof(ev_id)) == 0);
+   assert(kb_store_demotion_retrieval_event_write_turn("turn-abc", "fp", "Recall", ids, 2, ev_id,
+                                                       sizeof(ev_id)) == 0);
 
    /* look it up by the caller-visible turn_id. */
    char got_id[64], payload[8192];
-   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
-                                               sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                                    sizeof(payload)) == 1);
    assert(strcmp(got_id, ev_id) == 0);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22]") != NULL);
 
    /* A trace is either complete or explicitly unavailable, never truncated. */
    int bytes = (int)strlen(payload);
-   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
-                                               bytes + 1) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                                    bytes + 1) == 1);
    assert((int)strlen(payload) == bytes);
-   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
-                                               bytes) == -1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                                    bytes) == -1);
    assert(got_id[0] == 0 && payload[0] == 0);
    char tiny_id[8];
-   assert(db2_demotion_retrieval_event_by_turn("turn-abc", tiny_id, sizeof(tiny_id), payload,
-                                               sizeof(payload)) == -1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-abc", tiny_id, sizeof(tiny_id), payload,
+                                                    sizeof(payload)) == -1);
    assert(tiny_id[0] == 0 && payload[0] == 0);
 
    /* an unknown turn -> no event (0), not an error. */
-   assert(db2_demotion_retrieval_event_by_turn("turn-missing", got_id, sizeof(got_id), NULL, 0) ==
-          0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-missing", got_id, sizeof(got_id), NULL,
+                                                    0) == 0);
    assert(got_id[0] == '\0');
 
    /* DUPLICATE turn_id is first-wins: a second write for the same turn returns the
     * AUTHORITATIVE (first) event id, and by_turn still resolves to that one event. */
    char dup_id[64];
-   assert(db2_demotion_retrieval_event_write_turn("turn-abc", "fp2", "Recall", NULL, 0, dup_id,
-                                                  sizeof(dup_id)) == 0);
+   assert(kb_store_demotion_retrieval_event_write_turn("turn-abc", "fp2", "Recall", NULL, 0, dup_id,
+                                                       sizeof(dup_id)) == 0);
    assert(strcmp(dup_id, ev_id) == 0); /* returned the first event's id, not the orphan's */
    char reget[64];
-   assert(db2_demotion_retrieval_event_by_turn("turn-abc", reget, sizeof(reget), NULL, 0) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-abc", reget, sizeof(reget), NULL, 0) ==
+          1);
    assert(strcmp(reget, ev_id) == 0); /* still resolves to the original */
 
    /* a NULL/"" turn_id behaves like the base writer (no stamp, still written) and
     * such events are never found by a turn lookup. */
    char ev2[64];
-   assert(db2_demotion_retrieval_event_write_turn(NULL, "fp", "Recall", NULL, 0, ev2,
-                                                  sizeof(ev2)) == 0);
+   assert(kb_store_demotion_retrieval_event_write_turn(NULL, "fp", "Recall", NULL, 0, ev2,
+                                                       sizeof(ev2)) == 0);
    assert(strlen(ev2) == 36);
 
    /* legacy (turn-less) events do not collide on the partial unique index. */
-   assert(db2_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
 
    /* bad args. */
-   assert(db2_demotion_retrieval_event_by_turn(NULL, got_id, sizeof(got_id), NULL, 0) == -1);
+   assert(kb_store_demotion_retrieval_event_by_turn(NULL, got_id, sizeof(got_id), NULL, 0) == -1);
 
    close_db();
    printf("  retrieval_event_turn: ok\n");
@@ -118,10 +120,11 @@ static void test_retrieval_event_merge_turn(void)
    /* First writer on a fresh turn → behaves like write_turn (creates the event). */
    int64_t a[2] = {11, 22};
    char ev_id[64];
-   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp", "Recall", a, 2, ev_id,
-                                                  sizeof(ev_id)) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_turn("turn-m", "fp", "Recall", a, 2, ev_id,
+                                                       sizeof(ev_id)) == 0);
    char payload[8192];
-   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22]") != NULL);
    /* unified model (D3): the canonical surfaced_refs carries typed entries, and the
     * legacy surfaced_ids is a derived projection of the memory-typed ones. */
@@ -132,10 +135,11 @@ static void test_retrieval_event_merge_turn(void)
     * dup and is skipped; 33 is added). Returns the same canonical event id. */
    int64_t b[2] = {22, 33};
    char got[64];
-   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp2", "Recall", b, 2, got,
-                                                  sizeof(got)) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_turn("turn-m", "fp2", "Recall", b, 2, got,
+                                                       sizeof(got)) == 0);
    assert(strcmp(got, ev_id) == 0); /* same event, not a new one */
-   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22,33]") != NULL);
    /* the merged ref also gets a surfaced_items entry (same shape as the writer) */
    assert(strstr(json_canonical(payload), "\"surfaced_items\":") != NULL);
@@ -144,18 +148,20 @@ static void test_retrieval_event_merge_turn(void)
 
    /* Idempotent: re-merging refs already present changes nothing. */
    int64_t c[2] = {11, 33};
-   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp3", "Recall", c, 2, NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_merge_turn("turn-m", "fp3", "Recall", c, 2, NULL, 0) ==
+          0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22,33]") != NULL); /* unchanged */
 
    /* bad arg. */
-   assert(db2_demotion_retrieval_event_merge_turn("", "fp", "Recall", a, 2, NULL, 0) == -1);
+   assert(kb_store_demotion_retrieval_event_merge_turn("", "fp", "Recall", a, 2, NULL, 0) == -1);
 
    /* LEGACY MIGRATION: an event written before the unified model (surfaced_ids only,
     * no surfaced_refs) is migrated on the next merge — surfaced_refs is back-filled
     * and the new ref added, with the projection kept in sync. */
    {
-      void *conn = db2_conn();
+      void *conn = kb_store_conn();
       char e[256] = "";
       assert(aimee_pg_exec(conn,
                            "INSERT INTO artifacts (id, kind, turn_id, payload)"
@@ -163,10 +169,10 @@ static void test_retrieval_event_merge_turn(void)
                            " '{\"surfaced_ids\":[7],\"surfaced_items\":[{\"id\":7,\"v\":\"x\"}]}')",
                            e, sizeof e) == 0);
       int64_t d[1] = {8};
-      assert(db2_demotion_retrieval_event_merge_turn("turn-leg", "fp", "Recall", d, 1, NULL, 0) ==
-             0);
-      assert(db2_demotion_retrieval_event_by_turn("turn-leg", NULL, 0, payload, sizeof(payload)) ==
-             1);
+      assert(kb_store_demotion_retrieval_event_merge_turn("turn-leg", "fp", "Recall", d, 1, NULL,
+                                                          0) == 0);
+      assert(kb_store_demotion_retrieval_event_by_turn("turn-leg", NULL, 0, payload,
+                                                       sizeof(payload)) == 1);
       assert(strstr(json_canonical(payload), "\"surfaced_refs\":") != NULL); /* back-filled */
       assert(strstr(json_canonical(payload), "\"surfaced_ids\":[7,8]") !=
              NULL);                                                   /* migrated 7 + merged 8 */
@@ -182,15 +188,15 @@ static void test_exact_source_ids(void)
 {
    open_db();
    const int64_t ids[] = {42, INT64_C(9007199254740992), INT64_C(9007199254740993), INT64_MAX};
-   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 2, NULL, 0) ==
-          0);
-   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids + 1, 3, NULL,
-                                                  0) == 0);
-   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 4, NULL, 0) ==
-          0);
+   assert(kb_store_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 2, NULL,
+                                                       0) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids + 1, 3,
+                                                       NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 4, NULL,
+                                                       0) == 0);
    char payload[8192], event_id[64];
-   assert(db2_demotion_retrieval_event_by_turn("exact-ids", event_id, sizeof(event_id), payload,
-                                               sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("exact-ids", event_id, sizeof(event_id),
+                                                    payload, sizeof(payload)) == 1);
    cJSON *event = cJSON_Parse(payload);
    const char *fields[] = {"surfaced_ids", "surfaced_refs", "surfaced_items"};
    for (int f = 0; f < 3; f++)
@@ -208,10 +214,10 @@ static void test_exact_source_ids(void)
       }
    }
    cJSON_Delete(event);
-   assert(db2_demotion_retrieval_attribution_write(event_id, ids[2], "accepted", 0.8) == 0);
+   assert(kb_store_demotion_retrieval_attribution_write(event_id, ids[2], "accepted", 0.8) == 0);
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT payload FROM artifacts WHERE kind='retrieval_attribution' AND "
                         "scope_id='9007199254740993'",
                         err, sizeof(err));
@@ -222,7 +228,7 @@ static void test_exact_source_ids(void)
    aimee_pg_finalize(st);
 
    /* Never backfill already ambiguous numeric IDs into a plausible identity. */
-   assert(aimee_pg_exec(db2_conn(),
+   assert(aimee_pg_exec(kb_store_conn(),
                         "INSERT INTO artifacts(id,kind,turn_id,payload) VALUES "
                         "('unsafe-legacy','retrieval_event','unsafe-legacy','{\"surfaced_ids\":["
                         "9007199254740993]}'), "
@@ -233,11 +239,12 @@ static void test_exact_source_ids(void)
    for (int i = 0; i < 2; i++)
    {
       char before[8192];
-      assert(db2_demotion_retrieval_event_by_turn(turns[i], NULL, 0, before, sizeof(before)) == 1);
-      assert(db2_demotion_retrieval_event_merge_turn(turns[i], "fp", "Recall", ids, 1, NULL, 0) ==
-             -1);
-      assert(db2_demotion_retrieval_event_by_turn(turns[i], NULL, 0, payload, sizeof(payload)) ==
+      assert(kb_store_demotion_retrieval_event_by_turn(turns[i], NULL, 0, before, sizeof(before)) ==
              1);
+      assert(kb_store_demotion_retrieval_event_merge_turn(turns[i], "fp", "Recall", ids, 1, NULL,
+                                                          0) == -1);
+      assert(kb_store_demotion_retrieval_event_by_turn(turns[i], NULL, 0, payload,
+                                                       sizeof(payload)) == 1);
       assert(!strcmp(before, payload));
    }
    close_db();
@@ -263,10 +270,11 @@ static void test_retrieval_event_merge_refs(void)
 
    /* code ref on a fresh turn → a bare event is created, then the typed ref merged. */
    char ev_id[64];
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
-                                                       1, ev_id, sizeof(ev_id)) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs,
+                                                            vers, 1, ev_id, sizeof(ev_id)) == 0);
    char payload[8192];
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "\"type\":\"code\"") != NULL);
    assert(strstr(json_canonical(payload), "code:proj:src/a.c") != NULL);
    assert(strstr(json_canonical(payload), "\"v\":\"h1\"") != NULL);
@@ -275,56 +283,62 @@ static void test_retrieval_event_merge_refs(void)
 
    /* second call: a.c is a dup (skipped), b.c is added; same canonical event. */
    char got[64];
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
-                                                       2, got, sizeof(got)) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs,
+                                                            vers, 2, got, sizeof(got)) == 0);
    assert(strcmp(got, ev_id) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "code:proj:src/b.c") != NULL);
    assert(count_occurrences(json_canonical(payload), "code:proj:src/a.c") ==
           1); /* deduped, not duplicated */
 
    /* idempotent: re-merging both refs changes nothing. */
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
-                                                       2, NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs,
+                                                            vers, 2, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(count_occurrences(json_canonical(payload), "code:proj:src/a.c") == 1);
    assert(count_occurrences(json_canonical(payload), "code:proj:src/b.c") == 1);
 
    /* COEXISTENCE: a memory ref merged into the same turn lives alongside the code
     * refs in surfaced_refs; the legacy projection contains only the memory id. */
    int64_t mids[1] = {55};
-   assert(db2_demotion_retrieval_event_merge_turn("turn-c", "fp", "Recall", mids, 1, NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_merge_turn("turn-c", "fp", "Recall", mids, 1, NULL,
+                                                       0) == 0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "\"type\":\"memory\"") != NULL);
    assert(strstr(json_canonical(payload), "\"type\":\"code\"") != NULL);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[55]") != NULL);
 
    /* empty turn_id rejected; empty type/ref entries skipped (no-op success). */
-   assert(db2_demotion_retrieval_event_merge_refs_turn("", "fp", "Recall", types, refs, vers, 1,
-                                                       NULL, 0) == -1);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("", "fp", "Recall", types, refs, vers,
+                                                            1, NULL, 0) == -1);
    const char *empty_t[1] = {""};
    const char *empty_r[1] = {""};
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", empty_t, empty_r,
-                                                       NULL, 1, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", empty_t,
+                                                            empty_r, NULL, 1, NULL, 0) == 0);
 
    /* versions==NULL → v omitted; a fresh code ref still merges. */
    const char *t2[1] = {"code"};
    const char *r2[1] = {"code:proj:src/c.c"};
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", t2, r2, NULL, 1,
-                                                       NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", t2, r2, NULL,
+                                                            1, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "code:proj:src/c.c") != NULL);
 
    /* n_refs==0 is a valid no-op on an existing turn. */
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", NULL, NULL, NULL,
-                                                       0, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", NULL, NULL,
+                                                            NULL, 0, NULL, 0) == 0);
 
    /* a "memory"-typed entry is skipped here (it must use merge_turn). */
    const char *tm[1] = {"memory"};
    const char *rm[1] = {"memory:99"};
-   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", tm, rm, NULL, 1,
-                                                       NULL, 0) == 0);
-   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(kb_store_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", tm, rm, NULL,
+                                                            1, NULL, 0) == 0);
+   assert(kb_store_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) ==
+          1);
    assert(strstr(json_canonical(payload), "memory:99") == NULL); /* not added */
 
    close_db();
@@ -337,12 +351,15 @@ static void test_retrieval_attribution_write(void)
    open_db();
 
    char ev_id[64];
-   assert(db2_demotion_retrieval_event_write("fp", "Recall", NULL, 0, ev_id, sizeof(ev_id)) == 0);
+   assert(kb_store_demotion_retrieval_event_write("fp", "Recall", NULL, 0, ev_id, sizeof(ev_id)) ==
+          0);
 
-   int rc = db2_demotion_retrieval_attribution_write(ev_id, 42, DEMOTION_VERDICT_ACCEPTED, 0.8);
+   int rc =
+       kb_store_demotion_retrieval_attribution_write(ev_id, 42, DEMOTION_VERDICT_ACCEPTED, 0.8);
    assert(rc == 0);
 
-   int rc2 = db2_demotion_retrieval_attribution_write(ev_id, 42, DEMOTION_VERDICT_CORRECTED, 0.5);
+   int rc2 =
+       kb_store_demotion_retrieval_attribution_write(ev_id, 42, DEMOTION_VERDICT_CORRECTED, 0.5);
    assert(rc2 == 0);
 
    close_db();

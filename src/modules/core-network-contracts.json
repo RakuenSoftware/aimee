@@ -149,11 +149,31 @@
       "audit_disposition": "formally constrained core exception; higher-level action events are durable and transport bodies are excluded",
       "review_boundary": "no count or file expansion without Runtime Security approval and an egress-module migration decision",
       "matches": [
-        {"primitive": "http", "path": "src/modules/git/git_oauth_device.c", "count": 3},
-        {"primitive": "http", "path": "src/modules/git/git_oauth_github.c", "count": 3},
-        {"primitive": "http", "path": "src/modules/git/git_org_repos.c", "count": 2},
-        {"primitive": "http", "path": "src/modules/git/git_pr_api.c", "count": 5},
-        {"primitive": "http", "path": "src/modules/protocols/mcp/mcp_client.c", "count": 4}
+        {
+          "primitive": "http",
+          "path": "src/modules/git/git_oauth_device.c",
+          "count": 3
+        },
+        {
+          "primitive": "http",
+          "path": "src/modules/git/git_oauth_github.c",
+          "count": 3
+        },
+        {
+          "primitive": "http",
+          "path": "src/modules/git/git_org_repos.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/modules/git/git_pr_api.c",
+          "count": 5
+        },
+        {
+          "primitive": "http",
+          "path": "src/modules/protocols/mcp/mcp_client.c",
+          "count": 4
+        }
       ]
     },
     {
@@ -240,7 +260,11 @@
       "audit_disposition": "upstream model ingress owns request audit; proxy does not persist request bodies or credentials",
       "review_boundary": "bind address, route allowlist, framing, authentication, credential isolation, and lifecycle changes require thin-client and Runtime Security review; covered by test_thin_client_proxy.py",
       "matches": [
-        {"primitive": "inet_socket", "path": "src/core/connection/socket.c", "count": 1}
+        {
+          "primitive": "inet_socket",
+          "path": "src/core/connection/socket.c",
+          "count": 1
+        }
       ]
     },
     {
@@ -282,28 +306,6 @@
           "primitive": "tls_connect",
           "path": "src/core/connection/tls_openssl.c",
           "count": 2
-        }
-      ]
-    },
-    {
-      "id": "postgres-store-connections",
-      "owner": "DB2 store and WORM delivery worker",
-      "direction": "outbound",
-      "purpose": "PostgreSQL store transport",
-      "destination_constraint": "operator DSN with required role, TLS, schema, and startup posture checks",
-      "credential_constraint": "separate runtime/migrator credentials supplied through sealed deployment configuration",
-      "audit_disposition": "store mutations and WORM delivery have transaction/durability evidence; DSNs are never logged",
-      "review_boundary": "new PostgreSQL connection owners require DB2 and Data Authorization review",
-      "matches": [
-        {
-          "primitive": "postgres",
-          "path": "src/kb/kb_worm_worker_main.c",
-          "count": 1
-        },
-        {
-          "primitive": "postgres",
-          "path": "src/modules/db2/c/db_postgres.c",
-          "count": 1
         }
       ]
     },

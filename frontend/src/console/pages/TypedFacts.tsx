@@ -4,7 +4,7 @@ import { apiGet, apiSend } from "../api";
 /* Typed Facts page: the kb's typed-fact layer — its knobs, and the promotion
  * review queue for provisional relations.
  *
- * The typed-fact layer is a kb property end to end: the ontology lives in DB2,
+ * The typed-fact layer is a kb property end to end: the ontology lives in KB_STORE,
  * the promotion sweep runs in the kb, and `kb_typed_facts_auto_promote_enabled`
  * and `kb_typed_facts_promote_threshold` are not even in aimee-server's
  * config_fields allowlist — POST /v1/console/typed_facts/config is their only

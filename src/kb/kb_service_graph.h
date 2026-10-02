@@ -1,5 +1,5 @@
 /* kb_service_graph.h: aimee-kb dispatch handlers for the graph.* RPC family
- * (code projection sync and graph explain) that runs against DB2. */
+ * (code projection sync and graph explain) that runs against KB_STORE. */
 #ifndef DEC_KB_SERVICE_GRAPH_H
 #define DEC_KB_SERVICE_GRAPH_H 1
 
@@ -11,7 +11,7 @@
  * (content-addressed via the project fingerprint), so the curator drain stays
  * cheap when nothing changed. *rebuilt is set to 1 when a generation was
  * published, 0 when skipped. Returns edge count (>=0) on build, 0 on skip, -1 on
- * error. KB-side (in-process DB2). */
+ * error. KB-side (in-process KB_STORE). */
 int64_t kb_graph_build_project_if_changed(const char *project, int *rebuilt);
 
 /* §3 provenance tag for a graph edge, derived (no column) from its origin +

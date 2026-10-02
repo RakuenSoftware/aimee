@@ -1,13 +1,13 @@
 /* test_curator_invalidate.c: a changed/removed source doc marks its derived
- * curator artifacts stale (db2_curator_invalidate_doc). */
+ * curator artifacts stale (kb_store_curator_invalidate_doc). */
 #include <assert.h>
 #include <stdio.h>
 
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/kb_payload.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "modules/kb/c/kb_payload.h"
 
 static int scalar(sqlite3 *db, const char *sql)
 {
@@ -21,11 +21,11 @@ static int scalar(sqlite3 *db, const char *sql)
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_invalidate"))
+   if (kb_store_test_shim_skip_on_postgres("curator_invalidate"))
       return 0;
 
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    assert(sqlite3_exec(db,
@@ -52,25 +52,25 @@ int main(void)
             doc_id);
    assert(sqlite3_exec(db, ins, NULL, NULL, NULL) == SQLITE_OK);
 
-   int n = db2_curator_invalidate_doc("p", "f.md");
+   int n = kb_store_curator_invalidate_doc("p", "f.md");
    assert(n >= 1);
    assert(scalar(db, "SELECT COUNT(*) FROM artifacts WHERE id='a1' AND state='stale'") == 1);
    assert(scalar(db, "SELECT COUNT(*) FROM artifacts WHERE id='a2' AND state='committed'") == 1);
 
    /* Unknown file invalidates nothing. */
-   assert(db2_curator_invalidate_doc("p", "other.md") == 0);
+   assert(kb_store_curator_invalidate_doc("p", "other.md") == 0);
 
    /* The invalidation was recorded as a pollable event. */
-   db2_curator_invalidation_t evs[16];
-   int ne = db2_curator_invalidations_since(0, evs, 16);
+   kb_store_curator_invalidation_t evs[16];
+   int ne = kb_store_curator_invalidations_since(0, evs, 16);
    assert(ne == 1);
    assert(strcmp(evs[0].source_kind, "kb_file") == 0);
    assert(strcmp(evs[0].source_id, "f.md") == 0);
    assert(evs[0].artifacts_stale >= 1);
    /* since=last id returns nothing new. */
-   assert(db2_curator_invalidations_since(evs[0].id, evs, 16) == 0);
+   assert(kb_store_curator_invalidations_since(evs[0].id, evs, 16) == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  invalidate_doc marks citing artifacts stale OK\n");
    printf("curator_invalidate: all tests passed\n");
    return 0;

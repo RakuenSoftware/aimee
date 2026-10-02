@@ -441,10 +441,10 @@ static void test_config_deploy_env_is_routed(void)
 /* `memory get <id> --as-of <ts>` must reach the server, and its answer must be
  * printed.
  *
- * db2_memory_valid_at() had no production caller at all: the supersession WRITE
+ * kb_store_memory_valid_at() had no production caller at all: the supersession WRITE
  * that closes valid_until was live, but nothing could ever READ the interval, so
  * "was this true on 12 June" was unanswerable for rows though the data was being
- * recorded. A DB2 primitive with only tests calling it is not a feature.
+ * recorded. A KB_STORE primitive with only tests calling it is not a feature.
  *
  * The id must stay positional even with the flag present, and "unknown" has to
  * survive as a third answer -- the server returns it when it could not tell, and

@@ -51,10 +51,10 @@ status-function privileges. Conversely, `aimee_kb_runtime` may execute
 `kb_audit_worm_submit(...)` but cannot manipulate either ledger or invoke the
 worker API. PostgreSQL no longer creates or owns a KB WORM chain table.
 
-Give the worker a credential distinct from `AIMEE_DB2_URL`:
+Give the worker a credential distinct from the application runtime `AIMEE_STORE_URL`:
 
 ```sh
-AIMEE_WORM_DB2_URL='postgresql://aimee_kb_worm_worker:...@db/aimee' \
+AIMEE_WORM_POSTGRES_URL='postgresql://aimee_kb_worm_worker:...@db/aimee' \
   AIMEE_HOME=/var/lib/aimee-worm \
   AIMEE_WORM_PATH=/var/lib/aimee-worm/audit/kb-worm-live.db \
   aimee-kb-worm
@@ -98,3 +98,43 @@ aimee-kb-worm --batch=128 --poll-ms=1000
 The real-PostgreSQL recovery and privilege proof is
 `scripts/run-worm-worker-pg-test.sh`. The static regression gate is
 `make -C src worm-worker-boundary-check`.
+
+## Trace a memory mutation to delivery
+
+New shared-memory mutation intents include `changeset_id` and `evidence_event_id` in
+content-free outbox metadata. The event ID identifies the individual mutation when a
+changeset contains several rows. Older intents have only the changeset ID; do not infer
+an exact event match for those rows.
+
+An operator with read access can inspect a known changeset using `psql -v changeset_id=...`:
+
+```sql
+WITH intents AS (
+  SELECT o.*, CASE WHEN detail IS JSON OBJECT THEN detail::jsonb END AS metadata
+  FROM kb_audit_outbox o WHERE action LIKE 'memory.%'
+)
+SELECT i.metadata->>'changeset_id' AS changeset_id,
+       i.metadata->>'evidence_event_id' AS evidence_event_id,
+       i.outbox_id, 'kb:' || i.outbox_id AS worm_event_id,
+       d.audit_seq, d.sealed_at,
+       CASE WHEN d.outbox_id IS NULL THEN 'pending' ELSE 'delivered' END AS delivery,
+       e.event_id IS NOT NULL AS detailed_evidence_retained
+FROM intents i
+LEFT JOIN kb_audit_delivery d USING (outbox_id)
+LEFT JOIN memory_evidence_events e
+  ON e.event_id=i.metadata->>'evidence_event_id'
+ AND e.changeset_id=i.metadata->>'changeset_id'
+WHERE i.metadata->>'changeset_id'=:'changeset_id'
+ORDER BY i.outbox_id;
+```
+
+Run this in a separate transaction after the writer commits. A visible intent proves
+committed intent, and a delivery receipt records the worker's acknowledgment. Verify the
+SQLite chain and the matching `kb:<outbox_id>` event before claiming chain verification.
+An empty result does not prove that no mutation happened: check placement, changeset,
+retention, and legacy metadata first. This query describes KB delivery; Server has its own
+private audit store.
+
+Worker downtime leaves committed intents pending. An outbox insertion failure aborts
+the originating mutation. Erasing detailed evidence does not erase immutable identifiers
+or delivery receipts, but those receipts cannot reconstruct erased memory content.

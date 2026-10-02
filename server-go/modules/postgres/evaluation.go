@@ -33,7 +33,7 @@ type EvaluationStore struct {
 }
 
 // OpenEvaluationStore requires an explicit disposable PostgreSQL admin DSN in
-// AIMEE_DB2_EVAL_URL. It never falls back to a live storage URL, changes the
+// AIMEE_KB_STORE_EVAL_URL. It never falls back to a live storage URL, changes the
 // supplied database, or reuses public there. A separate database is necessary:
 // knowledge schema functions deliberately qualify their objects with public.
 // Call Close even after cancellation; its error reports failed cleanup.
@@ -44,11 +44,11 @@ func OpenEvaluationStore(ctx context.Context, schema string) (*EvaluationStore, 
 	lifetime := ctx
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	url := os.Getenv("AIMEE_DB2_EVAL_URL")
+	url := os.Getenv("AIMEE_KB_STORE_EVAL_URL")
 	if url == "" {
-		return nil, errors.New("postgres evaluation requires AIMEE_DB2_EVAL_URL (disposable PostgreSQL admin DSN)")
+		return nil, errors.New("postgres evaluation requires AIMEE_KB_STORE_EVAL_URL (disposable PostgreSQL admin DSN)")
 	}
-	config, err := parseStoreConfigFor("AIMEE_DB2_EVAL_URL", url)
+	config, err := parseStoreConfigFor("AIMEE_KB_STORE_EVAL_URL", url)
 	if err != nil {
 		return nil, err
 	}

@@ -4,12 +4,12 @@
  *
  * Embed the query, scan stored evidence vectors, rank by cosine similarity,
  * and return the top-K neighbours (which naturally span multiple evidence
- * kinds). DB2 only; no DB1 access from this file. */
+ * kinds). KB_STORE only; no DB1 access from this file. */
 
 #include "learning_bundle.h"
 
 #include "aimee.h"
-#include "modules/db2/c/evidence_vectors.h"
+#include "modules/kb/c/evidence_vectors.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -106,11 +106,11 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
    if (qdim <= 0)
       return -1;
 
-   db2_evidence_vector_row_t *rows = calloc(BUNDLE_SCAN_MAX, sizeof(*rows));
+   kb_store_evidence_vector_row_t *rows = calloc(BUNDLE_SCAN_MAX, sizeof(*rows));
    if (!rows)
       return -1;
 
-   int got = db2_evidence_vectors_list(rows, BUNDLE_SCAN_MAX);
+   int got = kb_store_evidence_vectors_list(rows, BUNDLE_SCAN_MAX);
    if (got < 0)
    {
       free(rows);
@@ -147,7 +147,7 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
    int take = nscored < k ? nscored : k;
    for (int i = 0; i < take; i++)
    {
-      db2_evidence_vector_row_t *r = &rows[scored[i].row];
+      kb_store_evidence_vector_row_t *r = &rows[scored[i].row];
       learning_bundle_item_t *it = &out->items[i];
       snprintf(it->artifact_id, sizeof(it->artifact_id), "%s", r->artifact_id);
       snprintf(it->kind, sizeof(it->kind), "%s", r->kind);

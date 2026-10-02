@@ -23,7 +23,11 @@
     "server-go/modules/postgres/storage/unlock_other.go",
     "server-go/modules/postgres/storage/volume_linux.go",
     "server-go/modules/postgres/credentials.go",
-    "server-go/modules/postgres/evaluation.go"
+    "server-go/modules/postgres/evaluation.go",
+    "server-go/modules/postgres/sessions.go",
+    "server-go/modules/postgres/local_session.go",
+    "server-go/modules/postgres/runtime_policy.go",
+    "server-go/modules/postgres/operator_policy.go"
   ],
   "go_tests": [
     "server-go/modules/postgres/checksum_test.go",
@@ -36,12 +40,28 @@
     "server-go/modules/postgres/storage/plain_linux_test.go",
     "server-go/modules/postgres/storage/storage_linux_test.go",
     "server-go/modules/postgres/credentials_test.go",
-    "server-go/modules/postgres/evaluation_test.go"
+    "server-go/modules/postgres/evaluation_test.go",
+    "server-go/modules/postgres/sessions_test.go",
+    "server-go/modules/postgres/local_session_test.go",
+    "server-go/modules/postgres/runtime_policy_test.go",
+    "server-go/modules/postgres/operator_policy_test.go"
   ],
   "public_headers": [
-    "src/modules/postgres/include/aimee/postgres/module_api.h"
+    "src/modules/postgres/include/aimee/postgres/module_api.h",
+    "src/modules/postgres/include/aimee/postgres/client.h"
   ],
   "docs": [
     "docs/modules/postgres.md"
+  ],
+  "sources": [
+    "src/modules/postgres/client/session.c",
+    "src/modules/postgres/client/local_session.c"
+  ],
+  "private_headers": [
+    "src/modules/postgres/client/session_internal.h"
+  ],
+  "tests": [
+    "src/tests/test_postgres_session_transport.c",
+    "src/tests/test_postgres_local_session.c"
   ]
 }

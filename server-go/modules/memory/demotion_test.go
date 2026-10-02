@@ -181,7 +181,7 @@ func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		t.Fatal(p, a, touch)
 	}
 	// A second host must skip instead of overlapping an in-flight run.
-	other, err := pgx.Connect(ctx, os.Getenv("AIMEE_DB2_REPLAY_URL"))
+	other, err := pgx.Connect(ctx, os.Getenv("AIMEE_KB_STORE_REPLAY_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,12 +30,12 @@
 
 typedef struct
 {
-   db2_management_jwks_publication_ctx_t db; /* Must remain first: shared callback opaque. */
+   kb_store_management_jwks_publication_ctx_t db; /* Must remain first: shared callback opaque. */
 } publisher_ctx_t;
 
 typedef struct
 {
-   const db2_management_jwks_admission_t *admission;
+   const kb_store_management_jwks_admission_t *admission;
    const kb_mgmt_root_record_t *manifest;
    const uint8_t *payload;
    size_t payload_len;
@@ -313,7 +313,7 @@ static kb_mgmt_jwks_result_t protected_sign(void *opaque, const kb_mgmt_root_rec
                                             uint8_t signature[KB_MGMT_JWKS_SIGNATURE_LEN])
 {
    publisher_ctx_t *ctx = opaque;
-   db2_management_jwks_admission_t admission;
+   kb_store_management_jwks_admission_t admission;
    uint8_t live_attestation[KB_MGMT_ROOT_ATTEST_MAX];
    size_t live_attestation_len = 0;
    uint64_t live_version = 0;
@@ -344,7 +344,7 @@ static kb_mgmt_jwks_result_t protected_sign(void *opaque, const kb_mgmt_root_rec
       return KB_MGMT_JWKS_INTEGRITY;
    }
    OPENSSL_cleanse(live_attestation, sizeof(live_attestation));
-   kb_mgmt_jwks_db_result_t dr = db2_management_jwks_manifest_key_admit(
+   kb_mgmt_jwks_db_result_t dr = kb_store_management_jwks_manifest_key_admit(
        &ctx->db, use_id, generation, candidate_id, manifest, payload_digest, &admission);
    OPENSSL_cleanse(use_id, sizeof(use_id));
    if (dr != KB_MGMT_JWKS_DB_OK)
@@ -501,16 +501,16 @@ int main(int argc, char **argv)
    }
    stderr_silenced = 1;
    char db_error[256] = "";
-   if (db2_management_jwks_publication_open(&publisher.db, db_url, db_error, sizeof(db_error)))
+   if (kb_store_management_jwks_publication_open(&publisher.db, db_url, db_error, sizeof(db_error)))
    {
       OPENSSL_cleanse(db_error, sizeof(db_error));
       exit_code = EXIT_DATABASE;
       goto provider_done;
    }
    db_open = 1;
-   if (db2_management_jwks_publication_set_provider_binding(&publisher.db, helper, hwm_domain,
-                                                            identity_digest) ||
-       db2_management_jwks_publication_bind(&publisher.db, &callbacks))
+   if (kb_store_management_jwks_publication_set_provider_binding(&publisher.db, helper, hwm_domain,
+                                                                 identity_digest) ||
+       kb_store_management_jwks_publication_bind(&publisher.db, &callbacks))
    {
       OPENSSL_cleanse(db_error, sizeof(db_error));
       exit_code = EXIT_DATABASE;
@@ -577,7 +577,7 @@ provider_done:
    if (provider_unsealed && vault_seal())
       exit_code = EXIT_CUSTODY;
    if (db_open)
-      db2_management_jwks_publication_close(&publisher.db);
+      kb_store_management_jwks_publication_close(&publisher.db);
    if (stderr_silenced && restore_stderr(&saved_stderr))
       exit_code = EXIT_HARDENING;
 done:

@@ -3,7 +3,7 @@
 # Run this INSIDE a throwaway Debian host or container, as root.
 #
 # The important detail, and the one that cost an hour the first time: do NOT
-# hand-apply src/modules/db2/c/schema.sql with `psql -f`. It is a TEMPLATE. The
+# hand-apply src/modules/kb/c/schema.sql with `psql -f`. It is a TEMPLATE. The
 # service substitutes the __EMBED_DIM__ placeholder from the configured embedder
 # width at init, and writes bookkeeping rows psql never will. A raw apply leaves
 # kb_meta.schema_embedding_dim holding the literal string "__EMBED_DIM__", so

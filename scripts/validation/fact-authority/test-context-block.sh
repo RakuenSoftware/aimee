@@ -73,7 +73,7 @@ seed() { # $1 = confidence_class  $2 = confidence
 state() { $P "select confidence_class || ' ' || case when superseded_at='' and invalidated_at='' and suppressed=0 then 'current' else 'gone' end from entity_edges where id=${1:-0}"; }
 
 # The retraction pre-scan runs through the memory module's EXTRACT_INDEX stage
-# (5889). When that stage does not answer, db2_typed_fact_ingress logs
+# (5889). When that stage does not answer, kb_store_typed_fact_ingress logs
 # "retraction scan gave no answer; not retracting this turn" and returns without
 # ever reaching the authority decision -- so both facts survive and this test
 # passes while proving nothing. That is the same false-positive shape as a probe
@@ -127,8 +127,8 @@ echo "  (the scan answered, so what follows reflects an authority decision)"
 # success for the very defect it was written to catch. The header calls this
 # path the sharpest form of gap 1, and the probe was blind to it.
 #
-# The real defect it was hiding: db2_typed_fact_ingress() tried
-# db2_fact_actor_from_request() FIRST and used the declared authority only as a
+# The real defect it was hiding: kb_store_typed_fact_ingress() tried
+# kb_store_fact_actor_from_request() FIRST and used the declared authority only as a
 # fallback. That function returns FACT_ACTOR_USER for any authenticated
 # principal, so the FACT_AUTHORITY_MODEL that kb_handle_memory_context_block()
 # passes on purpose was discarded whenever a request context existed -- which is

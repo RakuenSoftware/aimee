@@ -1,7 +1,7 @@
 /* kb_insights_util.h: pure, dependency-light helpers for /v1/insights/spend (P3b).
  *
  * Two testable-in-isolation pieces of the spend reporting surface, kept out of the HTTP
- * TU so the unit test can link them without the db2/tenant/router stack:
+ * TU so the unit test can link them without the kb_store/tenant/router stack:
  *   - kb_insights_date_valid(): boundary ISO-date validation (the route rejects a
  *     malformed date with 400 BEFORE the definer call; the definer re-validates too);
  *   - kb_insights_spend_json(): assembles the response JSON from the grouped rows,
@@ -37,7 +37,7 @@ extern "C"
     * Returns a malloc'd unformatted JSON string (caller frees), or NULL on OOM. */
    char *kb_insights_spend_json(int has_team, long long team, int has_project, long long project,
                                 const char *since, const char *until,
-                                const db2_org_spend_row_t *rows, int n);
+                                const kb_store_org_spend_row_t *rows, int n);
 
 #ifdef __cplusplus
 }

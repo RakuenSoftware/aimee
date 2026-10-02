@@ -1,9 +1,13 @@
 # Database
 
-The target is one database used by KB and server, not numbered database tiers.
-Runtime/session state and shared knowledge are domain responsibilities, not separate
-database products. Shared storage does not imply shared authorization: caller identity,
-workspace/project scope, runtime roles, and migration authority remain explicit.
+Server and KB share a database implementation and caller contract. Their standard deployments
+retain independent PostgreSQL stores, credentials, and instance identities. See
+[Server and KB](SERVER_AND_KB.md) for the product boundary.
+
+The consolidation work removes duplicate database machinery and proves that domain schemas can
+coexist. The shared-schema replay below is an implementation test; it does not change deployment
+ownership or permit two installations to share a DSN. Runtime/session state, personal memory, and
+shared knowledge remain separate domain responsibilities with explicit caller and scope checks.
 
 ## Shared contract
 
@@ -89,26 +93,18 @@ admin DSN in `AIMEE_TEST_STORE_URL`; missing binaries or configuration fail the
 gate. Each fixture creates its own schema and authenticated runtime role, passes
 the same explicit namespace to both credentials, and cleans up its own objects.
 
-## Remaining consolidation
+## PostgreSQL provider ownership
 
-These repository changes do **not** merge existing databases or rewrite deployment
-credentials. The tree still has legacy paths and contracts named `db1` and `db2`,
-separate schema bootstrap paths, and separate configuration surfaces:
-`AIMEE_STORE_URL` / `AIMEE_STORE_MIGRATION_URL` and the KB's vaulted
-`AIMEE_DB2_URL`. The KB also retains native PostgreSQL ownership during its
-remaining implementation migration.
+Both application roles now use the Go PostgreSQL module. The KB_STORE process and
+native libpq driver/pool are removed. KB owns knowledge schema and algorithms;
+its native callers use PostgreSQL session capabilities for SQL and transactions.
+`AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` are the runtime and migration
+profiles. Migration authority stays on the bootstrap thread and closes before
+normal serving. The WORM worker uses a separate restricted
+`AIMEE_WORM_POSTGRES_URL` through the same provider implementation.
 
-The next cuts must:
-
-1. Extend the shared-schema proof to deployment-role upgrades and independent
-   server identities before changing existing installations' database targets.
-   Preserve domain migration histories, RLS, and runtime grants.
-2. Consolidate connection/bootstrap configuration and migration ordering without
-   exposing vaulted credentials or granting runtime roles DDL authority.
-3. Retire the numbered client/provider names with their generators, descriptors,
-   deployment scripts, and tests together. Preserve wire IDs and recorded migration
-   history unless a separately tested protocol/data migration replaces them.
-
-Do not point two existing installations at one DSN as a substitute for this migration.
-No database contents, volumes, certificates, or production credentials are removed
-by the shared-contract extraction.
+Existing domain names, wire identities and SQL migration history are preserved.
+This does not merge installations or change their database targets. Preserve
+schema histories, RLS, runtime grants, Vault custody and matching database/home
+backups when upgrading. Do not point separate installations at one DSN as a
+substitute for a data migration.

@@ -35,7 +35,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "e92e6bf6c899734d50fdf02c30fde2bd2d5286ff881044877acf8b2cbfce0ea2",
+      "source_sha256": "e59715ae2354f2d557bca4e1178a58cafd22c01fef9f63087d51299d161c240e",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 2,
@@ -650,25 +650,6 @@
       "serve": [
         11265,
         11266
-      ]
-    },
-    {
-      "id": "db2",
-      "classification": "optional",
-      "repository": "https://github.com/RakuenSoftware/aimee-module-db2.git",
-      "ref": "v0.3.0",
-      "version": "0.3.0",
-      "commit": "6950c838030fc7a72557671e8106fed547f987f6",
-      "execution": "process",
-      "placements": [
-        "kb"
-      ],
-      "source_sha256": "521777b6613e7e61e31bd72993e3d7e59a6ce077b4de03b6b4d52718b754b9e6",
-      "runtime": "c",
-      "principal_class": 1,
-      "principal_ref": 29,
-      "serve": [
-        11521
       ]
     },
     {

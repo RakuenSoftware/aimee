@@ -1,5 +1,5 @@
 /* wfe_replay_worktree.c: worktree-grounded evidence-replay backend (see the
- * header). Pure libc file scanning — no index/db2/kb symbol, so it links in
+ * header). Pure libc file scanning — no index/kb_store/kb symbol, so it links in
  * every context that links evidence_replay. */
 #include "wfe_replay_worktree.h"
 

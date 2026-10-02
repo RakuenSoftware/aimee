@@ -33,16 +33,16 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         output = base / "bin"
         files = [
             *builder.CORE_EVENT_BUS_SOURCES,
-            "src/modules/db2/c/store.c",
-            "src/modules/db2/module_adapter.c",
+            "src/modules/fixture/c/store.c",
+            "src/modules/fixture/module_adapter.c",
         ]
         for relative in files:
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("int aimee_fixture;\n", encoding="utf-8")
         (root / "src/core/event_bus/include").mkdir(parents=True)
-        (root / "src/modules/db2/include").mkdir(parents=True)
-        main = bundle / "src/aimee-module-db2.c"
+        (root / "src/modules/fixture/include").mkdir(parents=True)
+        main = bundle / "src/aimee-module-fixture.c"
         main.parent.mkdir(parents=True)
         main.write_text("int main(void) { return 0; }\n", encoding="utf-8")
         self.write_manifest(bundle)
@@ -52,19 +52,19 @@ class RuntimeBundleBuildTests(unittest.TestCase):
         value = {
             "schema_version": 1,
             "modules": [{
-                "id": "db2",
-                "binary": "aimee-module-db2",
-                "main": "src/aimee-module-db2.c",
+                "id": "fixture",
+                "binary": "aimee-module-fixture",
+                "main": "src/aimee-module-fixture.c",
                 "sources": [
-                    "src/modules/db2/c/store.c",
-                    "src/modules/db2/module_adapter.c",
+                    "src/modules/fixture/c/store.c",
+                    "src/modules/fixture/module_adapter.c",
                 ],
-                "include_roots": ["src/modules/db2/include"],
+                "include_roots": ["src/modules/fixture/include"],
                 "compile_definitions": [
                     "AIMEE_DB1_DISABLED",
-                    "AIMEE_DISABLE_DB2_SQLITE_SHIM",
+                    "AIMEE_DISABLE_KB_STORE_SQLITE_SHIM",
                 ],
-                "pkg_config": ["libpq"],
+                "pkg_config": ["libssl"],
                 "system_libraries": [
                     "OpenSSL::Crypto",
                     "Threads::Threads",
@@ -100,7 +100,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 pkg_config,
                 "#!/usr/bin/env python3\n"
                 "import sys\n"
-                "print('-I/pkg/include' if sys.argv[1] == '--cflags' else '-L/pkg/lib -lpq')\n",
+                "print('-I/pkg/include' if sys.argv[1] == '--cflags' else '-L/pkg/lib -lssl')\n",
             )
             environment = os.environ.copy()
             environment["FAKE_CC_LOG"] = str(log)
@@ -113,19 +113,19 @@ class RuntimeBundleBuildTests(unittest.TestCase):
                 env=environment, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((output / "aimee-module-db2").read_text(), "binary")
+            self.assertEqual((output / "aimee-module-fixture").read_text(), "binary")
             arguments = json.loads(log.read_text(encoding="utf-8"))
             expected_sources = [
-                bundle / "src/aimee-module-db2.c",
-                root / "src/modules/db2/c/store.c",
-                root / "src/modules/db2/module_adapter.c",
+                bundle / "src/aimee-module-fixture.c",
+                root / "src/modules/fixture/c/store.c",
+                root / "src/modules/fixture/module_adapter.c",
                 *(root / relative for relative in builder.CORE_EVENT_BUS_SOURCES),
             ]
             for source in expected_sources:
                 self.assertEqual(arguments.count(str(source)), 1)
-            for flag in ("-I/pkg/include", "-L/pkg/lib", "-lpq", "-lcrypto",
+            for flag in ("-I/pkg/include", "-L/pkg/lib", "-lssl", "-lcrypto",
                          "-pthread", "-lz", "-lm", "-lzstd", "-DAIMEE_DB1_DISABLED",
-                         "-DAIMEE_DISABLE_DB2_SQLITE_SHIM", "-Os",
+                         "-DAIMEE_DISABLE_KB_STORE_SQLITE_SHIM", "-Os",
                          "-Wno-unused-parameter", "-Wno-format-truncation",
                          "-Wno-unused-result"):
                 self.assertIn(flag, arguments)
@@ -180,14 +180,14 @@ class RuntimeBundleBuildTests(unittest.TestCase):
     def test_generated_header_is_materialized_outside_source_tree(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
-            schema = root / "src/modules/db2/c/schema.sql"
-            schema.write_text("select 'db2';\n", encoding="utf-8")
+            schema = root / "src/modules/fixture/c/schema.sql"
+            schema.write_text("select 'fixture';\n", encoding="utf-8")
             path = bundle / builder.BUILD_MANIFEST
             value = json.loads(path.read_text(encoding="utf-8"))
             value["modules"][0]["generated_headers"] = [{
                 "entries": [{
-                    "source": "src/modules/db2/c/schema.sql",
-                    "symbol": "AIMEE_DB2_SCHEMA_SQL",
+                    "source": "src/modules/fixture/c/schema.sql",
+                    "symbol": "AIMEE_KB_STORE_SCHEMA_SQL",
                 }],
                 "output": "schema_data.h",
             }]
@@ -199,7 +199,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
             )
             header = generated / "schema_data.h"
             self.assertIn(
-                'AIMEE_DB2_SCHEMA_SQL __attribute__((unused)) = "select \'db2\';\\n";',
+                'AIMEE_KB_STORE_SCHEMA_SQL __attribute__((unused)) = "select \'fixture\';\\n";',
                 header.read_text(encoding="utf-8"),
             )
             command = builder.compiler_command(
@@ -236,7 +236,7 @@ class RuntimeBundleBuildTests(unittest.TestCase):
     def test_missing_owned_source_and_symlink_include_fail_closed(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
-            (root / "src/modules/db2/c/store.c").unlink()
+            (root / "src/modules/fixture/c/store.c").unlink()
             module = builder.load_builds(bundle)[0]
             with self.assertRaisesRegex(builder.BuildError, "missing or escapes"):
                 builder.compiler_command(module, root, bundle, output, "cc", "pkg-config")
@@ -245,9 +245,9 @@ class RuntimeBundleBuildTests(unittest.TestCase):
 
         temporary, root, bundle, output = self.fixture()
         try:
-            include = root / "src/modules/db2/include"
+            include = root / "src/modules/fixture/include"
             include.rmdir()
-            include.symlink_to(root / "src/modules/db2/c", target_is_directory=True)
+            include.symlink_to(root / "src/modules/fixture/c", target_is_directory=True)
             module = builder.load_builds(bundle)[0]
             with self.assertRaisesRegex(builder.BuildError, "not a real directory"):
                 builder.compiler_command(module, root, bundle, output, "cc", "pkg-config")
@@ -257,10 +257,10 @@ class RuntimeBundleBuildTests(unittest.TestCase):
     def test_placement_builds_only_the_processes_that_placement_runs(self) -> None:
         temporary, root, bundle, output = self.fixture()
         try:
-            # db2 is granted to kb but is NOT in kb.modules: a granted module
+            # fixture is granted to kb but is NOT in kb.modules: a granted module
             # still needs its binary, so the grants directory is the authority.
             (bundle / "grants/kb").mkdir(parents=True)
-            (bundle / "grants/kb/db2.grant").write_text("{}", encoding="utf-8")
+            (bundle / "grants/kb/fixture.grant").write_text("{}", encoding="utf-8")
             (bundle / "kb.modules").write_text("", encoding="utf-8")
             # A placement that grants no C process must build none of them.
             (bundle / "grants/server").mkdir(parents=True)

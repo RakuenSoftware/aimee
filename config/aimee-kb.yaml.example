@@ -4,11 +4,10 @@
 # illustration; the actual aimee config loader reads YAML/JSON (aimee.yaml).
 # These examples use the real, loadable schema.
 #
-# ── DB2: canonical rows + pgvector dense index ───────────────────────────
-# pgvector lives INSIDE this Postgres instance (it's a Postgres extension), so
-# there is no separate vector-store URL. install-today provisions
-# postgres:///aimee_shared with the pgvector extension enabled.
-db2_url: "postgres:///aimee_shared"
+# PostgreSQL is supplied by the supervised provider through AIMEE_STORE_URL
+# and the separate AIMEE_STORE_MIGRATION_URL deployment secrets. Do not put
+# connection credentials in this configuration file. pgvector is an extension
+# inside that PostgreSQL database; no separate vector-store URL is needed.
 
 # ── Observability (disabled by default) ──────────────────────────────────
 # Set AIMEE_KB_OBSERVABILITY_LISTEN (or the generic

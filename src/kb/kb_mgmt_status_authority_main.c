@@ -27,8 +27,8 @@
 
 typedef struct
 {
-   db2_management_status_runtime_t lookup;
-   db2_management_status_key_ctx_t key;
+   kb_store_management_status_runtime_t lookup;
+   kb_store_management_status_key_ctx_t key;
    kb_mgmt_status_custody_t custody;
 } status_worker_t;
 
@@ -133,15 +133,15 @@ static int lookup_cb(const char *issuer, const char *serial, const char *fingerp
                      const char *target, const char *purpose, int64_t *generation,
                      char *target_fingerprint, size_t target_fingerprint_len, void *opaque)
 {
-   db2_management_status_runtime_t *db = opaque;
-   int rc =
-       db2_management_status_runtime_lookup(db, issuer, serial, fingerprint, target, purpose,
-                                            generation, target_fingerprint, target_fingerprint_len);
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_OK)
+   kb_store_management_status_runtime_t *db = opaque;
+   int rc = kb_store_management_status_runtime_lookup(db, issuer, serial, fingerprint, target,
+                                                      purpose, generation, target_fingerprint,
+                                                      target_fingerprint_len);
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_OK)
       return KB_MGMT_STATUS_CALLBACK_OK;
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_DENIED)
       return KB_MGMT_STATUS_CALLBACK_DENIED;
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_INTEGRITY)
       return KB_MGMT_STATUS_CALLBACK_INTEGRITY;
    return KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
 }
@@ -162,17 +162,17 @@ static int checkpoint_lookup_cb(const char *peer_issuer, const char *peer_serial
                                 const kb_mgmt_checkpoint_request_t *request, int *revoked,
                                 int64_t *generation, void *opaque)
 {
-   int rc = db2_management_status_runtime_action_checkpoint(
+   int rc = kb_store_management_status_runtime_action_checkpoint(
        opaque, peer_issuer, peer_serial, peer_fingerprint, request->target_server_id,
        request->caller_issuer, request->caller_serial_norm, request->caller_fingerprint,
        (int64_t)request->staple_generation, revoked, generation);
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_OK)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_OK)
       return KB_MGMT_STATUS_CALLBACK_OK;
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_DENIED)
       return KB_MGMT_STATUS_CALLBACK_DENIED;
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_CONFLICT)
       return KB_MGMT_STATUS_CALLBACK_CONFLICT;
-   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY)
+   if (rc == KB_STORE_MANAGEMENT_STATUS_RUNTIME_INTEGRITY)
       return KB_MGMT_STATUS_CALLBACK_INTEGRITY;
    return KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
 }
@@ -296,17 +296,17 @@ static void service_close(status_service_t *service)
    for (size_t i = 0; i < KB_MGMT_STATUS_LISTENER_WORKERS; ++i)
    {
       if (service->workers[i].lookup.transaction_active)
-         (void)db2_management_status_runtime_startup_end(&service->workers[i].lookup, 0);
+         (void)kb_store_management_status_runtime_startup_end(&service->workers[i].lookup, 0);
       else if (service->workers[i].key.transaction_active)
-         (void)db2_management_status_key_guard_end(&service->workers[i].key, 0);
-      db2_management_status_key_ctx_close(&service->workers[i].key);
-      db2_management_status_runtime_close(&service->workers[i].lookup);
+         (void)kb_store_management_status_key_guard_end(&service->workers[i].key, 0);
+      kb_store_management_status_key_ctx_close(&service->workers[i].key);
+      kb_store_management_status_runtime_close(&service->workers[i].lookup);
    }
    OPENSSL_cleanse(service, sizeof(*service));
 }
 
-static int same_startup(const db2_management_status_runtime_startup_t *a,
-                        const db2_management_status_runtime_startup_t *b)
+static int same_startup(const kb_store_management_status_runtime_startup_t *a,
+                        const kb_store_management_status_runtime_startup_t *b)
 {
    return a->seal_epoch == b->seal_epoch && a->sealed == b->sealed && a->enabled == b->enabled &&
           a->version == b->version && strcmp(a->custody_key_id, b->custody_key_id) == 0 &&
@@ -320,21 +320,22 @@ static int service_open(status_service_t *service, const char *dsn, const char *
 {
    char error[256] = "";
    int failure_class = -1;
-   db2_management_status_runtime_startup_t baseline;
+   kb_store_management_status_runtime_startup_t baseline;
    memset(service, 0, sizeof(*service));
    memset(&baseline, 0, sizeof(baseline));
    for (size_t i = 0; i < KB_MGMT_STATUS_LISTENER_WORKERS; ++i)
-      if (db2_management_status_runtime_open(&service->workers[i].lookup, dsn, error,
-                                             sizeof(error)) != 0 ||
-          db2_management_status_key_ctx_borrow_hardened(&service->workers[i].key,
-                                                        &service->workers[i].lookup) != 0)
+      if (kb_store_management_status_runtime_open(&service->workers[i].lookup, dsn, error,
+                                                  sizeof(error)) != 0 ||
+          kb_store_management_status_key_ctx_borrow_hardened(&service->workers[i].key,
+                                                             &service->workers[i].lookup) != 0)
          goto fail;
 
    for (size_t i = 0; i < KB_MGMT_STATUS_LISTENER_WORKERS; ++i)
    {
-      db2_management_status_runtime_startup_t current;
+      kb_store_management_status_runtime_startup_t current;
       memset(&current, 0, sizeof(current));
-      if (db2_management_status_runtime_startup_begin(&service->workers[i].lookup, &current) != 0)
+      if (kb_store_management_status_runtime_startup_begin(&service->workers[i].lookup, &current) !=
+          0)
       {
          failure_class = -2;
          goto fail;
@@ -409,7 +410,7 @@ static int service_open(status_service_t *service, const char *dsn, const char *
    /* Release the mutually consistent startup snapshots only after the KMS,
     * public/wire binding, signed HWM, and durable seal epoch all agree. */
    for (size_t i = 0; i < KB_MGMT_STATUS_LISTENER_WORKERS; ++i)
-      if (db2_management_status_runtime_startup_end(&service->workers[i].lookup, 1) != 0)
+      if (kb_store_management_status_runtime_startup_end(&service->workers[i].lookup, 1) != 0)
       {
          failure_class = -4;
          goto fail;

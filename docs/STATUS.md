@@ -4,6 +4,9 @@ This page describes the current testing tree. `Done` means the path is implement
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
+Use [Server and KB](SERVER_AND_KB.md) for placement and deployment boundaries. The
+[Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records remaining source-confirmed gaps.
+
 The 0.4.6 candidate adds governed memory revisions, source checks at provider dispatch,
 reviewed corrections, erasure protection, and durable async run ownership. See the
 [release preparation](validation/release-0.4.6-preparation-2026-09-27.md) for completed checks
@@ -31,8 +34,11 @@ workspace registration alone does not start a client runner.
 | Feature | State | Boundary |
 | --- | --- | --- |
 | Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
-| DB1/DB2 ownership | Done | The store module owns DB1's PostgreSQL; KB owns DB2's PostgreSQL and pgvector; the server and thin clients own neither. |
-| Embedded KB PostgreSQL | Done | Default container path; external PostgreSQL remains supported. |
+| Server/KB placement | Done | Independent stores and immutable roles. Server owns personal memory and private code; KB owns the shared corpus. Both use Go memory and PostgreSQL modules. |
+| PostgreSQL deployment | Done | Separate PostgreSQL service per standard composition; ordinary persistent storage by default, LUKS opt-in. Both roles use the Go PostgreSQL provider; native KB algorithms use session transport. |
+| KB-free personal recall | Done | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
+| Current-memory eligibility | Done | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
+| Memory reliability program | In progress | Versioned KB replacement and operator typed-fact review exist; reviewed correction proposals and personal revision history are implemented; production-role hardening and end-to-end qualification still need explicit evidence. |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
@@ -82,7 +88,7 @@ workspace registration alone does not start a client runner.
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Managed container deploy | Done | Browser can launch the current one-KB profile through the mounted Docker socket. |
+| Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |
 
@@ -94,9 +100,9 @@ workspace registration alone does not start a client runner.
 | `aimee work` queue | Workflows, triggers, coordinated jobs, and durable delegate jobs. |
 | `aimee migrate v2` | Normal schema migration at daemon startup. |
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
-| Combined appliance image | Managed or split container stack. |
+| Combined Server-plus-KB appliance | One application image selects one immutable role per instance; PostgreSQL and models are separate services. |
 | Client-held agent keys | Server-sealed vault. |
-| Generic `aimee-llm` inference gateway | Embedding stays with the KB; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
+| Generic `aimee-llm` inference gateway | Each instance owns embedding; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

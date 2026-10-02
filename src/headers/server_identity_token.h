@@ -35,9 +35,9 @@ extern "C"
     * `cert:<issuer>:<serial>`, or a bare host-account `<username>`.
     *
     * Exposed so the grammar can be cross-checked against its other two copies —
-    * the subject CHECK in db2/schema.sql and db2_intent_canonical_actor in
-    * db2/management_intent_fields.h. Those three cannot share an implementation
-    * (the server links neither DB2_OBJS nor libpq), so the only thing that keeps
+    * the subject CHECK in kb_store/schema.sql and kb_store_intent_canonical_actor in
+    * kb_store/management_intent_fields.h. Those three cannot share an implementation
+    * (the server links neither KB_STORE_OBJS nor libpq), so the only thing that keeps
     * them from drifting is testing them against one shared corpus, and that needs
     * this predicate reachable. See tests/subject_corpus.h.
     *

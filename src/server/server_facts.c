@@ -3,7 +3,7 @@
  * facts.retract (§4) and entities.merge / entities.unmerge (§3): the half of the
  * typed-fact layer that lets a wrong belief be withdrawn. Every primitive here
  * existed and was unit-tested, and none of them had a production caller — the
- * store could learn a fact and nothing above db2 could tell it the fact was
+ * store could learn a fact and nothing above kb_store could tell it the fact was
  * wrong, and a mistaken entity merge was reversible only from a test.
  *
  * Split out of server_state.c, which is at its line ceiling. */

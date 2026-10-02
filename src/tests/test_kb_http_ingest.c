@@ -11,8 +11,8 @@
 #include "config.h"
 #include "kb_doc_pdf.h"
 
-/* ── Stubs for db2/kb_docs.h symbols ───────────────────────────────────────
- * The real db2_kb_doc_t layout must match what handle_get_doc reads,
+/* ── Stubs for kb_store/kb_docs.h symbols ───────────────────────────────────────
+ * The real kb_store_kb_doc_t layout must match what handle_get_doc reads,
  * so we reproduce it here verbatim rather than using void *. */
 
 typedef struct
@@ -71,9 +71,9 @@ const char *kb_document_disposition_name(kb_document_disposition_t disposition)
    }
 }
 
-int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
-                         const char *converter, const char *converter_version,
-                         const char *normalized_text, int *was_existing)
+int64_t kb_store_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
+                              const char *converter, const char *converter_version,
+                              const char *normalized_text, int *was_existing)
 {
    (void)filename;
    (void)scope;
@@ -87,7 +87,7 @@ int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const c
    return 42; /* fake doc id */
 }
 
-int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
+int kb_store_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
 {
    if (!content_hash || !scope)
       return -1;
@@ -98,7 +98,7 @@ int db2_kb_doc_exists_by_hash_scope(const char *content_hash, const char *scope)
    return 0;
 }
 
-int db2_kb_doc_read(int64_t id, stub_doc_t *out)
+int kb_store_kb_doc_read(int64_t id, stub_doc_t *out)
 {
    if (id != 42)
       return -1;
@@ -113,7 +113,7 @@ int db2_kb_doc_read(int64_t id, stub_doc_t *out)
    return 0;
 }
 
-int db2_kb_doc_set_state(int64_t id, const char *state, int clear, const char *reason)
+int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear, const char *reason)
 {
    (void)id;
    (void)state;
@@ -122,12 +122,12 @@ int db2_kb_doc_set_state(int64_t id, const char *state, int clear, const char *r
    return 0;
 }
 
-int db2_kb_doc_delete(int64_t id)
+int kb_store_kb_doc_delete(int64_t id)
 {
    return (id == 42) ? 0 : -1;
 }
 
-int db2_kb_doc_list_review(int limit, int64_t cursor_id, stub_doc_t *out, int max_out)
+int kb_store_kb_doc_list_review(int limit, int64_t cursor_id, stub_doc_t *out, int max_out)
 {
    (void)limit;
    (void)cursor_id;
@@ -293,7 +293,7 @@ static void test_post_pdf_flag_off_falls_through(void)
    int st = handle_post_docs(body, n, buf, sizeof(buf));
    assert(st == 201);
    assert(g_ingest_called == 0);           /* not routed to the structured path */
-   assert(g_last_content_hash[0] != '\0'); /* legacy db2_kb_doc_write reached */
+   assert(g_last_content_hash[0] != '\0'); /* legacy kb_store_kb_doc_write reached */
 }
 
 static void test_post_pdf_magic_mismatch_rejected(void)

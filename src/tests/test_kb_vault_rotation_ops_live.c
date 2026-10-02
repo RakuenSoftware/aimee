@@ -1,10 +1,10 @@
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_vault_rotation.h"
 #include "kb/kb_vault_rotation_ops.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -33,7 +33,7 @@ static kb_principal_t owner(void)
 static int64_t scalar(const char *sql)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
    int64_t value = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
@@ -49,7 +49,7 @@ static void stable_op(char saved[128], const char *got)
       assert(!strcmp(saved, got));
 }
 
-static int resolve_current(void *opaque, const char *op, const db2_vault_rotation_row_t *row,
+static int resolve_current(void *opaque, const char *op, const kb_store_vault_rotation_row_t *row,
                            const kb_vault_rotation_lease_t *lease, char *ref, size_t cap)
 {
    mock_vendor_t *v = opaque;
@@ -59,7 +59,7 @@ static int resolve_current(void *opaque, const char *op, const db2_vault_rotatio
    return KB_VAULT_OP_OK;
 }
 
-static int provision(void *opaque, const char *op, const db2_vault_rotation_row_t *row,
+static int provision(void *opaque, const char *op, const kb_store_vault_rotation_row_t *row,
                      const kb_vault_rotation_lease_t *lease, unsigned char *secret, size_t cap,
                      size_t *len, char *ref, size_t ref_cap, int *reconciled)
 {
@@ -80,7 +80,7 @@ static int provision(void *opaque, const char *op, const db2_vault_rotation_row_
    return v->provision_calls == 1 ? KB_VAULT_OP_UNCERTAIN : KB_VAULT_OP_OK;
 }
 
-static int probe(void *opaque, const char *op, const db2_vault_rotation_row_t *row,
+static int probe(void *opaque, const char *op, const kb_store_vault_rotation_row_t *row,
                  const kb_vault_rotation_lease_t *lease, const unsigned char *secret, size_t len)
 {
    static const unsigned char value[] = "vendor-secret-live";
@@ -91,7 +91,7 @@ static int probe(void *opaque, const char *op, const db2_vault_rotation_row_t *r
    return v->probe_calls == 1 ? KB_VAULT_OP_UNCERTAIN : KB_VAULT_OP_OK;
 }
 
-static int vendor_revoke(void *opaque, const char *op, const db2_vault_rotation_row_t *row,
+static int vendor_revoke(void *opaque, const char *op, const kb_store_vault_rotation_row_t *row,
                          const kb_vault_rotation_lease_t *lease, const char *ref, char *receipt,
                          size_t cap)
 {
@@ -107,7 +107,7 @@ static int vendor_revoke(void *opaque, const char *op, const db2_vault_rotation_
    return KB_VAULT_OP_OK;
 }
 
-static int reconcile(void *opaque, const char *op, const db2_vault_rotation_row_t *row,
+static int reconcile(void *opaque, const char *op, const kb_store_vault_rotation_row_t *row,
                      const kb_vault_rotation_lease_t *lease, char *ref, size_t ref_cap, int *exists,
                      char *evidence, size_t evidence_cap)
 {
@@ -131,16 +131,16 @@ int main(void)
       puts("SKIP: live PG + signed KMS HWM environment unavailable");
       return 0;
    }
-   assert(db2_init(url) == 0);
+   assert(kb_store_init(url) == 0);
    char err[256] = "";
    assert(kb_vault_policy_select("kms", err, sizeof(err)) == 0);
    kb_principal_t caller = owner();
 
-   assert(db2_tenant_scope_begin(&caller, 0) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, 0) == 0);
    assert(scalar("SELECT org_vault_put('org:test:p7-ops-live',NULL,'bedrock','primary',1,"
                  "decode(repeat('01',40),'hex'),decode(repeat('02',12),'hex'),'\\x03',"
                  "decode(repeat('04',16),'hex'))") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    int64_t rid = 0;
    const char *key_id = getenv("AIMEE_VAULT_KMS_KEY_ID");
@@ -158,7 +158,7 @@ int main(void)
    assert(vendor.provision_calls == 2 && vendor.candidate_count == 1);
    assert(vendor.probe_calls == 2 && vendor.revoke_calls == 2 && vendor.old_revoked);
 
-   assert(db2_tenant_scope_begin(&caller, 0) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, 0) == 0);
    assert(scalar("SELECT org_vault_has('org:test:p7-ops-live','bedrock','primary')") == 2);
    assert(scalar("SELECT count(*) FROM org_vault_rotation WHERE state='retired' AND "
                  "old_vendor_ref='vendor-old-credential' AND "
@@ -169,10 +169,10 @@ int main(void)
                  "ciphertext=convert_to('vendor-secret-live','UTF8')") == 0);
    assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'vault.rotation.%' AND "
                  "detail ILIKE '%vendor-secret-live%'") == 0);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    assert(kb_vault_policy_select("file", err, sizeof(err)) == 0);
-   db2_shutdown();
+   kb_store_shutdown();
    puts("PASS: live fenced rotation + crash reconciliation + signed KMS HWM");
    return 0;
 }

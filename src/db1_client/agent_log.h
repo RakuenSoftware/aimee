@@ -103,7 +103,7 @@ extern "C"
       char error[DB1_AL_LEARN_ERROR_LEN];
    } db1_agent_log_recent_error_t;
 
-   /* Recent non-empty error strings for DB1->DB2 learning flows. */
+   /* Recent non-empty error strings for DB1->KB_STORE learning flows. */
    int db1_agent_log_list_recent_errors(int since_days, db1_agent_log_recent_error_t *out, int max);
 
    typedef struct

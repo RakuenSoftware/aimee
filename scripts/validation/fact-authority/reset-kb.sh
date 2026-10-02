@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stop the kb and clear the sealed first-boot credential vault, so a changed
-# AIMEE_DB2_URL is picked up instead of the value sealed on the first boot.
+# AIMEE_STORE_URL is picked up instead of the value sealed on the first boot.
 # Run AS ROOT in the container.
 set -u
 pkill -f aimee-kb 2>/dev/null

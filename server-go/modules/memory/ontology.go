@@ -12,7 +12,7 @@ import "strings"
 //
 // Pure by construction — seed table only, no database. That is what lets it run
 // in the module process at all: a module reaches core over the bus and has no
-// DB2 handle of its own.
+// KB_STORE handle of its own.
 
 // NodeKind is an entity kind. Values match memory_node_kind_t exactly; they are
 // persisted as integer codes, so they are assigned rather than derived.

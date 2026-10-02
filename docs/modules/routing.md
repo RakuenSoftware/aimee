@@ -16,7 +16,7 @@ eligibility and policy surface during the process migration: role dispatch (`age
 (`agent_routing_block_reason`), and the route health/policy filters. This was extracted from
 `src/server/agent_config.c`; the routing contract is declared in the shared `src/headers/agent_config.h`,
 which this module implements while the config/auth half of `agent_config.c` stays in the server and is
-reached through the same header (the arrangement by which `memory` owns its contract while DB1/DB2
+reached through the same header (the arrangement by which `memory` owns its contract while DB1/KB_STORE
 implement storage). Equal-candidate selection and request-cost ordering no longer use module-local statics in the shipping
 server: `server-go/modules/routing` serves the pointer-free `module_api.h` contract from the separately
 supervised Go `aimee-module-routing` process, and `server/module_routing_adapter.c` calls it through the

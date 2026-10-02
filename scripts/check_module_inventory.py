@@ -49,7 +49,7 @@ RESERVED_BANDS = (
 REQUIRED_COUNT = 25
 # Principal references stay stable when a module changes activation class;
 # PostgreSQL is required by both immutable instance compositions.
-OPTIONAL_COUNT = 10
+OPTIONAL_COUNT = 9
 PINNED_REQUIRED = {"git", "providers", "postgres"}
 
 

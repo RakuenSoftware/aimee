@@ -11,12 +11,14 @@ export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server
 # >>> kb-module-grant-seeding
 AIMEE_MODULE_GRANT_SRC="${AIMEE_MODULE_GRANT_SRC:-/opt/aimee/module-grants/kb}"
 mkdir -p "$AIMEE_HOME/modules.d/kb/.seeded"
-# The published 0.4.1 memory grant predates seed records and the read stage.
+# Published grants predate seed records and later PostgreSQL/session and memory/read stages.
 # Match its entire policy, and never treat a changed recorded grant as a default.
-kb_historical_memory_grant() {
+kb_historical_grant() {
     [ ! -e "$3" ] || return 1
-    [ "$(basename "$1")" = memory.grant ] || return 1
-    [ "$(grep '^serve=' "$1" || true)" = 'serve=5889,5890,5891,5892,5893,5894' ] || return 1
+    case "$(basename "$1"):$(grep '^serve=' "$1" || true)" in
+        memory.grant:serve=5889,5890,5891,5892,5893,5894|postgres.grant:serve=11265,11266) ;;
+        *) return 1 ;;
+    esac
     [ "$(sed '/^serve=/d' "$1")" = "$(sed '/^serve=/d' "$2")" ]
 }
 for source in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
@@ -26,7 +28,7 @@ for source in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     record="$AIMEE_HOME/modules.d/kb/.seeded/$name.sha256"
     if [ ! -e "$dest" ] || cmp -s "$source" "$dest" ||
        { [ -r "$record" ] && [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$(cat "$record")" ]; } ||
-       kb_historical_memory_grant "$dest" "$source" "$record"; then
+       kb_historical_grant "$dest" "$source" "$record"; then
         cp "$source" "$dest"
         chmod 0600 "$dest"
         sha256sum "$dest" | cut -d' ' -f1 > "$record"
@@ -34,6 +36,21 @@ for source in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     else
         printf '[kb-entrypoint] preserving operator policy in %s; it differs from the shipped grant\n' "$dest" >&2
     fi
+done
+# Principal 29 was the retired KbStore process. Its executable is no longer in
+# either composition, and leaving the old grant active prevents bus startup.
+# Preserve the exact policy outside the active directory, including operator
+# edits; never transfer any of its capabilities to PostgreSQL.
+for obsolete in "$AIMEE_HOME"/modules.d/kb/*.grant; do
+    [ -f "$obsolete" ] || continue
+    [ "$(grep '^principal_class=' "$obsolete" || true)" = 'principal_class=1' ] || continue
+    [ "$(grep '^principal_ref=' "$obsolete" || true)" = 'principal_ref=29' ] || continue
+    retired="$AIMEE_HOME/modules.d/kb/.retired"
+    mkdir -p "$retired"
+    chmod 0700 "$retired"
+    digest=$(sha256sum "$obsolete" | cut -d' ' -f1)
+    mv "$obsolete" "$retired/$(basename "$obsolete").$digest.retired"
+    printf '[kb-entrypoint] archived grant for retired database principal 29\n' >&2
 done
 # <<< kb-module-grant-seeding
 manifest=$(apply_optional_modules kb "${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/kb.modules}" "$AIMEE_HOME")

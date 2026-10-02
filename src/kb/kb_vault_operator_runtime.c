@@ -22,38 +22,38 @@ typedef struct
 static void bytes_hex(const uint8_t *, size_t, char *);
 
 static void cache_activation_proof(kb_vault_operator_runtime_t *,
-                                   const db2_vault_operator_open_result_t *,
-                                   const db2_vault_operator_open_event_t *, int);
+                                   const kb_store_vault_operator_open_result_t *,
+                                   const kb_store_vault_operator_open_event_t *, int);
 static void bytes_hex(const uint8_t *, size_t, char *);
 
-static int production_provider_status(void *unused, db2_vault_provider_status_t *value)
+static int production_provider_status(void *unused, kb_store_vault_provider_status_t *value)
 {
    (void)unused;
    switch (vault_custody_selected_local_status())
    {
    case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
-      *value = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+      *value = KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
-      *value = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+      *value = KB_STORE_VAULT_PROVIDER_AVAILABLE_UNSEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
-      *value = DB2_VAULT_PROVIDER_UNAVAILABLE;
+      *value = KB_STORE_VAULT_PROVIDER_UNAVAILABLE;
       return 0;
    case VAULT_CUSTODY_LOCAL_MALFORMED:
-      *value = DB2_VAULT_PROVIDER_MALFORMED;
+      *value = KB_STORE_VAULT_PROVIDER_MALFORMED;
       return 0;
    }
    return -1;
 }
 
-static int production_read_status(db2_vault_operator_runtime_t *database,
+static int production_read_status(kb_store_vault_operator_runtime_t *database,
                                   kb_vault_operator_status_t *out)
 {
-   db2_vault_operator_status_t status;
+   kb_store_vault_operator_status_t status;
    if (!database || !out ||
-       db2_vault_operator_runtime_status(database, production_provider_status, NULL, &status) !=
-           DB2_VAULT_OPERATOR_OK)
+       kb_store_vault_operator_runtime_status(database, production_provider_status, NULL,
+                                              &status) != KB_STORE_VAULT_OPERATOR_OK)
       return -1;
    memset(out, 0, sizeof(*out));
    out->state = (kb_vault_operator_state_t)status.state;
@@ -80,16 +80,16 @@ static const kb_vault_operator_runtime_platform_t production_platform = {
     .random = vault_crypto_random,
     .authorization_preflight = vault_custody_selected_authorization_preflight,
     .authorization_preflight_current = vault_custody_selected_authorization_preflight_current,
-    .dispatch = db2_vault_operator_dispatch,
-    .reserve = db2_vault_operator_reserve,
-    .active = db2_vault_operator_active,
-    .completed = db2_vault_operator_completed,
-    .completed_active = db2_vault_operator_completed_active,
-    .current_check_page = db2_vault_operator_current_check_page,
-    .open_completed = db2_vault_operator_open_completed,
-    .open_idle = db2_vault_operator_open_idle,
-    .open_event = db2_vault_operator_open_event,
-    .recover_uncertain = db2_vault_operator_rewrap_recover_uncertain,
+    .dispatch = kb_store_vault_operator_dispatch,
+    .reserve = kb_store_vault_operator_reserve,
+    .active = kb_store_vault_operator_active,
+    .completed = kb_store_vault_operator_completed,
+    .completed_active = kb_store_vault_operator_completed_active,
+    .current_check_page = kb_store_vault_operator_current_check_page,
+    .open_completed = kb_store_vault_operator_open_completed,
+    .open_idle = kb_store_vault_operator_open_idle,
+    .open_event = kb_store_vault_operator_open_event,
+    .recover_uncertain = kb_store_vault_operator_rewrap_recover_uncertain,
     .orchestrator_run = vault_reseal_orchestrator_run,
     .receipt_decode = vault_reseal_receipt_decode,
     .receipt_status = vault_custody_tpm2_reseal_status,
@@ -120,22 +120,22 @@ static int platform_valid(const kb_vault_operator_runtime_platform_t *p)
 
 static kb_vault_mutation_db_result_t map_db(int result, int absent)
 {
-   switch ((db2_vault_rewrap_result_t)result)
+   switch ((kb_store_vault_rewrap_result_t)result)
    {
-   case DB2_VAULT_REWRAP_OK:
+   case KB_STORE_VAULT_REWRAP_OK:
       return absent ? KB_VAULT_MUTATION_DB_NOT_FOUND : KB_VAULT_MUTATION_DB_OK;
-   case DB2_VAULT_REWRAP_NOT_FOUND:
+   case KB_STORE_VAULT_REWRAP_NOT_FOUND:
       return KB_VAULT_MUTATION_DB_NOT_FOUND;
-   case DB2_VAULT_REWRAP_BUSY:
+   case KB_STORE_VAULT_REWRAP_BUSY:
       return KB_VAULT_MUTATION_DB_BUSY;
-   case DB2_VAULT_REWRAP_CONFLICT:
+   case KB_STORE_VAULT_REWRAP_CONFLICT:
       return KB_VAULT_MUTATION_DB_INTEGRITY;
-   case DB2_VAULT_REWRAP_TRANSIENT:
-   case DB2_VAULT_REWRAP_ERROR:
+   case KB_STORE_VAULT_REWRAP_TRANSIENT:
+   case KB_STORE_VAULT_REWRAP_ERROR:
       return KB_VAULT_MUTATION_DB_TRANSIENT;
-   case DB2_VAULT_REWRAP_INVALID:
+   case KB_STORE_VAULT_REWRAP_INVALID:
       return KB_VAULT_MUTATION_DB_INVALID;
-   case DB2_VAULT_REWRAP_INTEGRITY:
+   case KB_STORE_VAULT_REWRAP_INTEGRITY:
    default:
       return KB_VAULT_MUTATION_DB_INTEGRITY;
    }
@@ -152,7 +152,7 @@ static int status_equal(const kb_vault_operator_status_t *a, const kb_vault_oper
 }
 
 static int binding_copy(kb_vault_mutation_binding_t *out,
-                        const db2_vault_operator_rewrap_binding_t *in)
+                        const kb_store_vault_operator_rewrap_binding_t *in)
 {
    if (!out || !in || in->seal_epoch < 1 || in->fencing_token < 1 || in->old_generation < 0 ||
        in->old_generation == INT64_MAX || in->new_generation != in->old_generation + 1)
@@ -164,13 +164,14 @@ static int binding_copy(kb_vault_mutation_binding_t *out,
    out->new_generation = (uint64_t)in->new_generation;
    out->seal_epoch = (uint64_t)in->seal_epoch;
    out->fence = (uint64_t)in->fencing_token;
-   if (in->state == DB2_VAULT_REWRAP_COMPLETED)
+   if (in->state == KB_STORE_VAULT_REWRAP_COMPLETED)
       out->state = KB_VAULT_MUTATION_BINDING_COMPLETED;
-   else if (in->state == DB2_VAULT_REWRAP_ABORTED)
+   else if (in->state == KB_STORE_VAULT_REWRAP_ABORTED)
       out->state = KB_VAULT_MUTATION_BINDING_ABORTED;
-   else if (in->state == DB2_VAULT_REWRAP_RECOVERY_REQUIRED)
+   else if (in->state == KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED)
       out->state = KB_VAULT_MUTATION_BINDING_RECOVERY_REQUIRED;
-   else if (in->state >= DB2_VAULT_REWRAP_PREPARING && in->state <= DB2_VAULT_REWRAP_PROMOTED)
+   else if (in->state >= KB_STORE_VAULT_REWRAP_PREPARING &&
+            in->state <= KB_STORE_VAULT_REWRAP_PROMOTED)
       out->state = KB_VAULT_MUTATION_BINDING_ACTIVE;
    else
       return -1;
@@ -194,7 +195,7 @@ static void put_be64(uint8_t out[8], uint64_t value)
    }
 }
 
-static int completed_event_row_hash_valid(const db2_vault_operator_open_event_t *event)
+static int completed_event_row_hash_valid(const kb_store_vault_operator_open_event_t *event)
 {
    static const char domain[] = "aimee-vault-open-row-v1";
    static const char kind[] = "completed_opened";
@@ -246,7 +247,7 @@ static void idle_event_id(const uint8_t request_id[16], uint8_t out[SHA256_DIGES
    OPENSSL_cleanse(input, sizeof(input));
 }
 
-static int idle_event_row_hash_valid(const db2_vault_operator_open_event_t *event)
+static int idle_event_row_hash_valid(const kb_store_vault_operator_open_event_t *event)
 {
    static const char domain[] = "aimee-vault-open-row-v1";
    static const char kind[] = "idle_opened";
@@ -368,10 +369,10 @@ static kb_vault_mutation_db_result_t runtime_lookup(const uint8_t request_id[16]
 {
    (void)locked; /* The private function always takes advisory + row SHARE locks. */
    kb_vault_operator_runtime_t *r = opaque;
-   db2_vault_operator_rewrap_binding_t row = {0};
+   kb_store_vault_operator_rewrap_binding_t row = {0};
    int found = 0;
    int rc = r->platform->dispatch(request_id, &row, &found);
-   if (rc != DB2_VAULT_REWRAP_OK || !found)
+   if (rc != KB_STORE_VAULT_REWRAP_OK || !found)
       return map_db(rc, !found);
    if (binding_copy(binding, &row) != 0)
       return KB_VAULT_MUTATION_DB_INTEGRITY;
@@ -380,7 +381,7 @@ static kb_vault_mutation_db_result_t runtime_lookup(const uint8_t request_id[16]
       kb_vault_operator_status_t status = {0};
       uint8_t event_input[sizeof("aimee-vault-open-completed-v1") - 1 + 32 + 1];
       uint8_t event_id[SHA256_DIGEST_LENGTH];
-      db2_vault_operator_open_event_t event = {0};
+      kb_store_vault_operator_open_event_t event = {0};
       memcpy(event_input, "aimee-vault-open-completed-v1",
              sizeof("aimee-vault-open-completed-v1") - 1);
       bytes_hex(row.operation_id, 16,
@@ -390,7 +391,7 @@ static kb_vault_mutation_db_result_t runtime_lookup(const uint8_t request_id[16]
           status.state != KB_VAULT_OPERATOR_STATE_OPERATIONAL || status.flags != 0 ||
           status.seal_epoch < 1 || status.control_fence < 1 ||
           status.last_opened_fence != binding->fence ||
-          r->platform->open_event(event_id, &event) != DB2_VAULT_REWRAP_OK ||
+          r->platform->open_event(event_id, &event) != KB_STORE_VAULT_REWRAP_OK ||
           !event.completed_open || !event.operation_present ||
           event.operation_fence != row.fencing_token ||
           event.opened.opened_epoch != (int64_t)status.seal_epoch ||
@@ -420,12 +421,12 @@ runtime_reserve(const uint8_t request_id[16], const uint8_t candidate[16], uint6
                 void *opaque)
 {
    kb_vault_operator_runtime_t *r = opaque;
-   db2_vault_operator_rewrap_binding_t row = {0};
+   kb_store_vault_operator_rewrap_binding_t row = {0};
    if (old_generation > INT64_MAX || new_generation > INT64_MAX)
       return KB_VAULT_MUTATION_DB_INVALID;
    int rc = r->platform->reserve(request_id, candidate, (int64_t)old_generation,
                                  (int64_t)new_generation, &row, created);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
       return map_db(rc, 0);
    return binding_copy(binding, &row) == 0 ? KB_VAULT_MUTATION_DB_OK
                                            : KB_VAULT_MUTATION_DB_INTEGRITY;
@@ -435,12 +436,12 @@ static kb_vault_mutation_db_result_t runtime_active_common(kb_vault_mutation_bin
                                                            int completed, void *opaque)
 {
    kb_vault_operator_runtime_t *r = opaque;
-   db2_vault_operator_rewrap_binding_t row = {0};
+   kb_store_vault_operator_rewrap_binding_t row = {0};
    int found = 0;
    int rc = r->platform->active(&row, &found);
-   if (rc != DB2_VAULT_REWRAP_OK || !found)
+   if (rc != KB_STORE_VAULT_REWRAP_OK || !found)
       return map_db(rc, !found);
-   if (completed && row.state != DB2_VAULT_REWRAP_COMPLETED)
+   if (completed && row.state != KB_STORE_VAULT_REWRAP_COMPLETED)
       return KB_VAULT_MUTATION_DB_INTEGRITY;
    return binding_copy(binding, &row) == 0 ? KB_VAULT_MUTATION_DB_OK
                                            : KB_VAULT_MUTATION_DB_INTEGRITY;
@@ -460,12 +461,12 @@ static kb_vault_mutation_db_result_t runtime_completed_binding(kb_vault_mutation
 {
    kb_vault_operator_runtime_t *r = opaque;
    kb_vault_operator_status_t status = {0};
-   db2_vault_operator_completed_t completed = {0};
+   kb_store_vault_operator_completed_t completed = {0};
    if (r->platform->read_status(r->database, &status) != 0 || !(status.flags & 1u) ||
        status.state != KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED)
       return KB_VAULT_MUTATION_DB_INTEGRITY;
    int rc = r->platform->completed_active(status.operation_id, &completed);
-   if (rc != DB2_VAULT_REWRAP_OK)
+   if (rc != KB_STORE_VAULT_REWRAP_OK)
       return map_db(rc, 0);
    if (binding_copy(binding, &completed.binding) != 0 ||
        CRYPTO_memcmp(binding->operation_id, status.operation_id, 16) != 0)
@@ -546,7 +547,7 @@ static int verify_kek(const uint8_t kek[VAULT_KEK_LEN], void *opaque)
    verify_kek_context_t *context = opaque;
    kb_vault_operator_runtime_t *r = context->runtime;
    uint8_t digest[SHA256_DIGEST_LENGTH];
-   db2_vault_rewrap_cursor_t cursor = {{0}, 0};
+   kb_store_vault_rewrap_cursor_t cursor = {{0}, 0};
    int64_t consumed = 0;
    if (context->verify_receipt_digest &&
        (!context->receipt || !SHA256(kek, VAULT_KEK_LEN, digest) ||
@@ -558,21 +559,22 @@ static int verify_kek(const uint8_t kek[VAULT_KEK_LEN], void *opaque)
    OPENSSL_cleanse(digest, sizeof(digest));
    for (;;)
    {
-      db2_vault_rewrap_check_t rows[DB2_VAULT_REWRAP_PAGE_MAX];
-      db2_vault_rewrap_cursor_t next = {{0}, 0};
+      kb_store_vault_rewrap_check_t rows[KB_STORE_VAULT_REWRAP_PAGE_MAX];
+      kb_store_vault_rewrap_cursor_t next = {{0}, 0};
       size_t count = 0;
       int64_t total = 0;
       memset(rows, 0, sizeof(rows));
-      int rc = r->platform->current_check_page(&cursor, DB2_VAULT_REWRAP_PAGE_MAX, rows,
-                                               DB2_VAULT_REWRAP_PAGE_MAX, &count, &next, &total);
-      if (context->expected_count < 0 && rc == DB2_VAULT_REWRAP_OK)
+      int rc =
+          r->platform->current_check_page(&cursor, KB_STORE_VAULT_REWRAP_PAGE_MAX, rows,
+                                          KB_STORE_VAULT_REWRAP_PAGE_MAX, &count, &next, &total);
+      if (context->expected_count < 0 && rc == KB_STORE_VAULT_REWRAP_OK)
          context->expected_count = total;
-      if (rc != DB2_VAULT_REWRAP_OK || total != context->expected_count || count > 128 ||
+      if (rc != KB_STORE_VAULT_REWRAP_OK || total != context->expected_count || count > 128 ||
           consumed > total - (int64_t)count)
       {
-         db2_vault_rewrap_check_clear(rows, DB2_VAULT_REWRAP_PAGE_MAX);
-         db2_vault_rewrap_cursor_clear(&next);
-         db2_vault_rewrap_cursor_clear(&cursor);
+         kb_store_vault_rewrap_check_clear(rows, KB_STORE_VAULT_REWRAP_PAGE_MAX);
+         kb_store_vault_rewrap_cursor_clear(&next);
+         kb_store_vault_rewrap_cursor_clear(&cursor);
          return -1;
       }
       for (size_t i = 0; i < count; ++i)
@@ -580,27 +582,27 @@ static int verify_kek(const uint8_t kek[VAULT_KEK_LEN], void *opaque)
              (rows[i].kek_check_len != VAULT_WRAPPED_DEK_LEN ||
               r->platform->kek_check_verify(kek, rows[i].kek_check) != 0))
          {
-            db2_vault_rewrap_check_clear(rows, DB2_VAULT_REWRAP_PAGE_MAX);
-            db2_vault_rewrap_cursor_clear(&next);
-            db2_vault_rewrap_cursor_clear(&cursor);
+            kb_store_vault_rewrap_check_clear(rows, KB_STORE_VAULT_REWRAP_PAGE_MAX);
+            kb_store_vault_rewrap_cursor_clear(&next);
+            kb_store_vault_rewrap_cursor_clear(&cursor);
             return -1;
          }
       consumed += (int64_t)count;
-      db2_vault_rewrap_check_clear(rows, DB2_VAULT_REWRAP_PAGE_MAX);
+      kb_store_vault_rewrap_check_clear(rows, KB_STORE_VAULT_REWRAP_PAGE_MAX);
       if (!count)
       {
-         db2_vault_rewrap_cursor_clear(&next);
-         db2_vault_rewrap_cursor_clear(&cursor);
+         kb_store_vault_rewrap_cursor_clear(&next);
+         kb_store_vault_rewrap_cursor_clear(&cursor);
          return consumed == total ? 0 : -1;
       }
       cursor = next;
-      db2_vault_rewrap_cursor_clear(&next);
+      kb_store_vault_rewrap_cursor_clear(&next);
    }
 }
 
 static void cache_activation_proof(kb_vault_operator_runtime_t *runtime,
-                                   const db2_vault_operator_open_result_t *opened,
-                                   const db2_vault_operator_open_event_t *event, int has_event)
+                                   const kb_store_vault_operator_open_result_t *opened,
+                                   const kb_store_vault_operator_open_event_t *event, int has_event)
 {
    pthread_mutex_lock(&runtime->mutex);
    runtime->activation_open = *opened;
@@ -613,9 +615,9 @@ static void cache_activation_proof(kb_vault_operator_runtime_t *runtime,
    pthread_mutex_unlock(&runtime->mutex);
 }
 
-static int event_matches(const db2_vault_operator_open_result_t *opened,
-                         const db2_vault_operator_open_event_t *event,
-                         const db2_vault_operator_completed_t *completed, int completed_open)
+static int event_matches(const kb_store_vault_operator_open_result_t *opened,
+                         const kb_store_vault_operator_open_event_t *event,
+                         const kb_store_vault_operator_completed_t *completed, int completed_open)
 {
    return opened->opened_epoch == event->opened.opened_epoch &&
           opened->opened_fence == event->opened.opened_fence &&
@@ -651,16 +653,16 @@ static kb_vault_operator_result_t runtime_finalize(const kb_vault_mutation_bindi
                                                    void *opaque)
 {
    kb_vault_operator_runtime_t *r = opaque;
-   db2_vault_operator_completed_t completed = {0};
+   kb_store_vault_operator_completed_t completed = {0};
    vault_tpm2_reseal_receipt_t receipt = {0};
    kb_vault_protected_secret_t copy = {0};
    vault_maintenance_guard_t *guard = NULL;
-   db2_vault_operator_open_result_t opened = {0};
-   db2_vault_operator_open_event_t event = {0};
+   kb_store_vault_operator_open_result_t opened = {0};
+   kb_store_vault_operator_open_event_t event = {0};
    kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
    if (!binding || !status || runtime_singleton(r) != 0 ||
        r->platform->completed(binding->request_id, binding->operation_id, &completed) !=
-           DB2_VAULT_REWRAP_OK ||
+           KB_STORE_VAULT_REWRAP_OK ||
        binding_copy(&(kb_vault_mutation_binding_t){0}, &completed.binding) != 0 ||
        CRYPTO_memcmp(binding->request_id, completed.binding.request_id, 16) != 0 ||
        CRYPTO_memcmp(binding->operation_id, completed.binding.operation_id, 16) != 0 ||
@@ -718,7 +720,7 @@ static kb_vault_operator_result_t runtime_finalize(const kb_vault_mutation_bindi
    if (r->platform->guard_with_kek(guard, verify_kek, &verify) != 0)
       goto out;
    int open_result = r->platform->open_completed(&completed, &opened);
-   if (open_result == DB2_VAULT_REWRAP_TRANSIENT)
+   if (open_result == KB_STORE_VAULT_REWRAP_TRANSIENT)
    {
       kb_vault_operator_status_t fresh = {0};
       int recovered = recover_uncertain_open(r, &guard, &fresh);
@@ -750,7 +752,7 @@ static kb_vault_operator_result_t runtime_finalize(const kb_vault_mutation_bindi
                 (char *)event_input + sizeof("aimee-vault-open-completed-v1") - 1);
       int replay = fresh.state == KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED &&
                    fresh.flags == 0 && SHA256(event_input, sizeof(event_input) - 1, event_id) &&
-                   r->platform->open_event(event_id, &event) == DB2_VAULT_REWRAP_OK &&
+                   r->platform->open_event(event_id, &event) == KB_STORE_VAULT_REWRAP_OK &&
                    event_matches(&event.opened, &event, &completed, 1) &&
                    fresh.seal_epoch == (uint64_t)event.opened.opened_epoch &&
                    fresh.control_fence == (uint64_t)event.opened.opened_fence &&
@@ -762,8 +764,8 @@ static kb_vault_operator_result_t runtime_finalize(const kb_vault_mutation_bindi
           replay ? KB_VAULT_OPERATOR_RESULT_SAFE_RETRY : KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
       goto out;
    }
-   if (open_result != DB2_VAULT_REWRAP_OK ||
-       r->platform->open_event(opened.event_id, &event) != DB2_VAULT_REWRAP_OK ||
+   if (open_result != KB_STORE_VAULT_REWRAP_OK ||
+       r->platform->open_event(opened.event_id, &event) != KB_STORE_VAULT_REWRAP_OK ||
        !event_matches(&opened, &event, &completed, 1) || !completed_event_row_hash_valid(&event) ||
        r->platform->guard_sync(guard, (uint64_t)opened.opened_epoch) != VAULT_MAINTENANCE_OK ||
        runtime_singleton(r) != 0 ||
@@ -791,8 +793,8 @@ static kb_vault_operator_result_t unseal_common(const kb_vault_operator_status_t
    kb_vault_operator_runtime_t *r = opaque;
    vault_maintenance_guard_t *guard = NULL;
    uint8_t request_id[16] = {0};
-   db2_vault_operator_open_result_t opened = {0};
-   db2_vault_operator_open_event_t event = {0};
+   kb_store_vault_operator_open_result_t opened = {0};
+   kb_store_vault_operator_open_event_t event = {0};
    kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
    if (!status || runtime_singleton(r) != 0 ||
        (idle && (r->platform->random(request_id, sizeof(request_id)) != 0 ||
@@ -816,7 +818,7 @@ static kb_vault_operator_result_t unseal_common(const kb_vault_operator_status_t
       int open_result = r->platform->open_idle(request_id, (int64_t)status->seal_epoch,
                                                (int64_t)status->control_fence,
                                                (int64_t)status->last_opened_fence, &opened);
-      if (open_result == DB2_VAULT_REWRAP_TRANSIENT)
+      if (open_result == KB_STORE_VAULT_REWRAP_TRANSIENT)
       {
          kb_vault_operator_status_t fresh = {0};
          int recovered = recover_uncertain_open(r, &guard, &fresh);
@@ -842,7 +844,7 @@ static kb_vault_operator_result_t unseal_common(const kb_vault_operator_status_t
          idle_event_id(request_id, event_id);
          int replay = fresh.state == KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED &&
                       fresh.flags == 0 &&
-                      r->platform->open_event(event_id, &event) == DB2_VAULT_REWRAP_OK &&
+                      r->platform->open_event(event_id, &event) == KB_STORE_VAULT_REWRAP_OK &&
                       !event.completed_open && !event.operation_present &&
                       CRYPTO_memcmp(event.opened.event_id, event_id, sizeof(event_id)) == 0 &&
                       CRYPTO_memcmp(event.request_id, request_id, sizeof(request_id)) == 0 &&
@@ -855,8 +857,8 @@ static kb_vault_operator_result_t unseal_common(const kb_vault_operator_status_t
                          : KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
          goto out;
       }
-      if (open_result != DB2_VAULT_REWRAP_OK ||
-          r->platform->open_event(opened.event_id, &event) != DB2_VAULT_REWRAP_OK ||
+      if (open_result != KB_STORE_VAULT_REWRAP_OK ||
+          r->platform->open_event(opened.event_id, &event) != KB_STORE_VAULT_REWRAP_OK ||
           !event_matches(&opened, &event, NULL, 0) ||
           CRYPTO_memcmp(event.request_id, request_id, 16) != 0 ||
           !idle_event_row_hash_valid(&event) ||
@@ -926,7 +928,7 @@ static void runtime_seal(void *opaque)
 }
 
 int kb_vault_operator_runtime_init_with_platform(
-    kb_vault_operator_runtime_t *runtime, db2_vault_operator_runtime_t *database,
+    kb_vault_operator_runtime_t *runtime, kb_store_vault_operator_runtime_t *database,
     kb_vault_tpm_runtime_lock_t *singleton, kb_vault_activation_latch_t *activation,
     const kb_vault_operator_runtime_platform_t *platform,
     const vault_reseal_orchestrator_deps_t *orchestrator_deps)
@@ -943,7 +945,7 @@ int kb_vault_operator_runtime_init_with_platform(
    runtime->orchestrator_deps =
        orchestrator_deps
            ? *orchestrator_deps
-           : (vault_reseal_orchestrator_deps_t){.db = &db2_vault_operator_rewrap_ops,
+           : (vault_reseal_orchestrator_deps_t){.db = &kb_store_vault_operator_rewrap_ops,
                                                 .custody = &vault_reseal_custody_default_ops};
    if (!runtime->orchestrator_deps.db || !runtime->orchestrator_deps.custody)
    {
@@ -956,16 +958,16 @@ int kb_vault_operator_runtime_init_with_platform(
 }
 
 int kb_vault_operator_runtime_init(kb_vault_operator_runtime_t *runtime,
-                                   db2_vault_operator_runtime_t *database,
+                                   kb_store_vault_operator_runtime_t *database,
                                    kb_vault_tpm_runtime_lock_t *singleton,
                                    kb_vault_activation_latch_t *activation)
 {
-   if (!runtime || !database || db2_vault_operator_rewrap_bind(database) != 0)
+   if (!runtime || !database || kb_store_vault_operator_rewrap_bind(database) != 0)
       return -1;
    int rc = kb_vault_operator_runtime_init_with_platform(runtime, database, singleton, activation,
                                                          &production_platform, NULL);
    if (rc != 0)
-      db2_vault_operator_rewrap_unbind(database);
+      kb_store_vault_operator_rewrap_unbind(database);
    else
       runtime->database_bound = 1;
    return rc;
@@ -977,7 +979,7 @@ void kb_vault_operator_runtime_destroy(kb_vault_operator_runtime_t *runtime)
       return;
    runtime->initialized = 0;
    if (runtime->database_bound)
-      db2_vault_operator_rewrap_unbind(runtime->database);
+      kb_store_vault_operator_rewrap_unbind(runtime->database);
    pthread_mutex_destroy(&runtime->mutex);
    OPENSSL_cleanse(runtime, sizeof(*runtime));
 }
@@ -1019,8 +1021,8 @@ int kb_vault_operator_runtime_activation_validate(kb_vault_operator_runtime_t *r
    if (!runtime || !runtime->initialized || !latched ||
        latched->state != KB_VAULT_OPERATOR_STATE_OPERATIONAL)
       return -1;
-   db2_vault_operator_open_result_t opened;
-   db2_vault_operator_open_event_t event;
+   kb_store_vault_operator_open_result_t opened;
+   kb_store_vault_operator_open_event_t event;
    kb_vault_operator_status_t published;
    int valid, has_event;
    pthread_mutex_lock(&runtime->mutex);
@@ -1037,8 +1039,8 @@ int kb_vault_operator_runtime_activation_validate(kb_vault_operator_runtime_t *r
       return -1;
    if (has_event)
    {
-      db2_vault_operator_open_event_t fresh = {0};
-      if (runtime->platform->open_event(opened.event_id, &fresh) != DB2_VAULT_REWRAP_OK ||
+      kb_store_vault_operator_open_event_t fresh = {0};
+      if (runtime->platform->open_event(opened.event_id, &fresh) != KB_STORE_VAULT_REWRAP_OK ||
           fresh.opened.opened_epoch != opened.opened_epoch ||
           fresh.opened.opened_fence != opened.opened_fence ||
           CRYPTO_memcmp(fresh.opened.event_id, opened.event_id, 32) != 0 ||

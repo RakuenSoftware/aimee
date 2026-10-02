@@ -4,15 +4,15 @@
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/vector_index_ops.h"
-#include "modules/db2/c/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
-#include "modules/db2/c/sketch.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/vector_index_ops.h"
+#include "modules/kb/c/kb_runtime_state.h" /* kb_store_kb_purge_fence_active: ingest fence checks */
+#include "modules/kb/c/sketch.h"
 #include "kb_vectors.h"
 #include "kb_curator_notify.h"
 #include "kb_features.h"
@@ -20,7 +20,7 @@
 #include "kb_detect.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
-#include "modules/db2/c/bandit.h"
+#include "modules/kb/c/bandit.h"
 #include "headers/sketch.h"
 #include <strings.h>
 #include "kb.h"
@@ -498,7 +498,7 @@ static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
  * (project, file_path, chunk_index), so this is a plain INSERT
  * (DELETE-then-INSERT semantics: callers invoke delete_file_chunks
  * for the file before re-inserting any chunks).  RETURNING id keeps
- * backend-specific last-insert state inside DB2.  Returns the new
+ * backend-specific last-insert state inside KB_STORE.  Returns the new
  * document id, or -1. */
 
 /* Forward an embedding to pgvector for runtime dense search. The
@@ -508,17 +508,17 @@ int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
 {
    if (!vec || dim <= 0)
       return 0;
-   char *payload_json = db2_kb_build_document_payload(doc_id);
+   char *payload_json = kb_store_kb_build_document_payload(doc_id);
    if (!payload_json)
    {
-      db2_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, 0,
-                                 "payload build failed");
+      kb_store_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, 0,
+                                      "payload build failed");
       return -1;
    }
    int rc = pgvec_kb_vector_upsert_document(doc_id, vec, dim, payload_json);
    free(payload_json);
-   db2_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, rc == 0,
-                              rc ? "upsert failed" : NULL);
+   kb_store_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, rc == 0,
+                                   rc ? "upsert failed" : NULL);
    return rc;
 }
 
@@ -546,19 +546,19 @@ int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
  * open), 0 fenced / guard failed (nothing open), -1 transaction error. */
 int kb_purge_fenced_txn_begin(const char *project)
 {
-   if (db2_kb_txn_begin() != 0)
+   if (kb_store_kb_txn_begin() != 0)
       return -1;
-   int maintenance = db2_maintenance_context_apply_current();
+   int maintenance = kb_store_maintenance_context_apply_current();
    if (maintenance < 0)
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       LOG_WARN("kb_build", "maintenance scope refused for project '%s'", project ? project : "");
       return -1;
    }
    if (project && project[0] &&
-       (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
+       (kb_store_kb_purge_txn_guard(project) != 0 || kb_store_kb_purge_fence_active(project)))
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       LOG_WARN("kb_build", "purge fence active for project '%s': dropping ingest write", project);
       return 0;
    }
@@ -569,9 +569,9 @@ int kb_purge_fenced_txn_begin(const char *project)
  * back) on commit failure. */
 int kb_purge_fenced_txn_commit(void)
 {
-   if (db2_kb_txn_commit() != 0)
+   if (kb_store_kb_txn_commit() != 0)
    {
-      db2_kb_txn_rollback();
+      kb_store_kb_txn_rollback();
       return -1;
    }
    return 0;
@@ -591,7 +591,7 @@ int kb_file_index_upsert_fenced(const char *project, const char *file_path, cons
       free(clean_content);
       return -1;
    }
-   int rc = db2_kb_file_index_upsert(project, file_path, hash, clean_content);
+   int rc = kb_store_kb_file_index_upsert(project, file_path, hash, clean_content);
    if (kb_purge_fenced_txn_commit() != 0)
       rc = -1;
    free(clean_content);
@@ -626,20 +626,20 @@ int delete_file_chunks(const char *project, const char *file_path)
     * best-effort push notifies a subscribed server. Runs OUTSIDE the guarded
     * transaction: artifacts are retained by purge, and the broadcast is a
     * network call that must not hold the advisory lock. */
-   int curator_stale = db2_curator_invalidate_doc(project, file_path);
+   int curator_stale = kb_store_curator_invalidate_doc(project, file_path);
 
    if (kb_purge_fenced_txn_begin(project) != 1)
       return -1;
    int64_t ids[1024];
-   int n_ids = db2_kb_documents_list_chunk_ids_for_file(project, file_path, ids,
-                                                        (int)(sizeof(ids) / sizeof(ids[0])));
+   int n_ids = kb_store_kb_documents_list_chunk_ids_for_file(project, file_path, ids,
+                                                             (int)(sizeof(ids) / sizeof(ids[0])));
    for (int i = 0; i < n_ids; i++)
    {
       pgvec_kb_vector_delete_point(ids[i]);
-      db2_vector_index_op_remove(ids[i]);
+      kb_store_vector_index_op_remove(ids[i]);
    }
-   db2_kb_documents_delete_for_file(project, file_path);
-   db2_sketch_minhash_signature_delete(project, file_path);
+   kb_store_kb_documents_delete_for_file(project, file_path);
+   kb_store_sketch_minhash_signature_delete(project, file_path);
    int rc = kb_purge_fenced_txn_commit();
 
    kb_curator_invalidation_broadcast(project, file_path, curator_stale);
@@ -703,7 +703,7 @@ static void kb_flush_batch(const char *project, int64_t *ids, float *vecs, int d
    {
       int ok = (rc == 0);
       const char *err = rc ? (fenced ? "purge fence active" : "batch upsert failed") : NULL;
-      db2_vector_index_op_record(ids[i], pgvec_kb_vector_collection_name(), 0, ok, err);
+      kb_store_vector_index_op_record(ids[i], pgvec_kb_vector_collection_name(), 0, ok, err);
       free(payloads[i]);
       payloads[i] = NULL;
    }
@@ -718,7 +718,7 @@ static int kb_minhash_upsert_fenced(const char *project, const char *rel_path, c
 {
    if (kb_purge_fenced_txn_begin(project) != 1)
       return -1;
-   int rc = db2_sketch_minhash_signature_upsert(project, rel_path, hash, sig);
+   int rc = kb_store_sketch_minhash_signature_upsert(project, rel_path, hash, sig);
    if (kb_purge_fenced_txn_commit() != 0)
       rc = -1;
    return rc;
@@ -734,10 +734,11 @@ static void kb_load_build_sketches(const char *project, int force_rebuild, sketc
       sketch_hll_init(hll);
       return;
    }
-   int bloom_rc = db2_sketch_bloom_load(bloom, "kb_project", project ? project : "", "file_hash");
+   int bloom_rc =
+       kb_store_sketch_bloom_load(bloom, "kb_project", project ? project : "", "file_hash");
    int count_min_rc =
-       db2_sketch_count_min_load(count_min, "kb_project", project ? project : "", "file_hash");
-   int hll_rc = db2_sketch_hll_load(hll, "kb_project", project ? project : "", "file_path");
+       kb_store_sketch_count_min_load(count_min, "kb_project", project ? project : "", "file_hash");
+   int hll_rc = kb_store_sketch_hll_load(hll, "kb_project", project ? project : "", "file_path");
    if (bloom_rc < 0 || count_min_rc < 0 || hll_rc < 0)
       LOG_WARN("kb_build",
                "project=%s: sketch load failed; continuing with empty advisory sketches",
@@ -880,7 +881,7 @@ static int kb_path_wants_dense_vector(const char *rel_path)
 
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
-   int read_scope = db2_maintenance_scope_begin_current();
+   int read_scope = kb_store_maintenance_scope_begin_current();
    if (read_scope < 0)
    {
       LOG_WARN("kb_build", "maintenance read scope refused for project '%s'",
@@ -899,8 +900,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       char findex_hash[64] = "";
       char findex_ingested[64] = "";
       if (stat(c->files[fi].path, &fst) == 0 &&
-          db2_kb_file_index_get(c->project, c->files[fi].rel_path, findex_hash, sizeof(findex_hash),
-                                findex_ingested, sizeof(findex_ingested)) == 1 &&
+          kb_store_kb_file_index_get(c->project, c->files[fi].rel_path, findex_hash,
+                                     sizeof(findex_hash), findex_ingested,
+                                     sizeof(findex_ingested)) == 1 &&
           findex_ingested[0])
       {
          /* Shared parser: this read only the space form AND ignored strptime's
@@ -909,14 +911,14 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          time_t ingested_t = parse_utc_ts(findex_ingested);
          if (ingested_t > 0 && fst.st_mtime < ingested_t)
          {
-            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+            if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
                return;
             c->stats->files_skipped++;
             return;
          }
       }
    }
-   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
       return;
    read_scope = 0;
 
@@ -927,7 +929,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    /* Check if file needs re-indexing */
    if (!c->force_rebuild)
    {
-      read_scope = db2_maintenance_scope_begin_current();
+      read_scope = kb_store_maintenance_scope_begin_current();
       if (read_scope < 0)
       {
          LOG_WARN("kb_build", "maintenance hash scope refused for project '%s'",
@@ -935,12 +937,12 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          return;
       }
       char stored[32];
-      if (db2_kb_documents_get_stored_hash(c->project, c->files[fi].rel_path, stored,
-                                           sizeof(stored)) == 0)
+      if (kb_store_kb_documents_get_stored_hash(c->project, c->files[fi].rel_path, stored,
+                                                sizeof(stored)) == 0)
       {
          if (strcmp(stored, hash) == 0)
          {
-            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+            if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
                return;
             read_scope = 0;
             kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
@@ -953,16 +955,18 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    if (!c->force_rebuild && sketch_bloom_test_hash(c->bloom, h64))
    {
       char dup_path[MAX_PATH_LEN] = "";
-      int dup_exists = db2_kb_documents_hash_exists(c->project, hash, dup_path, sizeof(dup_path));
+      int dup_exists =
+          kb_store_kb_documents_hash_exists(c->project, hash, dup_path, sizeof(dup_path));
       if (dup_exists == 1)
       {
-         if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+         if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
             return;
          read_scope = 0;
          if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
             return; /* purge fence: drop this file */
-         db2_sketch_minhash_row_t dup_sig;
-         if (dup_path[0] && db2_sketch_minhash_signature_get(c->project, dup_path, &dup_sig) == 1)
+         kb_store_sketch_minhash_row_t dup_sig;
+         if (dup_path[0] &&
+             kb_store_sketch_minhash_signature_get(c->project, dup_path, &dup_sig) == 1)
             kb_minhash_upsert_fenced(c->project, c->files[fi].rel_path, hash, &dup_sig.signature);
          kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
          LOG_INFO("kb_build",
@@ -977,7 +981,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                   c->project ? c->project : "?", c->files[fi].rel_path);
    }
 
-   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
       return;
 
    /* Remove old chunks for this file */
@@ -993,9 +997,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    sketch_minhash_init(&minhash_sig);
    for (int ci = 0; ci < n_chunks; ci++)
       sketch_minhash_add_text(&minhash_sig, c->chunks[ci].content, 5);
-   db2_sketch_minhash_row_t lsh_rows[KB_MINHASH_LIMIT];
+   kb_store_sketch_minhash_row_t lsh_rows[KB_MINHASH_LIMIT];
    int n_lsh =
-       db2_sketch_minhash_candidate_list(c->project, &minhash_sig, lsh_rows, KB_MINHASH_LIMIT);
+       kb_store_sketch_minhash_candidate_list(c->project, &minhash_sig, lsh_rows, KB_MINHASH_LIMIT);
    double near_jaccard = 0.0;
    char near_path[MAX_PATH_LEN] = "";
    for (int mi = 0; mi < n_lsh; mi++)
@@ -1060,19 +1064,19 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    int inserted = 0;
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      doc_ids[ci] = db2_kb_documents_insert_chunk(c->project, c->files[fi].rel_path, hash, ci,
-                                                  c->chunks[ci].heading_path,
-                                                  c->chunks[ci].line_start, c->chunks[ci].line_end,
-                                                  c->chunks[ci].content, c->chunks[ci].token_count);
+      doc_ids[ci] = kb_store_kb_documents_insert_chunk(
+          c->project, c->files[fi].rel_path, hash, ci, c->chunks[ci].heading_path,
+          c->chunks[ci].line_start, c->chunks[ci].line_end, c->chunks[ci].content,
+          c->chunks[ci].token_count);
       if (doc_ids[ci] < 0)
       {
          LOG_WARN("kb_build", "project=%s path=%s: chunk %d insert failed; rolling back file",
                   c->project ? c->project : "?", c->files[fi].rel_path, ci);
-         db2_kb_txn_rollback();
+         kb_store_kb_txn_rollback();
          free(doc_ids);
          return;
       }
-      db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
+      kb_store_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
       prev_doc_id = doc_ids[ci];
       inserted++;
    }
@@ -1113,7 +1117,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       /* Generate embedding synchronously or enqueue it for async draining. */
       if (c->async_enabled)
       {
-         if (db2_kb_async_enqueue("embed_raw", doc_id, c->project) == 0)
+         if (kb_store_kb_async_enqueue("embed_raw", doc_id, c->project) == 0)
             continue;
       }
       if (c->effective_cmd[0])
@@ -1168,11 +1172,11 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
             }
             else
             {
-               char *payload_json = db2_kb_build_document_payload(doc_id);
+               char *payload_json = kb_store_kb_build_document_payload(doc_id);
                if (!payload_json)
                {
-                  db2_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, 0,
-                                             "payload build failed");
+                  kb_store_vector_index_op_record(doc_id, pgvec_kb_vector_collection_name(), 0, 0,
+                                                  "payload build failed");
                   continue;
                }
                c->kb_batch_ids[*c->kb_batch_count] = doc_id;
@@ -1203,12 +1207,12 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 static int kb_build_or_update(const char *root_path, const char *project, const char *embedding_cmd,
                               int force_rebuild, kb_stats_t *stats_out)
 {
-   if (!root_path || !db2_is_initialized())
+   if (!root_path || !kb_store_is_initialized())
       return -1;
    /* Generation fence (webchat-project-lifecycle slice 2): refuse to start an
     * ingest for a project whose purge is in flight. Per-batch commit-point
     * checks in kb_flush_batch cover a fence raised mid-ingest. */
-   if (project && project[0] && db2_kb_purge_fence_active(project))
+   if (project && project[0] && kb_store_kb_purge_fence_active(project))
    {
       LOG_WARN("kb_build", "purge fence active for project '%s': refusing ingest", project);
       return -1;
@@ -1217,7 +1221,7 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
     * identity/generation contract as code scans. This also makes direct `kb
     * build` safe on a previously unseen checkout instead of writing unowned
     * document rows with no active generation. */
-   if (!project || !project[0] || db2_code_index_project_upsert(project, root_path) < 0)
+   if (!project || !project[0] || kb_store_code_index_project_upsert(project, root_path) < 0)
       return -1;
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
@@ -1227,15 +1231,15 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
 
    if (force_rebuild && project && project[0])
    {
-      LOG_INFO("kb_build", "force rebuild: clearing project '%s' from DB2", project);
+      LOG_INFO("kb_build", "force rebuild: clearing project '%s' from KB_STORE", project);
       /* Vectors must be selected while their current document rows still exist. */
       pgvec_kb_vector_delete_current_project(project);
-      int maintenance_scope = db2_maintenance_scope_begin_current();
+      int maintenance_scope = kb_store_maintenance_scope_begin_current();
       if (maintenance_scope < 0)
          return -1;
-      int clear_rc = db2_kb_service_clear_current_project(project);
-      int sketch_rc = db2_sketch_minhash_signature_delete_project(project);
-      if (maintenance_scope == 1 && db2_maintenance_scope_commit() != 0)
+      int clear_rc = kb_store_kb_service_clear_current_project(project);
+      int sketch_rc = kb_store_sketch_minhash_signature_delete_project(project);
+      if (maintenance_scope == 1 && kb_store_maintenance_scope_commit() != 0)
          return -1;
       if (clear_rc < 0 || sketch_rc < 0)
          return -1;
@@ -1267,7 +1271,7 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
     * HLL tracks distinct file paths as a calibration/sample-size signal;
     * candidate-level HLL features are computed against each candidate hash.
     * Force rebuild starts sketches from empty state because
-    * db2_kb_service_clear_project() has removed their source-of-truth rows. */
+    * kb_store_kb_service_clear_project() has removed their source-of-truth rows. */
    sketch_bloom_t bloom;
    sketch_count_min_t count_min;
    sketch_hll_t hll;
@@ -1326,10 +1330,10 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
    free(kb_batch_vecs);
    free(kb_batch_payloads);
 
-   if (db2_sketch_bloom_save(&bloom, "kb_project", project ? project : "", "file_hash") != 0 ||
-       db2_sketch_count_min_save(&count_min, "kb_project", project ? project : "", "file_hash") !=
-           0 ||
-       db2_sketch_hll_save(&hll, "kb_project", project ? project : "", "file_path") != 0)
+   if (kb_store_sketch_bloom_save(&bloom, "kb_project", project ? project : "", "file_hash") != 0 ||
+       kb_store_sketch_count_min_save(&count_min, "kb_project", project ? project : "",
+                                      "file_hash") != 0 ||
+       kb_store_sketch_hll_save(&hll, "kb_project", project ? project : "", "file_path") != 0)
       LOG_WARN("kb_build", "project=%s: sketch save failed; ingest data remains committed",
                project ? project : "?");
 
@@ -1350,7 +1354,7 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
 int kb_build(const char *root_path, const char *project, const char *embedding_cmd,
              int force_rebuild, kb_stats_t *stats_out)
 {
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return -1;
    return kb_build_or_update(root_path, project, embedding_cmd, force_rebuild, stats_out);
 }
@@ -1358,7 +1362,7 @@ int kb_build(const char *root_path, const char *project, const char *embedding_c
 int kb_update(const char *root_path, const char *project, const char *embedding_cmd,
               kb_stats_t *stats_out)
 {
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return -1;
    return kb_build_or_update(root_path, project, embedding_cmd, 0, stats_out);
 }
@@ -1387,12 +1391,12 @@ typedef struct
 } kb_result_t;
 
 /* Fetch a kb_documents row by (id, project) into out, returning 1 on
- * hit / 0 on miss. Routes through db2_kb_document_fetch so the SQL
- * stays inside src/modules/db2/c/. */
+ * hit / 0 on miss. Routes through kb_store_kb_document_fetch so the SQL
+ * stays inside src/modules/kb/c/. */
 static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
 {
-   db2_kb_document_row_t row;
-   if (!db2_kb_document_fetch(id, project, &row))
+   kb_store_kb_document_row_t row;
+   if (!kb_store_kb_document_fetch(id, project, &row))
       return 0;
    /* structured-PDF Phase 2 safety chokepoint: PDF chunks are excluded from the general
     * search legs entirely. Once embedded they appear in the vector index, but PDF content
@@ -1415,7 +1419,7 @@ static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
 
 /* Lexical-style search routed through pgvector. Embeds the query, runs the
  * same project-scoped dense search as vec_search, and materialises rows
- * via DB2. Today this returns the same id set as vec_search, so the
+ * via KB_STORE. Today this returns the same id set as vec_search, so the
  * RRF merge in kb_search_gather degenerates to a re-rank of one input
  * list — still a valid combined score.  Future work: add a sparse / BM25
  * vector index and route this leg through it for true hybrid retrieval. */
@@ -1437,7 +1441,7 @@ static int lexical_search_fts(const char *project, const char *exclude_project, 
    if (max * 2 < cap)
       cap = max * 2;
    int n_hits =
-       db2_kb_documents_fts_search_scoped(project, exclude_project, query, ids, scores, cap);
+       kb_store_kb_documents_fts_search_scoped(project, exclude_project, query, ids, scores, cap);
    if (n_hits <= 0)
       return 0;
 
@@ -1826,8 +1830,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 
    if (!query || !query[0])
       return safe_strdup("error: empty query");
-   if (!db2_is_initialized())
-      return safe_strdup("error: db2 not initialized");
+   if (!kb_store_is_initialized())
+      return safe_strdup("error: kb_store not initialized");
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
    /* An explicit project scopes the search; omitting it means whole-corpus (all
@@ -1874,7 +1878,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
       }
       if (fm_arm_id[0])
          fusion_mode = fm_arm_id; /* function-scope buffer; valid throughout */
-      else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
+      else if (kb_store_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
                fm_promo[0])
          fusion_mode = fm_promo; /* promoted default (operator locked it in) */
       else if (fusion_cfg_ok && config_kb_fusion_mode()[0])
@@ -1978,7 +1982,7 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 
       sketch_count_min_t count_min;
       int have_count_min =
-          db2_sketch_count_min_load(&count_min, "kb_project", proj, "file_hash") == 0;
+          kb_store_sketch_count_min_load(&count_min, "kb_project", proj, "file_hash") == 0;
       if (!have_count_min)
          sketch_count_min_init(&count_min);
 
@@ -1996,7 +2000,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          if (merged[i].file_hash[0])
          {
             sketch_hll_t source_hll;
-            if (db2_kb_documents_hll_sources_for_hash(proj, merged[i].file_hash, &source_hll) >= 0)
+            if (kb_store_kb_documents_hll_sources_for_hash(proj, merged[i].file_hash,
+                                                           &source_hll) >= 0)
                sketch_features[i].distinct_sources_hll = sketch_hll_estimate(&source_hll);
          }
          kb_features_upsert_with_sketch(merged[i].doc_id, merged[i].lex_score,
@@ -2068,8 +2073,8 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
 
 char *kb_search(const char *project, const char *query, const char *embedding_cmd, int max_results)
 {
-   if (!db2_is_initialized())
-      return safe_strdup("error: db2 not initialized");
+   if (!kb_store_is_initialized())
+      return safe_strdup("error: kb_store not initialized");
    max_results = kb_search_resolve_cap(max_results);
 
    kb_result_t *merged = malloc((MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS) * sizeof(kb_result_t));
@@ -2121,8 +2126,8 @@ char *kb_search(const char *project, const char *query, const char *embedding_cm
 char *kb_search_json(const char *project, const char *query, const char *embedding_cmd,
                      int max_results)
 {
-   if (!db2_is_initialized())
-      return safe_strdup("{\"error\":\"db2 not initialized\"}");
+   if (!kb_store_is_initialized())
+      return safe_strdup("{\"error\":\"kb_store not initialized\"}");
    max_results = kb_search_resolve_cap(max_results);
 
    kb_result_t *merged = malloc((MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS) * sizeof(kb_result_t));
@@ -2202,8 +2207,8 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
 char *kb_search_json_ex(const char *project, const char *query, const char *embedding_cmd,
                         int max_results, const char *fusion_mode_override)
 {
-   if (!db2_is_initialized())
-      return safe_strdup("{\"error\":\"db2 not initialized\"}");
+   if (!kb_store_is_initialized())
+      return safe_strdup("{\"error\":\"kb_store not initialized\"}");
    max_results = kb_search_resolve_cap(max_results);
 
    kb_result_t *merged = malloc((MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS) * sizeof(kb_result_t));
@@ -2290,8 +2295,8 @@ char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, 
    if (!all_projects || !preferred_project || !preferred_project[0])
       return kb_search_json_ex(all_projects ? NULL : preferred_project, query, embedding_cmd,
                                max_results, fusion_mode_override);
-   if (!db2_is_initialized())
-      return safe_strdup("{\"error\":\"db2 not initialized\"}");
+   if (!kb_store_is_initialized())
+      return safe_strdup("{\"error\":\"kb_store not initialized\"}");
    max_results = kb_search_resolve_cap(max_results);
 
    const int cap = MAX_LEXICAL_RESULTS + MAX_VEC_RESULTS;

@@ -203,7 +203,7 @@ char **webuser_editor_build_env(const char *principal, const char *userroot, int
       *out_token_fd = -1;
    /* code-server gives the user an integrated terminal AND runs untrusted
     * extensions, so the child must NEVER inherit the server's full environment —
-    * that would expose secrets like AIMEE_DB2_URL (DB password), AIMEE_SERVER_TOKEN,
+    * that would expose secrets like AIMEE_STORE_URL (DB password), AIMEE_SERVER_TOKEN,
     * or provider keys to anything the user (or an extension) runs. Start from a
     * minimal curated base (PATH/LANG/TERM), layer the user's vault-backed git env
     * (GH_TOKEN/GIT_ASKPASS/SSH_AUTH_SOCK) on top, pin HOME at the per-user

@@ -33,10 +33,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/artifacts.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/artifacts.h"
 #include "feature_rows.h"
 #include "../kb_ranker.h"
 #include "../kb_ranker_fit.h"
@@ -45,12 +45,12 @@
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 static void insert_attr(const char *event_id, long long surfaced, const char *verdict)
@@ -70,7 +70,7 @@ static void insert_feat(long long doc, double dense, double lex, double rec)
             "{\"lex.cos\":%.4f,\"dense.cos\":%.4f,\"temp.recency\":%.4f,"
             "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}",
             lex, dense, rec);
-   int rc = db2_feature_row_upsert(subj, "kb_document", "", "", "v1", f, NULL);
+   int rc = kb_store_feature_row_upsert(subj, "kb_document", "", "", "v1", f, NULL);
    assert(rc == 0);
 }
 
@@ -80,7 +80,7 @@ static void insert_work_outcome(const char *outcome_id, const char *event_id,
 {
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
+       kb_store_conn(),
        "INSERT INTO work_outcomes(outcome_id,retrieval_event_id,subject_kind,subject_id,"
        " authenticated_evaluator,outcome,occurred_at)"
        " VALUES(?1,?2,?3,?4,'test',?5,'2026-01-01 00:00:00')",
@@ -114,7 +114,7 @@ static void write_file(const char *path, const char *content)
 
 static int count_kind(const char *kind)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    char err[256] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn, "SELECT COUNT(*) FROM artifacts WHERE kind = ?1", err, sizeof(err));

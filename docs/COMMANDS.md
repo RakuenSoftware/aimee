@@ -4,7 +4,7 @@ The exact command table is generated from the CLI registry: [CLI command referen
 This page is the map.
 
 The `aimee` binary is a thin client. A command either performs a small local operation or sends a
-typed request to `aimee-server`. It never opens DB1 or DB2.
+typed request to `aimee-server`. It never opens DB1 or KB_STORE.
 
 ## Everyday commands
 

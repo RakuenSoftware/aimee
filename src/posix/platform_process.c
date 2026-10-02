@@ -332,7 +332,7 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
     * rewrite, css render, oauth token, guardrails), so a thread lost here is a
     * server thread lost for good.
     *
-    * Observed in production: a kb whose embedder was unreachable pinned a DB2
+    * Observed in production: a kb whose embedder was unreachable pinned a KB_STORE
     * pool lease for 21.8 HOURS -- one thread stuck in this read() -- and the
     * reaper logged "missed lease_end?" 3895 times because it cannot safely
     * reclaim a connection a live thread may still be using. Reproduced from a

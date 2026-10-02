@@ -14,7 +14,7 @@ Extend existing dependency tracking with claim-level origin families and complet
 
 ## Existing integration points
 
-Reuse `derived_memory_registry`, `derived_memory_dependencies`, `derived_rederivation_queue`, current freshness/reconciliation functions and learning-observation evidence tables in `src/modules/db2/c/schema.sql`. Ingestion/extraction, summary, observation, reviewed-procedure and embedding producers must declare their actual inputs. This is an extension of the current dependency owner.
+Reuse `derived_memory_registry`, `derived_memory_dependencies`, `derived_rederivation_queue`, current freshness/reconciliation functions and learning-observation evidence tables in `src/modules/kb/c/schema.sql`. Ingestion/extraction, summary, observation, reviewed-procedure and embedding producers must declare their actual inputs. This is an extension of the current dependency owner.
 
 Implement memory lineage projection, producer registration and invalidation consumption in the Go memory module through its existing storage contract. Learning and other producers retain ownership of their canonical artifacts and publish dependency/version changes over declared contracts. Do not add direct feature-module imports or copy their admission rules into memory.
 

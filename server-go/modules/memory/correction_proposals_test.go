@@ -16,7 +16,7 @@ import (
 
 func installProposalFixture(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,12 +34,12 @@ func installProposalFixture(t *testing.T, ctx context.Context, tx pgx.Tx) {
 }
 
 func TestCorrectionProposalRuntimeReplay(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		if os.Getenv("AIMEE_MEMORY_REPLAY_REQUIRED") == "1" {
-			t.Fatal("AIMEE_DB2_REPLAY_URL required")
+			t.Fatal("AIMEE_KB_STORE_REPLAY_URL required")
 		}
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -58,7 +58,7 @@ func TestCorrectionProposalRuntimeReplay(t *testing.T) {
  END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`); err != nil {
 		t.Fatal(err)
 	}
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,9 +331,9 @@ func TestCorrectionProposalRuntimeReplay(t *testing.T) {
 // Real connections prove that approval and rejection share the parent lock,
 // and that two approvals do not create two successors or two review decisions.
 func TestCorrectionProposalConcurrentReview(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	for _, secondAction := range []string{"approve", "reject"} {
 		t.Run(secondAction, func(t *testing.T) {

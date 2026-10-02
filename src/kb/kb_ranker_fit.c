@@ -8,11 +8,11 @@
 #include "kb_ranker_fit.h"
 #include "kb_ranker.h"
 #include "kb_features.h" /* KB_FEATURE_SET_VERSION */
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/feature_rows.h" /* db2_feature_row_read */
-#include "modules/db2/c/demotion.h"     /* DEMOTION_VERDICT_ACCEPTED */
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/feature_rows.h" /* kb_store_feature_row_read */
+#include "modules/kb/c/demotion.h"     /* DEMOTION_VERDICT_ACCEPTED */
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
 #include "platform_process.h"
@@ -79,7 +79,7 @@ int kb_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_finger
                          int id_out_len)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    cJSON *p = cJSON_CreateObject();
    if (!p)
@@ -94,14 +94,15 @@ int kb_ranker_emit_event(const int64_t *doc_ids, int n, const char *query_finger
    if (!payload)
       return -1;
 
-   int rc = db2_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
+   int rc =
+       kb_store_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
    free(payload);
    if (rc != 0)
       return -1;
 
    /* Tag target_surface so kb_hybrid events are separable from memory-recall
     * retrieval_events in audit/trace queries. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (conn)
    {
       char err[256] = "";
@@ -131,7 +132,7 @@ int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *ve
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
    char scope_id[32];
    snprintf(scope_id, sizeof(scope_id), "%lld", (long long)doc_id);
 
@@ -147,8 +148,8 @@ int kb_ranker_outcome_write(const char *event_id, int64_t doc_id, const char *ve
    cJSON_Delete(record);
    if (!payload)
       return -1;
-   int rc = db2_artifact_write(id, "ranker_outcome", "proposed", "kb_hybrid", scope_id, "", 1.0,
-                               payload);
+   int rc = kb_store_artifact_write(id, "ranker_outcome", "proposed", "kb_hybrid", scope_id, "",
+                                    1.0, payload);
    free(payload);
    return rc;
 }
@@ -177,8 +178,8 @@ static int ranker_training_append(cJSON *rows, cJSON *seen_groups, const char *r
       return 0;
 
    char feat_buf[1024];
-   if (db2_feature_row_read(subject_id, ranker_kind, feature_set_version, feat_buf,
-                            sizeof(feat_buf)) != 0)
+   if (kb_store_feature_row_read(subject_id, ranker_kind, feature_set_version, feat_buf,
+                                 sizeof(feat_buf)) != 0)
       return 0;
 
    cJSON *feat = cJSON_Parse(feat_buf);
@@ -232,13 +233,13 @@ int kb_ranker_training_view(const char *subject_kind, const char *feature_set_ve
    const char *fsv = (feature_set_version && feature_set_version[0]) ? feature_set_version
                                                                      : KB_FEATURE_SET_VERSION;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
    /* Enumerate the legacy ranker_outcome artifacts and the canonical P5
     * work_outcomes table separately, then join each candidate to its feature
-    * vector in C via db2_feature_row_read. Separate simple queries preserve
+    * vector in C via kb_store_feature_row_read. Separate simple queries preserve
     * postgres/sqlite parity without backend-specific JSON constructors. One
     * row is emitted per (retrieval_event, candidate) that has BOTH a feature
     * vector and an outcome verdict.
@@ -604,7 +605,7 @@ static void load_incumbent_weights(double *out)
    out[3] = 0.0; /* sketch.frequency_kind_scope */
    out[4] = 0.0; /* sketch.distinct_sources_hll */
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[256] = "";
@@ -656,7 +657,7 @@ static void write_benchmark_trace(const char *model_id, const rank_gate_eval_t *
                                   const char *decision)
 {
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
    double cand = eval ? eval->mean_candidate : -1.0;
    double inc = eval ? eval->mean_incumbent : -1.0;
    char payload[768];
@@ -669,7 +670,7 @@ static void write_benchmark_trace(const char *model_id, const rank_gate_eval_t *
             eval ? eval->n_queries : 0, eval ? eval->wins : 0, eval ? eval->losses : 0,
             eval ? eval->ties : 0, RANK_FIT_MIN_BENCH_QUERIES, RANK_FIT_LIFT_EPSILON,
             decision ? decision : "");
-   db2_artifact_write(id, "benchmark_trace", "committed", "global", "", "", 1.0, payload);
+   kb_store_artifact_write(id, "benchmark_trace", "committed", "global", "", "", 1.0, payload);
 }
 
 static int finish_refused(cJSON *report, const char *reason, char **report_out, cJSON *rows)

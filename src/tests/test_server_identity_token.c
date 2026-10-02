@@ -187,7 +187,7 @@ int main(void)
 
    /* 8) A BARE host-account name is accepted: it is the PAM login's subject form,
     * and what kb_identity_token.h documents the `sub` as. This must agree with the
-    * subject CHECK in db2/schema.sql — a subject the database admits but the
+    * subject CHECK in kb_store/schema.sql — a subject the database admits but the
     * verifier rejects would mint a token the server then refuses as malformed. */
    {
       c = base_claims();

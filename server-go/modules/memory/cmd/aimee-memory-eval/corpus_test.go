@@ -79,8 +79,8 @@ func TestCorpusIsolatedSemanticReplay(t *testing.T) {
 		}
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
-	const schema = "../../../../../src/modules/db2/c/schema.sql"
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
+	const schema = "../../../../../src/modules/kb/c/schema.sql"
 	for _, fail := range []bool{false, true} {
 		executor := &corpusExecutor{failQuery: fail}
 		err := evaluationSession(context.Background(), schema, 3, func(db *postgres.EvaluationStore) error {
@@ -174,7 +174,7 @@ func TestCorpusCommandReplayAndBaselineFailure(t *testing.T) {
 		}
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	directory := t.TempDir()
 	corpus := validCorpus()
 	prefix := strings.Repeat("shared-prefix-", 10)
@@ -193,7 +193,7 @@ func TestCorpusCommandReplayAndBaselineFailure(t *testing.T) {
 	}
 	baseline := filepath.Join(directory, "baseline.json")
 	var output bytes.Buffer
-	schema := "../../../../../src/modules/db2/c/schema.sql"
+	schema := "../../../../../src/modules/kb/c/schema.sql"
 	if err := runCorpus(context.Background(), schema, 3, path, script, "", baseline, true, "json", "metrics", "compact", &output); err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestCorpusCancellationStopsQueryEmbedding(t *testing.T) {
 	if url == "" {
 		t.Skip("requires disposable PostgreSQL")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	executor := &corpusExecutor{blockQuery: make(chan struct{})}
@@ -266,7 +266,7 @@ func TestCorpusCancellationStopsQueryEmbedding(t *testing.T) {
 		}
 	}()
 	var returnedAt time.Time
-	err := evaluationSession(ctx, "../../../../../src/modules/db2/c/schema.sql", 3, func(db *postgres.EvaluationStore) error {
+	err := evaluationSession(ctx, "../../../../../src/modules/kb/c/schema.sql", 3, func(db *postgres.EvaluationStore) error {
 		result, err := memory.EvaluateCorpus(ctx, db, executor, validCorpus(), "http://corpus-test")
 		returnedAt = time.Now()
 		if err == nil || result.Status == "ok" {

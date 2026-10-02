@@ -5,7 +5,7 @@
 #include "retrieval_outcome_bridge.h"
 #include "config.h"
 #include "kb_client.h"
-#include "modules/db2/c/demotion.h" /* DEMOTION_VERDICT_* */
+#include "modules/kb/c/demotion.h" /* DEMOTION_VERDICT_* */
 
 #include <ctype.h>
 #include <string.h>

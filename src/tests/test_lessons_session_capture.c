@@ -1,6 +1,6 @@
 /* test_lessons_session_capture.c: the server-driven live cite-capture session map
  * (graph-feedback §3). Verifies the auto-useful proxy across turns, per-session
- * isolation, and the >=1-re-citation trigger. db2 writes are stubbed. */
+ * isolation, and the >=1-re-citation trigger. kb_store writes are stubbed. */
 #include "kb/lessons_session_capture.h"
 
 #include <assert.h>
@@ -8,14 +8,14 @@
 #include <stdio.h>
 #include <string.h>
 
-/* ── db2 stubs: count the outcome/citation writes the capture triggers ── */
+/* ── kb_store stubs: count the outcome/citation writes the capture triggers ── */
 static int g_outcomes = 0;
 static int g_citations = 0;
-int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
-                                   const char *project_id, int64_t generation_id,
-                                   const char *answer_outcome, const char *correction_text,
-                                   const char *finding_id, const char *actor_id,
-                                   const char *actor_source, int confirmed)
+int64_t kb_store_lessons_record_outcome(const char *session_id, const char *turn_id,
+                                        const char *project_id, int64_t generation_id,
+                                        const char *answer_outcome, const char *correction_text,
+                                        const char *finding_id, const char *actor_id,
+                                        const char *actor_source, int confirmed)
 {
    (void)session_id;
    (void)turn_id;
@@ -29,7 +29,7 @@ int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
    (void)confirmed;
    return ++g_outcomes; /* a positive oid */
 }
-int db2_lessons_record_citation(int64_t outcome_id, const char *node_id, const char *stance)
+int kb_store_lessons_record_citation(int64_t outcome_id, const char *node_id, const char *stance)
 {
    (void)outcome_id;
    (void)node_id;

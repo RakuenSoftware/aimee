@@ -9,13 +9,13 @@
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
-#include "kb_curator_drain.h"                 /* kb_curator_stages_json / _presets_json */
-#include "kb_service.h"                       /* kb_service_workers_json, kb_service_ctx_t */
-#include "kb_reqctx.h"                        /* verifier-derived trace scope */
-#include "kb_service_kb.h"                    /* kb_service_health_json */
-#include "modules/db2/c/kb_service_backend.h" /* async queue status */
-#include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
-#include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
+#include "kb_curator_drain.h"                /* kb_curator_stages_json / _presets_json */
+#include "kb_service.h"                      /* kb_service_workers_json, kb_service_ctx_t */
+#include "kb_reqctx.h"                       /* verifier-derived trace scope */
+#include "kb_service_kb.h"                   /* kb_service_health_json */
+#include "modules/kb/c/kb_service_backend.h" /* async queue status */
+#include "modules/kb/c/fact_mutation.h"      /* assertion review/rollback/removal */
+#include "modules/kb/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
 #include "runtime_secret.h"
 #include <math.h>
 #include <openssl/crypto.h> /* wipe transient credential request copies */
@@ -98,8 +98,8 @@ static int console_overview(char *out_buf, int out_cap)
    cJSON *comps = cJSON_AddArrayToObject(root, "components");
 
    /* Pipeline (async queue depth) — built directly as cJSON (no printf buffer). */
-   db2_kb_service_async_queue_stats_t qs;
-   if (db2_kb_service_async_queue_status(&qs) == 0)
+   kb_store_kb_service_async_queue_stats_t qs;
+   if (kb_store_kb_service_async_queue_status(&qs) == 0)
    {
       cJSON *d = cJSON_CreateObject();
       cJSON_AddNumberToObject(d, "pending", qs.pending);
@@ -243,7 +243,7 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
       return 400;
    }
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -370,7 +370,7 @@ static int console_graph_mutation(const char *body, const char *operation,
       return 400;
    }
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -424,7 +424,7 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
       return 400;
    }
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -504,7 +504,7 @@ static int console_typed_facts_commit(const char *body, char *out_buf, int out_c
    }
    snprintf(selector, sizeof(selector), "%s", selected);
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -513,8 +513,8 @@ static int console_typed_facts_commit(const char *body, char *out_buf, int out_c
    if (strcmp(action, "rollback") == 0)
    {
       char rollback_id[FACT_COMMIT_ID_MAX];
-      int n = by_run ? db2_fact_ingest_run_rollback(&actor, selector, rollback_id)
-                     : db2_fact_commit_rollback(&actor, selector, rollback_id);
+      int n = by_run ? kb_store_fact_ingest_run_rollback(&actor, selector, rollback_id)
+                     : kb_store_fact_commit_rollback(&actor, selector, rollback_id);
       cJSON_Delete(req);
       if (n < 0)
       {
@@ -533,8 +533,8 @@ static int console_typed_facts_commit(const char *body, char *out_buf, int out_c
       return 400;
    }
    fact_commit_change_t changes[64];
-   int n = by_run ? db2_fact_ingest_run_preview(selector, changes, 64)
-                  : db2_fact_commit_preview(selector, changes, 64);
+   int n = by_run ? kb_store_fact_ingest_run_preview(selector, changes, 64)
+                  : kb_store_fact_commit_preview(selector, changes, 64);
    cJSON_Delete(req);
    if (n < 0)
    {
@@ -597,7 +597,7 @@ static int console_typed_facts_erasure(const char *body, char *out_buf, int out_
    char action_copy[16];
    snprintf(action_copy, sizeof(action_copy), "%s", action);
    fact_actor_t actor;
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -606,8 +606,8 @@ static int console_typed_facts_erasure(const char *body, char *out_buf, int out_
    fact_erasure_impact_t impact;
    char cid[FACT_COMMIT_ID_MAX] = "";
    int rc = strcmp(action_copy, "preview") == 0
-                ? db2_fact_erasure_preview(source, relation, target, &impact)
-                : db2_fact_erasure_execute(&actor, source, relation, target, &impact, cid);
+                ? kb_store_fact_erasure_preview(source, relation, target, &impact)
+                : kb_store_fact_erasure_execute(&actor, source, relation, target, &impact, cid);
    cJSON_Delete(req);
    if (rc < 0)
    {
@@ -657,7 +657,7 @@ static int console_evidence(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action is required\"}");
       return 400;
    }
-   if (db2_fact_actor_from_request(1, &actor) != 0)
+   if (kb_store_fact_actor_from_request(1, &actor) != 0)
    {
       cJSON_Delete(req);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
@@ -807,7 +807,7 @@ static int console_evidence(const char *body, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unknown evidence action\"}");
       return 400;
    }
-   int rc = db2_evidence_lifecycle_json(&actor, op, args, nargs, out_buf, out_cap);
+   int rc = kb_store_evidence_lifecycle_json(&actor, op, args, nargs, out_buf, out_cap);
    for (int i = 0; i < owned_n; i++)
       free(owned[i]);
    cJSON_Delete(req);
@@ -1122,7 +1122,7 @@ static int console_settings(char *out_buf, int out_cap)
 
 /* POST /v1/console/settings/config — set ONE KB-owned option: {key, value}.
  * Same shape and same containment as the pipeline route: the key must be in
- * KB_SETTINGS, so this cannot reach arbitrary config (db2_url, the agent roster,
+ * KB_SETTINGS, so this cannot reach arbitrary config (provider settings, the agent roster,
  * or aimee-server's own keys). Persists to aimee.yaml; the `restart` fields take
  * effect when the kb restarts. */
 static int console_settings_config(const char *body, char *out_buf, int out_cap)

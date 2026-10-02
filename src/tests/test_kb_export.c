@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "../kb/db2_adapters/kb_service_backend_export.h"
+#include "../kb/kb_store_adapters/kb_service_backend_export.h"
 #include "../kb_export_json.h"
 #include "../kb_export_obsidian.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -216,16 +216,16 @@ static void test_import_dry_run_parse_contract(void)
    assert(cJSON_IsArray(memories));
 
    int imported = -1;
-   assert(db2_kb_service_memory_import_json(memories, "import-ws", 1, &imported) == 0);
+   assert(kb_store_kb_service_memory_import_json(memories, "import-ws", 1, &imported) == 0);
    assert(imported == 1);
    assert(dispatch_calls == 0);
-   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == 0);
+   assert(kb_store_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == 0);
    assert(imported == 1 && dispatch_calls == 1);
    dispatch_result = 0;
-   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
+   assert(kb_store_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
    assert(imported == 0);
    dispatch_result = -1;
-   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
+   assert(kb_store_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
    assert(imported == 0 && dispatch_calls == 3);
 
    cJSON_Delete(parsed);
@@ -238,11 +238,12 @@ int main(void)
    printf("kb_export:\n");
    test_obsidian_frontmatter_links_and_sanitation();
    test_json_render_parseable_with_schema_version();
-   cJSON *owner_export = db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0);
+   cJSON *owner_export =
+       kb_store_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0);
    assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(owner_export, "memories")));
    cJSON_Delete(owner_export);
    export_dispatch_result = -1;
-   assert(db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0) == NULL);
+   assert(kb_store_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0) == NULL);
    test_import_dry_run_parse_contract();
    printf("All kb_export tests passed.\n");
    return 0;

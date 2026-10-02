@@ -18,7 +18,7 @@ from an already-unique ref makes that impossible by construction.
 This script used to allocate an event base independently, out of a range at
 11264. That was a second allocation authority for one namespace, and it was
 wrong: each ref reserves a whole 256-kind block, and 4096 + 28*256 = 11264 is
-postgres's block. The range overlapped postgres (28), db2 (29) and db1 (30). A
+postgres's block. The range overlapped postgres (28), kb_store (29) and db1 (30). A
 live run against a real aimee-kb reproduced it -- the plugin was refused at
 attach, and in the other order it would have denied postgres instead.
 
@@ -227,7 +227,7 @@ def main():
         invoke, declare = kinds_for(ref)
         # Rewrite the serve list from the derivation rather than trusting what is
         # on disk. A grant written by the old scheme names kinds in postgres's,
-        # db2's or db1's block; keeping them would leave the instance either
+        # kb_store's or db1's block; keeping them would leave the instance either
         # denied at attach or, worse, denying a core module.
         old = sorted(int(k) for k in (existing.get("serve") or "").split(",")
                      if k.strip().isdigit())

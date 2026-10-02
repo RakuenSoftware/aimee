@@ -94,7 +94,7 @@ def _load_registry_file(path):
 
 def model_key(model_id):
     """Normalise an id to its registry key. Ids carry deployment decoration — an @rev
-    suffix (as the db2 model records use) or case differences — none of which change
+    suffix (as the kb_store model records use) or case differences — none of which change
     which prefixes the model was trained with."""
     return (model_id or "").split("@", 1)[0].strip().lower()
 

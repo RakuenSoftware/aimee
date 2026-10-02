@@ -30,7 +30,7 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CRE
 
 # Apply twice: the second pass is the production upgrade/idempotency contract.
 for pass in 1 2; do
-  sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
+  sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/kb/c/schema.sql" |
     psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
 done
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/fact-mutation-pg-test.sql" >/dev/null
@@ -112,7 +112,7 @@ actor="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
 # ---------------------------------------------------------------------------
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $UNSEALEDDB" >/dev/null
 psql -v ON_ERROR_STOP=1 "$UNSEALED_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/kb/c/schema.sql" |
   grep -v 'kb_fact_commit_worm_seal(cid' |
   psql -v ON_ERROR_STOP=1 "$UNSEALED_URL" -f - >/dev/null
 
@@ -128,9 +128,9 @@ unsealed_sealed="$(sealed_count "$UNSEALED_URL")"
 
 # The structural check that keeps a close added later from shipping unsealed,
 # and its own self-test, so it cannot pass vacuously.
-python3 "$ROOT/scripts/check_changeset_worm_seal.py" "$ROOT/src/modules/db2/c/schema.sql"
+python3 "$ROOT/scripts/check_changeset_worm_seal.py" "$ROOT/src/modules/kb/c/schema.sql"
 python3 "$ROOT/scripts/check_changeset_worm_seal.py" --self-test \
-  "$ROOT/src/modules/db2/c/schema.sql"
+  "$ROOT/src/modules/kb/c/schema.sql"
 
 echo "fact mutation PostgreSQL gate: PASSED"
 echo "  memory changeset seal: $sealed of $closed closed changesets carry a WORM row"

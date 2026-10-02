@@ -158,8 +158,9 @@ static void test_clean_passthrough(void)
          "clean fact");
 
    /* correction body is free text: clean passes, embedded markup defangs */
-   st = san("Actually it is db2_init(), not db_init().", SANITIZE_CORRECTION, out, sizeof out, &r);
-   CHECK(st == SANITIZE_OK && strcmp(out, "Actually it is db2_init(), not db_init().") == 0,
+   st = san("Actually it is kb_store_init(), not db_init().", SANITIZE_CORRECTION, out, sizeof out,
+            &r);
+   CHECK(st == SANITIZE_OK && strcmp(out, "Actually it is kb_store_init(), not db_init().") == 0,
          "clean correction");
    st = san("fix: use <|im_start|> guard", SANITIZE_CORRECTION, out, sizeof out, &r);
    CHECK(st == SANITIZE_OK && strstr(out, "<|im_start|>") == NULL, "correction markup defanged");

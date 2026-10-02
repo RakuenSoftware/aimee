@@ -15,6 +15,18 @@ The KB console, called `control-web` in newer trees, is a separate administratio
 The console credential file is private and read-only to the process. The browser never receives the
 KB service bearer.
 
+## Memory review boundaries
+
+The typed-fact page invokes KB operator approve, reject, and undo actions. This is separate from
+memory correction proposals, which retain a protected record while a model drafts a replacement.
+
+Correction-proposal listing and verified-user review already exist in the memory API for both
+placements. No caller of `review_correction` or `correction-review` was found in `frontend` or
+`control-web` at `6cd136947`; the typed-fact page must not be presented as that missing interface.
+Personal corrections belong to Server and require explicit `store=user` on those review operations.
+See [Knowledge](KNOWLEDGE.md#corrections-and-history) and the
+[review recommendation](reviews/agent-memory-atlas-2026-09-29.md#5-complete-the-user-visible-correction-workflow).
+
 ## Deploy
 
 Place the console near the KB, expose only its HTTPS listener, and keep the KB origin private. Pin
@@ -44,3 +56,10 @@ idles without opening a listener and remains healthy; restart the service after 
 - audit rows identify the administrator and operation.
 
 Source builds live under `control-web/` in current trees and `kb-console/` in older checkouts.
+
+## Due decisions
+
+Governance opens with the `revisit_due` operator queue. The revisit timestamp is shown
+alongside each decision. **Close review** marks a reviewed decision `superseded`, so it
+leaves the due queue. Use the status selector to inspect its retained history. These
+reminders are operator work items and are not automatically injected into model context.

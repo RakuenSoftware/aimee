@@ -13,9 +13,9 @@ import (
 )
 
 func TestMemoryIndexRebuildCannotBlockRecallPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("AIMEE_DB2_REPLAY_URL required")
+		t.Skip("AIMEE_KB_STORE_REPLAY_URL required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -73,9 +73,9 @@ func TestMemoryIndexRebuildCannotBlockRecallPostgres(t *testing.T) {
 }
 
 func TestAssertionGenerationCleanupIgnoresTempShadowPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("AIMEE_DB2_REPLAY_URL required")
+		t.Skip("AIMEE_KB_STORE_REPLAY_URL required")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -112,9 +112,9 @@ func TestAssertionGenerationCleanupIgnoresTempShadowPostgres(t *testing.T) {
 // assertion. The index worker already owns that job when it stabilizes parents.
 // It must yield on a busy parent, without model work or losing queued work.
 func TestAssertionIndexYieldsToParentMutationPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("AIMEE_DB2_REPLAY_URL required")
+		t.Skip("AIMEE_KB_STORE_REPLAY_URL required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

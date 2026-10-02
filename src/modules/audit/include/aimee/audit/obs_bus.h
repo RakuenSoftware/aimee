@@ -84,7 +84,7 @@ extern "C"
 
    /* Called on the consumer thread each time the bus goes idle, before it naps.
     * A durable sink that holds a per-thread resource uses this to let go of it
-    * between bursts: aimee-kb's WORM append lazily leases a pooled DB2
+    * between bursts: aimee-kb's WORM append lazily leases a pooled KB_STORE
     * connection, and without this hook that lease is held for the life of the
     * process, because the consumer thread never ends a unit of work. obs_bus
     * stays storage-neutral -- it only says "idle now" and the adapter decides

@@ -26,7 +26,7 @@
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB2 was created as a portable source boundary and its storage owner now resides at
-  `src/modules/db2/c`. Preserve its behavior by putting that C implementation behind a KB-local
+  `src/modules/kb/c`. Preserve its behavior by putting that C implementation behind a KB-local
   module process first. Once
   `aimee-kb` has no direct DB2 linkage, replace that module's internals with pure Go without
   changing its event contract.
@@ -59,7 +59,7 @@ future work.
 
 DB2 moves in two ownership transfers:
 
-1. **C library to C module.** The relocated `src/modules/db2/c` implementation becomes the private
+1. **C library to C module.** The relocated `src/modules/kb/c` implementation becomes the private
    implementation of a separately supervised `aimee-module-db2` process placed with
    `aimee-kb`. The C code, schema, SQL, transaction behavior, pool, and tests move together.
    `aimee-kb` reaches the process only through typed, versioned bus events and no longer links
@@ -85,7 +85,7 @@ the public KB HTTP/CLI contracts keep their meanings.
 ## 2. Why the existing boundary is portable
 
 The C implementation already hid its PostgreSQL handle inside the former `src/db2` boundary. That
-tree has been relocated intact to `src/modules/db2/c`; callers use typed
+tree has been relocated intact to `src/modules/kb/c`; callers use typed
 headers; code outside the boundary is not supposed to receive a libpq handle or issue SQL.
 Schema, lifecycle, pooling, tenant transactions, query implementations, and pgvector transport
 are all present under the same directory. That is the unit to package behind the process
@@ -95,11 +95,11 @@ Measured on `origin/testing` at `0916c09472`:
 
 | Measure | Count |
 | --- | ---: |
-| C translation units under `src/modules/db2/c` | 141 |
-| Headers under `src/modules/db2/c` | 137 |
-| SQL files under `src/modules/db2/c` | 6 |
+| C translation units under `src/modules/kb/c` | 141 |
+| Headers under `src/modules/kb/c` | 137 |
+| SQL files under `src/modules/kb/c` | 6 |
 | C, header, and SQL lines | 92,852 |
-| Files outside `src/modules/db2/c` that include a DB2 header | 297 |
+| Files outside `src/modules/kb/c` that include a DB2 header | 297 |
 | of those, production files | 147 |
 | of those, test files | 150 |
 | Direct DB2-header include directives outside the boundary | 967 |
@@ -108,7 +108,7 @@ Measured on `origin/testing` at `0916c09472`:
 
 The physical move also exposed the other side of the source boundary. At the relocation merge,
 DB2's C and header files contain 187 project or vendored-header include directives that resolve
-outside `src/modules/db2/c`: 122 host APIs, 45 private APIs from other modules, 17 vendored cJSON
+outside `src/modules/kb/c`: 122 host APIs, 45 private APIs from other modules, 17 vendored cJSON
 includes, two public module APIs, and the generated schema header. The initial process-boundary
 slice promoted the three shared management-authority contracts and their token-public dependency
 out of private `src/kb` ownership;
@@ -124,14 +124,14 @@ pattern is intentionally the same for file and directive counts):
 
 ```sh
 git checkout 0916c09472
-rg --files src/modules/db2/c -g '*.c' | wc -l
-rg --files src/modules/db2/c -g '*.h' | wc -l
-rg --files src/modules/db2/c -g '*.sql' | wc -l
-wc -l src/modules/db2/c/*.[ch] src/modules/db2/c/*.sql | tail -1
+rg --files src/modules/kb/c -g '*.c' | wc -l
+rg --files src/modules/kb/c -g '*.h' | wc -l
+rg --files src/modules/kb/c -g '*.sql' | wc -l
+wc -l src/modules/kb/c/*.[ch] src/modules/kb/c/*.sql | tail -1
 rg -l '#include [<"](?:\.\./)?db2/|#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/modules/db2/c/**' | wc -l
+  src --glob '!src/modules/kb/c/**' | wc -l
 rg -n '^#include [<"](?:\.\./)?db2/|^#include [<"][^">]*db2[^">]*\.h' \
-  src --glob '!src/modules/db2/c/**' | wc -l
+  src --glob '!src/modules/kb/c/**' | wc -l
 ```
 
 These planning-time counts are evidence, not a frozen migration manifest. The S2 declaration-audit
@@ -189,8 +189,8 @@ move from the language port and prevents every Go translation from reopening all
 transaction class, idempotency class, and allowed result codes. Numeric stage/operation pairs are
 never reused. The descriptor owns that file and the contract generator emits:
 
-- `src/modules/db2/include/aimee/db2/module_api.h`, with constants and C codecs;
-- `src/modules/db2/client/generated.c`, with typed KB-side calls;
+- `src/modules/kb/include/aimee/db2/module_api.h`, with constants and C codecs;
+- `src/modules/kb/client/generated.c`, with typed KB-side calls;
 - `src/modules/db2/runtime/generated_dispatch.c`, with validation and C handler dispatch;
 - `server-go/db2/contract_generated.go`, shared by Go callers and imported unchanged by the later
   Go provider; and
@@ -422,7 +422,7 @@ src/modules/db2/
   include/aimee/db2/module_api.h
   client/{client.c,client.h,generated.c}
   runtime/{main.c,module_adapter.c,generated_dispatch.c}
-  c/                         # the current src/modules/db2/c tree, paths preserved below this point
+  c/                         # the current src/modules/kb/c tree, paths preserved below this point
 docs/modules/db2.md
 tests/db2/{replay.c,fixtures/,schema_inventory.sql}
 server-go/db2/               # generated caller contract; no database or serving ownership
@@ -786,7 +786,7 @@ from runtime `c` to `go`, permitted only when every catalog operation has a Go d
 contract fingerprint is unchanged, all section 6 gates pass against both providers, and runtime-bundle
 tests start only the Go binary. Rollback installs the prior C artifact; it is not an in-image fallback.
 
-After one compatibility release, remove `src/modules/db2/c`, the C runtime/adapter targets, C-only
+After one compatibility release, remove `src/modules/kb/c`, the C runtime/adapter targets, C-only
 test shims, and C system-link declarations. Source and artifact scans reject a DB2 C object, libpq
 reference outside the Go executable's dependencies, or a stale C provider grant.
 

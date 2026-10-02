@@ -1,7 +1,7 @@
 /* cmd_graph.c: `aimee graph` CLI — code-graph projection sync and explain.
  *
- * Both subcommands reach DB2 (entity_edges / entity_nodes / code projection)
- * through the kb_client RPC boundary; this CLI never opens DB2 directly. */
+ * Both subcommands reach KB_STORE (entity_edges / entity_nodes / code projection)
+ * through the kb_client RPC boundary; this CLI never opens KB_STORE directly. */
 
 #include "aimee.h"
 #include "cJSON.h"

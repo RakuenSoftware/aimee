@@ -1,10 +1,10 @@
 #!/bin/bash
 # validate-memory-activation-live.sh — production recall activation, end to end.
 #
-# Starts the real server, DB1 store module, kb, and DB2 Postgres module against
+# Starts the real server, DB1 store module, kb, and KB_STORE Postgres module against
 # one disposable PostgreSQL database.  It then proves that the native
 # /v1/memory/recall route carries a caller's session into DB1, sends the bounded
-# activation snapshot to the DB2-only kb, applies cooldown there, and records
+# activation snapshot to the KB_STORE-only kb, applies cooldown there, and records
 # only rows that kb actually returned.  A server restart in the middle proves
 # the state is durable rather than worker-local.
 #
@@ -24,7 +24,7 @@ live_env_pg_create
 live_env_start_kb
 live_env_start_server
 
-step "Seeding one DB2-managed preference with a one-turn cooldown"
+step "Seeding one KB_STORE-managed preference with a one-turn cooldown"
 memory_id=$(pg_val "INSERT INTO memories
   (tier,kind,key,content,confidence,provenance_category,
    activation_sticky_turns,activation_cooldown_turns,activation_delay_turns,
@@ -33,9 +33,9 @@ memory_id=$(pg_val "INSERT INTO memories
          'agent_message',2,1,0,0)
  RETURNING id" | head -1)
 if printf '%s' "$memory_id" | grep -Eq '^[1-9][0-9]*$'; then
-   pass "seeded DB2 memory $memory_id"
+   pass "seeded KB_STORE memory $memory_id"
 else
-   echo "memory-activation: could not seed the DB2 fixture (got '$memory_id')" >&2
+   echo "memory-activation: could not seed the KB_STORE fixture (got '$memory_id')" >&2
    exit 2
 fi
 
@@ -105,9 +105,9 @@ assert_state() { # assert_state <session> <turn> <events> <last-event-turn>
 step "The first turn fires; the next turn is held by cooldown"
 recall turn1 "$SESSION_A"
 if memory_is_present "$LIVE_WORK/turn1.json" "$memory_id"; then
-   pass "turn 1 returned the DB2 row and marked it activation_managed"
+   pass "turn 1 returned the KB_STORE row and marked it activation_managed"
 else
-   fail "turn 1 omitted the DB2 activation row"
+   fail "turn 1 omitted the KB_STORE activation row"
 fi
 assert_state "$SESSION_A" 1 1 1
 
@@ -159,4 +159,4 @@ else
    fail "activation writes created $effectiveness_rows context-effectiveness row(s)"
 fi
 
-live_env_verdict "real HTTP -> server DB1 -> kb DB2 activation is bounded, durable, and session-local"
+live_env_verdict "real HTTP -> server DB1 -> kb KB_STORE activation is bounded, durable, and session-local"

@@ -191,9 +191,9 @@ func exerciseSharedIndexReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 // Two connections exercise actual row locks, not nested savepoints. The replay
 // database is disposable; all committed test records are removed on completion.
 func TestSharedIndexConcurrentClaims(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL to the packaged DB2 replay database")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL to the packaged KB_STORE replay database")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

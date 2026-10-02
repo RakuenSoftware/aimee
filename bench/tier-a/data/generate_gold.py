@@ -56,7 +56,7 @@ DOMAIN_SHARE = {"code": 0.40, "business": 0.30, "sales": 0.30}
 # torvalds/linux fills the gap: renames, moves, deletions and authorship are
 # structurally identical facts regardless of what the code does, so
 # `mm/slub.c -> mm/slab_common.c` exercises the same extraction as
-# `learning.h -> db2_learning.h`.
+# `learning.h -> kb_store_learning.h`.
 #
 # It is CAPPED rather than merged wholesale. Linux carries ~1.4M commits against
 # ~18k across every other repo, so an uncapped merge would make "the code domain"

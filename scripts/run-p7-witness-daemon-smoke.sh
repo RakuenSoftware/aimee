@@ -34,15 +34,15 @@ log "provision + boot the real aimee-kb daemon (file custody, compressed cadence
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $DB" >/dev/null
 psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null
-AIMEE_DB2_URL="$DB_URL" AIMEE_HOME="$HOME_DIR" AIMEE_WITNESS_CADENCE_TEST_S=2 \
+AIMEE_STORE_URL="$DB_URL" AIMEE_HOME="$HOME_DIR" AIMEE_WITNESS_CADENCE_TEST_S=2 \
   "$KB" --http-port="$PORT" --log-level=info >"$WORK/kb.out" 2>"$WORK/kb.err" &
 KBPID=$!
 for _ in $(seq 1 40); do
-  curl -s "http://localhost:$PORT/v1/health" 2>/dev/null | grep -q '"db2_ok":true' && break
+  curl -s "http://localhost:$PORT/v1/health" 2>/dev/null | grep -q '"postgres_ok":true' && break
   kill -0 "$KBPID" 2>/dev/null || { tail -20 "$WORK/kb.err"; fail "daemon exited during boot"; }
   sleep 0.25
 done
-curl -s "http://localhost:$PORT/v1/health" 2>/dev/null | grep -q '"db2_ok":true' || fail "daemon health never came up"
+curl -s "http://localhost:$PORT/v1/health" 2>/dev/null | grep -q '"postgres_ok":true' || fail "daemon health never came up"
 log "daemon up; witness cadence running in kb_main"
 
 log "seed witnessed evidence into the live DB"

@@ -1,7 +1,7 @@
 # Code intelligence
 
 aimee stores code as symbols, references, calls, imports, repository dependencies, embeddings, and
-git co-change. The graph lives in DB2 and can span every repository in a workspace.
+git co-change. The graph lives in KB_STORE and can span every repository in a workspace.
 
 ## Local-first scope
 

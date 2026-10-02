@@ -101,7 +101,7 @@ static void cmd_feedback_impl(app_ctx_t *ctx, int argc, char **argv, const char 
    if (!description)
       fatal("feedback requires a description");
 
-   const char *polarity = db2_feedback_parse_polarity(polarity_str);
+   const char *polarity = kb_store_feedback_parse_polarity(polarity_str);
    if (!polarity)
       fatal("invalid polarity: %s", polarity_str);
 

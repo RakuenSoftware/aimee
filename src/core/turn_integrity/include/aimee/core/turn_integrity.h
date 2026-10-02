@@ -1,7 +1,7 @@
 /* turn_integrity.h -- protocol-neutral contracts for one Aimee turn.
  *
  * This module owns data and transition rules only. It deliberately has no
- * dependency on the server, DB1/DB2, the event bus, or a provider. Shipping
+ * dependency on the server, DB1/KB_STORE, the event bus, or a provider. Shipping
  * daemons install the optional event callback at startup; other binaries get a
  * deterministic, dependency-free contract core. */
 #ifndef AIMEE_CORE_TURN_INTEGRITY_H

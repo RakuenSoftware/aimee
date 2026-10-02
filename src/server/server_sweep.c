@@ -423,7 +423,7 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Delta-awareness: exclude seams already filed by a prior sweep (its own filing
     * trail under $AIMEE_HOME). typed_facts/architecture_settled exclusion needs a
-    * kb_client recall path that does not exist yet (DB2-disabled server) — deferred;
+    * kb_client recall path that does not exist yet (KB_STORE-disabled server) — deferred;
     * v1 dedupes against prior filings, which is the dominant re-run case. */
    char **settled_arr = NULL;
    int settled_n = sweep_load_settled(&settled_arr);

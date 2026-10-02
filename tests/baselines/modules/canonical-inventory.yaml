@@ -36,7 +36,6 @@
     "control-web",
     "benchmarks",
     "economizer",
-    "db2",
     "observability"
   ],
   "principal_refs": {
@@ -68,7 +67,6 @@
     "sandbox": 26,
     "economizer": 27,
     "postgres": 28,
-    "db2": 29,
     "aimee": 30,
     "observability": 31,
     "egress": 32,
@@ -76,7 +74,9 @@
     "server": 34,
     "kb": 35
   },
-  "retired_principal_refs": [],
+  "retired_principal_refs": [
+    29
+  ],
   "plugin_principal_ref_band": {
     "first": 200,
     "limit": 456
