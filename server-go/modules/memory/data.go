@@ -32,6 +32,7 @@ const (
 )
 
 type DataRequest struct {
+	Restriction         *SearchRestriction `json:"restriction,omitempty"`
 	TaskPromotion       *taskPromotion     `json:"task_promotion,omitempty"`
 	ServedView          *servedViewRequest `json:"served_view,omitempty"`
 	recoveryActor       string
@@ -963,6 +964,9 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		return DataRequest{}, errors.New("memory: trailing data request")
 	}
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
+	if request.Restriction != nil && request.Operation != "search-restricted" {
+		return DataRequest{}, errors.New("memory: restriction requires search-restricted")
+	}
 	if request.TaskPromotion != nil && request.Operation != "task-projection-propose" {
 		return DataRequest{}, errors.New("memory: task proof requires proposal admission")
 	}
@@ -1385,7 +1389,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	privateRead := options.placement == PlacementServer && (request.Operation == "task-projection-propose" || request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
+	privateRead := options.placement == PlacementServer && (request.Operation == "task-projection-propose" || request.Operation == "served-view" || request.Operation == "claim-card" || request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "search-restricted" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
 	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || privateRead) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
@@ -2334,6 +2338,15 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 		err = getErr
 		response.Records = []Record{record}
+	case "search-restricted":
+		if request.Restriction.Validate() != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		restricted, ok := options.data.(restrictedSearchStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Records, err = restricted.SearchRestricted(ctx, scope, request.Query, request.Kind, request.Tier, request.Limit, *request.Restriction)
 	case "search", "recall", "briefing", "list":
 		query := request.Query
 		if request.Operation == "briefing" || request.Operation == "list" {
