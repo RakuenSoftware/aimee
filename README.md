@@ -64,6 +64,7 @@ Start at the [documentation index](docs/README.md).
 | [Command reference](docs/gen/cli-commands.md) | Every CLI command. Generated from source. |
 | [Configuration reference](docs/gen/configuration.md) | Every config key and variable. Generated from source. |
 | [Server API](docs/PUBLIC_API.md) | `/v1` transport, auth, compatibility. |
+| [Native memory plugin](docs/NATIVE_MEMORY_PLUGIN.md) | Connect an enrolled thin client to a local vLLM model. |
 | [Feature status](docs/STATUS.md) | What works, what is gated, what was removed. |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnose the first broken boundary. |
 
