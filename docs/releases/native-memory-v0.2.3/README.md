@@ -7,9 +7,9 @@ attach these exact files:
 
 | Asset | SHA-256 | Size |
 | --- | --- | ---: |
-| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `d2fc60d17c5280b461103f9adb93ecbe12a39470eeda497cc8348e5b8b566f3d` | 4,936,139 bytes |
-| `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `616360d726fbaf88c96ebbe9ec4a62fc69ba86cba591f1a8b609199ad5339246` | 230,630 bytes |
-| `manifest.json` | `b89ca74f7c3dc3032c8b7b3d9769df38e8c007909c3cb85b6511e02f92889e32` | See file |
+| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `2a0445c7cf70f80035e5f719e1ca87ee1a4246fad930e3236dc17077e0e59b5a` | 3,443,215 bytes |
+| `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656` | 230,630 bytes |
+| `manifest.json` | `782b1b997a2be9bf3a83030a4907c242dda4f9c21462f2073d8ebb005ef8b331` | 1,562 bytes |
 
 The plugin wheel contains the `aimee-native` Rust executable, compiled local
 encoder modules, the portable native consumer, and the vLLM plugin. It contains

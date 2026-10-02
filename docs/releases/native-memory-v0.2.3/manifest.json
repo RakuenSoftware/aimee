@@ -5,12 +5,12 @@
   "assets": {
     "aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl",
-      "sha256": "d2fc60d17c5280b461103f9adb93ecbe12a39470eeda497cc8348e5b8b566f3d",
-      "bytes": 4936139
+      "sha256": "2a0445c7cf70f80035e5f719e1ca87ee1a4246fad930e3236dc17077e0e59b5a",
+      "bytes": 3443215
     },
     "vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl",
-      "sha256": "616360d726fbaf88c96ebbe9ec4a62fc69ba86cba591f1a8b609199ad5339246",
+      "sha256": "09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656",
       "bytes": 230630
     }
   },
@@ -33,7 +33,8 @@
     "enrolled_thinclient": true,
     "selected_records": 2,
     "prompt_tokens": 34,
-    "revoked_request_http_status": 503
+    "revoked_request_http_status": 503,
+    "binary_disclosure_audit": true
   },
   "source_included": false,
   "model_weights_included": false,
