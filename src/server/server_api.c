@@ -234,6 +234,9 @@ static int kb_search_handler(const char *body, char *resp, int cap)
 static int memory_recall_handler(const char *body, char *resp, int cap)
 {
    cJSON *req = body ? cJSON_Parse(body) : NULL;
+   /* This is a model-neutral, enrolled-client read. The model and its weights
+    * remain on the inference host; this endpoint only releases source rows. */
+   const int primitive = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "native_primitive"));
    /* accept either "task_hint" or "query" as the hint */
    const cJSON *jh = req ? cJSON_GetObjectItemCaseSensitive(req, "task_hint") : NULL;
    if (!cJSON_IsString(jh) || !jh->valuestring[0])
@@ -262,7 +265,7 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
     * profile. Personal and strictly local — nothing leaves for the shared KB.
     * Only real user turns (not the session-start context fetch); best-effort, and
     * never affects the recall response. Gated by the working-profile switch. */
-   if (!session_start)
+   if (!session_start && !primitive)
    {
       if (config_identity_working_profile_injection_enabled())
          (void)working_profile_autoobserve_from_feedback(hint);
@@ -276,6 +279,13 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
                "{\"status\":\"error\",\"message\":\"memory store must be user or kb\"}");
       return 400;
    }
+   if (primitive && store_selection != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"native primitive requires personal memory\",\"type\":\"invalid_request_error\"}}");
+      return 400;
+   }
    if (!store_selection)
    {
       char *local = server_user_memory_recall_json(hint, limit_tokens, session_start);
@@ -286,8 +296,56 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
                   "{\"status\":\"error\",\"message\":\"user memory module unavailable\"}");
          return 502;
       }
-      snprintf(resp, (size_t)cap, "%s", local);
       int status = server_http_declared_status(local);
+      if (primitive && status == 200)
+      {
+         cJSON *envelope = cJSON_Parse(local);
+         cJSON *recall = envelope ? cJSON_GetObjectItemCaseSensitive(envelope, "recall") : NULL;
+         cJSON *rows = cJSON_CreateArray();
+         const char *groups[] = {"identity", "preferences", "active_context", "open_commitments"};
+         int valid = cJSON_IsObject(recall) && rows != NULL;
+         for (size_t g = 0; valid && g < sizeof(groups) / sizeof(groups[0]); ++g)
+         {
+            cJSON *group = cJSON_GetObjectItemCaseSensitive(recall, groups[g]);
+            if (!cJSON_IsArray(group)) { valid = 0; break; }
+            cJSON *row = NULL;
+            cJSON_ArrayForEach(row, group)
+            {
+               cJSON *version = cJSON_GetObjectItemCaseSensitive(row, "version");
+               cJSON *content = cJSON_GetObjectItemCaseSensitive(row, "content");
+               if (!cJSON_IsObject(version) || !cJSON_IsString(content)) { valid = 0; break; }
+               cJSON *copy = cJSON_Duplicate(row, 1);
+               if (!copy || !cJSON_AddItemToArray(rows, copy))
+               { cJSON_Delete(copy); valid = 0; break; }
+            }
+         }
+         cJSON *out = valid ? cJSON_CreateObject() : NULL;
+         if (!out)
+            valid = 0;
+         if (out)
+         {
+            cJSON_AddNumberToObject(out, "schema", 1);
+            cJSON_AddItemToObject(out, "records", rows);
+            rows = NULL;
+            char *wire = cJSON_PrintUnformatted(out);
+            if (wire && strlen(wire) < (size_t)cap)
+               snprintf(resp, (size_t)cap, "%s", wire);
+            else
+               valid = 0;
+            free(wire);
+         }
+         cJSON_Delete(rows);
+         cJSON_Delete(out);
+         cJSON_Delete(envelope);
+         free(local);
+         if (!valid)
+         {
+            snprintf(resp, (size_t)cap, "{\"error\":\"native primitive unavailable\"}");
+            return 502;
+         }
+         return 200;
+      }
+      snprintf(resp, (size_t)cap, "%s", local);
       free(local);
       return status ? status : 502;
    }

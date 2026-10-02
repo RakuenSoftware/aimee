@@ -328,6 +328,30 @@ components:
                   Present and true when POSTing returns a run handle to poll at
                   GET /v1/runs/{id} instead of a final response.
 paths:
+  /native/primitive:
+    post:
+      summary: Select model-neutral personal memory for local native preparation
+      description: >
+        Requires the enrolled client's memory-read capability. Aimee returns
+        current source records and revisions; the inference host retains its
+        model weights and prepares model-specific native state locally.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_hint]
+              properties:
+                task_hint: {type: string, minLength: 1}
+                limit_tokens: {type: integer, minimum: 64, maximum: 8192}
+                store: {type: string, enum: [user]}
+      responses:
+        '200': {description: Current selected source rows and record revisions; no model tensors}
+        '400': {description: Invalid selection request}
+        '403': {description: Memory read denied}
+        '502': {description: Personal memory unavailable}
   /native/bootstrap:
     get:
       summary: Resolve the enrolled caller's native-memory profile

@@ -578,6 +578,26 @@ static int rh_memory_recall(const route_req_t *rq, char *resp, int cap)
       session_id_clear_override();
    return status;
 }
+static int rh_native_primitive(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   if (!cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "native primitive requires a JSON object");
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(body, "native_primitive");
+   cJSON_AddBoolToObject(body, "native_primitive", 1);
+   char *wire = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   if (!wire)
+      return err_json(resp, cap, 500, "native primitive unavailable");
+   route_req_t projected = *rq;
+   projected.body = wire;
+   int status = rh_memory_recall(&projected, resp, cap);
+   free(wire);
+   return status;
+}
 static int rh_notes_search(const route_req_t *rq, char *resp, int cap)
 {
    return route_native_post(g_notes_search_handler, rq->body, resp, cap,
@@ -1682,6 +1702,7 @@ const http_route_t g_v1_routes[] = {
     /* Native query POSTs. */
     {"POST", "/v1/kb/search", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_kb_search},
     {"POST", "/v1/memory/recall", NULL, RM_EXACT, "memory.recall", 0, rh_memory_recall},
+    {"POST", "/v1/native/primitive", NULL, RM_EXACT, NULL, CAP_MEMORY_READ, rh_native_primitive},
     {"POST", "/v1/notes/search", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_notes_search},
 
     /* Memory read family (hub-migration P1), dispatch-backed; caps derived from

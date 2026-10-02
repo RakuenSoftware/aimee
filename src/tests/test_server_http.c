@@ -151,6 +151,15 @@ static int stub_recall_session_handler(const char *body, char *resp, int cap)
    snprintf(resp, (size_t)cap, "{\"stub\":true}");
    return 200;
 }
+static int stub_native_primitive_handler(const char *body, char *resp, int cap)
+{
+   cJSON *request = cJSON_Parse(body);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "native_primitive")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "query")), "x") == 0);
+   cJSON_Delete(request);
+   snprintf(resp, (size_t)cap, "{\"stub\":true}");
+   return 200;
+}
 
 /* Stub rules provider: returns a fixed heap JSON body (route frees it). */
 static char *stub_rules_provider(void)
@@ -1170,6 +1179,19 @@ int main(void)
       assert(session_id_override_active() == 0);
       server_http_identity_clear();
 
+      server_http_set_memory_recall_handler(NULL);
+   }
+
+   /* Native clients receive a model-neutral primitive through the same
+    * authorized recall owner, with the primitive mode set by the route. */
+   {
+      server_http_set_memory_recall_handler(stub_native_primitive_handler);
+      int st = server_http_route("POST", "/v1/native/primitive",
+                                 "{\"query\":\"x\"}", 13, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"stub\":true"));
+      st = server_http_route("POST", "/v1/native/primitive", "[]", 2, resp, sizeof(resp));
+      assert(st == 400);
       server_http_set_memory_recall_handler(NULL);
    }
 
