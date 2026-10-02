@@ -4,10 +4,10 @@
 #include "agent_config.h"
 #include "commands.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/code_index.h"
+#include "modules/kb/c/code_index.h"
 #include "config_database.h"
-#include "modules/db2/c/memory_payload.h"
-#include "modules/db2/c/memory_query.h"
+#include "modules/kb/c/memory_payload.h"
+#include "modules/kb/c/memory_query.h"
 #include "hardware_probe.h"
 #include "kb_client.h"
 #include "lifecycle.h"
@@ -44,28 +44,18 @@ typedef struct
 {
    int ready;
    int owned;
-} doctor_db2_session_t;
+} doctor_kb_store_session_t;
 
 /* --- Individual check functions --- */
 
-static doctor_db2_session_t check_database(check_result_t *r)
+static doctor_kb_store_session_t check_database(check_result_t *r)
 {
-   doctor_db2_session_t session = {0, 0};
+   doctor_kb_store_session_t session = {0, 0};
    r->name = "Knowledge Store";
 
    /* Open shared knowledge storage once for the doctor run. Later checks reuse
     * the same connection instead of closing it between probes. */
-   char db2_url[2048] = "";
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      r->status = CHECK_ERROR;
-      snprintf(r->message, sizeof(r->message), "shared knowledge URL not configured");
-      snprintf(r->remediation, sizeof(r->remediation),
-               "Store AIMEE_DB2_URL in the runtime secret store");
-      return session;
-   }
-
-   if (db2_is_initialized())
+   if (kb_store_is_initialized())
    {
       session.ready = 1;
    }
@@ -74,33 +64,32 @@ static doctor_db2_session_t check_database(check_result_t *r)
     * intentionally uniform) plus the pin flag, so an unpinned doctor run derives
     * the recorded dim rather than refusing on the 1024 default. A genuine
     * pin/recorded mismatch still surfaces via #337's record_or_check guard. */
-   else if ((db2_set_embedding_dim(config_embedder_dims_current()),
-             db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current()),
-             db2_set_embedder_model_id(config_embedder_model()), /* unified-llm §2 drift guard */
-             db2_init(db2_url)) == 0)
+   else if ((kb_store_set_embedding_dim(config_embedder_dims_current()),
+             kb_store_set_embedding_dim_pinned(config_embedder_dims_pinned_current()),
+             kb_store_set_embedder_model_id(
+                 config_embedder_model()), /* unified-llm §2 drift guard */
+             kb_store_init_configured()) == 0)
    {
       session.ready = 1;
       session.owned = 1;
    }
    else
    {
-      runtime_secret_wipe(db2_url, sizeof(db2_url));
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge connection failed");
       snprintf(r->remediation, sizeof(r->remediation),
                "Verify the shared knowledge connection URL and service reachability");
       return session;
    }
-   runtime_secret_wipe(db2_url, sizeof(db2_url));
    int schema_ok = 0;
    int have_fuzzy_extension = 0;
-   if (db2_health_probe(&schema_ok, &have_fuzzy_extension) != 0)
+   if (kb_store_health_probe(&schema_ok, &have_fuzzy_extension) != 0)
    {
       snprintf(r->message, sizeof(r->message), "shared knowledge health probe failed");
       snprintf(r->remediation, sizeof(r->remediation), "Check knowledge service logs");
       r->status = CHECK_ERROR;
       if (session.owned)
-         db2_shutdown();
+         kb_store_shutdown();
       session.ready = 0;
       session.owned = 0;
       return session;
@@ -113,7 +102,7 @@ static doctor_db2_session_t check_database(check_result_t *r)
                "Run 'aimee init' after configuring storage");
       r->status = CHECK_ERROR;
       if (session.owned)
-         db2_shutdown();
+         kb_store_shutdown();
       session.ready = 0;
       session.owned = 0;
       return session;
@@ -121,9 +110,9 @@ static doctor_db2_session_t check_database(check_result_t *r)
 
    if (!have_fuzzy_extension)
    {
-      /* db2_init enforces pg_trgm; reaching this branch implies the
-       * extension was dropped after init or db2 was opened without
-       * going through db2_init. Either way, fail visibly. */
+      /* kb_store_init enforces pg_trgm; reaching this branch implies the
+       * extension was dropped after init or kb_store was opened without
+       * going through kb_store_init. Either way, fail visibly. */
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message),
                "shared knowledge store reachable but pg_trgm is not installed");
@@ -136,7 +125,7 @@ static doctor_db2_session_t check_database(check_result_t *r)
    /* Postgres-native diagnostics: connection budget + replica role. */
    int active = -1, max_conns = -1, is_replica = -1;
    int64_t replica_lag = -1;
-   (void)db2_pg_stat_summary(&active, &max_conns, &is_replica, &replica_lag);
+   (void)kb_store_pg_stat_summary(&active, &max_conns, &is_replica, &replica_lag);
 
    /* Default OK message; override for warn states below. */
    r->status = CHECK_OK;
@@ -181,11 +170,11 @@ static doctor_db2_session_t check_database(check_result_t *r)
    return session;
 }
 
-static void doctor_db2_session_close(doctor_db2_session_t *session)
+static void doctor_kb_store_session_close(doctor_kb_store_session_t *session)
 {
    if (!session || !session->owned)
       return;
-   db2_shutdown();
+   kb_store_shutdown();
    session->ready = 0;
    session->owned = 0;
 }
@@ -499,11 +488,11 @@ static void check_secrets(check_result_t *r)
    snprintf(r->message, sizeof(r->message), "secret storage available, %d key(s) stored", count);
 }
 
-static void check_index(check_result_t *r, int db2_ready)
+static void check_index(check_result_t *r, int postgres_ready)
 {
    r->name = "Index";
 
-   if (!db2_ready)
+   if (!postgres_ready)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "skipped; shared knowledge unavailable");
@@ -513,7 +502,7 @@ static void check_index(check_result_t *r, int db2_ready)
 
    /* The indexer populates `projects`/`files`/`terms` in shared storage. The
     * unused `symbols` table is defined in migrations, so don't query it here. */
-   int project_count = db2_code_index_project_count();
+   int project_count = kb_store_code_index_project_count();
 
    if (project_count == 0)
    {
@@ -525,7 +514,7 @@ static void check_index(check_result_t *r, int db2_ready)
 
    /* Check staleness: most recent project scan timestamp */
    char ts_buf[64] = {0};
-   db2_code_index_project_last_scan(ts_buf, sizeof(ts_buf));
+   kb_store_code_index_project_last_scan(ts_buf, sizeof(ts_buf));
 
    /* Parse timestamp and check if older than 24h.
     *
@@ -560,11 +549,11 @@ static void check_index(check_result_t *r, int db2_ready)
    }
 }
 
-static void check_memory(check_result_t *r, int db2_ready)
+static void check_memory(check_result_t *r, int postgres_ready)
 {
    r->name = "Memory";
 
-   if (!db2_ready)
+   if (!postgres_ready)
    {
       r->status = CHECK_WARN;
       snprintf(r->message, sizeof(r->message), "skipped; shared knowledge unavailable");
@@ -572,10 +561,10 @@ static void check_memory(check_result_t *r, int db2_ready)
       return;
    }
 
-   int total = (int)db2_memory_count();
-   int l2_count = db2_memory_count_l2();
-   int l3_count = db2_memory_count_l3();
-   int orphaned_l0 = db2_memory_count_orphaned_l0();
+   int total = (int)kb_store_memory_count();
+   int l2_count = kb_store_memory_count_l2();
+   int l3_count = kb_store_memory_count_l3();
+   int orphaned_l0 = kb_store_memory_count_orphaned_l0();
 
    if (total == 0)
    {
@@ -634,7 +623,7 @@ static void check_kb_vector_store(check_result_t *r, int kb_rc, const kb_health_
    if (!h->pgvec_ok)
    {
       r->status = CHECK_ERROR;
-      snprintf(r->message, sizeof(r->message), "pgvector extension not loaded in DB2");
+      snprintf(r->message, sizeof(r->message), "pgvector extension not loaded in KB_STORE");
       snprintf(r->remediation, sizeof(r->remediation),
                "psql -d aimee_shared -c 'CREATE EXTENSION IF NOT EXISTS vector;'");
    }
@@ -771,7 +760,7 @@ static void check_guardrails_semantic(check_result_t *r)
 
 static int fix_orphaned_l0(void)
 {
-   int changes = db2_memory_prune_orphaned_l0();
+   int changes = kb_store_memory_prune_orphaned_l0();
    if (changes < 0)
    {
       fprintf(stderr, "  fix: L0 prune failed\n");
@@ -970,7 +959,7 @@ char *doctor_checks_json(void)
    memset(checks, 0, sizeof(checks));
 
    int n = 0;
-   doctor_db2_session_t db2_session = check_database(&checks[n++]);
+   doctor_kb_store_session_t kb_store_session = check_database(&checks[n++]);
    check_server(&checks[n++]);
    check_config(&checks[n++]);
    check_agents(&checks[n++]);
@@ -980,8 +969,8 @@ char *doctor_checks_json(void)
    check_hooks(&checks[n++]);
    check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], db2_session.ready);
-   check_memory(&checks[n++], db2_session.ready);
+   check_index(&checks[n++], kb_store_session.ready);
+   check_memory(&checks[n++], kb_store_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
@@ -1020,7 +1009,7 @@ char *doctor_checks_json(void)
 
    char *json = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
-   doctor_db2_session_close(&db2_session);
+   doctor_kb_store_session_close(&kb_store_session);
    return json ? json : strdup("{}");
 }
 
@@ -1047,7 +1036,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    {
       check_result_t r;
       memset(&r, 0, sizeof(r));
-      doctor_db2_session_t db2_session = check_database(&r);
+      doctor_kb_store_session_t kb_store_session = check_database(&r);
       if (ctx->json_output)
       {
          cJSON *obj = cJSON_CreateObject();
@@ -1069,7 +1058,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
          if (r.remediation[0])
             fprintf(stderr, "  remediation: %s\n", r.remediation);
       }
-      doctor_db2_session_close(&db2_session);
+      doctor_kb_store_session_close(&kb_store_session);
       if (r.status == CHECK_ERROR)
          exit(2);
       if (r.status == CHECK_WARN)
@@ -1099,7 +1088,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    memset(checks, 0, sizeof(checks));
 
    int n = 0;
-   doctor_db2_session_t db2_session = check_database(&checks[n++]);
+   doctor_kb_store_session_t kb_store_session = check_database(&checks[n++]);
    check_server(&checks[n++]);
    check_config(&checks[n++]);
    check_agents(&checks[n++]);
@@ -1109,8 +1098,8 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    check_hooks(&checks[n++]);
    check_mcp(&checks[n++]);
    check_secrets(&checks[n++]);
-   check_index(&checks[n++], db2_session.ready);
-   check_memory(&checks[n++], db2_session.ready);
+   check_index(&checks[n++], kb_store_session.ready);
+   check_memory(&checks[n++], kb_store_session.ready);
    kb_health_t kb_health;
    int kb_rc = check_kb_gather(&kb_health);
    check_kb_process(&checks[n++], kb_rc);
@@ -1187,7 +1176,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    if (do_fix)
    {
       fprintf(stderr, "\nApplying fixes...\n");
-      if (db2_session.ready)
+      if (kb_store_session.ready)
          fix_orphaned_l0();
       else
          fprintf(stderr, "  fix: skipped L0 prune; shared knowledge unavailable\n");
@@ -1198,7 +1187,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Exit code: 0 = all pass, 1 = warnings, 2 = errors */
-   doctor_db2_session_close(&db2_session);
+   doctor_kb_store_session_close(&kb_store_session);
    if (errors > 0)
       exit(2);
    else if (warnings > 0)

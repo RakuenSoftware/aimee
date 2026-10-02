@@ -1,7 +1,7 @@
 /* kb_client_roadmap.c: request-side glue from aimee (CLI/server) to the
  * aimee-kb sidecar for the spec-driven roadmap artifact ops.
  *
- * Roadmap / plan_unit artifacts live in DB2, which only aimee-kb may touch
+ * Roadmap / plan_unit artifacts live in KB_STORE, which only aimee-kb may touch
  * (3db boundary). These thin wrappers build the request JSON and hand it to
  * kb_v1_action_request(), which speaks the v1 action protocol over the kb
  * socket and returns the heap-allocated JSON response string (caller frees).

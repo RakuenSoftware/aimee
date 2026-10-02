@@ -46,7 +46,7 @@ STUDY_COMMIT=$(git -C "$AIMEE_ROOT" rev-parse HEAD)
 } > "$OUTPUT_DIR/environment.txt"
 
 env AIMEE_ROOT="$AIMEE_ROOT" AIMEE_SRC="$AIMEE_SRC" WORKDIR="$RUN_DIR" \
-    OUTPUT_DIR="$OUTPUT_DIR" PGDB="$TEST_URL" AIMEE_DB2_URL="$TEST_URL" \
+    OUTPUT_DIR="$OUTPUT_DIR" PGDB="$TEST_URL" \
     AIMEE_STORE_URL="$TEST_URL" STUDY_COMMIT="$STUDY_COMMIT" \
     bash "$AIMEE_ROOT/tests/e2e/self-learning-efficacy-pg-e2e.sh" \
     2>&1 | tee "$OUTPUT_DIR/run.log"

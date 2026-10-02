@@ -8,14 +8,14 @@
 #include "config_client.h"
 #include "config_database.h"
 #include "css_render_cmd.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/kb_store.h"
 #include "kb_witness_cadence.h"
 #include "managed_server_identity_install.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "team.h"
 #include "membership.h"
 #include "kb_insights_util.h"
@@ -44,15 +44,15 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "modules/db2/c/memory_vectors.h"
-#include "modules/db2/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
-#include "kb/kb_vault_policy.h"     /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "modules/kb/c/memory_vectors.h"
+#include "modules/kb/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h"    /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
 #include "kb/kb_vault_operator_runtime.h"
 #include "kb_vault_operator_status.h"
 #include "kb_vault_tpm_runtime_lock.h"
-#include "modules/db2/c/kb_audit_worm.h"
-#include "modules/db2/c/vault_operator_status_runtime.h"
+#include "modules/kb/c/kb_audit_worm.h"
+#include "modules/kb/c/vault_operator_status_runtime.h"
 #include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
@@ -91,7 +91,7 @@ typedef struct
 static void kb_vault_operator_components_destroy(kb_vault_operator_components_t *components);
 
 static int kb_vault_operator_components_init(kb_vault_operator_components_t *components,
-                                             db2_vault_operator_runtime_t *database,
+                                             kb_store_vault_operator_runtime_t *database,
                                              kb_vault_tpm_runtime_lock_t *singleton)
 {
    if (!components || !database || !singleton)
@@ -132,15 +132,16 @@ static void kb_vault_operator_components_destroy(kb_vault_operator_components_t 
    memset(components, 0, sizeof(*components));
 }
 
-_Static_assert((int)DB2_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
+_Static_assert((int)KB_STORE_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
                "vault operator state wire mismatch");
-_Static_assert((int)DB2_VAULT_OPERATION_RECOVERY_REQUIRED ==
+_Static_assert((int)KB_STORE_VAULT_OPERATION_RECOVERY_REQUIRED ==
                    (int)KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED,
                "vault operator operation wire mismatch");
-_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE == (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+_Static_assert((int)KB_STORE_VAULT_REMEDIATION_FINALIZE ==
+                   (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
                "vault operator remediation wire mismatch");
 
-static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_status_t *out)
+static int kb_vault_operator_provider_status(void *opaque, kb_store_vault_provider_status_t *out)
 {
    (void)opaque;
    if (!out)
@@ -148,16 +149,16 @@ static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_st
    switch (vault_custody_selected_local_status())
    {
    case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
-      *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+      *out = KB_STORE_VAULT_PROVIDER_AVAILABLE_SEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
-      *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+      *out = KB_STORE_VAULT_PROVIDER_AVAILABLE_UNSEALED;
       return 0;
    case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
-      *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
+      *out = KB_STORE_VAULT_PROVIDER_UNAVAILABLE;
       return 0;
    case VAULT_CUSTODY_LOCAL_MALFORMED:
-      *out = DB2_VAULT_PROVIDER_MALFORMED;
+      *out = KB_STORE_VAULT_PROVIDER_MALFORMED;
       return 0;
    }
    return -1;
@@ -165,11 +166,11 @@ static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_st
 
 static int kb_vault_operator_project(kb_vault_operator_status_t *out, void *opaque)
 {
-   db2_vault_operator_runtime_t *runtime = opaque;
-   db2_vault_operator_status_t status;
-   int rc =
-       db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL, &status);
-   if (rc == DB2_VAULT_OPERATOR_UNAVAILABLE || !out)
+   kb_store_vault_operator_runtime_t *runtime = opaque;
+   kb_store_vault_operator_status_t status;
+   int rc = kb_store_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL,
+                                                   &status);
+   if (rc == KB_STORE_VAULT_OPERATOR_UNAVAILABLE || !out)
       return -1;
    memset(out, 0, sizeof(*out));
    out->state = (kb_vault_operator_state_t)status.state;
@@ -216,12 +217,12 @@ static int kb_vault_operator_service_post_wipe(kb_vault_operator_opcode_t opcode
               : -1;
 }
 
-static int kb_vault_operator_status_equal(const db2_vault_operator_status_t *a,
-                                          const db2_vault_operator_status_t *b)
+static int kb_vault_operator_status_equal(const kb_store_vault_operator_status_t *a,
+                                          const kb_store_vault_operator_status_t *b)
 {
    return a && b && a->state == b->state && a->remediation == b->remediation &&
           a->provider == b->provider &&
-          db2_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
+          kb_store_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
 }
 
 static int kb_cmd_vault(int argc, char **argv)
@@ -322,9 +323,6 @@ static int kb_cmd_vault(int argc, char **argv)
    return client;
 }
 
-#define AIMEE_DB2_BOOTSTRAP_DB  "aimee_shared"
-#define AIMEE_DB2_BOOTSTRAP_URL "postgres:///aimee_shared"
-
 #ifndef _WIN32
 static void kb_signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
@@ -366,269 +364,44 @@ static void kb_install_signal_handlers(void)
 }
 #endif
 
-static void bootstrap_add_step(cJSON *steps, const char *step, int rc, const char *output)
+/* Reapply host-owned embedding policy after an isolated migration session is
+ * closed: lifecycle shutdown deliberately clears these process-local values. */
+static void kb_configure_knowledge_store(void)
 {
-   if (!steps)
-      return;
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return;
-   cJSON_AddStringToObject(obj, "step", step ? step : "");
-   cJSON_AddNumberToObject(obj, "exit_code", rc);
-   if (output && output[0])
-   {
-      char snippet[512];
-      snprintf(snippet, sizeof(snippet), "%s", output);
-      cJSON_AddStringToObject(obj, "output", snippet);
-   }
-   cJSON_AddItemToArray(steps, obj);
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_resolve_embedder_dims_current());
+   kb_store_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
+   kb_store_set_embedder_model_id(config_embedder_model());
+   embedder_probe_register(config_embedder_command_current(NULL));
 }
 
-static int bootstrap_run_cmd(cJSON *steps, const char *step, const char *cmd)
+/* The owner credential stays in the PostgreSQL module. Bootstrap applies only
+ * KB-owned schema; normal service traffic acquires the separate runtime role. */
+static int kb_bootstrap_postgres_resolve(cJSON *resp)
 {
-   int rc = -1;
-   /* Run with stdin from /dev/null: createdb/psql/sudo must never block waiting
-    * on a tty prompt. A blocked child orphans, and the setuid-root `sudo` steps
-    * cannot be reaped by this non-root process, so they accumulate. */
-   char guarded[1152];
-   snprintf(guarded, sizeof(guarded), "%s </dev/null", cmd);
-   char *out = run_cmd(guarded, &rc);
-   bootstrap_add_step(steps, step, rc, out);
-   free(out);
-   return rc;
-}
-
-/* Single-flight + cooldown guard for the local-tools DB2 bootstrap (the sudo
- * createdb/createuser/psql steps). Those steps connect to Postgres and can
- * block on catalog locks; without a guard, every kb autostart re-issues them
- * and they pile up as orphaned, un-killable setuid-root `sudo` children
- * (observed: 4000+ stuck `sudo -n -u postgres createdb` processes exhausting PG
- * connection slots). Returns a held lock fd (>=0; caller releases it via
- * bootstrap_local_tools_end) to proceed; -1 to skip because another attempt
- * holds the lock or one ran within the cooldown window; -2 on guard-infra
- * failure (proceed once, unguarded) so a missing config dir never permanently
- * blocks provisioning. */
-#define DB2_BOOTSTRAP_COOLDOWN_SECS 300
-
-/* Shell preamble that bounds each provisioning step with coreutils `timeout`
- * when available. The single-flight guard caps concurrent attempts to one, but
- * a `createdb`/`psql` can still block server-side on a catalog lock; without a
- * bound that one attempt holds the lock indefinitely (and, pre-guard, piled up).
- * Sets $TMO; place "$TMO " immediately before the binary so `timeout` is its
- * direct parent (for sudo steps, sudo relays the signal to the child). */
-#define DB2_BOOTSTRAP_TMO "TMO=$(command -v timeout >/dev/null 2>&1 && echo 'timeout -k 5 30'); "
-#ifndef _WIN32
-static int bootstrap_local_tools_begin(void)
-{
-   /* The lock must be HOST-GLOBAL per user, not per-AIMEE_HOME: the local
-    * tools provision the same shared Postgres database (aimee_shared) on the
-    * host regardless of which config dir the process runs under. Keying the
-    * lock to config_default_dir() let processes with different homes — notably
-    * the many short-lived aimee-kb instances tests spin up under /tmp temp
-    * homes — each take their own lock and hammer the same DB concurrently, the
-    * exact runaway this guard exists to prevent. Key it to the uid + target DB
-    * in a host-global temp dir so every aimee process for this user serializes. */
-   const char *tmp = getenv("TMPDIR");
-   if (!tmp || !tmp[0])
-      tmp = "/tmp";
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee-db2-bootstrap-%u-%s.lock", tmp, (unsigned)getuid(),
-            AIMEE_DB2_BOOTSTRAP_DB);
-   /* O_EXCL first, so we can tell "we just created the lock" from "a previous
-    * attempt left it behind". This matters: open(O_CREAT) stamps a NEW file
-    * with the current time, so the cooldown check below saw `now - mtime == 0`
-    * and skipped — meaning the very FIRST bootstrap on a fresh host, the one
-    * case the fallback exists for, never ran. It only became reachable once the
-    * cooldown had expired, five minutes into a crash loop. */
-   int created = 1;
-   int fd = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
-   if (fd < 0)
-   {
-      created = 0;
-      fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-   }
-   if (fd < 0)
-      return -2;
-   if (flock(fd, LOCK_EX | LOCK_NB) != 0)
-   {
-      close(fd); /* another bootstrap is in flight */
-      return -1;
-   }
-   struct stat st;
-   time_t now = time(NULL);
-   if (!created && fstat(fd, &st) == 0 && st.st_mtime > 0 &&
-       now - st.st_mtime < DB2_BOOTSTRAP_COOLDOWN_SECS)
-   {
-      flock(fd, LOCK_UN); /* attempted within the cooldown window — skip */
-      close(fd);
-      return -1;
-   }
-   (void)futimens(fd, NULL); /* stamp the attempt time; keep the lock held */
-   return fd;
-}
-static void bootstrap_local_tools_end(int lockfd)
-{
-   if (lockfd >= 0)
-   {
-      flock(lockfd, LOCK_UN);
-      close(lockfd);
-   }
-}
-#else
-static int bootstrap_local_tools_begin(void)
-{
-   return -2;
-}
-static void bootstrap_local_tools_end(int lockfd)
-{
-   (void)lockfd;
-}
-#endif
-
-static int bootstrap_db2_try_url(const char *url, cJSON *resp)
-{
-   if (!url || !url[0])
-      return -1;
-
-   /* Supply the width BEFORE db2_init, as the daemon and doctor do; bootstrap
-    * was the one path that skipped it, so first provisioning refused. */
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_embedder_dims_current());
-   if (db2_init(url) != 0)
-      return -1;
-
-   int schema_ok = 0;
-   int have_pg_trgm = 0;
-   int ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
-   db2_shutdown();
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_embedder_dims_current());
+   int initialized = kb_store_init_migration() == 0;
+   int schema_ok = 0, have_pg_trgm = 0;
+   int ok = initialized && kb_store_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok &&
+            have_pg_trgm;
+   if (initialized)
+      kb_store_shutdown();
+   cJSON_AddStringToObject(resp, "status", ok ? "ok" : "error");
+   cJSON_AddBoolToObject(resp, "knowledge_ready", ok);
    if (!ok)
-      return -1;
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddBoolToObject(resp, "knowledge_ready", 1);
-   cJSON_AddStringToObject(resp, "db2_url", url);
-   /* Database credentials belong to Vault.  The config module deliberately
-    * rejects this key, so bootstrap verifies the resolved secret without ever
-    * copying it into public configuration. */
-   cJSON_AddBoolToObject(resp, "config_saved", 0);
-   return 0;
+      cJSON_AddStringToObject(
+          resp, "message",
+          "PostgreSQL knowledge bootstrap failed; provision the PostgreSQL module's "
+          "runtime and migration credentials and run aimee init");
+   return ok ? 0 : 1;
 }
 
-static int bootstrap_db2_with_local_tools(cJSON *steps)
-{
-   int lockfd = bootstrap_local_tools_begin();
-   if (lockfd == -1)
-   {
-      bootstrap_add_step(
-          steps, "local_tools_guard", 0,
-          "skipped: a DB2 bootstrap is in progress or ran within the cooldown window");
-      return -1;
-   }
-
-   char *db = shell_quote(AIMEE_DB2_BOOTSTRAP_DB);
-   const char *user_env = getenv("USER");
-   if (!user_env || !user_env[0])
-      user_env = getenv("USERNAME");
-   if (!user_env || !user_env[0])
-      user_env = "aimee";
-   char *user = shell_quote(user_env);
-
-   char cmd[1024];
-
-   snprintf(cmd, sizeof(cmd), DB2_BOOTSTRAP_TMO "$TMO createdb %s 2>&1", db);
-   (void)bootstrap_run_cmd(steps, "createdb", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO
-            "$TMO psql -d %s -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>&1",
-            db);
-   int rc = bootstrap_run_cmd(steps, "create_extension", cmd);
-   if (rc == 0)
-   {
-      free(db);
-      free(user);
-      bootstrap_local_tools_end(lockfd);
-      return 0;
-   }
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres createuser --createdb %s 2>/dev/null "
-                              "|| true",
-            user);
-   (void)bootstrap_run_cmd(steps, "sudo_create_role", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres createdb -O %s %s 2>&1",
-            user, db);
-   (void)bootstrap_run_cmd(steps, "sudo_createdb", cmd);
-
-   snprintf(cmd, sizeof(cmd),
-            DB2_BOOTSTRAP_TMO "command -v sudo >/dev/null 2>&1 && "
-                              "$TMO sudo -n -u postgres psql -d %s -v ON_ERROR_STOP=1 "
-                              "-c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' 2>&1",
-            db);
-   rc = bootstrap_run_cmd(steps, "sudo_create_extension", cmd);
-
-   free(db);
-   free(user);
-   bootstrap_local_tools_end(lockfd);
-   return rc == 0 ? 0 : -1;
-}
-
-/* Resolve and bootstrap DB2 from the runtime-secret store. `resp` collects
- * step-level details (used by the init RPC; pass a
- * throwaway object when calling from startup). Returns 0 on success, 1 on
- * failure. */
-static int kb_bootstrap_db2_resolve(cJSON *resp)
-{
-   cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
-
-   /* AIMEE_DB2_URL is a credential-shaped value sourced exclusively from the
-    * runtime secret store. Public configuration never contains a database URL.
-    *
-    * `url` is a stable copy because try_url used to write the winner back through
-    * the buffer it was reading, and snprintf onto itself is undefined -- glibc
-    * truncated it to empty, leaving db2_init() with an empty URL. */
-   char url[CONFIG_DB2_URL_LEN];
-   int have_url = config_db2_url_effective(url, sizeof(url));
-
-   if (have_url && bootstrap_db2_try_url(url, resp) == 0)
-      return 0;
-
-   if (!have_url && bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
-   {
-      (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
-      return 0;
-   }
-
-   if (!have_url)
-   {
-      (void)bootstrap_db2_with_local_tools(steps);
-      if (bootstrap_db2_try_url(AIMEE_DB2_BOOTSTRAP_URL, resp) == 0)
-      {
-         (void)runtime_secret_store("AIMEE_DB2_URL", AIMEE_DB2_BOOTSTRAP_URL);
-         return 0;
-      }
-   }
-
-   cJSON_AddStringToObject(resp, "status", "error");
-   cJSON_AddBoolToObject(resp, "knowledge_ready", 0);
-   cJSON_AddStringToObject(resp, "message",
-                           "DB2 bootstrap failed; install/start Postgres or set AIMEE_DB2_URL");
-   cJSON_AddStringToObject(
-       resp, "remediation",
-       "Install PostgreSQL, start the service, then run: createdb " AIMEE_DB2_BOOTSTRAP_DB
-       " && psql -d " AIMEE_DB2_BOOTSTRAP_DB " -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'");
-   return 1;
-}
-
-static int kb_bootstrap_db2(int json_output)
+static int kb_bootstrap_postgres(int json_output)
 {
    cJSON *resp = cJSON_CreateObject();
 
-   (void)kb_bootstrap_db2_resolve(resp);
+   (void)kb_bootstrap_postgres_resolve(resp);
 
    int ok = 0;
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
@@ -731,32 +504,26 @@ static int kb_run_fusion_probe(const char *query)
  *   aimee-kb project create <team_id> <name> [team-open|restricted]
  *   aimee-kb project list [team_id]
  *   aimee-kb project attribute <code_project> <kb_project_id>
- * Runs in-process against DB2 as the 'owner' (bootstrap) principal, so an operator
+ * Runs in-process against KB_STORE as the 'owner' (bootstrap) principal, so an operator
  * with the kb DB credential can manage tenancy without a running listener. (The
  * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
-static int kb_cmd_tenancy_init_db2(void)
+static int kb_cmd_tenancy_init_kb_store(void)
 {
-   char db2_url[CONFIG_DB2_URL_LEN];
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
-      return -1;
-   }
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_embedder_dims_current());
+   kb_store_set_embedding_dim_default(config_embedder_dims_default());
+   kb_store_set_embedding_dim(config_embedder_dims_current());
    /* Tenant entry delegates canonical key construction to the identity owner.
     * Daemon startup registers this through module-stage setup, which CLI
     * subcommands intentionally do not run. Register the narrow adapter here so
     * owner/team operations do not fail closed before their first SQL statement. */
-   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
+   aimee_kb_store_register_identity_key_provider(kb_identity_key_from_fields);
    /* These commands read a deployment somebody else is running. Applying the
     * schema from here races the daemon's own pass, and Postgres answers "tuple
-    * concurrently updated", which surfaced below as "DB2 not reachable" against a
+    * concurrently updated", which surfaced below as "KB_STORE not reachable" against a
     * KB that was reachable and healthy. Verify instead. */
-   db2_set_schema_readonly(1);
-   if (db2_init(db2_url) != 0)
+   kb_store_set_schema_readonly(1);
+   if (kb_store_init_configured() != 0)
    {
-      fputs("aimee-kb: DB2 not reachable (check the Vault connection credential)\n", stderr);
+      fputs("aimee-kb: KB_STORE not reachable (check the Vault connection credential)\n", stderr);
       return -1;
    }
    return 0;
@@ -832,7 +599,7 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    int initialized = 0;
    for (int attempt = 0; attempt < 60 && !initialized; attempt++)
    {
-      if (kb_cmd_tenancy_init_db2() == 0)
+      if (kb_cmd_tenancy_init_kb_store() == 0)
          initialized = 1;
       else
          sleep(1);
@@ -842,13 +609,13 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    int rc = kb_managed_server_identity_install(&options) == 0 ? 0 : 1;
    if (rc)
       fputs("aimee-kb managed-server-identity: install failed\n", stderr);
-   db2_shutdown();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing spend reporting CLI (P3b):
  *   aimee-kb spend --team X [--project Y] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_spend_query()'s admin gate passes and --team may be omitted for
  * the org-wide report). Read-only. cost_usd is a NUMERIC string, never a float. */
 static int kb_cmd_spend(int argc, char **argv)
@@ -892,43 +659,43 @@ static int kb_cmd_spend(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
-   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
-   int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
-                               (int)(sizeof(rows) / sizeof(rows[0])));
+   kb_store_org_spend_row_t rows[KB_STORE_SPEND_MAX_ROWS];
+   int n = kb_store_org_spend_query(has_team, team, has_project, project, since, until, rows,
+                                    (int)(sizeof(rows) / sizeof(rows[0])));
    if (n < 0)
-      db2_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
+      kb_store_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
    else
-      db2_tenant_scope_commit();
+      kb_store_tenant_scope_commit();
 
    int rc = 0;
    if (n < 0)
    {
-      if (n == DB2_SPEND_ERR_DENIED)
+      if (n == KB_STORE_SPEND_ERR_DENIED)
          fprintf(stderr, "aimee-kb: not authorized (org-admin or team-lead required)\n");
-      else if (n == DB2_SPEND_ERR_BADDATE)
+      else if (n == KB_STORE_SPEND_ERR_BADDATE)
          fprintf(stderr, "aimee-kb: invalid date range\n");
-      else if (n == DB2_SPEND_ERR_TOOBIG)
+      else if (n == KB_STORE_SPEND_ERR_TOOBIG)
          fprintf(stderr,
                  "aimee-kb: report too large (>%d rows); narrow --team/--project/"
                  "--since/--until\n",
-                 DB2_SPEND_MAX_ROWS);
+                 KB_STORE_SPEND_MAX_ROWS);
       else
          fprintf(stderr, "aimee-kb: spend query failed\n");
       rc = 1;
@@ -965,14 +732,14 @@ static int kb_cmd_spend(int argc, char **argv)
                 rows[i].cost_usd, (long long)rows[i].calls);
       }
    }
-   db2_shutdown();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing budget admin CLI (P4a):
  *   aimee-kb budget set --team X [--project Y] --period day|month --limit USD [--soft USD]
  *   aimee-kb budget show --team X [--project Y]
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_budget_set/show admin gate passes). Money is a NUMERIC string,
  * never a float. BUDGET ONLY (the rate limiter is P4b; the egress wiring is P2b). */
 static int kb_cmd_budget(int argc, char **argv)
@@ -1014,20 +781,20 @@ static int kb_cmd_budget(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -1037,12 +804,12 @@ static int kb_cmd_budget(int argc, char **argv)
       if (!period || (strcmp(period, "day") != 0 && strcmp(period, "month") != 0) || !limit)
       {
          fprintf(stderr, "aimee-kb: budget set needs --period day|month and --limit USD\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       int64_t id = 0;
-      int r = db2_org_budget_set(team, has_project, project, period, limit, soft, &id);
+      int r = kb_store_org_budget_set(team, has_project, project, period, limit, soft, &id);
       if (r == 0)
       {
          printf("{\"id\":%lld,\"team\":%lld,", (long long)id, (long long)team);
@@ -1051,9 +818,9 @@ static int kb_cmd_budget(int argc, char **argv)
          printf("\"period\":\"%s\",\"limit_usd\":\"%s\"}\n", period, limit);
          rc = 0;
       }
-      else if (r == DB2_BUDGET_ERR_DENIED)
+      else if (r == KB_STORE_BUDGET_ERR_DENIED)
          fprintf(stderr, "budget set failed (not authorized — org-admin required)\n");
-      else if (r == DB2_BUDGET_ERR_RETRO)
+      else if (r == KB_STORE_BUDGET_ERR_RETRO)
          fprintf(stderr,
                  "budget set failed (retroactive reduction below committed spend+reserved)\n");
       else
@@ -1061,8 +828,8 @@ static int kb_cmd_budget(int argc, char **argv)
    }
    else /* show */
    {
-      db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
-      int n = db2_org_budget_show(team, has_project, project, rows, DB2_BUDGET_MAX_ROWS);
+      kb_store_org_budget_row_t rows[KB_STORE_BUDGET_MAX_ROWS];
+      int n = kb_store_org_budget_show(team, has_project, project, rows, KB_STORE_BUDGET_MAX_ROWS);
       if (n >= 0)
       {
          printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_"
@@ -1080,7 +847,7 @@ static int kb_cmd_budget(int argc, char **argv)
          }
          rc = 0;
       }
-      else if (n == DB2_BUDGET_ERR_DENIED)
+      else if (n == KB_STORE_BUDGET_ERR_DENIED)
          fprintf(stderr, "budget show failed (not authorized — org-admin or team-lead required)\n");
       else
          fprintf(stderr, "budget show failed\n");
@@ -1088,22 +855,22 @@ static int kb_cmd_budget(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
 /* Operator-facing rate-policy admin CLI (P4b):
  *   aimee-kb rate set --dim D --scope S --window SECS --max N
  *   aimee-kb rate show --dim D --scope S
- * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * Runs in-process against KB_STORE as the install owner principal (an org-admin, so the
  * SECURITY DEFINER org_rate_policy_set/show admin gate passes). RATE ONLY (the budget
  * core is P4a; the org_rate_check egress enforcement is P2b). */
 static int kb_cmd_rate(int argc, char **argv)
@@ -1137,20 +904,20 @@ static int kb_cmd_rate(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
@@ -1160,12 +927,12 @@ static int kb_cmd_rate(int argc, char **argv)
       if (!has_window || window <= 0 || !has_max || maxc < 0)
       {
          fprintf(stderr, "aimee-kb: rate set needs --window >0 and --max >=0\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       int64_t id = 0;
-      int r = db2_org_rate_policy_set(dim, scope, window, maxc, &id);
+      int r = kb_store_org_rate_policy_set(dim, scope, window, maxc, &id);
       if (r == 0)
       {
          printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_"
@@ -1173,15 +940,15 @@ static int kb_cmd_rate(int argc, char **argv)
                 (long long)id, dim, scope, (long long)window, (long long)maxc);
          rc = 0;
       }
-      else if (r == DB2_RATE_ERR_DENIED)
+      else if (r == KB_STORE_RATE_ERR_DENIED)
          fprintf(stderr, "rate set failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "rate set failed\n");
    }
    else /* show */
    {
-      db2_org_rate_policy_t rows[DB2_RATE_MAX_ROWS];
-      int n = db2_org_rate_policy_show(dim, scope, rows, DB2_RATE_MAX_ROWS);
+      kb_store_org_rate_policy_t rows[KB_STORE_RATE_MAX_ROWS];
+      int n = kb_store_org_rate_policy_show(dim, scope, rows, KB_STORE_RATE_MAX_ROWS);
       if (n >= 0)
       {
          printf("id\tdim\tscope\twindow_seconds\tmax_count\n");
@@ -1191,7 +958,7 @@ static int kb_cmd_rate(int argc, char **argv)
                    (long long)rows[i].max_count);
          rc = 0;
       }
-      else if (n == DB2_RATE_ERR_DENIED)
+      else if (n == KB_STORE_RATE_ERR_DENIED)
          fprintf(stderr, "rate show failed (not authorized — org-admin or team-lead required)\n");
       else
          fprintf(stderr, "rate show failed\n");
@@ -1199,15 +966,15 @@ static int kb_cmd_rate(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
@@ -1236,36 +1003,36 @@ static int kb_cmd_telemetry(int argc, char **argv)
       return 1;
    }
 
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
    kb_principal_t owner;
    kb_verify_result_t ovr;
    memset(&ovr, 0, sizeof(ovr));
    if (kb_principal_from_verify(&ovr, "", &owner) != 0)
    {
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
    int rc = 1;
    if (strcmp(sub, "show") == 0)
    {
-      db2_telemetry_allow_row_t rows[DB2_TELEMETRY_ALLOW_MAX_ROWS];
-      int n = db2_telemetry_allow_show(rows, DB2_TELEMETRY_ALLOW_MAX_ROWS);
+      kb_store_telemetry_allow_row_t rows[KB_STORE_TELEMETRY_ALLOW_MAX_ROWS];
+      int n = kb_store_telemetry_allow_show(rows, KB_STORE_TELEMETRY_ALLOW_MAX_ROWS);
       if (n >= 0)
       {
          printf("event_schema\tenabled\tmetric_names\tupdated_at\n");
          for (int i = 0; i < n; i++)
             printf("%s\t%d\t%s\t%s\n", rows[i].event_schema, rows[i].enabled, rows[i].metric_names,
                    rows[i].updated_at);
-         static org_metric_row_t mrows[DB2_TELEMETRY_MAX_ROWS];
-         int m = db2_metrics_snapshot(mrows, DB2_TELEMETRY_MAX_ROWS);
+         static org_metric_row_t mrows[KB_STORE_TELEMETRY_MAX_ROWS];
+         int m = kb_store_metrics_snapshot(mrows, KB_STORE_TELEMETRY_MAX_ROWS);
          if (m >= 0)
          {
             static char buf[256 * 1024];
@@ -1276,12 +1043,12 @@ static int kb_cmd_telemetry(int argc, char **argv)
             }
             rc = 0;
          }
-         else if (m == DB2_TELEMETRY_ERR_DENIED)
+         else if (m == KB_STORE_TELEMETRY_ERR_DENIED)
             fprintf(stderr, "telemetry metrics failed (not authorized — org-admin required)\n");
          else
             fprintf(stderr, "telemetry metrics snapshot failed\n");
       }
-      else if (n == DB2_TELEMETRY_ERR_DENIED)
+      else if (n == KB_STORE_TELEMETRY_ERR_DENIED)
          fprintf(stderr, "telemetry show failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "telemetry show failed\n");
@@ -1291,8 +1058,8 @@ static int kb_cmd_telemetry(int argc, char **argv)
       if (!schema || !metrics)
       {
          fprintf(stderr, "aimee-kb: telemetry allow needs --schema S --metrics a,b,c\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       /* Build the Postgres array literal '{a,b,c}' from the comma list. Each name
@@ -1327,20 +1094,20 @@ static int kb_cmd_telemetry(int argc, char **argv)
       if (bad || first)
       {
          fprintf(stderr, "aimee-kb: each --metrics name must match [a-zA-Z0-9_:]{1,128}\n");
-         db2_tenant_scope_rollback();
-         db2_shutdown();
+         kb_store_tenant_scope_rollback();
+         kb_store_shutdown();
          return 1;
       }
       arr[o++] = '}';
       arr[o] = '\0';
-      int r = db2_telemetry_allow(schema, arr, enabled);
+      int r = kb_store_telemetry_allow(schema, arr, enabled);
       if (r == 0)
       {
          printf("{\"event_schema\":\"%s\",\"metric_names\":\"%s\",\"enabled\":%s}\n", schema, arr,
                 enabled ? "true" : "false");
          rc = 0;
       }
-      else if (r == DB2_TELEMETRY_ERR_DENIED)
+      else if (r == KB_STORE_TELEMETRY_ERR_DENIED)
          fprintf(stderr, "telemetry allow failed (not authorized — org-admin required)\n");
       else
          fprintf(stderr, "telemetry allow failed\n");
@@ -1348,15 +1115,15 @@ static int kb_cmd_telemetry(int argc, char **argv)
 
    if (rc == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc;
 }
 
@@ -1364,7 +1131,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
 {
    const char *group = argv[1]; /* "team" | "project" */
    const char *sub = argc > 2 ? argv[2] : "";
-   if (kb_cmd_tenancy_init_db2() != 0)
+   if (kb_cmd_tenancy_init_kb_store() != 0)
       return 1;
 
    /* Act as the install owner (bootstrap admin). */
@@ -1375,17 +1142,17 @@ static int kb_cmd_tenancy(int argc, char **argv)
       return 1;
 
    int rc_http = 1;
-   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   if (kb_store_tenant_scope_begin(&owner, 0) != 0)
    {
       fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
-      db2_shutdown();
+      kb_store_shutdown();
       return 1;
    }
 
    if (strcmp(group, "team") == 0 && strcmp(sub, "create") == 0 && argc >= 4)
    {
       int64_t id = 0;
-      if (db2_team_create(argv[3], "cli", &id) == 0)
+      if (kb_store_team_create(argv[3], "cli", &id) == 0)
       {
          printf("{\"id\":%lld,\"name\":\"%s\"}\n", (long long)id, argv[3]);
          rc_http = 0;
@@ -1395,8 +1162,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
    }
    else if (strcmp(group, "team") == 0 && strcmp(sub, "list") == 0)
    {
-      db2_team_row_t rows[256];
-      int n = db2_team_list(rows, 256);
+      kb_store_team_row_t rows[256];
+      int n = kb_store_team_list(rows, 256);
       for (int i = 0; i < n; i++)
          printf("%lld\t%s\n", (long long)rows[i].id, rows[i].name);
       rc_http = (n < 0) ? 1 : 0;
@@ -1405,8 +1172,9 @@ static int kb_cmd_tenancy(int argc, char **argv)
    {
       int is_default = (argc >= 6 && strcmp(argv[5], "--default") == 0) ? 1 : 0;
       int64_t id = 0;
-      rc_http =
-          db2_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0 ? 0 : 1;
+      rc_http = kb_store_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0
+                    ? 0
+                    : 1;
       if (rc_http == 0)
          printf("ok\n");
       else
@@ -1414,7 +1182,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
    }
    else if (strcmp(group, "team") == 0 && strcmp(sub, "remove-member") == 0 && argc >= 5)
    {
-      rc_http = db2_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
+      rc_http = kb_store_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
       if (rc_http == 0)
          printf("ok\n");
       else
@@ -1424,7 +1192,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
    {
       const char *mode = argc >= 6 ? argv[5] : "team-open";
       int64_t id = 0;
-      if (db2_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
+      if (kb_store_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
       {
          printf("{\"id\":%lld,\"parent\":%s,\"name\":\"%s\"}\n", (long long)id, argv[3], argv[4]);
          rc_http = 0;
@@ -1435,8 +1203,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
    else if (strcmp(group, "project") == 0 && strcmp(sub, "list") == 0)
    {
       int64_t parent = argc >= 4 ? strtoll(argv[3], NULL, 10) : 0;
-      db2_project_row_t rows[256];
-      int n = db2_project_list(parent, rows, 256);
+      kb_store_project_row_t rows[256];
+      int n = kb_store_project_list(parent, rows, 256);
       for (int i = 0; i < n; i++)
          printf("%lld\t%lld\t%s\t%s\n", (long long)rows[i].id, (long long)rows[i].parent,
                 rows[i].name, rows[i].access_mode);
@@ -1446,8 +1214,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
       rc_http = kb_tenancy_cli_project_attribute(argv[3], argv[4]);
    else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
    {
-      db2_model_catalog_row_t rows[512];
-      int n = db2_model_catalog_list(rows, 512);
+      kb_store_model_catalog_row_t rows[512];
+      int n = kb_store_model_catalog_list(rows, 512);
       for (int i = 0; i < n; i++)
          printf("%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].model_id,
                 rows[i].enabled ? "enabled" : "disabled", rows[i].provider, rows[i].wire,
@@ -1465,8 +1233,8 @@ static int kb_cmd_tenancy(int argc, char **argv)
       const char *display_name = (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
       const char *endpoint = (argc >= 9 && strncmp(argv[8], "--", 2) != 0) ? argv[8] : "";
       int64_t id = 0;
-      if (db2_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
-                                   &id) == 0)
+      if (kb_store_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
+                                        &id) == 0)
       {
          printf("{\"id\":%lld,\"model_id\":\"%s\"}\n", (long long)id, argv[4]);
          rc_http = 0;
@@ -1478,7 +1246,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "remove") == 0)
    {
       int64_t removed = 0;
-      if (db2_model_catalog_remove(argv[4], &removed) == 0)
+      if (kb_store_model_catalog_remove(argv[4], &removed) == 0)
       {
          printf("{\"model_id\":\"%s\",\"removed\":%lld}\n", argv[4], (long long)removed);
          rc_http = 0;
@@ -1490,7 +1258,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "entitle") == 0)
    {
       int64_t id = 0;
-      if (db2_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
+      if (kb_store_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
       {
          printf("{\"model_id\":\"%s\",\"team\":%s,\"id\":%lld}\n", argv[4], argv[5], (long long)id);
          rc_http = 0;
@@ -1502,7 +1270,7 @@ static int kb_cmd_tenancy(int argc, char **argv)
             strcmp(argv[3], "unentitle") == 0)
    {
       int64_t removed = 0;
-      if (db2_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
+      if (kb_store_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
       {
          printf("{\"model_id\":\"%s\",\"team\":%s,\"removed\":%lld}\n", argv[4], argv[5],
                 (long long)removed);
@@ -1524,15 +1292,15 @@ static int kb_cmd_tenancy(int argc, char **argv)
 
    if (rc_http == 0)
    {
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
       {
          fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
          rc_http = 1;
       }
    }
    else
-      db2_tenant_scope_rollback();
-   db2_shutdown();
+      kb_store_tenant_scope_rollback();
+   kb_store_shutdown();
    return rc_http;
 }
 
@@ -1617,27 +1385,6 @@ int main(int argc, char **argv)
                     strcmp(argv[1], "--bootstrap-vault-stdin") == 0))
       return 0;
 
-   /* Entrypoint decision probe: presence only, never the DB credential. A KB
-    * restarted without first-boot environment metadata must still select the
-    * external database whose URL is held exclusively in Vault. */
-   if (argc == 2 && strcmp(argv[1], "--vault-db2-external") == 0)
-   {
-      char db2_url[4096];
-      int present = runtime_secret_get("AIMEE_DB2_URL", db2_url, sizeof(db2_url));
-      char embedded[4096];
-      const char *home = aimee_home();
-      int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
-                              home)
-                   : -1;
-      size_t embedded_len = n > 0 ? (size_t)n : 0;
-      int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
-                             strncmp(db2_url, embedded, embedded_len) == 0 &&
-                             (db2_url[embedded_len] == '\0' || db2_url[embedded_len] == '&');
-      int external = present && !matches_embedded;
-      runtime_secret_wipe(db2_url, sizeof(db2_url));
-      runtime_secret_wipe(embedded, sizeof(embedded));
-      return external ? 0 : 1;
-   }
    if (argc == 2 && strcmp(argv[1], "--vault-llm-auth-configured") == 0)
    {
       char token[513];
@@ -1666,7 +1413,7 @@ int main(int argc, char **argv)
       return kb_cmd_vault(argc, argv);
 
    log_level_t log_level = LOG_INFO;
-   int bootstrap_db2 = 0;
+   int bootstrap_postgres = 0;
    int json_output = 0;
    int http_port_override = -1; /* -1 = use config */
    kb_metrics_listener_config_t metrics_listener_config;
@@ -1681,8 +1428,8 @@ int main(int argc, char **argv)
          ; /* deprecated/ignored: HTTP is now the only transport */
       else if (strncmp(argv[i], "--fusion-probe=", 15) == 0)
          fusion_probe_query = argv[i] + 15;
-      else if (strcmp(argv[i], "--bootstrap-db2") == 0)
-         bootstrap_db2 = 1;
+      else if (strcmp(argv[i], "--bootstrap-postgres") == 0)
+         bootstrap_postgres = 1;
       else if (strcmp(argv[i], "--json") == 0)
          json_output = 1;
       else if (strncmp(argv[i], "--http-port=", 12) == 0)
@@ -1728,7 +1475,8 @@ int main(int argc, char **argv)
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
              "  --http-port=N        TCP port for /v1/* REST API (required; default 0 = off)\n"
              "  --log-level=LEVEL    Log level: error, warn, info, debug (default: info)\n"
-             "  --bootstrap-db2      Provision/verify the configured DB2 Postgres database\n"
+             "  --bootstrap-postgres      Provision/verify the configured KB_STORE Postgres "
+             "database\n"
              "  --json               Emit JSON for bootstrap commands\n"
              "  --version            Print version\n"
              "  --help               Show this help\n";
@@ -1743,8 +1491,8 @@ int main(int argc, char **argv)
       }
    }
 
-   if (bootstrap_db2)
-      return kb_bootstrap_db2(json_output);
+   if (bootstrap_postgres)
+      return kb_bootstrap_postgres(json_output);
 
    log_init(log_level);
    agent_http_init();
@@ -1814,108 +1562,61 @@ int main(int argc, char **argv)
       return 1;
    }
    kb_vault_tpm_runtime_lock_t *vault_tpm_runtime_lock = NULL;
-   db2_vault_operator_runtime_t vault_operator_runtime;
+   kb_store_vault_operator_runtime_t vault_operator_runtime;
    memset(&vault_operator_runtime, 0, sizeof(vault_operator_runtime));
    int vault_operator_runtime_opened = 0;
    kb_vault_operator_service_t *vault_operator_service = NULL;
    kb_vault_operator_components_t vault_operator_components;
    memset(&vault_operator_components, 0, sizeof(vault_operator_components));
-   db2_vault_operator_status_t vault_operator_startup_before;
+   kb_store_vault_operator_status_t vault_operator_startup_before;
    memset(&vault_operator_startup_before, 0, sizeof(vault_operator_startup_before));
 
-   /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
-    * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. EMBEDDER_DIMS
-    * overrides the configured value (containerized deploys without a writable
-    * aimee.yaml). */
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_resolve_embedder_dims_current());
-   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
-   /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
-    * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
-   db2_set_embedder_model_id(config_embedder_model());
-   /* §2b: register the embedder probes. Unconditionally, for whatever embed command is
-    * configured: embedder_probe_register decides which probes that command supports.
-    * The distinction belongs to the module that knows what each probe requires, not to
-    * its caller. */
-   embedder_probe_register(config_embedder_command_current(NULL));
+   kb_configure_knowledge_store();
    /* S6: register the policy arms and install the bandit-backed sampler.
     * Without this nothing ever samples, and the registry only describes a
     * decision nobody makes. */
    kb_policy_arms_init();
-   db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
-   /* The database credential is hydrated from Vault. */
-   char db2_url[CONFIG_DB2_URL_LEN];
-   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
-   {
-      cJSON *resp = cJSON_CreateObject();
-      int rc = kb_bootstrap_db2_resolve(resp);
-      if (rc != 0)
-      {
-         /* kb_bootstrap_db2_resolve already recorded WHY each fallback failed —
-          * the per-step command outcomes plus a message and a remediation. That
-          * detail used to be discarded, so the only thing an operator saw was
-          * "bootstrap failed", which does not distinguish "Postgres is not
-          * running" from "this image ships no Postgres at all" (the published
-          * aimee-kb:latest predating the embedded-DB2 packaging is exactly the
-          * latter). Print it: this message is the whole diagnosis for a KB that
-          * will not start. */
-         fprintf(stderr, "aimee-kb: db2_url not configured and bootstrap failed; "
-                         "run `aimee init` or set AIMEE_DB2_URL\n");
-         const cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         if (cJSON_IsString(msg) && msg->valuestring[0])
-            fprintf(stderr, "aimee-kb:   cause: %s\n", msg->valuestring);
-         const cJSON *steps = cJSON_GetObjectItemCaseSensitive(resp, "steps");
-         const cJSON *step = NULL;
-         cJSON_ArrayForEach(step, steps)
-         {
-            char *one = cJSON_PrintUnformatted(step);
-            if (one)
-            {
-               fprintf(stderr, "aimee-kb:   step: %s\n", one);
-               free(one);
-            }
-         }
-         const cJSON *fix = cJSON_GetObjectItemCaseSensitive(resp, "remediation");
-         if (cJSON_IsString(fix) && fix->valuestring[0])
-            fprintf(stderr, "aimee-kb:   remediation: %s\n", fix->valuestring);
-         cJSON_Delete(resp);
-         agent_http_cleanup();
-         return 1;
-      }
-      cJSON_Delete(resp);
-   }
+   /* Runtime credentials and connection acquisition belong exclusively to the
+    * PostgreSQL module. Schema provisioning is a separate owner operation. */
 
-   /* Re-read the runtime secret after bootstrap. */
-   (void)config_db2_url_effective(db2_url, sizeof(db2_url));
-
-   /* DB2 owns project, workspace, and global knowledge for aimee-kb.
+   /* KB_STORE owns project, workspace, and global knowledge for aimee-kb.
     *
     * Wait out a not-yet-ready Postgres on a bounded backoff instead of exiting
     * on the first failure. In a container/plugin deploy aimee-kb and its Postgres
     * come up as sibling services; Postgres is routinely still starting (or, as
     * seen on the smoothnas plugin runtime, started slightly later) when kb boots.
     * A hard exit here turns that ordinary startup race into a hard outage: the
-    * process dies with DB2 reported "unavailable" and, absent an external
+    * process dies with KB_STORE reported "unavailable" and, absent an external
     * supervisor that restarts it, the kb stays down until a manual restart. The
-    * retry is bounded, so a genuinely misconfigured/missing DB2 still surfaces as
+    * retry is bounded, so a genuinely misconfigured/missing KB_STORE still surfaces as
     * a startup failure — just after giving a slow Postgres time to arrive. */
    {
-      const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
-      const int db2_retry_secs = 5;
+      const int kb_store_max_attempts = 24; /* ~2 min at 5s spacing */
+      const int kb_store_retry_secs = 5;
       int attempt = 1;
-      while (db2_init(db2_url) != 0)
+      while (kb_store_init_runtime() != 0)
       {
-         if (attempt >= db2_max_attempts)
+         /* A published installation can require newer KB schema even when
+          * memory's own migrations have completed. Apply it in a separate
+          * provider-owned migration session, close that authority, then verify
+          * and serve exclusively through the supervised runtime role. */
+         if (kb_store_init_migration() == 0)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed after %d attempts (%ds)\n", attempt,
-                    attempt * db2_retry_secs);
+            kb_store_shutdown();
+            kb_configure_knowledge_store();
+            if (kb_store_init_runtime() == 0)
+               break;
+         }
+         if (attempt >= kb_store_max_attempts)
+         {
+            fprintf(stderr, "aimee-kb: KB_STORE init failed after %d attempts (%ds)\n", attempt,
+                    attempt * kb_store_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready; retry %d/%d in %ds\n", attempt, db2_max_attempts,
-                 db2_retry_secs);
-         sleep(db2_retry_secs);
+         fprintf(stderr, "aimee-kb: KB_STORE not ready; retry %d/%d in %ds\n", attempt,
+                 kb_store_max_attempts, kb_store_retry_secs);
+         sleep(kb_store_retry_secs);
          attempt++;
       }
    }
@@ -1929,7 +1630,7 @@ int main(int argc, char **argv)
    if (!vault_bound)
    {
       fputs("aimee-kb: instance Vault migration failed; refusing to start\n", stderr);
-      db2_shutdown();
+      kb_store_shutdown();
       agent_http_cleanup();
       return 1;
    }
@@ -1948,7 +1649,7 @@ int main(int argc, char **argv)
       {
          fprintf(stderr, "aimee-kb: %s; refusing to start\n",
                  lock_error[0] ? lock_error : "TPM runtime singleton validation failed");
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1965,7 +1666,7 @@ int main(int argc, char **argv)
       if (kb_vault_policy_select(vault_custody, custody_err, sizeof(custody_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", custody_err);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1980,7 +1681,7 @@ int main(int argc, char **argv)
       if (kb_witness_boot_check(witness_err, sizeof(witness_err)) != 0)
       {
          fprintf(stderr, "aimee-kb: %s\n", witness_err);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -1995,36 +1696,36 @@ int main(int argc, char **argv)
           vault_seal() != 0)
       {
          fputs("aimee-kb: cannot establish sealed D3 operator startup state\n", stderr);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
 #if defined(AIMEE_P7_D3_INTEGRATION_TEST_OVERRIDE)
       LOG_WARN("kb.vault", "P7-D3 integration-only loopback TPM override is ACTIVE");
-      if (db2_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
-                              "allow", "integration-only build flag active") != 0)
+      if (kb_store_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
+                                   "allow", "integration-only build flag active") != 0)
       {
          fputs("aimee-kb: cannot WORM-audit P7-D3 test override; refusing to start\n", stderr);
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
 #endif
-      if (db2_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
-                                          operator_error,
-                                          sizeof(operator_error)) != DB2_VAULT_OPERATOR_OK ||
-          db2_vault_operator_runtime_status(
+      if (kb_store_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
+                                               operator_error, sizeof(operator_error)) !=
+              KB_STORE_VAULT_OPERATOR_OK ||
+          kb_store_vault_operator_runtime_status(
               &vault_operator_runtime, kb_vault_operator_provider_status, NULL,
-              &vault_operator_startup_before) != DB2_VAULT_OPERATOR_OK ||
+              &vault_operator_startup_before) != KB_STORE_VAULT_OPERATOR_OK ||
           kb_vault_operator_startup_mode(
               (kb_vault_operator_state_t)vault_operator_startup_before.state) < 0)
       {
          fprintf(stderr, "aimee-kb: vault operator authority/status unavailable: %s\n",
                  operator_error[0] ? operator_error : "initial status failed");
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2038,8 +1739,8 @@ int main(int argc, char **argv)
    {
       int rc = kb_run_fusion_probe(fusion_probe_query);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return rc;
@@ -2054,7 +1755,7 @@ int main(int argc, char **argv)
    {
       int64_t primary_epoch = 0;
       int primary_sealed = 0;
-      int startup_tx = db2_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
+      int startup_tx = kb_store_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
       int startup_ok =
           startup_tx && primary_epoch > 0 && (primary_sealed == 0 || primary_sealed == 1);
       const char *startup_error = "vault control startup status invalid";
@@ -2069,7 +1770,7 @@ int main(int argc, char **argv)
          startup_ok = 0;
          startup_error = "vault primary seal epoch initialization failed";
       }
-      if (startup_tx && db2_vault_control_startup_end(startup_ok) != 0)
+      if (startup_tx && kb_store_vault_control_startup_end(startup_ok) != 0)
       {
          startup_ok = 0;
          startup_error = "vault control startup transaction failed";
@@ -2079,8 +1780,8 @@ int main(int argc, char **argv)
          (void)vault_seal();
          fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
          if (vault_operator_runtime_opened)
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2089,11 +1790,11 @@ int main(int argc, char **argv)
 
    if (vault_operator_enabled)
    {
-      db2_vault_operator_status_t startup_after;
+      kb_store_vault_operator_status_t startup_after;
       memset(&startup_after, 0, sizeof(startup_after));
-      if (db2_vault_operator_runtime_status(&vault_operator_runtime,
-                                            kb_vault_operator_provider_status, NULL,
-                                            &startup_after) != DB2_VAULT_OPERATOR_OK ||
+      if (kb_store_vault_operator_runtime_status(&vault_operator_runtime,
+                                                 kb_vault_operator_provider_status, NULL,
+                                                 &startup_after) != KB_STORE_VAULT_OPERATOR_OK ||
           !kb_vault_operator_status_equal(&vault_operator_startup_before, &startup_after) ||
           kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) < 0 ||
           kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
@@ -2107,9 +1808,9 @@ int main(int argc, char **argv)
       {
          fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n", stderr);
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2149,10 +1850,10 @@ int main(int argc, char **argv)
             kb_vault_operator_service_stop(vault_operator_service);
             vault_operator_service = NULL;
             kb_vault_operator_components_destroy(&vault_operator_components);
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
             vault_operator_runtime_opened = 0;
             embedder_probe_unregister();
-            db2_shutdown();
+            kb_store_shutdown();
             kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
             agent_http_cleanup();
             return g_ctx.running ? 1 : 0;
@@ -2164,9 +1865,9 @@ int main(int argc, char **argv)
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2177,9 +1878,9 @@ int main(int argc, char **argv)
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
-         db2_shutdown();
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2190,16 +1891,16 @@ int main(int argc, char **argv)
    if (kb_egress_release_allowed())
    {
       LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
-      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
-                              "integration-only build flag active") != 0)
+      if (kb_store_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b",
+                                   "allow", "integration-only build flag active") != 0)
       {
          fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
          kb_vault_operator_service_stop(vault_operator_service);
          vault_operator_service = NULL;
          kb_vault_operator_components_destroy(&vault_operator_components);
          if (vault_operator_runtime_opened)
-            db2_vault_operator_runtime_close(&vault_operator_runtime);
-         db2_shutdown();
+            kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_shutdown();
          kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
@@ -2213,7 +1914,7 @@ int main(int argc, char **argv)
     * purge cleans up rows from projects that registered before that
     * guard. No-op once the index is clean. */
    {
-      int purged = db2_code_index_purge_hidden_pollution();
+      int purged = kb_store_code_index_purge_hidden_pollution();
       if (purged > 0)
          LOG_INFO("kb_index", "purged %d hidden-dir index rows on startup", purged);
    }
@@ -2224,8 +1925,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -2245,8 +1946,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       fprintf(stderr,
@@ -2271,8 +1972,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -2285,8 +1986,8 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
-      db2_shutdown();
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
@@ -2301,9 +2002,9 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
       obs_bus_stop();
-      db2_shutdown();
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       audit_log_close();
       agent_http_cleanup();
@@ -2327,9 +2028,9 @@ int main(int argc, char **argv)
       vault_operator_service = NULL;
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
-         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         kb_store_vault_operator_runtime_close(&vault_operator_runtime);
       obs_bus_stop();
-      db2_shutdown();
+      kb_store_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       audit_log_close();
       agent_http_cleanup();
@@ -2415,9 +2116,9 @@ int main(int argc, char **argv)
       do
       {
          recovered = 0;
-      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+      } while (kb_store_org_egress_recover(100, &recovered) == 0 && recovered == 100);
    }
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
    time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
@@ -2427,14 +2128,14 @@ int main(int argc, char **argv)
       if (now >= next_egress_recovery)
       {
          int64_t recovered = 0;
-         (void)db2_org_egress_recover(100, &recovered);
+         (void)kb_store_org_egress_recover(100, &recovered);
          next_egress_recovery = now + 5;
       }
       kb_management_runtime_tick((int64_t)now);
       kb_witness_cadence_tick(now); /* P7-witness-e2: periodic checkpoint cadence */
-      /* Main-thread maintenance leases lazily from the DB2 pool. Return the
+      /* Main-thread maintenance leases lazily from the KB_STORE pool. Return the
        * lease before sleeping so the daemon does not pin one member forever. */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
@@ -2450,10 +2151,10 @@ int main(int argc, char **argv)
    vault_operator_service = NULL;
    kb_vault_operator_components_destroy(&vault_operator_components);
    if (vault_operator_runtime_opened)
-      db2_vault_operator_runtime_close(&vault_operator_runtime);
+      kb_store_vault_operator_runtime_close(&vault_operator_runtime);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
-   embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
-   db2_shutdown();
+   embedder_probe_unregister(); /* §2b: deregister the probe before kb_store_shutdown */
+   kb_store_shutdown();
    kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
    audit_log_close();
    agent_http_cleanup();

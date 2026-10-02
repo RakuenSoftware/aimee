@@ -61,7 +61,7 @@ static void test_count_todos(void)
 static void test_db_in_routes(void)
 {
    assert(audit_count_db_in_routes("src/routes/user.c", "SELECT * FROM users") == 1);
-   assert(audit_count_db_in_routes("src/api/user.py", "db2_code_index_project_count()") == 1);
+   assert(audit_count_db_in_routes("src/api/user.py", "kb_store_code_index_project_count()") == 1);
    assert(audit_count_db_in_routes("api/user.py", "aimee_pg_prepare(conn, sql, err, n)") == 1);
    assert(audit_count_db_in_routes("src/lib/user.c", "SELECT * FROM users") == 0);
    assert(audit_count_db_in_routes("src/routes/user.c", NULL) == 0);

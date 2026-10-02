@@ -26,19 +26,21 @@ typedef struct
                                 kb_workload_identity_t *, uint8_t *, size_t, size_t *);
    kb_workload_result_t (*unwrap)(void *, const uint8_t[32], const uint8_t[32], const void *,
                                   size_t, kb_workload_identity_t *, uint8_t *, size_t, size_t *);
-   db2_management_client_instance_result_t (*preflight)(
-       void *, const db2_management_client_grant_preflight_request_t *,
-       db2_management_client_grant_preflight_t *);
-   db2_management_client_instance_result_t (*begin_initial)(
-       void *, const db2_management_client_initial_request_t *, db2_management_client_pending_t *);
-   db2_management_client_instance_result_t (*begin_renewal)(
-       void *, const db2_management_client_renewal_request_t *, db2_management_client_pending_t *);
-   db2_management_client_instance_result_t (*activate)(
-       void *, const db2_management_client_activation_request_t *,
-       db2_management_client_active_t *);
-   db2_management_client_instance_result_t (*snapshot)(
-       void *, const char[33], const db2_management_client_instance_binding_t *,
-       db2_management_client_active_t *);
+   kb_store_management_client_instance_result_t (*preflight)(
+       void *, const kb_store_management_client_grant_preflight_request_t *,
+       kb_store_management_client_grant_preflight_t *);
+   kb_store_management_client_instance_result_t (*begin_initial)(
+       void *, const kb_store_management_client_initial_request_t *,
+       kb_store_management_client_pending_t *);
+   kb_store_management_client_instance_result_t (*begin_renewal)(
+       void *, const kb_store_management_client_renewal_request_t *,
+       kb_store_management_client_pending_t *);
+   kb_store_management_client_instance_result_t (*activate)(
+       void *, const kb_store_management_client_activation_request_t *,
+       kb_store_management_client_active_t *);
+   kb_store_management_client_instance_result_t (*snapshot)(
+       void *, const char[33], const kb_store_management_client_instance_binding_t *,
+       kb_store_management_client_active_t *);
    int (*crash)(void *, kb_management_cert_crash_point_t);
    int (*arena_fail)(void *, int);
 } kb_management_cert_test_ops_t;

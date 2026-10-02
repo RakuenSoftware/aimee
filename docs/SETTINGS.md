@@ -40,7 +40,7 @@ Each field carries a reload class in the metadata shipped by
 | --- | --- | --- |
 | `RELOAD_HOT` | Read per request. Live immediately. This is the default, so a field that names no class is hot. | provider and model, `openai_endpoint`, `embedder_url`, `synthesis_endpoint`, economizer and memory flags |
 | `RELOAD_REAPPLIABLE` | Bound state with a live re-applier. | fields being migrated out of the restart set |
-| `RELOAD_RESTART` | Bound once at startup, with no live re-applier. **Needs a restart.** | `db2_url` (the Postgres pool opens at startup), `kb_api_*` (the KB client initialises once), the deploy-topology record |
+| `RELOAD_RESTART` | Bound once at startup, with no live re-applier. **Needs a restart.** | `kb_api_*` (the KB client initialises once), the deploy-topology record |
 
 22 fields are `RELOAD_RESTART` today. The Settings page and the setup wizard both mark them, and the
 generated reference lists them per field.

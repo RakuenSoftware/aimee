@@ -27,7 +27,7 @@ const (
 	ValueDate  ValueKind = 5
 )
 
-// The bounds the production caller (db2_fact_ingest_text / db2_typed_fact_ingress)
+// The bounds the production caller (kb_store_fact_ingest_text / kb_store_typed_fact_ingress)
 // gives the C, reproduced because they are visible in the output: an attribute or
 // value longer than its buffer comes back truncated, and a truncated attribute
 // normalizes to a different relation name. Whatever a module returns has to match

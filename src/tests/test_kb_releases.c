@@ -7,7 +7,7 @@
 
 #include "kb_http_releases.h"
 
-/* ── db2_kb_release_t (mirrors db2/kb_releases.h) ──────────────────────────── */
+/* ── kb_store_kb_release_t (mirrors kb_store/kb_releases.h) ──────────────────────────── */
 
 typedef struct
 {
@@ -17,12 +17,12 @@ typedef struct
    char promoted_at[32];
    char retired_at[32];
    char created_at[32];
-} db2_kb_release_t;
+} kb_store_kb_release_t;
 
-/* ── DB2 stubs ───────────────────────────────────────────────────────────────── */
+/* ── KB_STORE stubs ───────────────────────────────────────────────────────────────── */
 
-int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
-                         const char *review_reason)
+int kb_store_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
+                              const char *review_reason)
 {
    (void)state;
    (void)clear_review_needed;
@@ -30,29 +30,29 @@ int db2_kb_doc_set_state(int64_t id, const char *state, int clear_review_needed,
    return (id > 0) ? 0 : -1;
 }
 
-int64_t db2_kb_release_create(const char *name)
+int64_t kb_store_kb_release_create(const char *name)
 {
    (void)name;
    return 7;
 }
 
-int db2_kb_release_promote(int64_t id)
+int kb_store_kb_release_promote(int64_t id)
 {
    return (id > 0) ? 0 : -1;
 }
 
-int db2_kb_release_rollback(int64_t target_id)
+int kb_store_kb_release_rollback(int64_t target_id)
 {
    (void)target_id;
    return 0;
 }
 
-int64_t db2_kb_release_get_active(void)
+int64_t kb_store_kb_release_get_active(void)
 {
    return 0;
 }
 
-int db2_kb_release_read(int64_t id, db2_kb_release_t *out)
+int kb_store_kb_release_read(int64_t id, kb_store_kb_release_t *out)
 {
    if (id <= 0)
       return -1;
@@ -64,7 +64,7 @@ int db2_kb_release_read(int64_t id, db2_kb_release_t *out)
    return 0;
 }
 
-int db2_kb_release_add_doc(int64_t release_id, int64_t doc_id)
+int kb_store_kb_release_add_doc(int64_t release_id, int64_t doc_id)
 {
    (void)release_id;
    (void)doc_id;

@@ -5,7 +5,7 @@
 #include "curiosity_resolve.h"
 
 #include "log.h"
-#include "modules/db2/c/curiosity.h"
+#include "modules/kb/c/curiosity.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -53,7 +53,7 @@ int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
    }
 
    static curiosity_item_t items[CURIOSITY_RESOLVE_MAX_FETCH];
-   int n = db2_curiosity_list(CURIOSITY_STATE_OPEN, items, CURIOSITY_RESOLVE_MAX_FETCH);
+   int n = kb_store_curiosity_list(CURIOSITY_STATE_OPEN, items, CURIOSITY_RESOLVE_MAX_FETCH);
    if (n < 0)
       return -1;
 
@@ -79,7 +79,7 @@ int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
       curiosity_evidence_t verdict = g_probe(items[i].gap_type, subject, items[i].evidence);
       if (verdict == CURIOSITY_EVIDENCE_FOUND)
       {
-         if (db2_curiosity_update_state(items[i].id, CURIOSITY_STATE_RESOLVED) == 0)
+         if (kb_store_curiosity_update_state(items[i].id, CURIOSITY_STATE_RESOLVED) == 0)
             stats->resolved++;
          else
             stats->unknown++; /* the write failed; the gap is still open */

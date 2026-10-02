@@ -21,29 +21,29 @@ typedef struct
    int uncertain_committed;
    int corrupt_event_hash;
    int dispatch_found;
-   db2_vault_operator_rewrap_binding_t dispatch_row;
-   db2_vault_operator_completed_t completed_row;
+   kb_store_vault_operator_rewrap_binding_t dispatch_row;
+   kb_store_vault_operator_completed_t completed_row;
    vault_tpm2_reseal_receipt_t receipt;
-   db2_vault_operator_open_result_t opened;
-   db2_vault_operator_open_event_t event;
+   kb_store_vault_operator_open_result_t opened;
+   kb_store_vault_operator_open_event_t event;
 } fixture_t;
 
 static fixture_t fixture;
 
 static void idle_opened_event(const uint8_t[16], int64_t, int64_t,
-                              db2_vault_operator_open_event_t *);
+                              kb_store_vault_operator_open_event_t *);
 static void opened_event_id(const uint8_t[16], uint8_t[32]);
-static void completed_row_hash(const db2_vault_operator_open_event_t *, uint8_t[32]);
+static void completed_row_hash(const kb_store_vault_operator_open_event_t *, uint8_t[32]);
 
 /* Production defaults are not exercised by this injected binary. */
-const db2_vault_rewrap_ops_t db2_vault_operator_rewrap_ops = {0};
+const kb_store_vault_rewrap_ops_t kb_store_vault_operator_rewrap_ops = {0};
 const vault_reseal_custody_ops_t vault_reseal_custody_default_ops = {0};
-int db2_vault_operator_rewrap_bind(db2_vault_operator_runtime_t *runtime)
+int kb_store_vault_operator_rewrap_bind(kb_store_vault_operator_runtime_t *runtime)
 {
    (void)runtime;
    return 0;
 }
-void db2_vault_operator_rewrap_unbind(db2_vault_operator_runtime_t *runtime)
+void kb_store_vault_operator_rewrap_unbind(kb_store_vault_operator_runtime_t *runtime)
 {
    (void)runtime;
 }
@@ -53,19 +53,19 @@ int kb_vault_operator_status_validate(const kb_vault_operator_status_t *status)
    return status && status->seal_epoch && status->control_fence;
 }
 
-void db2_vault_rewrap_check_clear(db2_vault_rewrap_check_t *rows, size_t count)
+void kb_store_vault_rewrap_check_clear(kb_store_vault_rewrap_check_t *rows, size_t count)
 {
    if (rows)
       memset(rows, 0, count * sizeof(*rows));
 }
 
-void db2_vault_rewrap_cursor_clear(db2_vault_rewrap_cursor_t *cursor)
+void kb_store_vault_rewrap_cursor_clear(kb_store_vault_rewrap_cursor_t *cursor)
 {
    if (cursor)
       memset(cursor, 0, sizeof(*cursor));
 }
 
-static int read_status(db2_vault_operator_runtime_t *database, kb_vault_operator_status_t *out)
+static int read_status(kb_store_vault_operator_runtime_t *database, kb_vault_operator_status_t *out)
 {
    assert(database == (void *)0x11);
    *out = fixture.status;
@@ -101,17 +101,18 @@ static vault_custody_auth_result_t current_preflight(const void *secret, size_t 
    return VAULT_CUSTODY_AUTHORIZED;
 }
 
-static int dispatch(const uint8_t request[16], db2_vault_operator_rewrap_binding_t *out, int *found)
+static int dispatch(const uint8_t request[16], kb_store_vault_operator_rewrap_binding_t *out,
+                    int *found)
 {
    (void)request;
    *found = fixture.dispatch_found;
    if (*found)
       *out = fixture.dispatch_row;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
 static int reserve_row(const uint8_t a[16], const uint8_t b[16], int64_t c, int64_t d,
-                       db2_vault_operator_rewrap_binding_t *e, int *f)
+                       kb_store_vault_operator_rewrap_binding_t *e, int *f)
 {
    (void)a;
    (void)b;
@@ -119,36 +120,38 @@ static int reserve_row(const uint8_t a[16], const uint8_t b[16], int64_t c, int6
    (void)d;
    (void)e;
    (void)f;
-   return DB2_VAULT_REWRAP_INVALID;
+   return KB_STORE_VAULT_REWRAP_INVALID;
 }
 
-static int active(db2_vault_operator_rewrap_binding_t *out, int *found)
+static int active(kb_store_vault_operator_rewrap_binding_t *out, int *found)
 {
    (void)out;
    *found = 0;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static int completed(const uint8_t a[16], const uint8_t b[16], db2_vault_operator_completed_t *out)
+static int completed(const uint8_t a[16], const uint8_t b[16],
+                     kb_store_vault_operator_completed_t *out)
 {
    if (memcmp(a, fixture.completed_row.binding.request_id, 16) ||
        memcmp(b, fixture.completed_row.binding.operation_id, 16))
-      return DB2_VAULT_REWRAP_NOT_FOUND;
+      return KB_STORE_VAULT_REWRAP_NOT_FOUND;
    *out = fixture.completed_row;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static int completed_active(const uint8_t operation_id[16], db2_vault_operator_completed_t *out)
+static int completed_active(const uint8_t operation_id[16],
+                            kb_store_vault_operator_completed_t *out)
 {
    if (memcmp(operation_id, fixture.completed_row.binding.operation_id, 16))
-      return DB2_VAULT_REWRAP_NOT_FOUND;
+      return KB_STORE_VAULT_REWRAP_NOT_FOUND;
    *out = fixture.completed_row;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static int check_page(const db2_vault_rewrap_cursor_t *after, int limit,
-                      db2_vault_rewrap_check_t *rows, size_t capacity, size_t *count,
-                      db2_vault_rewrap_cursor_t *next, int64_t *total)
+static int check_page(const kb_store_vault_rewrap_cursor_t *after, int limit,
+                      kb_store_vault_rewrap_check_t *rows, size_t capacity, size_t *count,
+                      kb_store_vault_rewrap_cursor_t *next, int64_t *total)
 {
    (void)limit;
    (void)rows;
@@ -156,11 +159,11 @@ static int check_page(const db2_vault_rewrap_cursor_t *after, int limit,
    *count = 0;
    *next = *after;
    *total = 0;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static int open_completed(const db2_vault_operator_completed_t *completed,
-                          db2_vault_operator_open_result_t *out)
+static int open_completed(const kb_store_vault_operator_completed_t *completed,
+                          kb_store_vault_operator_open_result_t *out)
 {
    fixture.open_calls++;
    memset(&fixture.event, 0, sizeof(fixture.event));
@@ -177,11 +180,11 @@ static int open_completed(const db2_vault_operator_completed_t *completed,
       fixture.event.opened.row_hash[0] ^= 1;
    fixture.opened = fixture.event.opened;
    *out = fixture.opened;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
 static int open_idle(const uint8_t request[16], int64_t epoch, int64_t fence, int64_t marker,
-                     db2_vault_operator_open_result_t *out)
+                     kb_store_vault_operator_open_result_t *out)
 {
    assert(epoch == 5 && fence == 9 && marker == 0);
    fixture.open_calls++;
@@ -206,15 +209,15 @@ static int open_idle(const uint8_t request[16], int64_t epoch, int64_t fence, in
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_NONE;
    fixture.status.seal_epoch = 6;
    fixture.status.control_fence = 10;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
-static int open_event(const uint8_t id[32], db2_vault_operator_open_event_t *out)
+static int open_event(const uint8_t id[32], kb_store_vault_operator_open_event_t *out)
 {
    assert(memcmp(id, fixture.event.opened.event_id, 32) == 0);
    fixture.event_reads++;
    *out = fixture.event;
-   return DB2_VAULT_REWRAP_OK;
+   return KB_STORE_VAULT_REWRAP_OK;
 }
 
 static int recover_uncertain(void)
@@ -378,7 +381,7 @@ static void opened_event_id(const uint8_t operation_id[16], uint8_t out[32])
    assert(SHA256(input, sizeof(input), out) != NULL);
 }
 
-static void completed_row_hash(const db2_vault_operator_open_event_t *event, uint8_t out[32])
+static void completed_row_hash(const kb_store_vault_operator_open_event_t *event, uint8_t out[32])
 {
    static const char domain[] = "aimee-vault-open-row-v1";
    static const char kind[] = "completed_opened";
@@ -415,7 +418,7 @@ static void completed_row_hash(const db2_vault_operator_open_event_t *event, uin
 }
 
 static void idle_opened_event(const uint8_t request_id[16], int64_t epoch, int64_t fence,
-                              db2_vault_operator_open_event_t *event)
+                              kb_store_vault_operator_open_event_t *event)
 {
    static const char id_domain[] = "aimee-vault-open-idle-v1";
    static const char row_domain[] = "aimee-vault-open-row-v1";
@@ -464,7 +467,7 @@ static void test_opened_replay(void)
    fixture.dispatch_found = 1;
    memset(fixture.dispatch_row.operation_id, 0x23, 16);
    memset(fixture.dispatch_row.request_id, 0x12, 16);
-   fixture.dispatch_row.state = DB2_VAULT_REWRAP_COMPLETED;
+   fixture.dispatch_row.state = KB_STORE_VAULT_REWRAP_COMPLETED;
    fixture.dispatch_row.seal_epoch = 5;
    fixture.dispatch_row.fencing_token = 7;
    fixture.dispatch_row.old_generation = 7;
@@ -478,7 +481,7 @@ static void test_opened_replay(void)
    fixture.event.opened.opened_fence = 30;
    opened_event_id(fixture.dispatch_row.operation_id, fixture.event.opened.event_id);
    completed_row_hash(&fixture.event, fixture.event.opened.row_hash);
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};
@@ -494,11 +497,11 @@ static void test_opened_replay(void)
    assert(binding.state == KB_VAULT_MUTATION_BINDING_OPENED);
    assert(runtime.activation_proof_valid && runtime.activation_has_event);
    assert(fixture.event_reads == 1);
-   fixture.dispatch_row.state = DB2_VAULT_REWRAP_ABORTED;
+   fixture.dispatch_row.state = KB_STORE_VAULT_REWRAP_ABORTED;
    assert(deps.start_lookup(fixture.dispatch_row.request_id, 0, &binding, &runtime) ==
           KB_VAULT_MUTATION_DB_OK);
    assert(binding.state == KB_VAULT_MUTATION_BINDING_ABORTED);
-   fixture.dispatch_row.state = DB2_VAULT_REWRAP_RECOVERY_REQUIRED;
+   fixture.dispatch_row.state = KB_STORE_VAULT_REWRAP_RECOVERY_REQUIRED;
    assert(deps.start_lookup(fixture.dispatch_row.request_id, 0, &binding, &runtime) ==
           KB_VAULT_MUTATION_DB_OK);
    assert(binding.state == KB_VAULT_MUTATION_BINDING_RECOVERY_REQUIRED);
@@ -512,9 +515,9 @@ static void test_uncertain_idle_open_is_safe_retry(void)
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
    fixture.status.seal_epoch = 5;
    fixture.status.control_fence = 9;
-   fixture.open_result = DB2_VAULT_REWRAP_TRANSIENT;
+   fixture.open_result = KB_STORE_VAULT_REWRAP_TRANSIENT;
    fixture.uncertain_recoveries = 1;
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};
@@ -544,10 +547,10 @@ static void test_uncertain_committed_idle_open_is_safe_retry(void)
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
    fixture.status.seal_epoch = 5;
    fixture.status.control_fence = 9;
-   fixture.open_result = DB2_VAULT_REWRAP_TRANSIENT;
+   fixture.open_result = KB_STORE_VAULT_REWRAP_TRANSIENT;
    fixture.uncertain_recoveries = 1;
    fixture.uncertain_committed = 1;
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};
@@ -576,7 +579,7 @@ static void test_corrupt_idle_open_event_fails_closed(void)
    fixture.status.seal_epoch = 5;
    fixture.status.control_fence = 9;
    fixture.corrupt_event_hash = 1;
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};
@@ -609,7 +612,7 @@ static void test_corrupt_completed_open_event_fails_closed(void)
    fixture.status.old_generation = 6;
    fixture.status.new_generation = 7;
    memset(fixture.status.operation_id, 0x31, 16);
-   fixture.completed_row.binding.state = DB2_VAULT_REWRAP_COMPLETED;
+   fixture.completed_row.binding.state = KB_STORE_VAULT_REWRAP_COMPLETED;
    fixture.completed_row.binding.seal_epoch = 5;
    fixture.completed_row.binding.fencing_token = 7;
    fixture.completed_row.binding.old_generation = 6;
@@ -623,7 +626,7 @@ static void test_corrupt_completed_open_event_fails_closed(void)
    memset(kek, 0x77, sizeof(kek));
    assert(SHA256(kek, sizeof(kek), fixture.receipt.new_kek_digest) != NULL);
    fixture.corrupt_event_hash = 1;
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};
@@ -657,7 +660,7 @@ int main(void)
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
    fixture.status.seal_epoch = 5;
    fixture.status.control_fence = 9;
-   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const kb_store_vault_rewrap_ops_t fake_db_ops = {0};
    static const vault_reseal_custody_ops_t fake_custody_ops = {0};
    vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
                                                          .custody = &fake_custody_ops};

@@ -18,8 +18,8 @@
 set -u
 
 PSQL=/usr/lib/postgresql/17/bin/psql
-SCHEMA=${SCHEMA:-/tmp/db2_schema.sql}
-BIGSCHEMA=/tmp/db2_schema_bigdim.sql
+SCHEMA=${SCHEMA:-/tmp/kb_store_schema.sql}
+BIGSCHEMA=/tmp/kb_store_schema_bigdim.sql
 FAIL=0
 
 pass() { echo "  ok: $1"; }

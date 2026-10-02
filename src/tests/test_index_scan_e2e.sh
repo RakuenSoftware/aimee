@@ -308,9 +308,9 @@ PY
 # 1. The exact regression: kb returns status:error. CLI must surface the
 #    message and exit non-zero. Must NOT print "Scan complete: 0".
 run_case "kb error surfaces to user" \
-    '{"status":"error","message":"canonical index unavailable (DB2 not initialized)"}' \
+    '{"status":"error","message":"canonical index unavailable (KB_STORE not initialized)"}' \
     1 \
-    "DB2 not initialized" \
+    "KB_STORE not initialized" \
     "Scan complete"
 
 # 2. Healthy success path. CLI prints the scan summary and exits 0.

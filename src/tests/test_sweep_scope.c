@@ -18,16 +18,16 @@ static void test_allowlist(void)
    assert(sweep_path_allowed("", globs, n) == 0);
    assert(sweep_path_allowed("src/foo.c", NULL, 0) == 0);
 
-   const char *pre[] = {"src/db*"};
-   assert(sweep_path_allowed("src/db2", pre, 1) == 1); /* trailing * prefix */
+   const char *pre[] = {"src/kb*"};
+   assert(sweep_path_allowed("src/kb_store", pre, 1) == 1); /* trailing * prefix */
    assert(sweep_path_allowed("src/net", pre, 1) == 0);
 
    /* trailing-* has NO dir boundary (unlike slash-star-star): "src*" matches "srcX/.." */
    const char *nb[] = {"src*"};
    assert(sweep_path_allowed("srcX/foo.c", nb, 1) == 1);
    /* overlapping globs: either may match */
-   const char *ov[] = {"src/**", "src/db*"};
-   assert(sweep_path_allowed("src/db2/x.c", ov, 2) == 1);
+   const char *ov[] = {"src/**", "src/kb*"};
+   assert(sweep_path_allowed("src/kb_store/x.c", ov, 2) == 1);
 }
 
 static void test_partition(void)

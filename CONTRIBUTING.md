@@ -9,13 +9,13 @@ Small, finished changes are easiest to review.
 3. Check [docs/proposals](docs/proposals/) for an accepted design or an owner already doing the work.
 4. Preview the blast radius for shared symbols, routes, config, storage, and wire contracts.
 
-Do not cross the DB1/DB2 boundary. The server's store and `aimee-kb` are separate databases with
+Do not cross the DB1/KB_STORE boundary. The server's store and `aimee-kb` are separate databases with
 separate owners, and the thin client owns neither.
 
 This used to read "`aimee-server` owns SQLite", which is no longer true and would send you to the
 wrong place. The server's store is PostgreSQL, served by the `aimee` module, which opens no database
 itself: it reaches the `postgres` module over the event bus, and that module owns the connection and
-the DSN (`AIMEE_STORE_URL`). `aimee-kb` owns DB2 and pgvector, also PostgreSQL.
+the DSN (`AIMEE_STORE_URL`). `aimee-kb` owns KB_STORE and pgvector, also PostgreSQL.
 
 `aimee-server` still links libsqlite3 for the audit WORM ledger. That store is separate from DB1.
 The `aimee` and `aimee-kb` binaries link no SQLite:
@@ -35,16 +35,16 @@ make docs-gen-check
 Run the narrow test target while iterating. Run the full unit suite before sending a change. Add
 ASAN or TSAN for memory ownership, concurrency, event-bus, and shutdown work.
 
-`make unit-tests` links DB2 against a sqlite shim that *translates* its SQL, so engine-level
+`make unit-tests` links KB_STORE against a sqlite shim that *translates* its SQL, so engine-level
 behaviour is unverified by it. `make unit-tests-pg` runs the same binaries against a real
 PostgreSQL, which is what CI gates on:
 
 ```bash
-make unit-tests-pg AIMEE_TEST_DB2_TEMPLATE_URL=postgresql://user@host/aimee_test_tpl
+make unit-tests-pg AIMEE_TEST_KB_STORE_TEMPLATE_URL=postgresql://user@host/aimee_test_tpl
 ```
 
 It rebuilds the template database, then clones it per test process. Point it at a disposable
-server: it creates and drops databases beside the template. Touching DB2 SQL without running it is
+server: it creates and drops databases beside the template. Touching KB_STORE SQL without running it is
 how a statement that Postgres rejects outright can sit in a green tree.
 
 The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
@@ -149,7 +149,7 @@ could never have been wired in the ordinary way.
 
 It belongs HERE rather than in `make lint` on purpose. Some of these tests are
 promote-time gates by deliberate design. `.github/workflows/module-inventory.yml`
-says so outright, that the module boundary and the frozen DB2 consumer surface
+says so outright, that the module boundary and the frozen KB_STORE consumer surface
 are "promote-time questions, decided when work is promoted to `main`", and that
 running them on `testing` would block ordinary feature work on a decision nobody
 is making at that point. Pulling the whole set into the PR gate would override

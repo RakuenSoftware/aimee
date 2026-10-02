@@ -3,7 +3,7 @@
  * Drains the evidence_index_ops queue (populated by
  * learning_evidence_write_event), embeds each evidence artifact's content via
  * the configured embedding_command (or the builtin embedder), and stores the
- * 384-dim vector into evidence_vectors. DB2 only; no DB1 access. */
+ * 384-dim vector into evidence_vectors. KB_STORE only; no DB1 access. */
 #ifndef KB_EVIDENCE_EMBED_H
 #define KB_EVIDENCE_EMBED_H 1
 

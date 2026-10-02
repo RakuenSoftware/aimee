@@ -14,7 +14,7 @@ set -u
 pkill -f '/usr/local/bin/aimee-kb' 2>/dev/null
 sleep 2
 export AIMEE_HOME=/root/.config/aimee
-export AIMEE_DB2_URL="postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared"
+export AIMEE_STORE_URL="postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared"
 export AIMEE_KB_HTTP_BIND=1
 export AIMEE_KB_API_BEARER_TOKEN="$(cat /root/kb-bearer.txt)"
 # OIDC, when an issuer has been minted. kb verifies an RS256 bearer against this

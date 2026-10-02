@@ -57,12 +57,12 @@ static int is_script_tool(const char *tool)
 static int guardrails_anti_pattern_check(const char *file_path, const char *command,
                                          anti_pattern_t *out, int max)
 {
-   return db2_anti_pattern_check(file_path, command, out, max);
+   return kb_store_anti_pattern_check(file_path, command, out, max);
 }
 
 static void guardrails_anti_pattern_bump(int64_t id)
 {
-   (void)db2_anti_pattern_bump(id);
+   (void)kb_store_anti_pattern_bump(id);
 }
 
 static int is_subagent_tool(const char *tool)
@@ -1704,7 +1704,7 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
 
       /* Shadow precedent lookup via graph reasoning layer (Phase 1 — log only).
        * Runs when no direct anti-pattern hit was found to check for related cases.
-       * Only active when DB2 is available (KB binary context). */
+       * Only active when KB_STORE is available (KB binary context). */
       if (ap_count == 0)
       {
          if (config_reasoning_datalog_command()[0] && file_str)

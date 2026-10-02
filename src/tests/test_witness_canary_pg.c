@@ -29,11 +29,11 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_witness_checkpoint.h"
-#include "modules/db2/c/db2_witness_emit.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
+#include "modules/kb/c/kb_store_witness_emit.h"
+#include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "vault_witness_provider_fixture.h"
 
@@ -170,8 +170,8 @@ int main(void)
    snprintf(home, sizeof home, "%s/aimee-witness-canary-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
-   MUST(db2_init(url) == 0, "db2_init failed for %s", url);
-   void *conn = db2_conn();
+   MUST(kb_store_init(url) == 0, "kb_store_init failed for %s", url);
+   void *conn = kb_store_conn();
    MUST(conn != NULL, "no connection");
 
    /* The secrets a leak would expose. */
@@ -206,9 +206,11 @@ int main(void)
       MUST(append_with_cred(conn, sid, SENTINEL_CRED) == 0, "append %s failed", sid);
    }
    int64_t cp = -1;
-   MUST(db2_witness_checkpoint_produce(&cp) == DB2_WITNESS_CP_OK, "checkpoint produce failed");
-   db2_witness_emit_stats_t s;
-   MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &s) == DB2_WITNESS_EMIT_OK, "emit failed");
+   MUST(kb_store_witness_checkpoint_produce(&cp) == KB_STORE_WITNESS_CP_OK,
+        "checkpoint produce failed");
+   kb_store_witness_emit_stats_t s;
+   MUST(kb_store_witness_emit_run(capture_sink, NULL, 8192, &s) == KB_STORE_WITNESS_EMIT_OK,
+        "emit failed");
    MUST(g_len > 0, "no evidence emitted");
 
    /* Guards against a vacuous pass. The KEK must be a real high-entropy value (an
@@ -287,7 +289,7 @@ int main(void)
 
    OPENSSL_cleanse(kek, sizeof kek);
    OPENSSL_cleanse(seed, sizeof seed);
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_canary_pg: PASSED (no KEK in evidence or tables; provider_cred is a stable "
           "identifier)\n");
    return 0;

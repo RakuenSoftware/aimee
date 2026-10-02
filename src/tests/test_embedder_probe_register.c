@@ -3,7 +3,7 @@
  * This tests a registration DECISION, not a computation, because that decision is where
  * the vector-space guard was lost.
  *
- * The chain is four links: kb_main registers the probes -> db2_init calls the serving
+ * The chain is four links: kb_main registers the probes -> kb_store_init calls the serving
  * probe -> the probe asks memory_embed_serving_id what space is being served -> the guard
  * records or refuses. Only the last link was tested. It was also the only link that was
  * never broken: test_embedding_dim.c asserts by name that the guard refuses a
@@ -34,7 +34,7 @@
  * establish is that the module is safe to call unconditionally for every embed command,
  * which is the property the fix depends on.
  */
-#include "../modules/db2/c/lifecycle.h"
+#include "../modules/kb/c/lifecycle.h"
 #include "embedder_probe.h"
 #include <assert.h>
 #include <stdio.h>
@@ -49,13 +49,13 @@ static void check(int ok, const char *what)
       failures++;
 }
 
-/* Registration is global state on the db2 side, so each case starts from nothing.
+/* Registration is global state on the kb_store side, so each case starts from nothing.
  * Without this a later case could pass on an earlier one's registration. */
 static void reset(void)
 {
    embedder_probe_unregister();
-   assert(!db2_embedder_probe_registered());
-   assert(!db2_embedder_serving_probe_registered());
+   assert(!kb_store_embedder_probe_registered());
+   assert(!kb_store_embedder_serving_probe_registered());
 }
 
 int main(void)
@@ -63,13 +63,13 @@ int main(void)
    printf("no embed command configured\n");
    reset();
    embedder_probe_register(NULL);
-   check(!db2_embedder_probe_registered(), "NULL command registers no dim probe");
-   check(!db2_embedder_serving_probe_registered(), "NULL command registers no serving probe");
+   check(!kb_store_embedder_probe_registered(), "NULL command registers no dim probe");
+   check(!kb_store_embedder_serving_probe_registered(), "NULL command registers no serving probe");
 
    reset();
    embedder_probe_register("");
-   check(!db2_embedder_probe_registered(), "empty command registers no dim probe");
-   check(!db2_embedder_serving_probe_registered(), "empty command registers no serving probe");
+   check(!kb_store_embedder_probe_registered(), "empty command registers no dim probe");
+   check(!kb_store_embedder_serving_probe_registered(), "empty command registers no serving probe");
 
    /* "builtin" was a real embedder here once — a lexical feature hash that served when
     * nothing was configured. It is gone, and with it the idea that an unconfigured kb
@@ -78,21 +78,21 @@ int main(void)
    printf("a sidecar embed command\n");
    reset();
    embedder_probe_register("python3 /opt/aimee/scripts/embed-remote.py");
-   check(db2_embedder_probe_registered(), "dim probe registered");
-   check(db2_embedder_serving_probe_registered(), "serving probe registered");
+   check(kb_store_embedder_probe_registered(), "dim probe registered");
+   check(kb_store_embedder_serving_probe_registered(), "serving probe registered");
 
    printf("an http endpoint\n");
    reset();
    embedder_probe_register("http://127.0.0.1:8760");
-   check(db2_embedder_probe_registered(), "dim probe registered");
-   check(db2_embedder_serving_probe_registered(), "serving probe registered");
+   check(kb_store_embedder_probe_registered(), "dim probe registered");
+   check(kb_store_embedder_serving_probe_registered(), "serving probe registered");
 
    printf("unregister clears both seams\n");
    /* Both point at embedder_probe.c's statics, so leaving either registered would hand
-    * db2 a callback over a cleared command. */
+    * kb_store a callback over a cleared command. */
    embedder_probe_unregister();
-   check(!db2_embedder_probe_registered(), "dim probe cleared");
-   check(!db2_embedder_serving_probe_registered(), "serving probe cleared");
+   check(!kb_store_embedder_probe_registered(), "dim probe cleared");
+   check(!kb_store_embedder_serving_probe_registered(), "serving probe cleared");
 
    if (failures)
    {

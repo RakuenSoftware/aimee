@@ -5,11 +5,11 @@
 #include "management_token_authority.h"
 
 typedef int (*kb_mgmt_token_authority_db_reopen_fn)(void *opaque,
-                                                    db2_management_token_authority_ctx_t *db);
+                                                    kb_store_management_token_authority_ctx_t *db);
 
 typedef struct
 {
-   db2_management_token_authority_ctx_t *db;
+   kb_store_management_token_authority_ctx_t *db;
    kb_mgmt_token_authority_db_reopen_fn reopen_db;
    void *reopen_opaque;
 } kb_mgmt_token_authority_service_t;

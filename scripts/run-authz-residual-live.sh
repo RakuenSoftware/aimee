@@ -67,7 +67,7 @@ step "1a. A grant is honoured, and REVOKING it denies the NEXT token immediately
 
 # Driven through the REAL mint SQL, kb_management_identity_intent_start -- the
 # function the login route calls -- with the same session scope the route sets
-# (aimee.principal / aimee.team, which db2_tenant_scope_begin establishes). That
+# (aimee.principal / aimee.team, which kb_store_tenant_scope_begin establishes). That
 # function reads the grant with `revoked_at IS NULL` and raises
 # 'management identity not granted' when there is none, so it answers the
 # criterion directly. No vault: filing an intent writes a row; only SIGNING the

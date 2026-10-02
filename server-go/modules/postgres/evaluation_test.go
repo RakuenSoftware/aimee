@@ -12,12 +12,12 @@ import (
 )
 
 func TestEvaluationRequiresExplicitDisposableURL(t *testing.T) {
-	t.Setenv("AIMEE_DB2_EVAL_URL", "")
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", "")
 	t.Setenv("AIMEE_STORE_URL", "postgres://live:secret@localhost/live")
-	if _, err := OpenEvaluationStore(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "AIMEE_DB2_EVAL_URL") {
+	if _, err := OpenEvaluationStore(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "AIMEE_KB_STORE_EVAL_URL") {
 		t.Fatal("evaluation accepted live store fallback", err)
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", "postgres://user:secret@host:invalid/database")
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", "postgres://user:secret@host:invalid/database")
 	if _, err := OpenEvaluationStore(context.Background(), ""); err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatal("invalid evaluation DSN was accepted or disclosed", err)
 	}
@@ -32,7 +32,7 @@ func evaluationAdmin(t *testing.T) *pgxpool.Pool {
 		}
 		t.Skip("set AIMEE_DB_TEST_URL to an explicit disposable PostgreSQL admin DSN")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
 	pool, err := pgxpool.New(context.Background(), url)
 	if err != nil {
 		t.Fatal("cannot open test admin pool")

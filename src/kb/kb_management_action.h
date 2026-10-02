@@ -2,7 +2,7 @@
 #ifndef AIMEE_KB_MANAGEMENT_ACTION_H
 #define AIMEE_KB_MANAGEMENT_ACTION_H
 
-#include "modules/db2/c/management_action_journal.h"
+#include "modules/kb/c/management_action_journal.h"
 #include "kb_management_health_exchange.h"
 #include "kb_mgmt_token_authority_ipc.h"
 
@@ -41,15 +41,15 @@ typedef struct
    char digest_hex[65];
 } kb_management_action_body_t;
 
-typedef db2_management_action_result_t (*kb_management_action_init_fn)(
-    int64_t, const char *, db2_management_action_capability_t, const uint8_t[32], const char *,
-    const char *, int, const char *, db2_management_action_operation_t *);
-typedef db2_management_action_result_t (*kb_management_action_intent_fn)(
-    const kb_principal_t *, const db2_management_action_operation_t *,
-    db2_management_action_intent_t *);
-typedef db2_management_action_result_t (*kb_management_action_outcome_fn)(
-    const kb_principal_t *, const db2_management_action_outcome_operation_t *,
-    db2_management_action_outcome_t *);
+typedef kb_store_management_action_result_t (*kb_management_action_init_fn)(
+    int64_t, const char *, kb_store_management_action_capability_t, const uint8_t[32], const char *,
+    const char *, int, const char *, kb_store_management_action_operation_t *);
+typedef kb_store_management_action_result_t (*kb_management_action_intent_fn)(
+    const kb_principal_t *, const kb_store_management_action_operation_t *,
+    kb_store_management_action_intent_t *);
+typedef kb_store_management_action_result_t (*kb_management_action_outcome_fn)(
+    const kb_principal_t *, const kb_store_management_action_outcome_operation_t *,
+    kb_store_management_action_outcome_t *);
 typedef kb_mgmt_token_authority_ipc_result_t (*kb_management_action_token_fn)(
     void *, const char *, const char *, kb_mgmt_token_authority_output_t *);
 typedef kb_management_action_transport_t (*kb_management_action_request_fn)(
@@ -97,7 +97,7 @@ typedef struct
 
 int kb_management_action_body_parse(const char *, size_t, kb_management_action_body_t *);
 int kb_management_action_response_parse(const char *, size_t, int,
-                                        db2_management_action_outcome_operation_t *);
+                                        kb_store_management_action_outcome_operation_t *);
 kb_management_action_result_t
 kb_management_action_execute(const kb_management_action_request_t *,
                              const kb_management_action_dependencies_t *);

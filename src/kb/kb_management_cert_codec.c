@@ -334,9 +334,9 @@ int kb_management_cert_candidate_encode(const kb_management_cert_candidate_view_
        !exact_hex(v->storage_id, 32) || v->generation < 1 ||
        v->provider_kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
        v->provider_kind > KB_WORKLOAD_PROVIDER_PKCS11_V1 ||
-       !printable(v->issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &issuer_len) ||
-       !printable(v->ca_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &ca_issuer_len) ||
-       !printable(v->serial_norm, DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX, &serial_len) ||
+       !printable(v->issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &issuer_len) ||
+       !printable(v->ca_issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &ca_issuer_len) ||
+       !printable(v->serial_norm, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX, &serial_len) ||
        !exact_hex(v->serial_norm, serial_len) || v->not_before_epoch < 1 ||
        v->not_after_epoch <= v->not_before_epoch || !v->ciphertext || !v->ciphertext_len ||
        v->ciphertext_len > KB_WORKLOAD_WRAP_CAP || issuer_len > UINT16_MAX ||
@@ -412,21 +412,21 @@ int kb_management_cert_candidate_decode(const void *input, size_t len,
        TAKE32(v.ca_fingerprint))
       return -1;
 #undef TAKE32
-   if (get_u16(&r, &n16) || !n16 || n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
+   if (get_u16(&r, &n16) || !n16 || n16 > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
        get(&r, &p, n16))
       return -1;
    memcpy(v.issuer, p, n16);
    v.issuer[n16] = 0;
    size_t checked;
-   if (!printable(v.issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) || checked != n16 ||
-       get_u16(&r, &n16) || !n16 || n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
-       get(&r, &p, n16))
+   if (!printable(v.issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) ||
+       checked != n16 || get_u16(&r, &n16) || !n16 ||
+       n16 > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX || get(&r, &p, n16))
       return -1;
    memcpy(v.ca_issuer, p, n16);
    v.ca_issuer[n16] = 0;
-   if (!printable(v.ca_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) ||
+   if (!printable(v.ca_issuer, KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) ||
        checked != n16 || get_u16(&r, &n16) || !n16 ||
-       n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX || get(&r, &p, n16))
+       n16 > KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX || get(&r, &p, n16))
       return -1;
    memcpy(v.serial_norm, p, n16);
    v.serial_norm[n16] = 0;

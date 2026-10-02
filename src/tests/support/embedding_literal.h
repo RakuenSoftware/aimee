@@ -22,12 +22,12 @@
 #include <stdio.h>
 #include <string.h>
 
-int db2_embedding_dim(void);
+int kb_store_embedding_dim(void);
 
-/* Write "[v,v,...,v]" of db2_embedding_dim() elements into `buf`. Returns `buf`. */
+/* Write "[v,v,...,v]" of kb_store_embedding_dim() elements into `buf`. Returns `buf`. */
 static inline char *embedding_literal(char *buf, size_t len, double value)
 {
-   int dim = db2_embedding_dim();
+   int dim = kb_store_embedding_dim();
    assert(dim > 0);
    size_t o = 0;
    int n = snprintf(buf + o, len - o, "[");

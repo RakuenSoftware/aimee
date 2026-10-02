@@ -1,9 +1,9 @@
 /* user_memory.h: per-user structured memory (db1).
  *
- * Proposal 2 (memory-db1-db2-architecture), Phase 1. aimee-server is 1:1 per
+ * Proposal 2 (memory-db1-kb_store-architecture), Phase 1. aimee-server is 1:1 per
  * user, so db1 is per-user by construction and this store needs no tenancy
- * column. It mirrors the db2 `memories` recall shape + selector patterns so
- * memory_recall can merge db1 (user-specific) and db2 (org-shared) rows
+ * column. It mirrors the kb_store `memories` recall shape + selector patterns so
+ * memory_recall can merge db1 (user-specific) and kb_store (org-shared) rows
  * uniformly. Scope for S1: identity + preferences only. */
 #ifndef AIMEE_DB1_USER_MEMORY_H
 #define AIMEE_DB1_USER_MEMORY_H
@@ -13,8 +13,8 @@
 
 typedef struct cJSON cJSON;
 
-/* Row shape mirrors db2_memory_cand_row_t's recall-relevant fields (same
- * capacities) so the recall renderer treats db1 and db2 rows identically. */
+/* Row shape mirrors kb_store_memory_cand_row_t's recall-relevant fields (same
+ * capacities) so the recall renderer treats db1 and kb_store rows identically. */
 typedef struct
 {
    int64_t id;
@@ -31,7 +31,7 @@ typedef enum
 } db1_user_recall_section_t;
 
 /* Fill up to `cap` rows for a recall section from db1 user_memories, using the
- * same tier band (L2..L5) + key conventions as the db2 selectors. Returns the
+ * same tier band (L2..L5) + key conventions as the kb_store selectors. Returns the
  * number filled (0 on empty table / no db1 / error). */
 int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memory_row_t *rows,
                                 int cap);

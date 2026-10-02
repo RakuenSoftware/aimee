@@ -44,7 +44,7 @@
   source_hash` for embeddings that have it (no false positives from a re-scan that
   changed nothing), falling back to the scanned-since-embed staleness heuristic only
   for legacy rows with `source_hash=''`. **P3 storage substrate landed next**:
-  `src/modules/db2/c/fidelity.{c,h}` records answer-level `fidelity_report` (supported /
+  The original native substrate recorded answer-level `fidelity_report` (supported /
   unsupported / abstained buckets + four-state status, upserted per turn_id) and
   per-chunk `fidelity_attribution` (`accepted`/`irrelevant`, `operator_id`
   `fidelity-judge`) as **non-scored** artifact kinds, structurally invisible to
@@ -56,6 +56,10 @@
   server→kb-forward vertical mirroring `/v1/audit/provenance`, returning the
   turn's `fidelity_report` buckets + `attribution_count` with a four-state
   `fidelity_status` (`not_evaluated` when the default-off judge has not run).
+  The DB2 retirement now routes that read through the Go memory owner and shared
+  PostgreSQL module (`server-go/modules/memory/fidelity.go`). The obsolete native
+  fidelity storage implementation and its test-only writer APIs are removed;
+  retained records require no schema conversion. The judge remains deferred.
   The **P1.5 two-writer merge core** landed next:
   `db2_demotion_retrieval_event_merge_turn` (D14), the first writer creates the
   turn's `retrieval_event`; a later writer (e.g. the code-search surface) MERGES its

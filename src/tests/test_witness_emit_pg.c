@@ -22,11 +22,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_witness_checkpoint.h"
-#include "modules/db2/c/db2_witness_emit.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
+#include "modules/kb/c/kb_store_witness_emit.h"
+#include "modules/kb/c/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -81,12 +81,12 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
 
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "db2_init failed for %s\n", url);
+      fprintf(stderr, "kb_store_init failed for %s\n", url);
       return 1;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
 
    append_record(conn, "e1");
@@ -94,16 +94,16 @@ int main(void)
    append_record(conn, "e3");
 
    int64_t seq = -1;
-   db2_witness_checkpoint_result_t cr = db2_witness_checkpoint_produce(&seq);
-   if (cr != DB2_WITNESS_CP_OK)
+   kb_store_witness_checkpoint_result_t cr = kb_store_witness_checkpoint_produce(&seq);
+   if (cr != KB_STORE_WITNESS_CP_OK)
    {
       fprintf(stderr, "produce returned %d\n", (int)cr);
       return 1;
    }
 
-   db2_witness_emit_stats_t s;
-   db2_witness_emit_result_t er = db2_witness_emit_run(capture_sink, NULL, 256, &s);
-   if (er != DB2_WITNESS_EMIT_OK)
+   kb_store_witness_emit_stats_t s;
+   kb_store_witness_emit_result_t er = kb_store_witness_emit_run(capture_sink, NULL, 256, &s);
+   if (er != KB_STORE_WITNESS_EMIT_OK)
    {
       fprintf(stderr, "emit run returned %d\n", (int)er);
       return 1;
@@ -123,8 +123,8 @@ int main(void)
    /* Cursor monotonicity: with nothing new appended, a second run emits nothing.
     * If this regressed, every tick would re-emit the whole history. */
    size_t before = g_frames;
-   db2_witness_emit_stats_t s2;
-   assert(db2_witness_emit_run(capture_sink, NULL, 256, &s2) == DB2_WITNESS_EMIT_OK);
+   kb_store_witness_emit_stats_t s2;
+   assert(kb_store_witness_emit_run(capture_sink, NULL, 256, &s2) == KB_STORE_WITNESS_EMIT_OK);
    if (g_frames != before || s2.records_emitted != 0 || s2.checkpoints_emitted != 0)
    {
       fprintf(stderr, "second emit run was not a no-op: frames %zu -> %zu\n", before, g_frames);
@@ -133,8 +133,8 @@ int main(void)
 
    /* A newly appended record is picked up by the next run, and only that record. */
    append_record(conn, "e4");
-   db2_witness_emit_stats_t s3;
-   assert(db2_witness_emit_run(capture_sink, NULL, 256, &s3) == DB2_WITNESS_EMIT_OK);
+   kb_store_witness_emit_stats_t s3;
+   assert(kb_store_witness_emit_run(capture_sink, NULL, 256, &s3) == KB_STORE_WITNESS_EMIT_OK);
    if (s3.records_emitted != 1)
    {
       fprintf(stderr, "incremental emit sent %llu records, expected 1\n",
@@ -153,8 +153,8 @@ int main(void)
          snprintf(sid, sizeof sid, "burst%d", i);
          append_record(conn, sid);
       }
-      db2_witness_emit_stats_t sb;
-      assert(db2_witness_emit_run(capture_sink, NULL, 8192, &sb) == DB2_WITNESS_EMIT_OK);
+      kb_store_witness_emit_stats_t sb;
+      assert(kb_store_witness_emit_run(capture_sink, NULL, 8192, &sb) == KB_STORE_WITNESS_EMIT_OK);
       if (sb.records_emitted != 600)
       {
          fprintf(stderr, "burst drain emitted %llu records, expected 600 in one run\n",
@@ -174,8 +174,8 @@ int main(void)
          snprintf(sid, sizeof sid, "burst2-%d", i);
          append_record(conn, sid);
       }
-      db2_witness_emit_stats_t sc;
-      assert(db2_witness_emit_run(capture_sink, NULL, 300, &sc) == DB2_WITNESS_EMIT_OK);
+      kb_store_witness_emit_stats_t sc;
+      assert(kb_store_witness_emit_run(capture_sink, NULL, 300, &sc) == KB_STORE_WITNESS_EMIT_OK);
       if (sc.records_emitted >= 600 || sc.records_emitted == 0)
       {
          fprintf(stderr, "budget of 300 emitted %llu records; expected a partial drain\n",
@@ -185,8 +185,8 @@ int main(void)
       printf("witness_emit_pg: burst drained 600 in one run; budget 300 stopped at %llu\n",
              (unsigned long long)sc.records_emitted);
       /* Finish the drain so the offline verification below sees a complete chain. */
-      db2_witness_emit_stats_t sd;
-      assert(db2_witness_emit_run(capture_sink, NULL, 8192, &sd) == DB2_WITNESS_EMIT_OK);
+      kb_store_witness_emit_stats_t sd;
+      assert(kb_store_witness_emit_run(capture_sink, NULL, 8192, &sd) == KB_STORE_WITNESS_EMIT_OK);
    }
 
    /* Verify the captured bytes offline: anchor only, no database. */
@@ -242,7 +242,7 @@ int main(void)
       return 1;
    }
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("witness_emit_pg: PASSED (emitted bytes verify offline; tampering detected)\n");
    return 0;
 }

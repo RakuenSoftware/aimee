@@ -1,17 +1,17 @@
 /* kb_service_graph.c: aimee-kb dispatch handlers for the graph.* RPC family.
- * Code projection sync and graph explain run against DB2 here, on the KB side;
+ * Code projection sync and graph explain run against KB_STORE here, on the KB side;
  * server/CLI reach them only via kb_client RPC. */
 
 #include "kb_service_graph.h"
 
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/code_projection.h"
-#include "modules/db2/c/entity_edges.h"
-#include "modules/db2/c/entity_nodes.h"
-#include "modules/db2/c/kb_service_backend.h" /* db2_kb_service_code_audit_json */
-#include "kb_graph_analytics.h"               /* kb_graph_communities */
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/code_projection.h"
+#include "modules/kb/c/entity_edges.h"
+#include "modules/kb/c/entity_nodes.h"
+#include "modules/kb/c/kb_service_backend.h" /* kb_store_kb_service_code_audit_json */
+#include "kb_graph_analytics.h"              /* kb_graph_communities */
 
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +51,7 @@ static int kb_graph_persist_communities(int64_t gen_id, const char *project)
    code_projection_edge_t *cpe = malloc((size_t)KB_GRAPH_COMMUNITY_MAX_EDGES * sizeof(*cpe));
    if (!cpe)
       return -1;
-   int ne = db2_code_projection_list_edges_for_gen(gen_id, cpe, KB_GRAPH_COMMUNITY_MAX_EDGES);
+   int ne = kb_store_code_projection_list_edges_for_gen(gen_id, cpe, KB_GRAPH_COMMUNITY_MAX_EDGES);
    if (ne < 0)
    {
       free(cpe);
@@ -61,7 +61,7 @@ static int kb_graph_persist_communities(int64_t gen_id, const char *project)
    {
       /* No edges -> clear any stale membership for this generation. */
       free(cpe);
-      return db2_code_projection_communities_replace(gen_id, project, NULL, 0);
+      return kb_store_code_projection_communities_replace(gen_id, project, NULL, 0);
    }
 
    kb_graph_edge_t *ge = malloc((size_t)ne * sizeof(*ge));
@@ -107,7 +107,7 @@ static int kb_graph_persist_communities(int64_t gen_id, const char *project)
    }
    free(gc);
 
-   int rc = db2_code_projection_communities_replace(gen_id, project, rows, nc);
+   int rc = kb_store_code_projection_communities_replace(gen_id, project, rows, nc);
    free(rows);
    return rc == 0 ? nc : -1;
 }
@@ -116,30 +116,30 @@ int64_t kb_graph_build_project_if_changed(const char *project, int *rebuilt)
 {
    if (rebuilt)
       *rebuilt = 0;
-   if (!project || !*project || !db2_is_initialized())
+   if (!project || !*project || !kb_store_is_initialized())
       return -1;
    /* Content-addressed idempotency: skip a project whose code is unchanged since
     * its last published generation, so the drain is cheap-when-nothing-changed. */
    char fp[64] = "", visible_fp[64] = "";
-   if (db2_code_projection_project_fingerprint(project, fp, sizeof(fp)) != 0)
+   if (kb_store_code_projection_project_fingerprint(project, fp, sizeof(fp)) != 0)
       return -1;
-   db2_code_projection_visible_source_hash(project, visible_fp, sizeof(visible_fp));
+   kb_store_code_projection_visible_source_hash(project, visible_fp, sizeof(visible_fp));
    if (fp[0] && visible_fp[0] && strcmp(fp, visible_fp) == 0)
       return 0; /* unchanged -> no work */
 
-   int64_t gen = db2_code_projection_generation_create(project);
+   int64_t gen = kb_store_code_projection_generation_create(project);
    if (gen <= 0)
       return -1;
-   db2_code_projection_generation_set_source_hash(gen, fp);
-   int64_t edges = db2_code_projection_sync_project(project, gen);
+   kb_store_code_projection_generation_set_source_hash(gen, fp);
+   int64_t edges = kb_store_code_projection_sync_project(project, gen);
    if (edges < 0)
    {
-      db2_code_projection_generation_abort(gen, "sync failed");
+      kb_store_code_projection_generation_abort(gen, "sync failed");
       return -1;
    }
-   if (db2_code_projection_generation_publish(gen, project) != 0)
+   if (kb_store_code_projection_generation_publish(gen, project) != 0)
    {
-      db2_code_projection_generation_abort(gen, "publish failed");
+      kb_store_code_projection_generation_abort(gen, "publish failed");
       return -1;
    }
    /* Derived analytic: deterministic community membership for this generation.
@@ -157,23 +157,23 @@ int kb_handle_graph_sync_code(int fd, cJSON *req)
       return kb_send_error(fd, "missing project");
    const char *project = proj_j->valuestring;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
 
-   int64_t gen = db2_code_projection_generation_create(project);
+   int64_t gen = kb_store_code_projection_generation_create(project);
    if (gen <= 0)
       return kb_send_error(fd, "failed to create projection generation");
 
-   int64_t edges = db2_code_projection_sync_project(project, gen);
+   int64_t edges = kb_store_code_projection_sync_project(project, gen);
    if (edges < 0)
    {
-      db2_code_projection_generation_abort(gen, "sync failed");
+      kb_store_code_projection_generation_abort(gen, "sync failed");
       return kb_send_error(fd, "code projection sync failed");
    }
 
-   if (db2_code_projection_generation_publish(gen, project) != 0)
+   if (kb_store_code_projection_generation_publish(gen, project) != 0)
    {
-      db2_code_projection_generation_abort(gen, "publish failed");
+      kb_store_code_projection_generation_abort(gen, "publish failed");
       return kb_send_error(fd, "failed to publish projection generation");
    }
    /* Derived analytic (best-effort, see kb_graph_build_project_if_changed). */
@@ -199,11 +199,11 @@ int kb_handle_graph_explain(int fd, cJSON *req)
    if (limit <= 0 || limit > 200)
       limit = 40;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
 
-   db2_entity_edge_explain_t edges[200];
-   int n = db2_entity_edge_explain_by_entity(entity, edges, limit);
+   kb_store_entity_edge_explain_t edges[200];
+   int n = kb_store_entity_edge_explain_by_entity(entity, edges, limit);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "entity", entity);
@@ -211,8 +211,8 @@ int kb_handle_graph_explain(int fd, cJSON *req)
    cJSON_AddTrueToObject(resp, "provisional_weights");
 
    /* Canonical node metadata when present. */
-   db2_entity_node_t node;
-   if (db2_entity_node_get(entity, &node) == 0)
+   kb_store_entity_node_t node;
+   if (kb_store_entity_node_get(entity, &node) == 0)
    {
       cJSON *nj = cJSON_CreateObject();
       cJSON_AddStringToObject(nj, "node_key", node.node_key);
@@ -256,10 +256,10 @@ int kb_handle_code_audit(int fd, cJSON *req)
    const char *project = cJSON_IsString(proj_j) ? proj_j->valuestring : "";
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
 
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return kb_send_error(fd, "failed to open knowledge service store");
 
-   cJSON *resp = db2_kb_service_code_audit_json(project, limit);
+   cJSON *resp = kb_store_kb_service_code_audit_json(project, limit);
    if (!resp)
       return kb_send_error(fd, "failed to build code audit");
    int rc = kb_send_response(fd, resp);

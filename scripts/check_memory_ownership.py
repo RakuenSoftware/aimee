@@ -21,8 +21,7 @@ spec.loader.exec_module(inventory)
 
 
 def findings(root: Path, manifest: dict) -> dict[str, list[str]]:
-    patterns = [re.escape(s) if s not in inventory.CAPTURED_MEMBERS else inventory.CAPTURED_MEMBERS[s]
-                for s in manifest["native_symbols"]]
+    patterns = inventory.native_symbol_patterns(manifest)
     symbols = re.compile(r"\b(?:" + "|".join(patterns) +
                          r"|AIMEE_MEMORY_\w+|aimee_memory_\w+|server_module_memory_\w+|kb_module_memory_\w+|kb_client_memory_\w+)\b")
     files = {}

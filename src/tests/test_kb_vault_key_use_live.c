@@ -5,11 +5,11 @@
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
 #include "modules/vault/vault_server_key.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/org_vault_key_use.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/org_vault_key_use.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>
@@ -45,7 +45,7 @@ static int consume(const unsigned char *plaintext, size_t len, void *ctx)
 static int64_t scalar(const char *sql)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
    int64_t value = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
@@ -64,12 +64,12 @@ int main(void)
       return 0;
    }
    int64_t team_id = strtoll(team_text, NULL, 10);
-   assert(team_id > 0 && db2_init(url) == 0);
+   assert(team_id > 0 && kb_store_init(url) == 0);
    int64_t startup_epoch = 0;
    int startup_sealed = -1;
-   assert(db2_vault_control_startup_begin(&startup_epoch, &startup_sealed) == 0);
+   assert(kb_store_vault_control_startup_begin(&startup_epoch, &startup_sealed) == 0);
    assert(startup_epoch > 0 && (startup_sealed == 0 || startup_sealed == 1));
-   assert(db2_vault_control_startup_end(1) == 0);
+   assert(kb_store_vault_control_startup_end(1) == 0);
    kb_principal_t caller = owner();
    kb_principal_t transport = origin();
    char policy_err[256] = "";
@@ -86,11 +86,11 @@ int main(void)
    assert(vault_secret_encrypt(dek, aad, aad_len, secret, sizeof(secret) - 1, nonce, ciphertext,
                                tag) == 0);
 
-   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT org_vault_put('team:970713:provider:bedrock',970713,'bedrock',"
                  "'primary',1,decode(repeat('01',40),'hex'),decode(repeat('02',12),'hex'),"
                  "decode('03','hex'),decode(repeat('04',16),'hex'))") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    int64_t rid = 0;
    assert(kb_vault_rotation_start(&caller, team_id, key_id, "team:970713:provider:bedrock",
@@ -112,46 +112,46 @@ int main(void)
                            "anthropic.claude", "invoke", consume, NULL) == KB_VAULT_KEY_USE_REPLAY);
    assert(callback_calls == 1);
 
-   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
    assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND "
                  "subject='team:970713|bedrock|primary'") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
-   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("WITH u AS (UPDATE org_vault_current SET version=1 WHERE "
                  "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
                  "cred='primary' RETURNING 1) SELECT count(*) FROM u") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
    assert(kb_vault_key_use(&caller, team_id, &transport, "live-use-rollback", key_id,
                            "team:970713:provider:bedrock", "bedrock", "primary", digest, "bedrock",
                            "anthropic.claude", "invoke", consume,
                            NULL) == KB_VAULT_KEY_USE_UNATTESTED);
    assert(callback_calls == 1);
-   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("WITH u AS (UPDATE org_vault_current SET version=2 WHERE "
                  "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
                  "cred='primary' RETURNING 1) SELECT count(*) FROM u") == 1);
    assert(scalar("WITH u AS (UPDATE org_vault_secret SET hwm_attestation='\\xdead' WHERE "
                  "principal='team:970713:provider:bedrock' AND agent='bedrock' AND "
                  "cred='primary' AND version=2 RETURNING 1) SELECT count(*) FROM u") == 1);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
    assert(kb_vault_key_use(&caller, team_id, &transport, "live-use-bad-signature", key_id,
                            "team:970713:provider:bedrock", "bedrock", "primary", digest, "bedrock",
                            "anthropic.claude", "invoke", consume,
                            NULL) == KB_VAULT_KEY_USE_UNATTESTED);
    assert(callback_calls == 1);
-   assert(db2_tenant_scope_begin(&caller, team_id) == 0);
+   assert(kb_store_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
    assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE detail LIKE '%AKIA_TEST%'") == 0);
-   assert(db2_tenant_scope_commit() == 0);
+   assert(kb_store_tenant_scope_commit() == 0);
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(dek, sizeof(dek));
    OPENSSL_cleanse(wrapped, sizeof(wrapped));
    OPENSSL_cleanse(ciphertext, sizeof(ciphertext));
    assert(kb_vault_policy_select("file", policy_err, sizeof(policy_err)) == 0);
-   db2_shutdown();
+   kb_store_shutdown();
    puts("PASS: live PG17 + signed HWM + locked decrypt/callback/replay");
    return 0;
 }

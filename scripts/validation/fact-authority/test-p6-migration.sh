@@ -14,9 +14,9 @@
 # The apply is ONE TRANSACTION, so the whole schema rolled back and aimee-kb
 # never became ready:
 #
-#     aimee: db2_init: schema apply failed: ERROR: semantic facts must be
+#     aimee: kb_store_init: schema apply failed: ERROR: semantic facts must be
 #     changed through fact_mutation
-#     aimee-kb: DB2 not ready (...); retry 13/24 in 5s
+#     aimee-kb: KB_STORE not ready (...); retry 13/24 in 5s
 #
 # and the server, three layers away, answered "failed to store memory".
 #
@@ -66,7 +66,7 @@ if [ "$ready" = "1" ]; then
   echo "PASS: aimee-kb became ready with semantic facts present"
 else
   echo "FAIL: aimee-kb never became ready"
-  grep -a "schema apply failed\|DB2 not ready" /root/kb.log | tail -3
+  grep -a "schema apply failed\|KB_STORE not ready" /root/kb.log | tail -3
   rc=1
 fi
 

@@ -100,7 +100,7 @@ func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal(result)
 	}
 	// Port the native curiosity recall regression through the actual Go
-	// operation called by db2_kb_service_curiosity_route_top_json. Queue routing
+	// operation called by kb_store_kb_service_curiosity_route_top_json. Queue routing
 	// has its own native tests; this checks the memory owner side of that boundary.
 	before := result
 	for _, cause := range []string{"retrieval_failure", "contradiction"} {

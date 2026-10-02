@@ -215,7 +215,7 @@ cJSON *aimee_task_to_json(const aimee_task_t *t)
    return j;
 }
 
-cJSON *decision_to_json(const db2_decision_log_row_t *d)
+cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
 {
    cJSON *j = cJSON_CreateObject();
    cJSON_AddNumberToObject(j, "id", (double)d->id);

@@ -613,7 +613,7 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
          "\n"
          "$(OBJDIR)/server/%.o: %.c\n"
          "\t@mkdir -p $(dir $@)\n"
-         "\t$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<\n",
+         "\t$(CC) -c $(C_FLAGS) -DAIMEE_KB_STORE_DISABLED -o $@ $<\n",
          f);
    fclose(f);
 
@@ -623,11 +623,11 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
                         "$(OBJDIR)/server/server_kb_workers.o: server/server_kb_workers.c\n"
                         "\t@mkdir -p $(dir $@)\n"
                         "\t$(CC) -c $(C_FLAGS) -o $@ $<           \xE2\x86\x90"
-                        " line 3, missing DB2 flag\n"
+                        " line 3, missing KB_STORE flag\n"
                         "\n"
                         "$(OBJDIR)/server/%.o: %.c\n"
                         "\t@mkdir -p $(dir $@)\n"
-                        "\t$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<\n"
+                        "\t$(CC) -c $(C_FLAGS) -DAIMEE_KB_STORE_DISABLED -o $@ $<\n"
                         "```\n";
    assert(delegate_check_review_evidence_drift(review, root, err, sizeof(err)) == 0);
 

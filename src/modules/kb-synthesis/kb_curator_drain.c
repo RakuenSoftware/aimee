@@ -9,13 +9,13 @@
 #define _GNU_SOURCE
 #endif
 
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
-#include "modules/db2/c/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
-#include "modules/db2/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
-#include "modules/db2/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
-#include "modules/db2/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/decision_log.h"        /* kb_store_decision_log_mark_revisit_due (P1) */
+#include "modules/kb/c/cross_repo_identity.h" /* kb_store_cross_repo_rebuild_identities (H0c) */
+#include "modules/kb/c/cross_repo_route.h"    /* kb_store_cross_repo_rebuild_routes (H0d) */
+#include "modules/kb/c/cross_repo_build.h" /* kb_store_cross_repo_rebuild_build_deps (recall R2) */
+#include "modules/kb/c/cross_repo_stats.h" /* kb_store_cross_repo_recompute_blocked_symbols */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"
@@ -84,7 +84,7 @@
  * routes are keyed on identities, so a failed identity rebuild must NOT proceed
  * to routes (it would key them on stale/partial identities). Returns 0 on a
  * completed rebuild, -1 if the store is not ready / a sub-rebuild failed (caller
- * retries next poll). Idempotent + set-based DB2; no embedder/LLM.
+ * retries next poll). Idempotent + set-based KB_STORE; no embedder/LLM.
  *
  * Failure semantics — fail-to-last-known-good, NOT fail-open: each sub-rebuild
  * (rebuild_identities, rebuild_routes) is internally atomic (BEGIN/DELETE/INSERT/
@@ -94,10 +94,10 @@
  * resolver's gate keeps using last-known-good routes (bounded staleness, self-
  * healed by the next successful rebuild), never a torn/partial table and never a
  * permissive no-route-accepts-all state (no-route demotes to LOW). A persistent
- * failure is surfaced via WARN so a wedged db2 / schema drift is observable. */
+ * failure is surfaced via WARN so a wedged kb_store / schema drift is observable. */
 static int kb_cross_repo_meta_rebuild(void)
 {
-   int ids = db2_cross_repo_rebuild_identities();
+   int ids = kb_store_cross_repo_rebuild_identities();
    if (ids < 0)
    {
       aimee_log(
@@ -105,7 +105,7 @@ static int kb_cross_repo_meta_rebuild(void)
           "identity rebuild unavailable/failed; gate keeps last-known-good routes this cycle");
       return -1;
    }
-   int routes = db2_cross_repo_rebuild_routes();
+   int routes = kb_store_cross_repo_rebuild_routes();
    if (routes < 0)
    {
       aimee_log(LOG_WARN, "kb.cross_repo.meta",
@@ -115,16 +115,16 @@ static int kb_cross_repo_meta_rebuild(void)
    /* Recall R2: build-declared deps (FetchContent/submodule/Cargo) — a separate
     * evidence class the resolver merges as build_declared. Same fail-to-last-known-
     * good semantics. */
-   int bdeps = db2_cross_repo_rebuild_build_deps();
+   int bdeps = kb_store_cross_repo_rebuild_build_deps();
    if (bdeps < 0)
    {
       aimee_log(LOG_WARN, "kb.cross_repo.meta",
                 "build-dep rebuild failed; keeps last-known-good build deps this cycle");
       return -1;
    }
-   int bsym = db2_cross_repo_recompute_blocked_symbols(config_kb_curator_cross_repo_k(),
-                                                       config_kb_curator_cross_repo_m(),
-                                                       config_kb_curator_cross_repo_len_min());
+   int bsym = kb_store_cross_repo_recompute_blocked_symbols(config_kb_curator_cross_repo_k(),
+                                                            config_kb_curator_cross_repo_m(),
+                                                            config_kb_curator_cross_repo_len_min());
    aimee_log(
        LOG_INFO, "kb.cross_repo.meta",
        "rebuilt cross-repo metadata: identities=%d routes=%d build_deps=%d blocked_symbols=%d", ids,
@@ -135,7 +135,7 @@ static int kb_cross_repo_meta_rebuild(void)
 /* Projection-graph sweep (INDEX/CPU lane): publish a fresh typed-edge generation
  * per CHANGED project (content-addressed -- an unchanged project is skipped), so
  * `workspace add` materializes the code_projection_edges layer with no manual
- * `aimee graph sync-code`. Pure DB2 (reads files/terms/code_calls), no embedder/
+ * `aimee graph sync-code`. Pure KB_STORE (reads files/terms/code_calls), no embedder/
  * LLM -- so it runs on the CPU/index lane, off the GPU/LLM thread. When a project
  * changed this cycle (the content-addressed `built` signal), it also does the
  * incremental cross-repo metadata refresh (H0c identities, H0d routes, build_deps,
@@ -268,11 +268,11 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    {
       kb_code_embed_result_t r;
       memset(&r, 0, sizeof(r));
-      if (db2_maintenance_job_enter(DB2_MAINTENANCE_CODE_INDEXER, projects[i].name) != 0)
+      if (kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CODE_INDEXER, projects[i].name) != 0)
          continue;
       if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
       {
-         db2_maintenance_job_leave();
+         kb_store_maintenance_job_leave();
          continue;
       }
       total += (int)r.embedded;
@@ -288,7 +288,7 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
        * on a synthesis endpoint being configured. */
       if (kb_code_embed_project_fully_embedded(projects[i].name))
          kb_curator_queue_code_units_for_project(projects[i].name, NULL);
-      db2_maintenance_job_leave();
+      kb_store_maintenance_job_leave();
    }
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
@@ -315,9 +315,10 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
       return 0;
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
-   int reembed = db2_reembed_in_progress_get(NULL, NULL) == 1;
-   db2_maintenance_worker_t worker = reembed ? DB2_MAINTENANCE_REEMBED : DB2_MAINTENANCE_CURATOR;
-   if (db2_maintenance_job_enter(worker, projects[selected].name) != 0)
+   int reembed = kb_store_reembed_in_progress_get(NULL, NULL) == 1;
+   kb_store_maintenance_worker_t worker =
+       reembed ? KB_STORE_MAINTENANCE_REEMBED : KB_STORE_MAINTENANCE_CURATOR;
+   if (kb_store_maintenance_job_enter(worker, projects[selected].name) != 0)
       return 0;
    int total = 0;
    int e = kb_doc_refresh(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
@@ -326,7 +327,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
    int b = kb_doc_embed_backfill(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
-   db2_maintenance_job_leave();
+   kb_store_maintenance_job_leave();
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) for project '%s'", total,
                 projects[selected].name);
@@ -334,7 +335,7 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
     * up (a pass that embedded nothing means every chunk has a vector). */
    if (total == 0 && reembed)
    {
-      db2_reembed_in_progress_clear();
+      kb_store_reembed_in_progress_clear();
       aimee_log(LOG_INFO, "kb.reembed",
                 "dim-change re-embed reconciled (doc corpus); cleared maintenance");
    }
@@ -787,10 +788,10 @@ static void *drain_thread_main(void *arg)
     * cross_repo_route would stay empty — silently demoting every legitimate
     * non-LOW cross-repo edge to LOW indefinitely. Run the rebuild once at startup,
     * independent of corpus change, so routes exist before the resolver is queried.
-    * Retried until it succeeds once (db2 may not be open on the first iteration),
+    * Retried until it succeeds once (kb_store may not be open on the first iteration),
     * then never again (cleared on the first 0-return); self-heals within one poll
     * of the store coming up. The retry is naturally rate-limited to one attempt
-    * per DRAIN_POLL_SECS, and each attempt is cheap on a wedged store (db2_conn()
+    * per DRAIN_POLL_SECS, and each attempt is cheap on a wedged store (kb_store_conn()
     * returns NULL fast -> -1). */
    int cross_repo_cold_start_pending = 1;
 
@@ -802,7 +803,7 @@ static void *drain_thread_main(void *arg)
    {
       /* Return any pool connection acquired last cycle before sleeping, so this
        * long-lived thread doesn't pin one while idle (stuck-lease reaper). */
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       sleep(DRAIN_POLL_SECS);
       if (ctx->stop)
          break;
@@ -820,13 +821,13 @@ static void *drain_thread_main(void *arg)
        * decisions past their revisit_when to 'revisit_due' so they resurface.
        * Reuses this existing drain — no new scheduler. */
       {
-         int due = db2_decision_log_mark_revisit_due();
+         int due = kb_store_decision_log_mark_revisit_due();
          if (due > 0)
             aimee_log(LOG_DEBUG, "kb.decision.revisit", "flipped %d decision(s) to revisit_due",
                       due);
          else if (due < 0)
             aimee_log(LOG_WARN, "kb.decision.revisit",
-                      "revisit sweep failed this cycle (db2 unavailable?)");
+                      "revisit sweep failed this cycle (kb_store unavailable?)");
       }
 
       /* Typed-fact extraction drain — runs every poll, independent of the
@@ -852,7 +853,7 @@ static void *drain_thread_main(void *arg)
 
       /* Code projection-graph + incremental cross-repo metadata refresh moved to
        * the CPU/index lane (kb_curator_projection_sweep, driven by
-       * kb_curator_index_lane_main) so this pure-DB2 O(projects) sweep drains
+       * kb_curator_index_lane_main) so this pure-KB_STORE O(projects) sweep drains
        * concurrently with -- rather than blocking -- the GPU/LLM pass here. */
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the
@@ -924,7 +925,7 @@ static void *drain_thread_main(void *arg)
          /* Return the thread's pooled connection between jobs so a long batch
           * doesn't pin one past the stuck-lease ceiling (it's re-acquired lazily
           * by the next stage); cheap no-op when nothing is held. */
-         db2_lease_release_idle();
+         kb_store_lease_release_idle();
          /* This (main) worker drives the LLM lane; the CPU index lane runs on its own
           * thread (kb_curator_index_lane_main) so indexing does not wait behind each
           * multi-second extraction. */
@@ -981,7 +982,7 @@ static void *kb_curator_code_worker_main(void *arg)
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_code_unit_one(&opts);
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       if (r == 1)
          continue; /* did work — claim the next job immediately */
       /* empty queue (0) or error (<0): back off the poll interval */
@@ -1024,7 +1025,7 @@ static void *kb_curator_doc_worker_main(void *arg)
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
       int r = kb_curator_extract_one(&opts);
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       if (r == 1)
          continue; /* did work — claim the next job immediately */
       /* empty queue (0) or error (<0): back off the poll interval */
@@ -1055,7 +1056,7 @@ static void *kb_curator_index_lane_main(void *arg)
       opts.max_attempts =
           config_kb_curator_max_attempts() > 0 ? config_kb_curator_max_attempts() : 3;
 
-      /* Pure-DB2 projection-graph + cross-repo refresh once per poll, ahead of the
+      /* Pure-KB_STORE projection-graph + cross-repo refresh once per poll, ahead of the
        * INDEX queue drain -- content-addressed, so cheap when nothing changed. */
       kb_curator_projection_sweep();
 
@@ -1068,7 +1069,7 @@ static void *kb_curator_index_lane_main(void *arg)
       int r = 0, drained = 0;
       while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
       {
-         db2_lease_release_idle();
+         kb_store_lease_release_idle();
          r = kb_curator_pipeline_run_pass(ordered, nordered, KB_CURATOR_LANE_INDEX, &opts,
                                           curator_index_set_status);
          if (r != 1)
@@ -1076,7 +1077,7 @@ static void *kb_curator_index_lane_main(void *arg)
          drained++;
       }
       kb_background_clear("curator.index");
-      db2_lease_release_idle();
+      kb_store_lease_release_idle();
       if (ctx->stop)
          break;
       if (r != 1) /* idle or error: back off; a hit batch cap loops hot */

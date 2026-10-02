@@ -6,22 +6,26 @@ routes cheap work to cheap models, and enforces guardrails the model cannot writ
 
 Point any tool at it. Your context follows you between them.
 
-One application image, with one identity established on first boot:
+Two independent instance roles, packaged in one application image:
 
 - **aimee-server** assists one human. Sessions, tools, credentials, delegates, workflows.
 - **aimee-kb** serves a corpus, team, or company. Durable knowledge, code indexes, retrieval,
   curation.
 
-Server works without a KB. Both identities compose the same Go PostgreSQL and memory modules,
+**Server works without a KB, including durable personal memory and local code indexing.**
+Connecting a KB adds shared knowledge through its API; personal rows and vectors stay on Server.
+Ordinary memory commands default to the personal store; use `--store kb` explicitly for shared
+knowledge. See [Server and KB](docs/SERVER_AND_KB.md) for ownership and request paths.
+
+Both identities compose the same Go PostgreSQL and memory modules,
 with their own local Vault and PostgreSQL container (LUKS is optional). The role cannot be changed on an
 existing instance. The `aimee` CLI is a thin client for Linux, macOS, and Windows; Go composition
 modules supervise the standard modules around the existing C resource and event-bus hosts.
 
 ## What you get
 
-- **Memory that survives the session.** The curator extracts facts, joins evidence, catches
-  contradictions, and lets stale detail decay. Source revisions and final dispatch checks prevent
-  changed or erased evidence from reusing an old binding. See [Knowledge](docs/KNOWLEDGE.md).
+- **Memory that survives the session.** Server retains personal memory. An optional KB adds shared
+  records, typed facts, evidence, and curation. See [Knowledge](docs/KNOWLEDGE.md).
 - **Your code as a graph.** Symbols, callers, imports, and cross-repo dependencies feed search and
   blast-radius checks. See [Code intelligence](docs/CODE_INTELLIGENCE.md).
 - **Delegates that cut the bill.** Send review, diagnosis, and routine implementation to the
@@ -59,6 +63,7 @@ Start at the [documentation index](docs/README.md).
 | [What's new](docs/WHATS_NEW.md) | Current patch fixes and the 0.4 deployment changes. |
 | [Upgrading](docs/UPGRADING.md) | Migrate storage and preserve instance identity. |
 | [Manual](MANUAL.md) | Day-to-day use and operations. |
+| [Server and KB](docs/SERVER_AND_KB.md) | Separate roles, stores, scopes, and failure boundaries. |
 | [Architecture](docs/ARCHITECTURE.md) | Processes, storage, trust, request flow. |
 | [Deployment](docs/DEPLOYMENT.md) | Standalone Server, optional KB, encrypted storage, backup. |
 | [Command reference](docs/gen/cli-commands.md) | Every CLI command. Generated from source. |

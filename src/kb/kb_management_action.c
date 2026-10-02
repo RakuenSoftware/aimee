@@ -113,7 +113,7 @@ fail:
 }
 
 int kb_management_action_response_parse(const char *raw, size_t len, int status,
-                                        db2_management_action_outcome_operation_t *out)
+                                        kb_store_management_action_outcome_operation_t *out)
 {
    if (!out)
       return -1;
@@ -123,25 +123,26 @@ int kb_management_action_response_parse(const char *raw, size_t len, int status,
       return -1;
 #define EXACT_RESPONSE(s) (len == sizeof(s) - 1 && memcmp(raw, (s), sizeof(s) - 1) == 0)
    if (status == 200 && EXACT_RESPONSE("{\"result\":\"succeeded\",\"effect\":\"applied\"}"))
-      out->result = DB2_MANAGEMENT_ACTION_SUCCEEDED,
-      out->result_class = DB2_MANAGEMENT_ACTION_CLASS_REMOTE_SUCCESS;
+      out->result = KB_STORE_MANAGEMENT_ACTION_SUCCEEDED,
+      out->result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_SUCCESS;
    else if (status == 403 && EXACT_RESPONSE("{\"result\":\"denied\",\"effect\":\"none\"}"))
-      out->result = DB2_MANAGEMENT_ACTION_DENIED_RESULT,
-      out->result_class = DB2_MANAGEMENT_ACTION_CLASS_REMOTE_DENIED;
+      out->result = KB_STORE_MANAGEMENT_ACTION_DENIED_RESULT,
+      out->result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_DENIED;
    else if (status == 500 && EXACT_RESPONSE("{\"result\":\"failed\",\"effect\":\"none\"}"))
-      out->result = DB2_MANAGEMENT_ACTION_FAILED,
-      out->result_class = DB2_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE;
+      out->result = KB_STORE_MANAGEMENT_ACTION_FAILED,
+      out->result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE;
    else if (status == 502 &&
             EXACT_RESPONSE("{\"result\":\"indeterminate\",\"effect\":\"unknown\"}"))
-      out->result = DB2_MANAGEMENT_ACTION_INDETERMINATE,
-      out->result_class = DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
+      out->result = KB_STORE_MANAGEMENT_ACTION_INDETERMINATE,
+      out->result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
    else
       return -1;
 #undef EXACT_RESPONSE
    return 0;
 }
 
-static int snapshot_valid(const db2_server_snapshot_t *s, const db2_management_action_intent_t *i)
+static int snapshot_valid(const kb_store_server_snapshot_t *s,
+                          const kb_store_management_action_intent_t *i)
 {
    return s && i && !strcmp(s->server_id, i->target_server_id) &&
           kb_mgmt_endpoint_validate(s->endpoint) == 0 && !strcmp(s->status, "active") &&
@@ -152,8 +153,8 @@ static int snapshot_valid(const db2_server_snapshot_t *s, const db2_management_a
           s->revocation_generation == i->revocation_generation;
 }
 
-static int intent_matches_operation(const db2_management_action_intent_t *i,
-                                    const db2_management_action_operation_t *o, uint64_t now)
+static int intent_matches_operation(const kb_store_management_action_intent_t *i,
+                                    const kb_store_management_action_operation_t *o, uint64_t now)
 {
    return i && o && now <= INT64_MAX && !strcmp(i->correlation_id, o->correlation_id) &&
           !strcmp(i->jti, o->jti) && i->team_id == o->team_id && i->capability == o->capability &&
@@ -165,7 +166,7 @@ static int intent_matches_operation(const db2_management_action_intent_t *i,
           i->expires_at - i->issued_at == o->ttl_seconds;
 }
 
-static int snapshots_equal(const db2_server_snapshot_t *a, const db2_server_snapshot_t *b)
+static int snapshots_equal(const kb_store_server_snapshot_t *a, const kb_store_server_snapshot_t *b)
 {
    return !strcmp(a->server_id, b->server_id) && !strcmp(a->endpoint, b->endpoint) &&
           !strcmp(a->status, b->status) && !strcmp(a->enrollment_state, b->enrollment_state) &&
@@ -177,7 +178,7 @@ static int snapshots_equal(const db2_server_snapshot_t *a, const db2_server_snap
 }
 
 static int active_matches(const kb_management_cert_active_t *a,
-                          const db2_management_action_intent_t *i)
+                          const kb_store_management_action_intent_t *i)
 {
    char fp[65];
    hex32(a->fingerprint, fp);
@@ -213,7 +214,7 @@ static void nonce_encode(const unsigned char in[32], char out[44])
 
 static int status_matches(const char *json, const unsigned char nonce[32],
                           const kb_management_cert_active_t *active,
-                          const db2_management_action_intent_t *intent,
+                          const kb_store_management_action_intent_t *intent,
                           const kb_management_action_dependencies_t *d, uint64_t now)
 {
    kb_mgmt_status_t s;
@@ -234,17 +235,18 @@ static int status_matches(const char *json, const unsigned char nonce[32],
    return !bad;
 }
 
-static db2_management_action_result_t append_outcome(const kb_management_action_request_t *r,
-                                                     const kb_management_action_dependencies_t *d,
-                                                     db2_management_action_outcome_operation_t *op)
+static kb_store_management_action_result_t
+append_outcome(const kb_management_action_request_t *r,
+               const kb_management_action_dependencies_t *d,
+               kb_store_management_action_outcome_operation_t *op)
 {
-   db2_management_action_outcome_t stored;
-   db2_management_action_result_t rc;
+   kb_store_management_action_outcome_t stored;
+   kb_store_management_action_result_t rc;
    do
    {
       memset(&stored, 0, sizeof(stored));
       rc = d->outcome_append(r->actor, op, &stored);
-   } while (rc == DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS &&
+   } while (rc == KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS &&
             d->monotonic_millis(d->clock_ctx) < r->deadline_millis);
    return rc;
 }
@@ -252,14 +254,14 @@ static db2_management_action_result_t append_outcome(const kb_management_action_
 static kb_management_action_result_t
 journal_local_failure(const kb_management_action_request_t *r,
                       const kb_management_action_dependencies_t *d,
-                      const db2_management_action_intent_t *intent)
+                      const kb_store_management_action_intent_t *intent)
 {
-   db2_management_action_outcome_operation_t op = {0};
+   kb_store_management_action_outcome_operation_t op = {0};
    memcpy(op.correlation_id, intent->correlation_id, 65);
    op.team_id = intent->team_id;
-   op.result = DB2_MANAGEMENT_ACTION_FAILED;
-   op.result_class = DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE;
-   return append_outcome(r, d, &op) == DB2_MANAGEMENT_ACTION_OK
+   op.result = KB_STORE_MANAGEMENT_ACTION_FAILED;
+   op.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE;
+   return append_outcome(r, d, &op) == KB_STORE_MANAGEMENT_ACTION_OK
               ? KB_MANAGEMENT_ACTION_UNAVAILABLE
               : KB_MANAGEMENT_ACTION_INDETERMINATE;
 }
@@ -269,9 +271,9 @@ kb_management_action_execute(const kb_management_action_request_t *r,
                              const kb_management_action_dependencies_t *d)
 {
    kb_management_action_body_t body = {0};
-   db2_management_action_operation_t operation = {0};
-   db2_management_action_intent_t intent = {0};
-   db2_server_snapshot_t a = {0}, b = {0};
+   kb_store_management_action_operation_t operation = {0};
+   kb_store_management_action_intent_t intent = {0};
+   kb_store_server_snapshot_t a = {0}, b = {0};
    kb_management_cert_bundle_t bundle = {0};
    kb_management_cert_active_t active = {0};
    kb_mgmt_token_authority_output_t token_out = {0};
@@ -293,26 +295,26 @@ kb_management_action_execute(const kb_management_action_request_t *r,
        d->monotonic_millis(d->clock_ctx) >= r->deadline_millis ||
        kb_management_action_body_parse(r->body, r->body_len, &body))
       goto done;
-   if (d->operation_init(r->team_id, r->server_id, DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES,
+   if (d->operation_init(r->team_id, r->server_id, KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES,
                          body.digest, d->token_issuer, d->kid, d->ttl_seconds, d->installation_id,
-                         &operation) != DB2_MANAGEMENT_ACTION_OK)
+                         &operation) != KB_STORE_MANAGEMENT_ACTION_OK)
    {
       result = KB_MANAGEMENT_ACTION_UNAVAILABLE;
       goto done;
    }
-   db2_management_action_result_t jr;
+   kb_store_management_action_result_t jr;
    do
    {
       memset(&intent, 0, sizeof(intent));
       jr = d->intent_start(r->actor, &operation, &intent);
-   } while (jr == DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS &&
+   } while (jr == KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS &&
             d->monotonic_millis(d->clock_ctx) < r->deadline_millis);
-   if (jr != DB2_MANAGEMENT_ACTION_OK)
+   if (jr != KB_STORE_MANAGEMENT_ACTION_OK)
    {
-      result = jr == DB2_MANAGEMENT_ACTION_DENIED     ? KB_MANAGEMENT_ACTION_DENIED
-               : jr == DB2_MANAGEMENT_ACTION_CONFLICT ? KB_MANAGEMENT_ACTION_CONFLICT
-               : jr == DB2_MANAGEMENT_ACTION_INVALID  ? KB_MANAGEMENT_ACTION_INVALID
-                                                      : KB_MANAGEMENT_ACTION_UNAVAILABLE;
+      result = jr == KB_STORE_MANAGEMENT_ACTION_DENIED     ? KB_MANAGEMENT_ACTION_DENIED
+               : jr == KB_STORE_MANAGEMENT_ACTION_CONFLICT ? KB_MANAGEMENT_ACTION_CONFLICT
+               : jr == KB_STORE_MANAGEMENT_ACTION_INVALID  ? KB_MANAGEMENT_ACTION_INVALID
+                                                           : KB_MANAGEMENT_ACTION_UNAVAILABLE;
       goto done;
    }
    if (intent.replayed)
@@ -434,18 +436,18 @@ kb_management_action_execute(const kb_management_action_request_t *r,
    }
    tr = d->server_request(d->server_ctx, session, "POST", "/v1/management/action", body.canonical,
                           headers, protocol_deadline, response, sizeof(response), &status);
-   db2_management_action_outcome_operation_t outcome = {0};
+   kb_store_management_action_outcome_operation_t outcome = {0};
    memcpy(outcome.correlation_id, intent.correlation_id, 65);
    outcome.team_id = intent.team_id;
    if (tr == KB_MANAGEMENT_ACTION_NOT_SENT)
    {
-      outcome.result = DB2_MANAGEMENT_ACTION_FAILED;
-      outcome.result_class = DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE;
+      outcome.result = KB_STORE_MANAGEMENT_ACTION_FAILED;
+      outcome.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE;
    }
    else if (tr == KB_MANAGEMENT_ACTION_SENT_AMBIGUOUS)
    {
-      outcome.result = DB2_MANAGEMENT_ACTION_INDETERMINATE;
-      outcome.result_class = DB2_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS;
+      outcome.result = KB_STORE_MANAGEMENT_ACTION_INDETERMINATE;
+      outcome.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS;
    }
    else
    {
@@ -468,18 +470,18 @@ kb_management_action_execute(const kb_management_action_request_t *r,
       }
       if (kb_management_action_response_parse(response, response_len, status, &outcome))
       {
-         outcome.result = DB2_MANAGEMENT_ACTION_INDETERMINATE;
-         outcome.result_class = DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
+         outcome.result = KB_STORE_MANAGEMENT_ACTION_INDETERMINATE;
+         outcome.result_class = KB_STORE_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
       }
    }
    jr = append_outcome(r, d, &outcome);
-   if (jr != DB2_MANAGEMENT_ACTION_OK)
+   if (jr != KB_STORE_MANAGEMENT_ACTION_OK)
       result = KB_MANAGEMENT_ACTION_INDETERMINATE;
-   else if (outcome.result == DB2_MANAGEMENT_ACTION_SUCCEEDED)
+   else if (outcome.result == KB_STORE_MANAGEMENT_ACTION_SUCCEEDED)
       result = KB_MANAGEMENT_ACTION_OK;
-   else if (outcome.result == DB2_MANAGEMENT_ACTION_DENIED_RESULT)
+   else if (outcome.result == KB_STORE_MANAGEMENT_ACTION_DENIED_RESULT)
       result = KB_MANAGEMENT_ACTION_DENIED;
-   else if (outcome.result == DB2_MANAGEMENT_ACTION_FAILED)
+   else if (outcome.result == KB_STORE_MANAGEMENT_ACTION_FAILED)
       result = KB_MANAGEMENT_ACTION_UNAVAILABLE;
    else
       result = KB_MANAGEMENT_ACTION_INDETERMINATE;

@@ -36,7 +36,7 @@ ADAPTERS = {
 
 # Which CMake source lists each daemon links.
 SOURCE_LISTS = {
-    "kb": ("KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_HOST_ADAPTER_SRCS"),
+    "kb": ("KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "KB_STORE_SRCS", "KB_STORE_HOST_ADAPTER_SRCS"),
     "server": ("SERVER_SRCS", "SERVER_DATA_SRCS", "SERVER_CORE_SRCS", "DATA_SRCS", "CORE_SRCS",
                "AGENT_SRCS", "CMD_SRCS", "GIT_SRCS", "DB1_SRCS"),
 }

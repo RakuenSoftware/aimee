@@ -10,11 +10,11 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_synthesize.h"
 
-void *(db2_conn)(void);
+void *(kb_store_conn)(void);
 
 static void seed(sqlite3 *db, const char *sql)
 {
@@ -23,17 +23,17 @@ static void seed(sqlite3 *db, const char *sql)
 
 static void test_gated_empty(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    /* Gated off (no synthesize_command) → returns 0 before any DB work. */
    assert(kb_curator_synthesize_one(NULL) == 0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  synthesize gated/empty OK\n");
 }
 
 static void test_pick_seeded(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    /* A committed entity with one inbound `mentions` and no synthesis about it. */
    seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
@@ -43,8 +43,8 @@ static void test_pick_seeded(void)
 
    char id[64] = "", sk[64] = "", si[128] = "";
    char *payload = NULL;
-   int found = kb_curator_synth_pick_topic(db2_conn(), id, sizeof(id), &payload, sk, sizeof(sk), si,
-                                           sizeof(si));
+   int found = kb_curator_synth_pick_topic(kb_store_conn(), id, sizeof(id), &payload, sk,
+                                           sizeof(sk), si, sizeof(si));
    assert(found == 1);
    assert(strcmp(id, "ent") == 0);
    assert(payload && strstr(payload, "pgvector") != NULL);
@@ -55,12 +55,12 @@ static void test_pick_seeded(void)
    seed(db, "INSERT INTO artifact_links (from_id,to_id,kind) VALUES ('syn','ent','about')");
    char id2[64] = "";
    char *p2 = NULL;
-   int f2 = kb_curator_synth_pick_topic(db2_conn(), id2, sizeof(id2), &p2, sk, sizeof(sk), si,
+   int f2 = kb_curator_synth_pick_topic(kb_store_conn(), id2, sizeof(id2), &p2, sk, sizeof(sk), si,
                                         sizeof(si));
    assert(f2 == 0);
    free(p2);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  synth_pick_topic selects an un-synthesised entity OK\n");
 }
 
@@ -76,8 +76,8 @@ static int count_sql(sqlite3 *db, const char *sql)
 
 static void test_restore_fragment_record(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
             " ('base','summary','committed','doc','base-doc','{\"text\":\"base\"}')");
@@ -99,13 +99,13 @@ static void test_restore_fragment_record(void)
    assert(count_sql(
               db, "SELECT COUNT(*) FROM audit_events WHERE target_surface='corpus.restore'") == 1);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  restore_fragment_record writes provenance OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_synthesize"))
+   if (kb_store_test_shim_skip_on_postgres("curator_synthesize"))
       return 0;
 
    test_gated_empty();

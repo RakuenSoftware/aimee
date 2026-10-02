@@ -1,6 +1,6 @@
 /* json_canonical.h: one spelling for a JSON column, whichever engine returned it.
  *
- * DB2's JSON columns (artifacts.payload, feature_rows.features, ...) are JSONB on
+ * KB_STORE's JSON columns (artifacts.payload, feature_rows.features, ...) are JSONB on
  * Postgres, and Postgres normalises jsonb on the way back out: it prints a space
  * after every colon and reorders object keys. Under the sqlite test shim the same
  * column is plain TEXT holding the exact bytes cJSON emitted, so a needle like

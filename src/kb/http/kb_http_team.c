@@ -2,7 +2,7 @@
  *
  * Team/project/membership CRUD on aimee-kb. The authenticated actor comes from
  * kb_reqctx (set by the router after verification); every mutating op runs inside a
- * tenant scope (db2_tenant_scope_begin sets aimee.principal + bootstrap_owner), so
+ * tenant scope (kb_store_tenant_scope_begin sets aimee.principal + bootstrap_owner), so
  * the org-admin capability is enforced at the DB layer by the RLS write policies —
  * a non-admin write is denied there and surfaces here as 403. Reads are RLS-scoped
  * to the caller's teams. */
@@ -11,7 +11,7 @@
 
 #include "admin_grant.h"
 #include "cJSON.h"
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_reqctx.h"
 #include "membership.h"
 #include "project.h"
@@ -57,14 +57,14 @@ static int name_is_clean(const char *s)
    return 1;
 }
 
-/* Map a tenant-scope/db2 return into an HTTP status. */
+/* Map a tenant-scope/kb_store return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return 503; /* tenancy needs the Postgres tier */
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return 401;
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return 403;
    return 500;
 }
@@ -79,7 +79,7 @@ static int begin_actor_scope(char *out, int cap, int *http_out)
       *http_out = err(out, cap, 401, "authentication required");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(actor, 0);
+   int rc = kb_store_tenant_scope_begin(actor, 0);
    if (rc != 0)
    {
       *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
@@ -88,7 +88,7 @@ static int begin_actor_scope(char *out, int cap, int *http_out)
    return 0;
 }
 
-static cJSON *team_json(const db2_team_row_t *t)
+static cJSON *team_json(const kb_store_team_row_t *t)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON_AddNumberToObject(o, "id", (double)t->id);
@@ -118,13 +118,13 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
-      int rc = db2_team_create(nm, "", &id);
+      int rc = kb_store_team_create(nm, "", &id);
       if (rc != 0)
       {
-         db2_tenant_scope_rollback();
+         kb_store_tenant_scope_rollback();
          return err(out, cap, 403, "not authorized to create a team");
       }
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
@@ -136,9 +136,9 @@ static int handle_team(const char *method, const char *body, char *out, int cap)
    {
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
-      db2_team_row_t rows[128];
-      int n = db2_team_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
-      if (db2_tenant_scope_commit() != 0)
+      kb_store_team_row_t rows[128];
+      int n = kb_store_team_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
       if (n < 0)
          return err(out, cap, 500, "list failed");
@@ -184,23 +184,23 @@ static int handle_member(const char *method, const char *body, char *out, int ca
    if (strcmp(method, "POST") == 0)
    {
       int64_t id = 0;
-      rc = db2_membership_add(key, team_id, is_default, &id);
+      rc = kb_store_membership_add(key, team_id, is_default, &id);
    }
    else if (strcmp(method, "DELETE") == 0)
    {
-      rc = db2_membership_remove(key, team_id);
+      rc = kb_store_membership_remove(key, team_id);
    }
    else
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return err(out, cap, 405, "method not allowed");
    }
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return err(out, cap, 403, "not authorized to modify membership");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "ok", 1);
@@ -235,13 +235,13 @@ static int handle_project(const char *method, const char *query_string, const ch
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
       int64_t id = 0;
-      int rc = db2_project_create(parent_id, nm, am, "", &id);
+      int rc = kb_store_project_create(parent_id, nm, am, "", &id);
       if (rc != 0)
       {
-         db2_tenant_scope_rollback();
+         kb_store_tenant_scope_rollback();
          return err(out, cap, 403, "not authorized to create a project");
       }
-      if (db2_tenant_scope_commit() != 0)
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "id", (double)id);
@@ -277,9 +277,9 @@ static int handle_project(const char *method, const char *query_string, const ch
       }
       if (begin_actor_scope(out, cap, &http) != 0)
          return http;
-      db2_project_row_t rows[128];
-      int n = db2_project_list(parent_id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
-      if (db2_tenant_scope_commit() != 0)
+      kb_store_project_row_t rows[128];
+      int n = kb_store_project_list(parent_id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+      if (kb_store_tenant_scope_commit() != 0)
          return err(out, cap, 500, "commit failed");
       if (n < 0)
          return err(out, cap, 500, "list failed");

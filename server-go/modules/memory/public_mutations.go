@@ -12,6 +12,10 @@ func commandMutationRefusal(code *int, proposals ...*correctionProposal) map[str
 		return nil
 	}
 	switch *code {
+	case MutationInstructionRefused:
+		result := commandError("forbidden", errInstructionMemory.Error())
+		result["reason"] = "instruction_override"
+		return result
 	case MutationIdempotencyConflict:
 		result := commandError("conflict", errIdempotencyConflict.Error())
 		result["reason"] = "idempotency_conflict"

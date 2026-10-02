@@ -29,8 +29,9 @@ Current contracts:
   [vault](vault.md);
 - [aimee](aimee.md), [economizer](economizer.md), [egress](egress.md),
   [observability](observability.md), and [sandbox](sandbox.md);
-- [db2](db2.md) and [postgres](postgres.md). The server PostgreSQL tier is documented separately
-  as the [DB1 storage boundary](../DB1.md).
+- [PostgreSQL](postgres.md), the sole database provider for both Server and KB.
+  Knowledge policy and schema belong to [KB](kb.md); server storage contracts are
+  described in the [DB1 storage boundary](../DB1.md).
 
 See the [technical reference](../../src/README.md) for the process and source map.
 

@@ -10,13 +10,12 @@
 #include "json_fluent.h"
 #include "module_commands.h"
 #include "config.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
-#include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
-#include "modules/db2/c/fact_mutation.h"
-#include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/demotion.h" /* kb_store_demotion_retrieval_event_write_turn (auditable-correctness P1) */
+#include "modules/kb/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/fact_mutation.h"
+#include "modules/kb/c/code_index_ops.h" /* kb_store_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_service_memory.h"
 #include "log.h"
 
@@ -66,7 +65,7 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
       }
    }
    char ev_id[64] = "";
-   int rc = db2_demotion_retrieval_event_write_turn(
+   int rc = kb_store_demotion_retrieval_event_write_turn(
        jo_str(plan, "turn_id", ""), jo_str(plan, "query_fingerprint", ""),
        jo_str(plan, "role", "Recall"), ids, n, ev_id, sizeof(ev_id));
    free(ids);
@@ -83,7 +82,7 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
  * surface (the ingress code search) contributes its typed code refs into the SAME
  * turn's retrieval_event, idempotently merged with whatever the memory surface
  * already wrote. The emission decision (kb_evidence_emit_enabled) is made
- * server-side; this is the dumb writer over db2_demotion_retrieval_event_merge_refs_turn. */
+ * server-side; this is the dumb writer over kb_store_demotion_retrieval_event_merge_refs_turn. */
 int kb_handle_evidence_merge_retrieval_event(int fd, cJSON *req)
 {
    cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
@@ -133,9 +132,9 @@ int kb_handle_evidence_merge_retrieval_event(int fd, cJSON *req)
    char ev_id[64] = "";
    /* m==0 (no valid refs) is a no-op: don't call the merge, which would otherwise
     * create a bare turn event for an empty request. */
-   int rc = (m > 0) ? db2_demotion_retrieval_event_merge_refs_turn(turn_j->valuestring, fp, role,
-                                                                   types, refs, versions, m, ev_id,
-                                                                   sizeof(ev_id))
+   int rc = (m > 0) ? kb_store_demotion_retrieval_event_merge_refs_turn(turn_j->valuestring, fp,
+                                                                        role, types, refs, versions,
+                                                                        m, ev_id, sizeof(ev_id))
                     : 0;
    free(types);
    free(refs);
@@ -154,7 +153,7 @@ int kb_handle_evidence_merge_retrieval_event(int fd, cJSON *req)
  * Only two states are reachable in P1's single-writer foundation:
  *   - "ok"                   : a retrieval_event durably exists for the turn.
  *   - "evidence_unavailable" : the turn id resolves to no durable event (never
- *                              landed — e.g. DB2 was down at emit) or the read
+ *                              landed — e.g. KB_STORE was down at emit) or the read
  *                              itself errored.
  * The other two states are defined but produced by later phases:
  *   - "not_instrumented"     : a path that emits no evidence (e.g. the Anthropic
@@ -170,8 +169,8 @@ int kb_handle_evidence_trace_retrieval_event(int fd, cJSON *req)
 
    char ev_id[64] = "";
    char payload[8192] = "";
-   int rc = db2_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id), payload,
-                                                 sizeof(payload));
+   int rc = kb_store_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id),
+                                                      payload, sizeof(payload));
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -215,8 +214,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
 
    char ev_id[64] = "";
    char payload[8192] = "";
-   int rc = db2_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id), payload,
-                                                 sizeof(payload));
+   int rc = kb_store_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id),
+                                                      payload, sizeof(payload));
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -229,8 +228,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
        * parallel reporting path.  An empty array means computed-and-empty;
        * lookup failure is explicit and never masquerades as no outcomes. */
       char outcomes_json[16384] = "";
-      if (db2_work_outcomes_for_retrieval_json(ev_id, outcomes_json, (int)sizeof(outcomes_json)) ==
-          0)
+      if (kb_store_work_outcomes_for_retrieval_json(ev_id, outcomes_json,
+                                                    (int)sizeof(outcomes_json)) == 0)
       {
          cJSON *outcomes = cJSON_Parse(outcomes_json);
          if (cJSON_IsArray(outcomes))
@@ -361,7 +360,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
             /* >= content_hash[80] (the source width) with margin, so a live hash is
              * never truncated into a spurious mismatch. */
             char live[128] = "";
-            int found = db2_code_file_hash(project, file_path, live, sizeof(live));
+            int found = kb_store_code_file_hash(project, file_path, live, sizeof(live));
 
             if (!code_sources)
                continue; /* array alloc failed — skip rather than leak */
@@ -407,36 +406,27 @@ int kb_handle_evidence_fidelity(int fd, cJSON *req)
    if (strlen(turn_j->valuestring) > 128)
       return kb_send_error(fd, "audit.fidelity turn_id too long");
 
-   char fstatus[32] = "";
-   int sup = 0, uns = 0, abst = 0;
-   int rc = db2_fidelity_report_by_turn(turn_j->valuestring, fstatus, sizeof(fstatus), &sup, &uns,
-                                        &abst);
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
-   if (rc == 1)
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "fidelity-read");
+   cJSON_AddStringToObject(args, "turn_id", turn_j->valuestring);
+   int rc = args ? aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) : -1;
+   cJSON_Delete(args);
+   cJSON *resp = NULL;
+   if (rc == 1 && cJSON_IsObject(reply) && !strcmp(jo_cstr(reply, "status"), "ok") &&
+       !strcmp(jo_cstr(reply, "turn_id"), turn_j->valuestring) &&
+       jo_cstr(reply, "fidelity_status")[0])
    {
-      cJSON_AddStringToObject(resp, "fidelity_status", fstatus[0] ? fstatus : "ok");
-      cJSON *rep = cJSON_AddObjectToObject(resp, "report");
-      cJSON_AddNumberToObject(rep, "supported", sup);
-      cJSON_AddNumberToObject(rep, "unsupported", uns);
-      cJSON_AddNumberToObject(rep, "abstained", abst);
-      /* Emit the count only when it read cleanly; on a count error omit it (rather
-       * than clamp to 0, which would conflate "no attributions" with "count
-       * failed") and flag the error — honesty over a silent zero on an audit read. */
-      int ac = db2_fidelity_attribution_count_by_turn(turn_j->valuestring);
-      if (ac >= 0)
-         cJSON_AddNumberToObject(resp, "attribution_count", ac);
-      else
-         cJSON_AddBoolToObject(resp, "attribution_count_error", 1);
+      resp = reply;
+      reply = NULL;
    }
-   else
+   cJSON_Delete(reply);
+   if (!resp)
    {
-      cJSON_AddStringToObject(resp, "fidelity_status",
-                              rc < 0 ? "evidence_unavailable" : "not_evaluated");
-      cJSON_AddStringToObject(resp, "detail",
-                              rc < 0 ? "lookup error" : "no fidelity report for this turn");
+      resp = cJSON_CreateObject();
+      cJSON_AddStringToObject(resp, "status", "ok");
+      cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
+      cJSON_AddStringToObject(resp, "fidelity_status", "evidence_unavailable");
+      cJSON_AddStringToObject(resp, "detail", "lookup error");
    }
    return kb_reply_or_error(fd, resp, "failed to read fidelity report");
 }
@@ -495,7 +485,7 @@ int kb_handle_task_create(int fd, cJSON *req)
    const char *sid = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
    int64_t parent = cJSON_IsNumber(parent_j) ? (int64_t)parent_j->valuedouble : 0;
 
-   cJSON *resp = db2_kb_service_task_create_json(title_j->valuestring, sid, parent);
+   cJSON *resp = kb_store_kb_service_task_create_json(title_j->valuestring, sid, parent);
    return kb_reply_or_error(fd, resp, "failed to create task");
 }
 
@@ -507,7 +497,7 @@ int kb_handle_task_update_state(int fd, cJSON *req)
       return kb_send_error(fd, "task.update_state requires id and state");
 
    cJSON *resp =
-       db2_kb_service_task_update_state_json((int64_t)id_j->valuedouble, state_j->valuestring);
+       kb_store_kb_service_task_update_state_json((int64_t)id_j->valuedouble, state_j->valuestring);
    return kb_reply_or_error(fd, resp, "failed to update task state");
 }
 
@@ -517,7 +507,7 @@ int kb_handle_task_delete(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "task.delete requires id");
 
-   cJSON *resp = db2_kb_service_task_delete_json((int64_t)id_j->valuedouble);
+   cJSON *resp = kb_store_kb_service_task_delete_json((int64_t)id_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to delete task");
 }
 
@@ -530,8 +520,8 @@ int kb_handle_task_add_edge(int fd, cJSON *req)
       return kb_send_error(fd, "task.add_edge requires source and target");
    const char *relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "depends_on";
 
-   cJSON *resp = db2_kb_service_task_add_edge_json((int64_t)src_j->valuedouble,
-                                                   (int64_t)dst_j->valuedouble, relation);
+   cJSON *resp = kb_store_kb_service_task_add_edge_json((int64_t)src_j->valuedouble,
+                                                        (int64_t)dst_j->valuedouble, relation);
    return kb_reply_or_error(fd, resp, "failed to add task edge");
 }
 
@@ -543,7 +533,7 @@ int kb_handle_task_get_edges(int fd, cJSON *req)
       return kb_send_error(fd, "task.get_edges requires task_id");
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 16;
 
-   cJSON *resp = db2_kb_service_task_get_edges_json((int64_t)id_j->valuedouble, max);
+   cJSON *resp = kb_store_kb_service_task_get_edges_json((int64_t)id_j->valuedouble, max);
    return kb_reply_or_error(fd, resp, "failed to fetch task edges");
 }
 
@@ -556,6 +546,6 @@ int kb_handle_task_list(int fd, cJSON *req)
    const char *sid = cJSON_IsString(sid_j) ? sid_j->valuestring : NULL;
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 16;
 
-   cJSON *resp = db2_kb_service_task_list_json(state, sid, limit);
+   cJSON *resp = kb_store_kb_service_task_list_json(state, sid, limit);
    return kb_reply_or_error(fd, resp, "failed to list tasks");
 }

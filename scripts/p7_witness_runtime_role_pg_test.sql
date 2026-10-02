@@ -28,7 +28,7 @@ DO $$ BEGIN
 END $$;
 
 -- ============================ POSITIVE: must SUCCEED ========================
--- The exact operations db2_witness_checkpoint_produce / _emit / boot / gate perform.
+-- The exact operations kb_store_witness_checkpoint_produce / _emit / boot / gate perform.
 DO $$
 DECLARE v_fence BIGINT; v_leaves BIGINT; v_max BIGINT; v_ns BIGINT; v_persisted BIGINT;
         v_cov BIGINT; v_age BIGINT; v_cnt BIGINT; v_pending BIGINT; v_ts TEXT;
@@ -156,7 +156,7 @@ END $$;
 
 -- ============================ HARDENED PRE-PROVISIONED VERIFY ================
 -- On the hardened tier the kb connects as this runtime role and CANNOT apply DDL;
--- db2_init runs db2_verify_pre_provisioned() instead — a read-only check that the
+-- kb_store_init runs kb_store_verify_pre_provisioned() instead — a read-only check that the
 -- schema was migrated (dim + version recorded) and its objects are present. Exercise
 -- exactly those read-only queries AS the runtime role so a regression that made any
 -- of them unreadable (or the metadata unrecorded) is caught here.

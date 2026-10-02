@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Read-only inventory of the .md harness-memory store, for the db1/db2 memory
+"""Read-only inventory of the .md harness-memory store, for the db1/kb_store memory
 migration (Proposal 2, memory-arch retirement — Slice 1).
 
 This is the ONLY zero-data-loss first increment of the .md retirement: it WRITES
 NOTHING and DELETES NOTHING. It produces the manifest the operator needs to
-classify each memory as user (-> db1) vs org (-> db2) before any migration runs,
+classify each memory as user (-> db1) vs org (-> kb_store) before any migration runs,
 because — per the design roundtable — scope is NOT mechanically derivable from
 the legacy schema (harness_memory.type is {fact,index,note,scratch}, and
 auto-defaulting either way is a silent, irreversible leak-or-lockaway).
@@ -91,7 +91,7 @@ def suggested_disposition(meta):
     if t in ("user", "feedback"):
         return "user (db1)"
     if t in ("reference",):
-        return "org (db2)?"
+        return "org (kb_store)?"
     if t in ("project",):
         return "review: user-or-org"
     return "review: unknown"
@@ -221,7 +221,7 @@ def main():
             if recon[label]:
                 print(f"  DRIFT [{label}]: {', '.join(recon[label][:10])}"
                       + (" …" if len(recon[label]) > 10 else ""))
-    print("\nNEXT: operator classifies each memory user(db1)/org(db2)/drop; "
+    print("\nNEXT: operator classifies each memory user(db1)/org(kb_store)/drop; "
           "migration WRITES nothing until that classification exists. This tool is read-only.")
     return 0
 

@@ -2,7 +2,7 @@
 # Gap 2 end to end, through the REAL commit path.
 #
 # With the memory module placed in kb it serves EXTRACT_INDEX and WRITE, so a
-# stored note finally reaches db2_fact_commit for real: memory.store enqueues a
+# stored note finally reaches kb_store_fact_commit for real: memory.store enqueues a
 # memory_facts job, the drain runs the pattern extractor over the note, and each
 # triple goes through the typed-fact write gate. That is the only production
 # route to the functional-relation correction this fix guards.
@@ -51,7 +51,7 @@ reset_age() {
 # alone calls an invalidated row "current", so a fact that was correctly
 # retracted still reads as standing.
 # "Current" is lifecycle_state IN ('persistent','promoted') -- the product's own
-# definition (db2_fact_current_count). superseded_at/invalidated_at/suppressed
+# definition (kb_store_fact_current_count). superseded_at/invalidated_at/suppressed
 # alone is NOT enough: a write the authority guard refuses is inserted as a
 # CANDIDATE (fm: `if (quarantined) desired = FACT_LIFECYCLE_CANDIDATE`), which
 # has none of those three set. Judged by the old predicate a quarantined row

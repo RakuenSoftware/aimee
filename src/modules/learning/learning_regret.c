@@ -16,7 +16,7 @@
 
 #include <aimee/learning/learning.h>
 
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/kb_store_learning.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -64,7 +64,7 @@ int learning_fate_record(int proposal_id, const char *fate, const char *reason)
 {
    if (proposal_id <= 0 || !learning_fate_is_valid(fate))
       return -1;
-   return db2_learning_fate_record(proposal_id, fate, reason);
+   return kb_store_learning_fate_record(proposal_id, fate, reason);
 }
 
 /* The regret vocabulary as the one comma-separated list the SQL layer matches
@@ -87,8 +87,8 @@ int learning_metrics_regret(int window_days, learning_detector_regret_t *out, in
    char fates[128];
    regret_fate_list(fates, sizeof(fates));
 
-   db2_learning_fate_count_t rows[LEARNING_REGRET_MAX_DETECTORS];
-   int n = db2_learning_fate_counts(
+   kb_store_learning_fate_count_t rows[LEARNING_REGRET_MAX_DETECTORS];
+   int n = kb_store_learning_fate_counts(
        window_days, fates, rows,
        max < LEARNING_REGRET_MAX_DETECTORS ? max : LEARNING_REGRET_MAX_DETECTORS);
    if (n < 0)

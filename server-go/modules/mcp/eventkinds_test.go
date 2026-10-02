@@ -73,7 +73,7 @@ func highestCanonicalRef(t *testing.T) uint32 {
 // The regression this whole change exists for. Canonical module refs start at 1
 // and each reserves a full 256-kind block whether or not it uses every stage --
 // so postgres (28) owns 11264..11519 even though its grant names only 11265.
-// The retired plugin range started at 11264 and squatted postgres, db2 and the
+// The retired plugin range started at 11264 and squatted postgres, kb_store and the
 // store module.
 func TestPluginKindsCannotLandInACanonicalModuleBlock(t *testing.T) {
 	highestCanonicalRef := highestCanonicalRef(t)
@@ -122,7 +122,7 @@ func TestEventKindsDoNotOverlapBetweenInstances(t *testing.T) {
 }
 
 func TestEventKindsRefusesRefsOutsideTheBand(t *testing.T) {
-	// 28, 29 and 30 are postgres, db2 and aimee. A plugin instance must never be
+	// 28, 29 and 30 are postgres, kb_store and aimee. A plugin instance must never be
 	// able to derive kinds from a canonical module's ref.
 	for _, ref := range []uint32{0, 1, 28, 29, 30, PluginRefFirst - 1, PluginRefLimit,
 		PluginRefLimit + 1} {

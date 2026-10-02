@@ -14,22 +14,22 @@
 #include "../headers/tool_args_coerce.h"
 #include <aimee/tools/agent_tools.h>
 #include "db1_client/db1.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/kb_store.h"
+#include "../modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 
 /* --- helpers --- */
 
 static void setup_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void teardown_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* --- tool_suggest --- */
@@ -97,8 +97,8 @@ static void test_validate_unknown_tool_no_suggestion(void)
 static void test_validate_disabled_tool(void)
 {
    setup_db();
-   (void)aimee_pg_exec(db2_conn(), "UPDATE tool_registry SET enabled = 0 WHERE name = 'bash'", NULL,
-                       0);
+   (void)aimee_pg_exec(kb_store_conn(), "UPDATE tool_registry SET enabled = 0 WHERE name = 'bash'",
+                       NULL, 0);
    char err[256] = {0};
    int rc = tool_validate("bash", "{\"command\":\"ls\"}", err, sizeof(err));
    assert(rc == -1);

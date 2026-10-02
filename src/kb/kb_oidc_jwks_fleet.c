@@ -3,7 +3,7 @@
 #include "kb_oidc_jwks_fleet.h"
 
 #include "kb_auth_oidc.h" /* kb_oidc_set_fleet_resolver */
-#include "oidc_jwks.h"    /* db2_jwks_list_active */
+#include "oidc_jwks.h"    /* kb_store_jwks_list_active */
 
 #include <pthread.h>
 #include <stdio.h>
@@ -84,8 +84,8 @@ int kb_oidc_jwks_fleet_get(const char *issuer, char *out, size_t cap)
    pthread_mutex_unlock(&g_fleet_lock);
 
    /* Cache miss / stale: read the source of truth. */
-   db2_jwks_row_t rows[32];
-   int n = db2_jwks_list_active(issuer, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+   kb_store_jwks_row_t rows[32];
+   int n = kb_store_jwks_list_active(issuer, rows, (int)(sizeof(rows) / sizeof(rows[0])));
    char jwks[FLEET_JWKS_MAX];
    int have = 0;
    if (n > 0)

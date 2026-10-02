@@ -46,7 +46,7 @@ CI never runs `freeze`; it only verifies committed intent.
 - Public headers and symbols: tracked global headers plus a separate aggregate digest of their
   complete normalized, declaration-bearing contents. This avoids a heuristic C parser silently
   omitting complex declarations.
-- Database schemas: DB1/DB2 schema SQL and repository migration SQL.
+- Database schemas: DB1/KB_STORE schema SQL and repository migration SQL.
 - Packages and install surface: image definitions, install scripts, frontend/editor manifests, and
   the normalized `src/Makefile` `install` recipe.
 

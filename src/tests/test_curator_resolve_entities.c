@@ -12,7 +12,7 @@
 #include "aimee.h"
 #include <sqlite3.h>
 
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_resolve_entities.h"
 
 /* Stub the heavy embed + vector deps the handler references. Returns a full
@@ -163,7 +163,7 @@ static void test_resolve_seeded(void)
     * `payload` column (not `payload_json`). A seeded proposed entity must be
     * found and committed; if the column name drifts, resolve_one returns 0 and
     * the state stays proposed. */
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    assert(sqlite3_exec(db,
                        "INSERT INTO artifacts (id,kind,state,payload)"
@@ -187,7 +187,7 @@ static void test_resolve_cross_scope(void)
    /* A project-scoped mention whose only canonical match lives at the broader
     * GLOBAL scope must resolve onto it (no new vector written), exercising the
     * scope-lattice walk project -> workspace -> global. */
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
    g_upserts = 0;
    g_match_scope = "global";
@@ -218,16 +218,16 @@ static void test_resolve_cross_scope(void)
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_resolve_entities"))
+   if (kb_store_test_shim_skip_on_postgres("curator_resolve_entities"))
       return 0;
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_embed_text();
    test_point_id();
    test_resolve_graceful();
    test_resolve_seeded();
    test_resolve_cross_scope();
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("curator_resolve_entities: all tests passed\n");
    return 0;
 }

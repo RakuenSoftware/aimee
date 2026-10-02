@@ -9,9 +9,9 @@
  * pipeline judges over.
  *
  * The ranking is a C-side brute-force scan over the stored vectors (kept simple
- * and unit-testable against the db2 sqlite shim). At production scale the same
+ * and unit-testable against the kb_store sqlite shim). At production scale the same
  * contract can be served by a pgvector-native top-K (ORDER BY embedding <=> q)
- * behind db2_evidence_vectors_list without changing this interface.
+ * behind kb_store_evidence_vectors_list without changing this interface.
  *
  * See docs/proposals/pending/cross-source-learning-pipeline.md */
 #ifndef DEC_LEARNING_BUNDLE_H
@@ -44,7 +44,7 @@ extern "C"
     * command ("builtin"/NULL = hash embedder). `k` is the number of neighbours
     * to return (clamped to [1, LEARNING_BUNDLE_MAX]). Fills *out (sorted by
     * descending score). Returns 0 on success (including an empty corpus, count
-    * 0), -1 on error (embedder failed or DB2 unavailable). */
+    * 0), -1 on error (embedder failed or KB_STORE unavailable). */
    int learning_bundle_build(const char *query, const char *embed_cmd, int k,
                              learning_bundle_t *out);
 

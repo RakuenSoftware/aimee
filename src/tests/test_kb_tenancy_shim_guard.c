@@ -1,10 +1,10 @@
-/* test_kb_tenancy_shim_guard.c (B1/N1): every tenant-scoped db2 entrypoint must
- * hard-fail with DB2_ERR_TENANT_REQUIRES_PG on the SQLite shim — RLS cannot be
+/* test_kb_tenancy_shim_guard.c (B1/N1): every tenant-scoped kb_store entrypoint must
+ * hard-fail with KB_STORE_ERR_TENANT_REQUIRES_PG on the SQLite shim — RLS cannot be
  * enforced there, so a tenant op must never silently run unprotected. The pg
- * accessors are stubbed: db2_tenant_require_pg() returns early on the shim, so no
+ * accessors are stubbed: kb_store_tenant_require_pg() returns early on the shim, so no
  * accessor is ever reached; the stubs exist only to satisfy the linker. */
 
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "team.h"
 #include "project.h"
 #include "membership.h"
@@ -21,24 +21,24 @@ int aimee_pg_is_shim(void)
 {
    return 1;
 }
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return NULL;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
-/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+/* The real symbol is kb_store_lease_begin_at; kb_store_lease_begin is a macro in kb_store.h
  * that records the caller's file:line for stuck-lease attribution. */
-void db2_lease_begin_at(const char *site)
+void kb_store_lease_begin_at(const char *site)
 {
 }
-void db2_lease_end(void)
+void kb_store_lease_end(void)
 {
 }
 aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
@@ -106,7 +106,7 @@ static int fails = 0;
    do                                                                                              \
    {                                                                                               \
       int rc = (call);                                                                             \
-      if (rc != DB2_ERR_TENANT_REQUIRES_PG)                                                        \
+      if (rc != KB_STORE_ERR_TENANT_REQUIRES_PG)                                                   \
       {                                                                                            \
          printf("FAIL: %s did not hard-fail on shim (rc=%d)\n", name, rc);                         \
          fails++;                                                                                  \
@@ -118,65 +118,68 @@ int main(void)
    int64_t id = 0;
    int64_t teams[4];
 
-   REQUIRES_PG(db2_tenant_require_pg(), "db2_tenant_require_pg");
-   REQUIRES_PG(db2_maintenance_scope_begin(DB2_MAINTENANCE_INGEST, "p"),
-               "db2_maintenance_scope_begin");
+   REQUIRES_PG(kb_store_tenant_require_pg(), "kb_store_tenant_require_pg");
+   REQUIRES_PG(kb_store_maintenance_scope_begin(KB_STORE_MAINTENANCE_INGEST, "p"),
+               "kb_store_maintenance_scope_begin");
 
    /* Worker wiring is deliberately inert on the SQLite backend: there is no
     * content RLS to satisfy, so the thread-local job survives only long enough
     * to tell begin_current that no transaction is needed. */
-   if (db2_maintenance_job_enter(DB2_MAINTENANCE_INGEST, "p") != 0 ||
-       !db2_maintenance_job_active() || db2_maintenance_scope_begin_current() != 0 ||
-       db2_maintenance_context_apply_current() != 0 ||
-       db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "p") != DB2_ERR_MAINTENANCE_INVALID)
+   if (kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_INGEST, "p") != 0 ||
+       !kb_store_maintenance_job_active() || kb_store_maintenance_scope_begin_current() != 0 ||
+       kb_store_maintenance_context_apply_current() != 0 ||
+       kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CURATOR, "p") !=
+           KB_STORE_ERR_MAINTENANCE_INVALID)
    {
       printf("FAIL: maintenance job context is not inert and non-nestable on shim\n");
       fails++;
    }
-   db2_maintenance_job_leave();
-   if (db2_maintenance_job_active())
+   kb_store_maintenance_job_leave();
+   if (kb_store_maintenance_job_active())
    {
       printf("FAIL: maintenance job context survived leave\n");
       fails++;
    }
 
    /* Every tenant-scoped entry across all five modules must hard-fail. */
-   REQUIRES_PG(db2_team_create("t", "op", &id), "db2_team_create");
-   REQUIRES_PG(db2_team_list(NULL, 0), "db2_team_list");
-   REQUIRES_PG(db2_team_get(1, NULL), "db2_team_get");
-   REQUIRES_PG(db2_team_get_by_name("t", NULL), "db2_team_get_by_name");
+   REQUIRES_PG(kb_store_team_create("t", "op", &id), "kb_store_team_create");
+   REQUIRES_PG(kb_store_team_list(NULL, 0), "kb_store_team_list");
+   REQUIRES_PG(kb_store_team_get(1, NULL), "kb_store_team_get");
+   REQUIRES_PG(kb_store_team_get_by_name("t", NULL), "kb_store_team_get_by_name");
 
-   REQUIRES_PG(db2_project_create(1, "p", "team-open", "op", &id), "db2_project_create");
-   REQUIRES_PG(db2_project_list(1, NULL, 0), "db2_project_list");
-   REQUIRES_PG(db2_project_get(1, NULL), "db2_project_get");
-   REQUIRES_PG(db2_project_attribute_code("p", 1), "db2_project_attribute_code");
+   REQUIRES_PG(kb_store_project_create(1, "p", "team-open", "op", &id), "kb_store_project_create");
+   REQUIRES_PG(kb_store_project_list(1, NULL, 0), "kb_store_project_list");
+   REQUIRES_PG(kb_store_project_get(1, NULL), "kb_store_project_get");
+   REQUIRES_PG(kb_store_project_attribute_code("p", 1), "kb_store_project_attribute_code");
 
-   REQUIRES_PG(db2_membership_add("k", 1, 0, &id), "db2_membership_add");
-   REQUIRES_PG(db2_membership_remove("k", 1), "db2_membership_remove");
-   REQUIRES_PG(db2_membership_list_for_identity("k", NULL, 0), "db2_membership_list_for_identity");
-   REQUIRES_PG(db2_membership_teams("k", teams, 4), "db2_membership_teams");
-   REQUIRES_PG(db2_membership_default_team("k", teams), "db2_membership_default_team");
+   REQUIRES_PG(kb_store_membership_add("k", 1, 0, &id), "kb_store_membership_add");
+   REQUIRES_PG(kb_store_membership_remove("k", 1), "kb_store_membership_remove");
+   REQUIRES_PG(kb_store_membership_list_for_identity("k", NULL, 0),
+               "kb_store_membership_list_for_identity");
+   REQUIRES_PG(kb_store_membership_teams("k", teams, 4), "kb_store_membership_teams");
+   REQUIRES_PG(kb_store_membership_default_team("k", teams), "kb_store_membership_default_team");
 
-   REQUIRES_PG(db2_admin_grant_add("k", "oidc", "by", &id), "db2_admin_grant_add");
-   REQUIRES_PG(db2_admin_grant_revoke("k"), "db2_admin_grant_revoke");
-   REQUIRES_PG(db2_admin_grant_is_active("k"), "db2_admin_grant_is_active");
+   REQUIRES_PG(kb_store_admin_grant_add("k", "oidc", "by", &id), "kb_store_admin_grant_add");
+   REQUIRES_PG(kb_store_admin_grant_revoke("k"), "kb_store_admin_grant_revoke");
+   REQUIRES_PG(kb_store_admin_grant_is_active("k"), "kb_store_admin_grant_is_active");
 
    {
       kb_identity_tier_t tier;
-      db2_write_tier_grant_row_t rows[2];
+      kb_store_write_tier_grant_row_t rows[2];
       size_t count = 0;
-      REQUIRES_PG(db2_write_tier_grant_lookup("srv", 1, "owner", &tier),
-                  "db2_write_tier_grant_lookup");
-      REQUIRES_PG(db2_write_tier_grant_set("srv", 1, "owner", KB_IDENTITY_TIER_DATA, "by"),
-                  "db2_write_tier_grant_set");
-      REQUIRES_PG(db2_write_tier_grant_revoke("srv", 1, "owner"), "db2_write_tier_grant_revoke");
-      REQUIRES_PG(db2_write_tier_grant_list("srv", 1, rows, 2, &count),
-                  "db2_write_tier_grant_list");
+      REQUIRES_PG(kb_store_write_tier_grant_lookup("srv", 1, "owner", &tier),
+                  "kb_store_write_tier_grant_lookup");
+      REQUIRES_PG(kb_store_write_tier_grant_set("srv", 1, "owner", KB_IDENTITY_TIER_DATA, "by"),
+                  "kb_store_write_tier_grant_set");
+      REQUIRES_PG(kb_store_write_tier_grant_revoke("srv", 1, "owner"),
+                  "kb_store_write_tier_grant_revoke");
+      REQUIRES_PG(kb_store_write_tier_grant_list("srv", 1, rows, 2, &count),
+                  "kb_store_write_tier_grant_list");
    }
 
-   REQUIRES_PG(db2_jwks_add("iss", "kid", "{}", &id), "db2_jwks_add");
-   REQUIRES_PG(db2_jwks_retire("iss", "kid"), "db2_jwks_retire");
-   REQUIRES_PG(db2_jwks_list_active("iss", NULL, 0), "db2_jwks_list_active");
+   REQUIRES_PG(kb_store_jwks_add("iss", "kid", "{}", &id), "kb_store_jwks_add");
+   REQUIRES_PG(kb_store_jwks_retire("iss", "kid"), "kb_store_jwks_retire");
+   REQUIRES_PG(kb_store_jwks_list_active("iss", NULL, 0), "kb_store_jwks_list_active");
 
    if (fails == 0)
       printf("test_kb_tenancy_shim_guard: all passed\n");

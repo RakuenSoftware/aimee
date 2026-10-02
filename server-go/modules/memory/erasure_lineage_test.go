@@ -12,9 +12,9 @@ import (
 )
 
 func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -34,7 +34,7 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 		}
 	}
 	exec(`SET LOCAL jit=off; SELECT set_config('aimee.memory_scope_all','1',true)`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 	}
 	exec(string(schema[start:end]))
 	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN CREATE ROLE aimee_kb_runtime NOLOGIN NOBYPASSRLS; END IF; IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_owner') THEN CREATE ROLE aimee_kb_owner NOLOGIN; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_kb_runtime`)
-	grants, err := os.ReadFile("../../../src/modules/db2/c/schema_grants.sql")
+	grants, err := os.ReadFile("../../../src/modules/kb/c/schema_grants.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 }
 
 func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("requires packaged PostgreSQL")
 	}
@@ -210,7 +210,7 @@ func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
 		t.Fatal("claimed complete erasure without verifying offline owner's retained copies")
 	}
 	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN CREATE ROLE aimee_kb_runtime NOLOGIN NOBYPASSRLS; END IF; IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_owner') THEN CREATE ROLE aimee_kb_owner NOLOGIN; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_kb_runtime`)
-	grants, e := os.ReadFile("../../../src/modules/db2/c/schema_grants.sql")
+	grants, e := os.ReadFile("../../../src/modules/kb/c/schema_grants.sql")
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -75,7 +75,7 @@ static int onboard_smoke_memory(char *err, size_t err_len)
    snprintf(key, sizeof(key), "onboard-smoke-%ld", (long)now);
 
    /* Round-trip a tiny L0 fact through aimee-kb to verify the memory
-    * path is wired up end-to-end (server -> kb_client -> aimee-kb -> DB2). */
+    * path is wired up end-to-end (server -> kb_client -> aimee-kb -> KB_STORE). */
    memory_t m;
    int rc = onboard_memory_insert_impl("L0", "fact", key, "onboard smoke test", 0.1, "onboard", &m);
    if (rc != 0)

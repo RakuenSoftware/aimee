@@ -79,7 +79,7 @@ extern "C"
     * the trusted JWKS for the configured issuer from this callback (the shared
     * Postgres source) instead of the per-instance file; the file is used only when
     * the resolver returns non-zero (no fleet keys). Keeps this core free of a DB
-    * dependency — kb registers the db2-backed resolver at startup; tests leave it
+    * dependency — kb registers the kb_store-backed resolver at startup; tests leave it
     * unset. Returns 0 + fills out[cap] on success, non-zero to fall back. */
    typedef int (*kb_oidc_fleet_resolver_fn)(const char *issuer, char *out, size_t cap);
    void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn);

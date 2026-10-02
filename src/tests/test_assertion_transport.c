@@ -27,20 +27,20 @@ int main(void)
        "{\"status\":\"ok\",\"value\":\"full 界 convention\",\"count\":9007199254742002}";
    for (int sync = 0; sync <= 1; sync++)
    {
-      cJSON *css = db2_kb_service_css_conventions_json("css-project", sync);
+      cJSON *css = kb_store_kb_service_css_conventions_json("css-project", sync);
       char *text = cJSON_PrintUnformatted(css);
       assert(text && !strcmp(text, typed_receipt));
       free(text);
       cJSON_Delete(css);
    }
    unavailable = 1;
-   assert(!db2_kb_service_css_conventions_json("css-project", 1));
+   assert(!kb_store_kb_service_css_conventions_json("css-project", 1));
    unavailable = 0;
    const char *bad_css[] = {"[]", "{} trailing", "null"};
    for (unsigned i = 0; i < sizeof(bad_css) / sizeof(bad_css[0]); i++)
    {
       typed_receipt = bad_css[i];
-      assert(!db2_kb_service_css_conventions_json("css-project", 0));
+      assert(!kb_store_kb_service_css_conventions_json("css-project", 0));
    }
    puts("CSS transport: exact JSON and failures passed");
    return 0;

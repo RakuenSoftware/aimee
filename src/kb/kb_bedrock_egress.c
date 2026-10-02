@@ -39,7 +39,7 @@ struct kb_bedrock_authorized_target
    uint64_t magic;
    uint64_t magic_inverse;
    atomic_uint state;
-   db2_bedrock_target_t raw;
+   kb_store_bedrock_target_t raw;
 };
 
 static int ascii_safe(const char *s, size_t max, int empty)
@@ -413,7 +413,7 @@ static int partition_region_ok(const char *partition, const char *region)
    return 0;
 }
 
-static const char *policy_id(const db2_bedrock_target_t *t, bedrock_target_type_t type,
+static const char *policy_id(const kb_store_bedrock_target_t *t, bedrock_target_type_t type,
                              int *was_arn)
 {
    *was_arn = 0;
@@ -454,7 +454,7 @@ static const char *policy_id(const db2_bedrock_target_t *t, bedrock_target_type_
 
 static int model_path_ok(const char *id);
 
-static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, int streaming)
+static kb_bedrock_result_t target_policy_check(const kb_store_bedrock_target_t *t, int streaming)
 {
    if (!t || t->endpoint[0] || !ascii_safe(t->bedrock_api, sizeof(t->bedrock_api), 0) ||
        !ascii_safe(t->model_family, sizeof(t->model_family), 0) ||
@@ -506,7 +506,7 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
                          .id = id,
                          .underlying_fm_arns = arns,
                          .n_underlying = t->n_underlying};
-   size_t cap = 65U * DB2_BEDROCK_ARN_CAP + 8192U;
+   size_t cap = 65U * KB_STORE_BEDROCK_ARN_CAP + 8192U;
    char *policy = malloc(cap);
    if (!policy)
       return KB_BEDROCK_INTERNAL_ERROR;
@@ -518,7 +518,7 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
    return ok ? KB_BEDROCK_OK : KB_BEDROCK_INVALID_TARGET;
 }
 
-static kb_bedrock_result_t authorized_target_create(const db2_bedrock_target_t *raw,
+static kb_bedrock_result_t authorized_target_create(const kb_store_bedrock_target_t *raw,
                                                     kb_bedrock_authorized_target_t **out)
 {
    if (out)
@@ -548,18 +548,20 @@ kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const 
 {
    if (out)
       *out = NULL;
-   db2_bedrock_target_t raw;
+   kb_store_bedrock_target_t raw;
    if (!out || team_id <= 0 || !ascii_safe(model_id, sizeof(raw.model_id), 0))
       return KB_BEDROCK_INVALID_ARGUMENT;
    memset(&raw, 0, sizeof(raw));
-   db2_bedrock_target_result_t resolved = db2_model_bedrock_target_resolve(team_id, model_id, &raw);
+   kb_store_bedrock_target_result_t resolved =
+       kb_store_model_bedrock_target_resolve(team_id, model_id, &raw);
    kb_bedrock_result_t result;
-   if (resolved == DB2_BEDROCK_TARGET_OK)
+   if (resolved == KB_STORE_BEDROCK_TARGET_OK)
       result =
           ascii_safe(raw.model_id, sizeof(raw.model_id), 0) && strcmp(raw.model_id, model_id) == 0
               ? authorized_target_create(&raw, out)
               : KB_BEDROCK_INVALID_TARGET;
-   else if (resolved == DB2_BEDROCK_TARGET_UNAVAILABLE || resolved == DB2_BEDROCK_TARGET_INVALID)
+   else if (resolved == KB_STORE_BEDROCK_TARGET_UNAVAILABLE ||
+            resolved == KB_STORE_BEDROCK_TARGET_INVALID)
       result = KB_BEDROCK_INVALID_TARGET;
    else
       result = KB_BEDROCK_INTERNAL_ERROR;
@@ -584,7 +586,7 @@ void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **slot)
 }
 
 static kb_bedrock_result_t authorized_target_acquire(kb_bedrock_authorized_target_t *target,
-                                                     const db2_bedrock_target_t **raw)
+                                                     const kb_store_bedrock_target_t **raw)
 {
    *raw = NULL;
    if (!target)
@@ -692,7 +694,7 @@ kb_bedrock_result_t kb_bedrock_canonical_body(const aimee_request_t *ir, char **
    return KB_BEDROCK_OK;
 }
 
-kb_bedrock_result_t kb_bedrock_wire_request_build(const db2_bedrock_target_t *t,
+kb_bedrock_result_t kb_bedrock_wire_request_build(const kb_store_bedrock_target_t *t,
                                                   const aimee_request_t *ir, int streaming,
                                                   const kb_bedrock_credentials_t *c,
                                                   kb_bedrock_wire_request_t *out)
@@ -781,7 +783,7 @@ kb_bedrock_result_t kb_bedrock_authorized_wire_build(kb_bedrock_authorized_targe
                                            .session_token = NULL,
                                            .amz_date = view->amz_date,
                                            .date = view->date};
-   const db2_bedrock_target_t *raw = NULL;
+   const kb_store_bedrock_target_t *raw = NULL;
    kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
    if (result == KB_BEDROCK_OK)
    {
@@ -1703,7 +1705,7 @@ static kb_bedrock_result_t map_transport_result(kb_http_result_t result)
 }
 
 static kb_bedrock_result_t
-dispatch_wire_exchange(const db2_bedrock_target_t *target, kb_bedrock_wire_request_t *wire,
+dispatch_wire_exchange(const kb_store_bedrock_target_t *target, kb_bedrock_wire_request_t *wire,
                        int streaming, kb_bedrock_stream_callback_t callback, void *callback_context,
                        aimee_response_t *response, int *http_status, int *vendor_bytes_possible)
 {
@@ -1803,7 +1805,7 @@ done:
    return result;
 }
 
-static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
+static kb_bedrock_result_t dispatch_exchange(const kb_store_bedrock_target_t *target,
                                              const aimee_request_t *ir,
                                              const kb_bedrock_credentials_t *credentials,
                                              int streaming, kb_bedrock_stream_callback_t callback,
@@ -1821,7 +1823,7 @@ static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
    return result;
 }
 
-static int wire_matches_target(const db2_bedrock_target_t *target,
+static int wire_matches_target(const kb_store_bedrock_target_t *target,
                                const kb_bedrock_wire_request_t *wire)
 {
    if (target_policy_check(target, 0) != KB_BEDROCK_OK || !model_path_ok(target->model_id) ||
@@ -1853,7 +1855,7 @@ kb_bedrock_result_t kb_bedrock_authorized_wire_dispatch(kb_bedrock_authorized_ta
       aimee_response_free(response);
    if (!wire || !response || !http_status || !vendor_bytes_possible)
       return KB_BEDROCK_INVALID_ARGUMENT;
-   const db2_bedrock_target_t *raw = NULL;
+   const kb_store_bedrock_target_t *raw = NULL;
    kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
    if (result == KB_BEDROCK_OK)
    {
@@ -1877,7 +1879,7 @@ kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t 
       aimee_response_free(response);
    if (!request || !credentials || !response || !http_status)
       return KB_BEDROCK_INVALID_ARGUMENT;
-   const db2_bedrock_target_t *raw = NULL;
+   const kb_store_bedrock_target_t *raw = NULL;
    kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
    if (result == KB_BEDROCK_OK)
    {
@@ -1897,7 +1899,7 @@ kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *t
       *http_status = 0;
    if (!request || !credentials || !http_status)
       return KB_BEDROCK_INVALID_ARGUMENT;
-   const db2_bedrock_target_t *raw = NULL;
+   const kb_store_bedrock_target_t *raw = NULL;
    kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
    if (result == KB_BEDROCK_OK)
    {

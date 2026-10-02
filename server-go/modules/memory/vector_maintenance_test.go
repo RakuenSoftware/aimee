@@ -56,7 +56,7 @@ func exerciseVectorMaintenanceReplay(t *testing.T, ctx context.Context, tx pgx.T
 	}
 	// A second database session holds the same transaction-scoped lock. The
 	// rejected rebuild must neither clear rows nor queue any partial work.
-	other, err := pgx.Connect(ctx, os.Getenv("AIMEE_DB2_REPLAY_URL"))
+	other, err := pgx.Connect(ctx, os.Getenv("AIMEE_KB_STORE_REPLAY_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}

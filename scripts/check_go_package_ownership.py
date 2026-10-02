@@ -101,10 +101,6 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Caller-side contract for the aimee domain module (principal 30). "
         "The existing db1-fields-v2 protocol identity is unchanged.",
     ),
-    "server-go/db2": (
-        "contract",
-        "Caller-side mirror of the db2 module's serving wire.",
-    ),
     "server-go/delegate": (
         "contract",
         "Shared caller-side contract for delegate execution, so a peer can call "

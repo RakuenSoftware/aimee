@@ -377,7 +377,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
    guardrails_action_audit_register_reload();
 
-   /* DB2 + pgvector startup and supervision are owned by aimee-kb, not
+   /* KB_STORE + pgvector startup and supervision are owned by aimee-kb, not
     * aimee-server.  Keep the server on the DB1 side of the service split. */
 
    if (!socket_path)

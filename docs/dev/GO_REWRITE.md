@@ -63,7 +63,7 @@ control-plane failure. The C workflow engine and scheduler no longer start.
    family at a time, maintaining one writer per family.
 4. **Isolate resource execution.** Move delegate/provider execution, vault, and policy enforcement into
    Go services. Preserve durable admission-before-dispatch semantics.
-5. **Rewrite KB ownership.** Move the KB service and DB2 while retaining typed HTTP boundaries.
+5. **Rewrite KB ownership.** Move the KB service and KB_STORE while retaining typed HTTP boundaries.
 6. **Replace remaining clients.** Move thin-client and gateway behavior where needed. Delete compatibility
    adapters once no deployed client depends on them.
 7. **Remove native runtime dependencies.** Any retained

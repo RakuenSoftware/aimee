@@ -588,11 +588,10 @@ static int vault_env_bootstrap_init_mode(int include_delegate)
       const char *agent = NULL;
       const char *cred = NULL;
       slot_for_env(name, &agent, &cred);
-      if (value && value[0] &&
+      if (strcmp(name, "AIMEE_DB2_URL") != 0 && value && value[0] &&
           (overwrite ||
            (migrate_store && (strcmp(name, "AIMEE_STORE_URL") == 0 ||
-                              strcmp(name, "AIMEE_STORE_MIGRATION_URL") == 0 ||
-                              strcmp(name, "AIMEE_DB2_URL") == 0)) ||
+                              strcmp(name, "AIMEE_STORE_MIGRATION_URL") == 0)) ||
            !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred)))
       {
          if (vault_service_set_server(agent, cred, value) == VAULT_OK)

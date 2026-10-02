@@ -1,7 +1,7 @@
 /* kb_http_models.c: /v1/models routes (P2a org model catalog + entitlement).
  *
  * The authenticated actor comes from kb_reqctx (set by the router after verification);
- * every op runs inside a tenant scope (db2_tenant_scope_begin sets aimee.principal), so
+ * every op runs inside a tenant scope (kb_store_tenant_scope_begin sets aimee.principal), so
  * the entitled read is actor-bound and the org-admin capability for the /org mutations
  * is enforced at the DB layer (kb_principal_is_admin inside the SECURITY DEFINER
  * catalog functions) — a non-admin write is denied there and surfaces here as 403.
@@ -11,7 +11,7 @@
 #include "kb_http_models.h"
 
 #include "cJSON.h"
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_models_validate.h"
 #include "kb_reqctx.h"
 #include "org_model_catalog.h"
@@ -41,14 +41,14 @@ static int err(char *out, int cap, int status, const char *msg)
    return status;
 }
 
-/* Map a tenant-scope/db2 return into an HTTP status. */
+/* Map a tenant-scope/kb_store return into an HTTP status. */
 static int tenant_http_status(int rc)
 {
-   if (rc == DB2_ERR_TENANT_REQUIRES_PG)
+   if (rc == KB_STORE_ERR_TENANT_REQUIRES_PG)
       return 503;
-   if (rc == DB2_ERR_TENANT_UNAUTHENTICATED)
+   if (rc == KB_STORE_ERR_TENANT_UNAUTHENTICATED)
       return 401;
-   if (rc == DB2_ERR_TENANT_DENIED)
+   if (rc == KB_STORE_ERR_TENANT_DENIED)
       return 403;
    return 500;
 }
@@ -63,7 +63,7 @@ static int begin_actor_scope(char *out, int cap, int *http_out)
       *http_out = err(out, cap, 401, "authentication required");
       return -1;
    }
-   int rc = db2_tenant_scope_begin(actor, 0);
+   int rc = kb_store_tenant_scope_begin(actor, 0);
    if (rc != 0)
    {
       *http_out = err(out, cap, tenant_http_status(rc), "tenant scope failed");
@@ -80,9 +80,9 @@ static int handle_entitled(const char *method, char *out, int cap)
    int http = 0;
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
-   db2_model_entitled_row_t rows[256];
-   int n = db2_model_entitled_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
-   if (db2_tenant_scope_commit() != 0)
+   kb_store_model_entitled_row_t rows[256];
+   int n = kb_store_model_entitled_list(rows, (int)(sizeof(rows) / sizeof(rows[0])));
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    if (n < 0)
       return err(out, cap, 500, "list failed");
@@ -127,7 +127,8 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
       cJSON_Delete(b);
       return err(out, cap, 400, "endpoint too long (<=500 chars)");
    }
-   char model_id[256], provider[128], wire[32], display_name[256], endpoint[DB2_MODEL_ENDPOINT_CAP];
+   char model_id[256], provider[128], wire[32], display_name[256],
+       endpoint[KB_STORE_MODEL_ENDPOINT_CAP];
    snprintf(model_id, sizeof(model_id), "%s", jmodel->valuestring);
    snprintf(provider, sizeof(provider), "%s", jprov->valuestring);
    snprintf(wire, sizeof(wire), "%s", jwire->valuestring);
@@ -153,16 +154,16 @@ static int handle_org_upsert(const char *method, const char *body, char *out, in
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    int64_t id = 0;
-   int rc =
-       db2_model_catalog_upsert(model_id, display_name, provider, wire, endpoint, enabled, &id);
+   int rc = kb_store_model_catalog_upsert(model_id, display_name, provider, wire, endpoint, enabled,
+                                          &id);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
-      if (rc == DB2_MODEL_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (rc == KB_STORE_MODEL_ERR_DENIED)
          return err(out, cap, 403, "not authorized to manage the model catalog");
       return err(out, cap, 500, "model catalog update failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddNumberToObject(o, "id", (double)id);
@@ -192,15 +193,15 @@ static int handle_org_remove(const char *method, const char *body, char *out, in
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    int64_t removed = 0;
-   int rc = db2_model_catalog_remove(model_id, &removed);
+   int rc = kb_store_model_catalog_remove(model_id, &removed);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
-      if (rc == DB2_MODEL_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (rc == KB_STORE_MODEL_ERR_DENIED)
          return err(out, cap, 403, "not authorized to manage the model catalog");
       return err(out, cap, 500, "model catalog remove failed");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "ok", 1);
@@ -239,16 +240,16 @@ static int handle_org_entitle(const char *method, const char *body, int grant, c
    if (begin_actor_scope(out, cap, &http) != 0)
       return http;
    int64_t v = 0;
-   int rc = grant ? db2_model_entitle(model_id, team_id, &v)
-                  : db2_model_unentitle(model_id, team_id, &v);
+   int rc = grant ? kb_store_model_entitle(model_id, team_id, &v)
+                  : kb_store_model_unentitle(model_id, team_id, &v);
    if (rc != 0)
    {
-      db2_tenant_scope_rollback();
-      if (rc == DB2_MODEL_ERR_DENIED)
+      kb_store_tenant_scope_rollback();
+      if (rc == KB_STORE_MODEL_ERR_DENIED)
          return err(out, cap, 403, "not authorized to manage entitlements");
       return err(out, cap, 500, "entitlement update failed (or unknown model/team)");
    }
-   if (db2_tenant_scope_commit() != 0)
+   if (kb_store_tenant_scope_commit() != 0)
       return err(out, cap, 500, "commit failed");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddBoolToObject(o, "ok", 1);

@@ -2,8 +2,8 @@
  *
  * Stores the subset of `memory_runtime_state` rows that describe the
  * *local* machine: memory query counters, maintenance cadence keys, and
- * other per-host telemetry. pgvector runtime coordination lives in DB2's
- * kb_runtime_state (see db2/kb_runtime_state.h) because it belongs to
+ * other per-host telemetry. pgvector runtime coordination lives in KB_STORE's
+ * kb_runtime_state (see kb_store/kb_runtime_state.h) because it belongs to
  * aimee-kb, not the host.
  *
  * Pure domain API. No backend types or handles in any signature. */

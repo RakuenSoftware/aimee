@@ -72,7 +72,7 @@ Twenty-three process identities now run in the Go multicall executable:
 `benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, and `egress`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
-fixtures. DB2 remains the separately supervised C process in the current catalog;
+fixtures. KB_STORE remains the separately supervised C process in the current catalog;
 it uses the same admitted bus contract rather than an in-process exception.
 
 A moved stage is a bounded decision, and the storage-heavy or daemon

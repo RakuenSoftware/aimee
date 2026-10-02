@@ -19,7 +19,6 @@
 
 /* Scalars resolve defaults in the Go config module. A transport failure is
  * reported through config_client_last_error(); scalar accessors return zero. */
-int config_db2_pool_size(void);
 int config_workspace_count(void);
 int config_subagent_ban_enabled(void);
 int config_embedder_dims(void);
@@ -303,7 +302,6 @@ double config_kb_mdl_bump_drift_alert(void);
 int config_kb_synthesize_n_attempts(void);
 int config_kb_reflection_synthesis_shadow(void);
 int config_kb_worker_count(void);
-int config_db2_connection_pool_size(void);
 int config_kb_connection_workers(void);
 int config_kb_bg_ingest_enabled(void);
 int config_kb_bg_ingest_interval_hours(void);
@@ -381,7 +379,6 @@ int config_aux_task_count(void);
 int config_prefer_local_agents(void);
 int config_model_meta_refresh_minutes(void);
 int config_model_meta_capability_routing(void);
-int64_t config_db2_vector_corpus_diskann_threshold(void);
 int config_ensemble_reference_count(void);
 int config_ensemble_reference_persona_count(void);
 int config_ensemble_min_successful(void);
@@ -401,7 +398,6 @@ int config_roundtable_pipeline_unknown_context_tokens(void);
  * the next call to the SAME accessor on this thread; copy to retain. Never
  * NULL — an unreadable config yields "". */
 const char *config_db1_path(void);
-const char *config_db2_url(void);
 const char *config_provider(void);
 const char *config_default_persona(void);
 const char *config_claude_model(void);
@@ -505,7 +501,6 @@ const char *config_kb_curator_judge_command(void);
 const char *config_kb_curator_synthesize_command(void);
 const char *config_aux_default_provider(void);
 const char *config_aux_default_model(void);
-const char *config_db2_vector_corpus_index(void);
 const char *config_ensemble_aggregator(void);
 const char *config_roundtable_turns(void);
 const char *config_roundtable_default(void);
@@ -519,7 +514,6 @@ const char *config_context_engine(void);
  * A caller setting SEVERAL fields pays a save per call. That is the honest
  * cost of not handing out the struct; batch changes belong behind a
  * purpose-named config function rather than a loop of setters. */
-int config_set_db2_pool_size(int value);
 int config_set_workspace_count(int value);
 int config_set_subagent_ban_enabled(int value);
 int config_set_embedder_dims(int value);
@@ -794,7 +788,6 @@ int config_set_kb_mdl_bump_drift_alert(double value);
 int config_set_kb_synthesize_n_attempts(int value);
 int config_set_kb_reflection_synthesis_shadow(int value);
 int config_set_kb_worker_count(int value);
-int config_set_db2_connection_pool_size(int value);
 int config_set_kb_connection_workers(int value);
 int config_set_kb_bg_ingest_enabled(int value);
 int config_set_kb_bg_ingest_interval_hours(int value);
@@ -872,7 +865,6 @@ int config_set_aux_task_count(int value);
 int config_set_prefer_local_agents(int value);
 int config_set_model_meta_refresh_minutes(int value);
 int config_set_model_meta_capability_routing(int value);
-int config_set_db2_vector_corpus_diskann_threshold(int64_t value);
 int config_set_ensemble_reference_count(int value);
 int config_set_ensemble_reference_persona_count(int value);
 int config_set_ensemble_min_successful(int value);
@@ -888,7 +880,6 @@ int config_set_roundtable_pipeline_gate_ttl_h(int value);
 int config_set_roundtable_pipeline_parked_releases_slot(int value);
 int config_set_roundtable_pipeline_unknown_context_tokens(int value);
 int config_set_db1_path(const char *value);
-int config_set_db2_url(const char *value);
 int config_set_provider(const char *value);
 int config_set_default_persona(const char *value);
 int config_set_claude_model(const char *value);
@@ -991,7 +982,6 @@ int config_set_kb_curator_judge_command(const char *value);
 int config_set_kb_curator_synthesize_command(const char *value);
 int config_set_aux_default_provider(const char *value);
 int config_set_aux_default_model(const char *value);
-int config_set_db2_vector_corpus_index(const char *value);
 int config_set_ensemble_aggregator(const char *value);
 int config_set_roundtable_turns(const char *value);
 int config_set_roundtable_default(const char *value);
@@ -1008,7 +998,6 @@ int config_set_context_engine(const char *value);
  * Truncates to n and always NUL-terminates. Returns the field's full width so
  * a caller can detect truncation; 0 when out is NULL or n is 0. */
 size_t config_db1_path_copy(char *out, size_t n);
-size_t config_db2_url_copy(char *out, size_t n);
 size_t config_provider_copy(char *out, size_t n);
 size_t config_default_persona_copy(char *out, size_t n);
 size_t config_claude_model_copy(char *out, size_t n);
@@ -1111,7 +1100,6 @@ size_t config_kb_curator_judge_command_copy(char *out, size_t n);
 size_t config_kb_curator_synthesize_command_copy(char *out, size_t n);
 size_t config_aux_default_provider_copy(char *out, size_t n);
 size_t config_aux_default_model_copy(char *out, size_t n);
-size_t config_db2_vector_corpus_index_copy(char *out, size_t n);
 size_t config_ensemble_aggregator_copy(char *out, size_t n);
 size_t config_roundtable_turns_copy(char *out, size_t n);
 size_t config_roundtable_default_copy(char *out, size_t n);

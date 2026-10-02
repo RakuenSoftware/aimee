@@ -5,7 +5,7 @@ The memory_facts drain -- which runs the deterministic pattern extractor and
 commits through the typed-fact write gate -- lives on the curator's LLM lane,
 and that lane only starts when a synthesis endpoint is CONFIGURED. Without one
 the drain never runs, memory_facts jobs sit pending forever, and nothing ever
-reaches db2_fact_commit.
+reaches kb_store_fact_commit.
 
 This stub exists to start the lane, not to extract anything. It answers every
 chat completion with an empty fact list, so the LLM pass contributes nothing and

@@ -8,7 +8,7 @@
  * The split is not decoration. A module may only reach a peer over the event
  * bus, and these rows are DB1 — this machine's observations about its own
  * failed jobs. Putting the store behind the learning module made the feature
- * inert in the daemon, which builds with DB2 compiled out; the live run caught
+ * inert in the daemon, which builds with KB_STORE compiled out; the live run caught
  * exactly that.
  *
  * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */

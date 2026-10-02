@@ -4,13 +4,15 @@ This directory owns the C resource plane: DB1-facing sessions, agents, tools, po
 provider calls, KB clients, and the public server `/v1` surface. Physical DB1 storage belongs to
 the `aimee` and `postgres` modules.
 
-It does not own DB2 or workflow lifecycle.
+The Server composition also owns durable personal memory and private code through the Go memory
+module and local PostgreSQL provider. It works without KB. Shared knowledge uses an explicit KB
+connection; `aimee-wfe` owns workflow lifecycle. See [Server and KB](../../docs/SERVER_AND_KB.md).
 
 ## Boundaries
 
 - reaches DB1 only through the module bus and never links libpq;
 - retains SQLite only for the separate append-only audit WORM;
-- reaches DB2 only through the typed KB client;
+- reaches KB_STORE only through the typed KB client;
 - returns `410 Gone` for retired C workflow lifecycle routes;
 - serves local clients over a filesystem-protected Unix socket;
 - serves remote clients through TLS, identity, capabilities, scope, and write-tier checks;

@@ -2,6 +2,11 @@
 
 ## Purpose and non-goals
 
+One Go implementation runs independently in Server and KB. Server owns durable personal memory;
+KB owns the shared corpus. [Server and KB](../SERVER_AND_KB.md) defines instance, store, and
+scope boundaries. PostgreSQL access in both placements belongs to the Go provider; the native
+DB2 provider is retired.
+
 The [memory behavior guide](../MEMORY.md) details Go ownership, retrieval validity,
 mutation admission, evaluation and caller migration.
 
@@ -43,7 +48,7 @@ adapter also replaces any supplied scope with `user`, so a client cannot use the
 server placement to address KB memory. The KB placement rejects user scope.
 
 The Go owner stores embedding generations in an unconstrained `vector` column,
-with dimensions recorded per version. Global DB2 dimension reset only discovers
+with dimensions recorded per version. Global KB_STORE dimension reset only discovers
 columns declared with a fixed vector dimension, so it cannot drop these Go-owned
 generations. Unknown dimension-bound tables still refuse the reset, including
 with force enabled. Rebuild/cutover of memory generations stays with Go.
@@ -68,8 +73,10 @@ JSON so the native parser cannot round record IDs or error receipts. Private
 get/delete/supersede accept canonical positive decimal-string int64 IDs;
 unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
 Go response. The host adds HTTP error classification through its existing
-runtime-web provider without rewriting owner tokens. This transport change does
-not implement personal version history or durable mutation receipts.
+runtime-web provider without rewriting owner tokens. Personal retained history now lives in
+`personal_versions.go`; `include_version`, `at_version`, and `expected_version` select its explicit
+read/mutation contracts. Both placements also support correction proposals and verified user
+review, described in the [behavior guide](../MEMORY.md#current-ownership-and-review).
 
 Personal review-list rendering now belongs to the Go owner through the private
 `user-review-list` runtime operation. It retains the Server envelope, both
@@ -240,9 +247,10 @@ The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,
 typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
 retired-engine fixtures are not substitutes for Go owner regressions.
-The required `db2-process-replay` CI job initializes the packaged DB2 owner,
-then runs `make -C src memory-owner-replay-check` with separate packaged-replay
-and empty scratch connections. `AIMEE_DB2_URL`, `AIMEE_MEMORY_EVAL_URL` and
+The required `postgres-knowledge-replay` CI job exercises the PostgreSQL provider
+and memory owner with separate replay and scratch connections. The manual
+`make -C src memory-owner-replay-check` gate requires `AIMEE_KB_STORE_REPLAY_URL`,
+`AIMEE_MEMORY_EVAL_URL` and
 `AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
 The target runs the full memory, isolated evaluator and module race suites with
 required PostgreSQL variables, including the restricted-role replay. Missing
@@ -273,7 +281,7 @@ memory implementation. The C bus itself is unchanged by this cutover.
 |---|---|
 | `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
 | `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
-| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/include/aimee/db2/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
+| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/kb/include/aimee/kb/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
 | `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
 
 `check_memory_c_boundary.py` also forbids database access from the benchmark
@@ -350,7 +358,7 @@ end-to-end ranking parity, legacy query/candidate expansion and unversioned-vect
 admission remain separate work. No production enablement or quality improvement
 is claimed without paired evaluation.
 
-There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
+There is no C memory engine and no C KB_STORE `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
 success; a local fallback is forbidden.
 
@@ -373,3 +381,16 @@ bus-framing tests, and update the descriptor-owned sources. Do not restore a
 retired C policy or storage implementation to satisfy a legacy ABI. Both role
 supervisors require memory; removing it requires migrating those consumers
 and their event contracts rather than silently dropping recall behavior.
+
+### Retained fidelity evidence
+
+The host-only `memory.runtime` operation `fidelity-read` reads retained
+`fidelity_report` and `fidelity_attribution` artifacts through the shared PostgreSQL
+module in both role compositions. The KB audit adapter forwards the exact turn ID.
+A missing report remains `not_evaluated`; owner or database failures become
+`evidence_unavailable` at the audit transport. Report and attribution count come
+from one statement snapshot. No native connection pool is used by this path.
+
+The former C fidelity writer APIs had no production callers and were removed with
+the C reader. This does not enable the deferred fidelity judge or add a new write
+API. Existing rows and the public audit response fields remain readable.

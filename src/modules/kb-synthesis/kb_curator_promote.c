@@ -10,9 +10,9 @@
 #include "config.h"
 #include "cJSON.h"
 #include "log.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -145,7 +145,7 @@ static int promote_carry_mentions(void *conn, const char *old_id, const char *ne
    aimee_pg_finalize(st);
 
    for (int i = 0; i < n; i++)
-      db2_artifact_link(froms[i], new_id, "mentions");
+      kb_store_artifact_link(froms[i], new_id, "mentions");
    free(froms);
    return n;
 }
@@ -153,7 +153,7 @@ static int promote_carry_mentions(void *conn, const char *old_id, const char *ne
 int kb_curator_promote_entity_one(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
    if (!config_kb_curator_promote_entity_enabled())
@@ -193,9 +193,9 @@ int kb_curator_promote_entity_one(const kb_curator_extract_opts_t *opts)
    cJSON_Delete(pj);
 
    char new_id[64];
-   db2_artifact_gen_id(new_id, sizeof(new_id));
-   int rc = db2_artifact_write(new_id, "entity", "committed", new_kind, new_id_scope, "curator",
-                               0.0, new_payload ? new_payload : "{}");
+   kb_store_artifact_gen_id(new_id, sizeof(new_id));
+   int rc = kb_store_artifact_write(new_id, "entity", "committed", new_kind, new_id_scope,
+                                    "curator", 0.0, new_payload ? new_payload : "{}");
    free(new_payload);
    free(payload);
    if (rc != 0)
@@ -205,7 +205,7 @@ int kb_curator_promote_entity_one(const kb_curator_extract_opts_t *opts)
    }
 
    /* Wire old -> new, carry evidence, audit, and retire the old entity. */
-   db2_artifact_link(old_id, new_id, "supersedes");
+   kb_store_artifact_link(old_id, new_id, "supersedes");
    int carried = promote_carry_mentions(conn, old_id, new_id);
 
    char before[256], after[256];
@@ -215,11 +215,11 @@ int kb_curator_promote_entity_one(const kb_curator_extract_opts_t *opts)
             "{\"scope_kind\":\"%s\",\"scope_id\":\"%s\",\"entity_id\":\"%s\"}", new_kind,
             new_id_scope, new_id);
    char audit_id[64];
-   db2_artifact_gen_id(audit_id, sizeof(audit_id));
-   db2_audit_event_write(audit_id, old_id, "kb.curator.promote_entity", new_id, "curator", new_kind,
-                         new_id_scope, 0.0, 0, before, after);
+   kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
+   kb_store_audit_event_write(audit_id, old_id, "kb.curator.promote_entity", new_id, "curator",
+                              new_kind, new_id_scope, 0.0, 0, before, after);
 
-   db2_artifact_set_state(old_id, "superseded");
+   kb_store_artifact_set_state(old_id, "superseded");
 
    aimee_log(LOG_INFO, "kb.curator.promote",
              "promoted entity %s (%s:%s) -> %s (%s:%s), carried %d source(s)", old_id, scope_kind,

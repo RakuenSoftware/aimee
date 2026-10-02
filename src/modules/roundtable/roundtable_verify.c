@@ -169,7 +169,7 @@ void roundtable_verify_items(roundtable_result_t *out, int require_evidence)
 {
    /* Use the process-registered backend (the server installs a kb_client-backed
     * one at startup). NULL backend => every item degrades (kept, unverified). The
-    * verifier references no index/db2/kb symbol directly, so it links everywhere. */
+    * verifier references no index/kb_store/kb symbol directly, so it links everywhere. */
    roundtable_verify_items_with(out, evidence_replay_active_backend(), require_evidence);
 }
 

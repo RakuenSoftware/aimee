@@ -45,27 +45,28 @@ static int random_hex(char out[65])
    return 0;
 }
 
-static kb_mgmt_token_authority_ipc_result_t map_db(db2_management_token_authority_result_t result)
+static kb_mgmt_token_authority_ipc_result_t
+map_db(kb_store_management_token_authority_result_t result)
 {
    switch (result)
    {
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_OK:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_DENIED:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_DENIED:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_DENIED;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_CONFLICT:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_CONFLICT:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_CONFLICT;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_EXPIRED:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_EXPIRED:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_SEALED:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_SEALED:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_SEALED;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
-   case DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE:
+   case KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE:
       return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
    }
    return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
@@ -171,42 +172,45 @@ static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_s
    memset(token_aad, 0, sizeof(token_aad));
    memset(lease_owner, 0, sizeof(lease_owner));
 
-   db2_management_token_authority_result_t db_result =
-       db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   kb_store_management_token_authority_result_t db_result =
+       kb_store_management_token_read_readback(service->db, correlation_id, jti, &retained);
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       *out = retained;
       return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
    }
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
       return map_db(db_result);
    if (random_hex(lease_owner) != 0)
       return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
 
-   db_result = db2_management_token_read_claim(service->db, correlation_id, jti, lease_owner, &use);
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   db_result =
+       kb_store_management_token_read_claim(service->db, correlation_id, jti, lease_owner, &use);
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
    {
       if (!reopen(service))
          return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
-      db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
-      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      db_result =
+          kb_store_management_token_read_readback(service->db, correlation_id, jti, &retained);
+      if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          *out = retained;
          return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
       }
       return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
    }
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
    {
-      db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
-      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      db_result =
+          kb_store_management_token_read_readback(service->db, correlation_id, jti, &retained);
+      if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          *out = retained;
          return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
       }
       return KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED;
    }
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       return map_db(db_result);
 
    kb_mgmt_token_authority_ipc_result_t result = KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
@@ -259,9 +263,9 @@ static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_s
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto done;
 
-   db_result = db2_management_token_read_finalize(service->db, correlation_id, jti, lease_owner,
-                                                  issue.output.jwt);
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   db_result = kb_store_management_token_read_finalize(service->db, correlation_id, jti,
+                                                       lease_owner, issue.output.jwt);
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
    {
       if (!reopen(service))
       {
@@ -269,15 +273,15 @@ static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_s
          goto done;
       }
    }
-   else if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   else if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
    }
-   db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   db_result = kb_store_management_token_read_readback(service->db, correlation_id, jti, &retained);
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
-      result = db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT
+      result = db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT
                    ? KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS
                    : map_db(db_result);
       goto done;
@@ -318,9 +322,9 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
    memset(fresh_attestation, 0, sizeof(fresh_attestation));
    memset(token_aad, 0, sizeof(token_aad));
 
-   db2_management_token_authority_result_t db_result =
-       db2_management_identity_authority_admit(service->db, correlation_id, jti, &admitted);
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   kb_store_management_token_authority_result_t db_result =
+       kb_store_management_identity_authority_admit(service->db, correlation_id, jti, &admitted);
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
    {
       /* Same reasoning as the action path: only an independently reopened exact
        * readback can prove this invocation admitted the tuple. Absence means the
@@ -332,30 +336,30 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
          result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
          goto done;
       }
-      db_result =
-          db2_management_identity_authority_readback(service->db, correlation_id, jti, &admitted);
-      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+      db_result = kb_store_management_identity_authority_readback(service->db, correlation_id, jti,
+                                                                  &admitted);
+      if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
       {
-         db_result =
-             db2_management_identity_authority_admit(service->db, correlation_id, jti, &admitted);
-         if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK && !admitted.newly_admitted)
+         db_result = kb_store_management_identity_authority_admit(service->db, correlation_id, jti,
+                                                                  &admitted);
+         if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK && !admitted.newly_admitted)
          {
             result = KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED;
             goto done;
          }
       }
-      else if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      else if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
          goto done;
       }
-      if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
          goto done;
       }
    }
-   else if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   else if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -366,8 +370,9 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
       goto done;
    }
 
-   db_result = db2_management_identity_authority_use_begin(service->db, correlation_id, jti, &use);
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   db_result =
+       kb_store_management_identity_authority_use_begin(service->db, correlation_id, jti, &use);
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -430,8 +435,8 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto abort;
 
-   db_result = db2_management_identity_authority_finalize(service->db);
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   db_result = kb_store_management_identity_authority_finalize(service->db);
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -443,7 +448,7 @@ identity_issue(kb_mgmt_token_authority_service_t *service, const char *correlati
    goto done;
 
 abort:
-   db2_management_token_authority_abort(service->db);
+   kb_store_management_token_authority_abort(service->db);
 done:
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       OPENSSL_cleanse(out, sizeof(*out));
@@ -472,29 +477,29 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) != 0)
       return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
 
-   db2_management_token_intent_kind_t kind = 0;
-   db2_management_token_authority_result_t kind_result =
-       db2_management_token_authority_kind(service->db, correlation_id, jti, &kind);
-   if (kind_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   kb_store_management_token_intent_kind_t kind = 0;
+   kb_store_management_token_authority_result_t kind_result =
+       kb_store_management_token_authority_kind(service->db, correlation_id, jti, &kind);
+   if (kind_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       return map_db(kind_result);
    }
-   if (kind == DB2_MANAGEMENT_TOKEN_INTENT_READ)
+   if (kind == KB_STORE_MANAGEMENT_TOKEN_INTENT_READ)
    {
       kb_mgmt_token_authority_ipc_result_t read_result =
           read_issue(service, correlation_id, jti, out);
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       return read_result;
    }
-   if (kind == DB2_MANAGEMENT_TOKEN_INTENT_IDENTITY)
+   if (kind == KB_STORE_MANAGEMENT_TOKEN_INTENT_IDENTITY)
    {
       kb_mgmt_token_authority_ipc_result_t identity_result =
           identity_issue(service, correlation_id, jti, out);
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       return identity_result;
    }
-   if (kind != DB2_MANAGEMENT_TOKEN_INTENT_ACTION)
+   if (kind != KB_STORE_MANAGEMENT_TOKEN_INTENT_ACTION)
    {
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
@@ -511,9 +516,9 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    memset(fresh_attestation, 0, sizeof(fresh_attestation));
    memset(token_aad, 0, sizeof(token_aad));
 
-   db2_management_token_authority_result_t db_result =
-       db2_management_token_authority_admit(service->db, correlation_id, jti, &admitted);
-   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   kb_store_management_token_authority_result_t db_result =
+       kb_store_management_token_authority_admit(service->db, correlation_id, jti, &admitted);
+   if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
    {
       /* The adapter destroyed the ambiguous session. Only an independently
        * reopened exact readback can prove that this invocation admitted the
@@ -524,20 +529,20 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
          goto done;
       }
       db_result =
-          db2_management_token_authority_readback(service->db, correlation_id, jti, &admitted);
-      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+          kb_store_management_token_authority_readback(service->db, correlation_id, jti, &admitted);
+      if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
       {
          /* The readback transaction proved the first COMMIT did not land.
           * Retrying the same immutable identifiers is the sole safe retry. */
          db_result =
-             db2_management_token_authority_admit(service->db, correlation_id, jti, &admitted);
-         if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK && !admitted.newly_admitted)
+             kb_store_management_token_authority_admit(service->db, correlation_id, jti, &admitted);
+         if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK && !admitted.newly_admitted)
          {
             result = KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED;
             goto done;
          }
       }
-      else if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      else if (db_result == KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          /* Readback proves the row exists, but cannot prove whether this
           * invocation inserted it or merely replayed a prior admission before
@@ -546,13 +551,13 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
          result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
          goto done;
       }
-      if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
       {
          result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
          goto done;
       }
    }
-   else if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   else if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -563,8 +568,9 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
       goto done;
    }
 
-   db_result = db2_management_token_authority_use_begin(service->db, correlation_id, jti, &use);
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   db_result =
+       kb_store_management_token_authority_use_begin(service->db, correlation_id, jti, &use);
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -620,8 +626,8 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto abort;
 
-   db_result = db2_management_token_authority_finalize(service->db);
-   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   db_result = kb_store_management_token_authority_finalize(service->db);
+   if (db_result != KB_STORE_MANAGEMENT_TOKEN_AUTHORITY_OK)
    {
       result = map_db(db_result);
       goto done;
@@ -633,7 +639,7 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    goto done;
 
 abort:
-   db2_management_token_authority_abort(service->db);
+   kb_store_management_token_authority_abort(service->db);
 done:
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       OPENSSL_cleanse(out, sizeof(*out));

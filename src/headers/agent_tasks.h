@@ -58,7 +58,7 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out);
 
 /* Result cache lives in src/db1/caches.h (db1_agent_cache_*). */
 
-/* One-shot hint lookup lives in db2/agent_hints.h
- * (db2_agent_hint_find_and_consume). */
+/* One-shot hint lookup lives in kb_store/agent_hints.h
+ * (kb_store_agent_hint_find_and_consume). */
 
 #endif /* DEC_AGENT_TASKS_H */

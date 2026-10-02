@@ -1,4 +1,4 @@
-/* kb_reasoning.h: Datalog-based graph reasoning over DB2 artifacts.
+/* kb_reasoning.h: Datalog-based graph reasoning over KB_STORE artifacts.
  * See
  * docs/proposals/accepted/graph-reasoning-case-based-recall-and-contradiction-logic.md
  */
@@ -39,15 +39,14 @@ extern "C"
       int elapsed_ms;
    } kb_reasoning_result_t;
 
-   /* Run a Datalog query against the DB2 artifact graph.
+   /* Run a Datalog query against the KB_STORE artifact graph.
     * query:          Datalog atom, e.g. "contradiction_ok(?a, ?b)"
     * bindings_json:  initial bindings as JSON object, or NULL
     * scope_kind / scope_id: narrow the fact snapshot; NULL = all scopes
     * result_out:     populated on success; caller frees with kb_reasoning_result_free
     * Returns 0 on success, -1 if disabled or error. */
-   int kb_reasoning_query(const char *query, const char *bindings_json,
-                          const char *scope_kind, const char *scope_id,
-                          kb_reasoning_result_t *result_out);
+   int kb_reasoning_query(const char *query, const char *bindings_json, const char *scope_kind,
+                          const char *scope_id, kb_reasoning_result_t *result_out);
 
    void kb_reasoning_result_free(kb_reasoning_result_t *r);
 
@@ -59,10 +58,9 @@ extern "C"
 
    /* Structural contradiction check for a proposed contradicts link.
     * Returns 1 if the Datalog check passes, 0 if it fails, -1 if disabled/error. */
-   int kb_reasoning_contradiction_check(const char *artifact_a_id,
-                                        const char *artifact_b_id);
+   int kb_reasoning_contradiction_check(const char *artifact_a_id, const char *artifact_b_id);
 
-   /* Seed the built-in ruleset-v1 record into DB2 reasoning_rulesets (idempotent). */
+   /* Seed the built-in ruleset-v1 record into KB_STORE reasoning_rulesets (idempotent). */
    void kb_reasoning_seed_ruleset(void);
 
    /* One recalled case result. */
@@ -73,13 +71,12 @@ extern "C"
       double score;
    } kb_reasoning_case_result_t;
 
-   /* Composite case recall: kNN on exemplar_vectors + DB2 case query + rank by confidence.
+   /* Composite case recall: kNN on exemplar_vectors + KB_STORE case query + rank by confidence.
     * trigger_json: JSON trigger features (may be NULL).
     * scope_kind / scope_id: narrow to project or workspace (NULL = all).
     * Returns number of results written into out, or -1 on error. */
-   int kb_reasoning_case_recall(const char *trigger_json,
-                                const char *scope_kind, const char *scope_id,
-                                kb_reasoning_case_result_t *out, int max_out);
+   int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind,
+                                const char *scope_id, kb_reasoning_case_result_t *out, int max_out);
 
 #ifdef __cplusplus
 }

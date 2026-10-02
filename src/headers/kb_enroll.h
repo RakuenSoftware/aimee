@@ -5,7 +5,7 @@
  * Phase 1 of the distributed-mode-auth proposal: the token lifecycle and the
  * connection-string codec. The internal CA / mTLS client-cert issuance
  * (`pki.c`), the `POST /v1/enroll` endpoint, and the JWKS/OIDC verifier are
- * later phases. The registry here is in-memory (token hashes only); DB2
+ * later phases. The registry here is in-memory (token hashes only); KB_STORE
  * persistence (proposal invariant 3) is a follow-up.
  *
  * Security model: tokens are 256-bit opaque random values, base64url-encoded;
@@ -61,7 +61,7 @@ extern "C"
     * or a non-`sha256:` ca prefix). Query params may appear in any order. */
    int kb_enroll_conn_string_parse(const char *s, kb_enroll_conn_t *out);
 
-   /* --- Single-use enrollment-token registry (in-memory; DB2 persistence is a
+   /* --- Single-use enrollment-token registry (in-memory; KB_STORE persistence is a
     *     later phase). Stores only token hashes + scope, never cleartext. --- */
 
    /* Issue a fresh enrollment token bound to `scope` (e.g. "global",

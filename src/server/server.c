@@ -638,7 +638,7 @@ static cJSON *server_run_kb_bootstrap(void)
 
    char *quoted = shell_quote(kb_path);
    char cmd[MAX_PATH_LEN + 128];
-   snprintf(cmd, sizeof(cmd), "%s --bootstrap-db2 --json", quoted);
+   snprintf(cmd, sizeof(cmd), "%s --bootstrap-postgres --json", quoted);
    free(quoted);
 
    char *out = NULL;

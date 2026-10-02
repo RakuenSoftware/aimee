@@ -102,11 +102,11 @@ trap cleanup EXIT
 step "Provisioning $db"
 snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/kb/c/schema_roles.sql >/dev/null 2>&1
 runuser -u postgres -- createdb -O aimee_kb_owner "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/kb/c/schema_roles.sql >/dev/null 2>&1
 psqlq -c 'GRANT USAGE, CREATE ON SCHEMA public TO aimee_kb_owner' >/dev/null 2>&1
 
 step "Starting aimee-kb (dev shape: owner role, schema applied at boot)"
@@ -121,7 +121,7 @@ YAML
 kbpw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 psqlq -c "ALTER ROLE aimee_kb_owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
   || fail "could not give aimee_kb_owner a password"
-export AIMEE_DB2_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
+export AIMEE_STORE_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
 ./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
 kb_pid=$!
 for i in $(seq 1 60); do
@@ -212,7 +212,7 @@ step "INVARIANT: the schema survived and nothing injected"
 echo "  both tables intact"
 
 step "INVARIANT: every hostile subject above was refused, and none was stored"
-# Those refusals are DELIBERATE, not incidental: db2_intent_canonical_actor enforces a grammar
+# Those refusals are DELIBERATE, not incidental: kb_store_intent_canonical_actor enforces a grammar
 # -- `owner`, a bare username, or oidc:<issuer>:<subject> / cert:<issuer>:<serial> with encoded
 # components -- and the same rule is mirrored by a CHECK constraint in schema.sql and covered by
 # src/tests/test_subject_grammar.c against a shared corpus. So the interesting question is not

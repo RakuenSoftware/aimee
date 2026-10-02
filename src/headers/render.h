@@ -5,7 +5,7 @@
 #include "agent_types.h"
 #include "checkpoints.h"
 #include "decisions.h"
-#include "decision_log.h" /* db2/decision_log.h via -Idb2 */
+#include "decision_log.h" /* kb_store/decision_log.h via -Ikb_store */
 
 /* Emit a cJSON value as compact JSON to stdout, applying the given field
  * filter and response profile. Frees the cJSON object after printing. */
@@ -26,8 +26,8 @@ cJSON *search_result_to_json(const search_result_t *r);
 /* Create a cJSON object from a aimee_task_t. */
 cJSON *aimee_task_to_json(const aimee_task_t *t);
 
-/* Create a cJSON object from a DB2 decision_log row. */
-cJSON *decision_to_json(const db2_decision_log_row_t *d);
+/* Create a cJSON object from a KB_STORE decision_log row. */
+cJSON *decision_to_json(const kb_store_decision_log_row_t *d);
 
 /* Create a cJSON object from a db1_checkpoint_t. */
 cJSON *checkpoint_to_json(const db1_checkpoint_t *c);

@@ -7,14 +7,14 @@
 
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
-#include "../modules/db2/c/code_projection.h"
-#include "../modules/db2/c/entity_edges.h"
-#include "../modules/db2/c/entity_nodes.h"
+#include "../modules/kb/c/code_projection.h"
+#include "../modules/kb/c/entity_edges.h"
+#include "../modules/kb/c/entity_nodes.h"
 
 static char g_db_path[512];
 
@@ -24,12 +24,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   db2_test_shim_open_path(g_db_path);
+   kb_store_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }
@@ -37,7 +37,7 @@ static void teardown(void)
 static long scalar(const char *sql)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(kb_store_conn(), sql, err, sizeof(err));
    assert(st);
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
    long value = (long)aimee_pg_column_int64(st, 0);
@@ -49,7 +49,7 @@ static long scalar(const char *sql)
 static void test_generation_create(void)
 {
    setup();
-   int64_t id = db2_code_projection_generation_create("test_proj");
+   int64_t id = kb_store_code_projection_generation_create("test_proj");
    /* SQLite shim has no Postgres so returns -1; test graceful return. */
    assert(id == -1 || id > 0);
    teardown();
@@ -59,7 +59,7 @@ static void test_generation_create(void)
 static void test_visible_id_none(void)
 {
    setup();
-   int64_t vid = db2_code_projection_visible_id("nonexistent_project");
+   int64_t vid = kb_store_code_projection_visible_id("nonexistent_project");
    assert(vid == 0 || vid == -1); /* 0=none, -1=no DB */
    teardown();
 }
@@ -68,7 +68,7 @@ static void test_visible_id_none(void)
 static void test_abort_invalid(void)
 {
    setup();
-   int rc = db2_code_projection_generation_abort(-1, "test error");
+   int rc = kb_store_code_projection_generation_abort(-1, "test error");
    assert(rc == -1);
    teardown();
 }
@@ -77,7 +77,7 @@ static void test_abort_invalid(void)
 static void test_sync_null_project(void)
 {
    setup();
-   int64_t n = db2_code_projection_sync_project(NULL, 1);
+   int64_t n = kb_store_code_projection_sync_project(NULL, 1);
    assert(n == -1);
    teardown();
 }
@@ -86,7 +86,7 @@ static void test_sync_null_project(void)
 static void test_sync_invalid_gen(void)
 {
    setup();
-   int64_t n = db2_code_projection_sync_project("myproj", 0);
+   int64_t n = kb_store_code_projection_sync_project("myproj", 0);
    assert(n == -1);
    teardown();
 }
@@ -95,7 +95,7 @@ static void test_sync_invalid_gen(void)
 static void test_publish_invalid(void)
 {
    setup();
-   int rc = db2_code_projection_generation_publish(-1, "proj");
+   int rc = kb_store_code_projection_generation_publish(-1, "proj");
    assert(rc == -1);
    teardown();
 }
@@ -105,8 +105,8 @@ static void test_structural_weight_defaults(void)
 {
    /* Verify edge upsert accepts valid inputs without crashing.
     * With no DB the functions return -1 gracefully. */
-   int rc = db2_code_projection_edge_upsert(1, "proj", "file:proj:src/a.c", "defines",
-                                            "symbol:proj:foo", 0, 0, 0, 3);
+   int rc = kb_store_code_projection_edge_upsert(1, "proj", "file:proj:src/a.c", "defines",
+                                                 "symbol:proj:foo", 0, 0, 0, 3);
    assert(rc == -1 || rc == 0); /* -1 no DB, 0 ok */
 }
 
@@ -114,7 +114,7 @@ static void test_structural_weight_defaults(void)
 static void test_edge_record_null(void)
 {
    setup();
-   int rc = db2_code_projection_edge_record(1, "proj", NULL, "defines", "symbol:proj:foo", "");
+   int rc = kb_store_code_projection_edge_record(1, "proj", NULL, "defines", "symbol:proj:foo", "");
    assert(rc == -1);
    teardown();
 }
@@ -123,7 +123,7 @@ static void test_edge_record_null(void)
 static void test_cleanup_negative_days(void)
 {
    setup();
-   int n = db2_code_projection_cleanup_old("proj", -1);
+   int n = kb_store_code_projection_cleanup_old("proj", -1);
    assert(n == 0);
    teardown();
 }
@@ -132,7 +132,7 @@ static void test_cleanup_negative_days(void)
 static void test_update_counts_invalid(void)
 {
    setup();
-   int rc = db2_code_projection_generation_update_counts(-1, 5, 3);
+   int rc = kb_store_code_projection_generation_update_counts(-1, 5, 3);
    assert(rc == -1);
    teardown();
 }
@@ -141,7 +141,7 @@ static void test_generic_graph_visibility_tracks_projection_lifecycle(void)
 {
    setup();
    char err[256] = "";
-   assert(aimee_pg_exec(db2_conn(),
+   assert(aimee_pg_exec(kb_store_conn(),
                         "INSERT INTO projects(name,root,scanned_at) VALUES('proj','/x','t');"
                         "INSERT INTO code_projection_generations(id,project,state) VALUES"
                         " (101,'proj','pending'),(102,'proj','visible'),"
@@ -154,11 +154,11 @@ static void test_generic_graph_visibility_tracks_projection_lifecycle(void)
                         " ('subject','rel','superseded','code_projection',103)",
                         err, sizeof(err)) == 0);
    edge_t edges[8];
-   assert(db2_entity_edge_list_by_entity("subject", edges, 8) == 2);
-   assert(aimee_pg_exec(db2_conn(),
+   assert(kb_store_entity_edge_list_by_entity("subject", edges, 8) == 2);
+   assert(aimee_pg_exec(kb_store_conn(),
                         "UPDATE projects SET lifecycle_state='detached' WHERE name='proj'", err,
                         sizeof(err)) == 0);
-   assert(db2_entity_edge_list_by_entity("subject", edges, 8) == 1);
+   assert(kb_store_entity_edge_list_by_entity("subject", edges, 8) == 1);
    assert(strcmp(edges[0].target, "ordinary") == 0);
    teardown();
 }
@@ -167,7 +167,7 @@ static void test_publish_is_atomic_and_project_bound(void)
 {
    setup();
    char err[256] = "";
-   assert(aimee_pg_exec(db2_conn(),
+   assert(aimee_pg_exec(kb_store_conn(),
                         "INSERT INTO projects(name,root,scanned_at) VALUES"
                         " ('proj','/x','t'),('other','/y','t');"
                         "INSERT INTO code_projection_generations(id,project,state) VALUES"
@@ -175,14 +175,14 @@ static void test_publish_is_atomic_and_project_bound(void)
                         " (203,'other','pending')",
                         err, sizeof(err)) == 0);
 
-   assert(db2_code_projection_generation_publish(999, "proj") == -1);
+   assert(kb_store_code_projection_generation_publish(999, "proj") == -1);
    assert(scalar("SELECT count(*) FROM code_projection_generations"
                  " WHERE project='proj' AND state='visible'") == 1);
-   assert(db2_code_projection_generation_publish(203, "proj") == -1);
+   assert(kb_store_code_projection_generation_publish(203, "proj") == -1);
    assert(scalar("SELECT count(*) FROM code_projection_generations"
                  " WHERE project='proj' AND state='visible'") == 1);
 
-   assert(db2_code_projection_generation_publish(202, "proj") == 0);
+   assert(kb_store_code_projection_generation_publish(202, "proj") == 0);
    assert(scalar("SELECT count(*) FROM code_projection_generations"
                  " WHERE id=201 AND state='superseded'") == 1);
    assert(scalar("SELECT count(*) FROM code_projection_generations"

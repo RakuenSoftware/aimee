@@ -25,7 +25,7 @@
 
 typedef struct
 {
-   db2_management_status_provision_ctx_t db;
+   kb_store_management_status_provision_ctx_t db;
 } provision_db_ctx_t;
 
 enum
@@ -143,7 +143,7 @@ static int restore_stderr(int *saved)
    return rc < 0 || close_rc != 0 ? -1 : 0;
 }
 
-static int copy_envelope_to_db(db2_vault_key_use_envelope_t *dst,
+static int copy_envelope_to_db(kb_store_vault_key_use_envelope_t *dst,
                                const kb_mgmt_status_provision_envelope_t *src, uint64_t seal_epoch)
 {
    if (!dst || !src || src->ciphertext_len != 32 || (src->version != 1 && src->version != 2) ||
@@ -161,7 +161,7 @@ static int copy_envelope_to_db(db2_vault_key_use_envelope_t *dst,
 }
 
 static int copy_envelope_from_db(kb_mgmt_status_provision_envelope_t *dst,
-                                 const db2_vault_key_use_envelope_t *src, int64_t version)
+                                 const kb_store_vault_key_use_envelope_t *src, int64_t version)
 {
    if (!dst || !src || src->version != version || src->ciphertext_len != 32)
       return -1;
@@ -175,7 +175,7 @@ static int copy_envelope_from_db(kb_mgmt_status_provision_envelope_t *dst,
    return 0;
 }
 
-static int db_to_core(const db2_management_status_provision_record_t *src,
+static int db_to_core(const kb_store_management_status_provision_record_t *src,
                       kb_mgmt_status_provision_record_t *dst)
 {
    if (!src || !dst || src->seal_epoch <= 0)
@@ -221,7 +221,7 @@ static int db_to_core(const db2_management_status_provision_record_t *src,
 }
 
 static int core_to_db(const kb_mgmt_status_provision_record_t *src,
-                      db2_management_status_provision_record_t *dst)
+                      kb_store_management_status_provision_record_t *dst)
 {
    if (!src || !dst || src->phase != KB_MGMT_STATUS_PROVISION_STAGED || !src->seal_epoch ||
        src->seal_epoch > INT64_MAX || src->hwm1_attestation_len != 64)
@@ -250,9 +250,9 @@ static kb_mgmt_status_provision_db_result_t inspect_cb(void *opaque, const char 
                                                        kb_mgmt_status_provision_record_t *record)
 {
    provision_db_ctx_t *ctx = opaque;
-   db2_management_status_provision_record_t db_record;
+   kb_store_management_status_provision_record_t db_record;
    memset(&db_record, 0, sizeof(db_record));
-   int rc = db2_management_status_provision_inspect(&ctx->db, custody_key_id, &db_record);
+   int rc = kb_store_management_status_provision_inspect(&ctx->db, custody_key_id, &db_record);
    if (rc != 0)
    {
       OPENSSL_cleanse(&db_record, sizeof(db_record));
@@ -267,11 +267,12 @@ static kb_mgmt_status_provision_db_result_t
 stage_cb(void *opaque, const kb_mgmt_status_provision_record_t *record)
 {
    provision_db_ctx_t *ctx = opaque;
-   db2_management_status_provision_record_t db_record;
+   kb_store_management_status_provision_record_t db_record;
    int64_t rotation_id = 0, seal_epoch = 0;
    if (core_to_db(record, &db_record) != 0)
       return KB_MGMT_STATUS_PROVISION_DB_INTEGRITY;
-   int rc = db2_management_status_provision_stage(&ctx->db, &db_record, &rotation_id, &seal_epoch);
+   int rc =
+       kb_store_management_status_provision_stage(&ctx->db, &db_record, &rotation_id, &seal_epoch);
    OPENSSL_cleanse(&db_record, sizeof(db_record));
    if (rc != 0)
       return KB_MGMT_STATUS_PROVISION_DB_RETRY;
@@ -287,15 +288,15 @@ prepare_cb(void *opaque, const kb_mgmt_status_provision_record_t *record)
    int64_t rotation_id = 0, expected = 0, next = 0;
    if (!record || !text_valid(record->bootstrap_id, 64))
       return KB_MGMT_STATUS_PROVISION_DB_INTEGRITY;
-   if (db2_management_status_provision_prepare_activation(&ctx->db, record->bootstrap_id,
-                                                          &rotation_id, &expected, &next) != 0)
+   if (kb_store_management_status_provision_prepare_activation(&ctx->db, record->bootstrap_id,
+                                                               &rotation_id, &expected, &next) != 0)
       return KB_MGMT_STATUS_PROVISION_DB_RETRY;
    return rotation_id > 0 && expected == 1 && next == 2 ? KB_MGMT_STATUS_PROVISION_DB_OK
                                                         : KB_MGMT_STATUS_PROVISION_DB_INTEGRITY;
 }
 
 static int fixed_final_record(const kb_mgmt_status_provision_record_t *expected,
-                              const db2_management_status_provision_record_t *actual,
+                              const kb_store_management_status_provision_record_t *actual,
                               const uint8_t *attestation, size_t attestation_len)
 {
    kb_mgmt_status_provision_record_t converted;
@@ -321,12 +322,12 @@ finalize_cb(void *opaque, const kb_mgmt_status_provision_record_t *record,
             const uint8_t *hwm_attestation, size_t hwm_attestation_len)
 {
    provision_db_ctx_t *ctx = opaque;
-   db2_management_status_provision_record_t final_record;
+   kb_store_management_status_provision_record_t final_record;
    memset(&final_record, 0, sizeof(final_record));
    if (!record || !hwm_attestation || hwm_attestation_len != 64)
       return KB_MGMT_STATUS_PROVISION_DB_INTEGRITY;
-   int rc = db2_management_status_provision_finalize(&ctx->db, record->bootstrap_id,
-                                                     hwm_attestation, &final_record);
+   int rc = kb_store_management_status_provision_finalize(&ctx->db, record->bootstrap_id,
+                                                          hwm_attestation, &final_record);
    if (rc != 0)
    {
       OPENSSL_cleanse(&final_record, sizeof(final_record));
@@ -452,7 +453,7 @@ int main(int argc, char **argv)
       fixed_error("hardening");
       return EXIT_HARDENING;
    }
-   if (db2_management_status_provision_open(&ctx.db, db_url, db_error, sizeof(db_error)) != 0)
+   if (kb_store_management_status_provision_open(&ctx.db, db_url, db_error, sizeof(db_error)) != 0)
    {
       OPENSSL_cleanse(db_error, sizeof(db_error));
       if (restore_stderr(&saved_stderr) != 0)
@@ -465,7 +466,7 @@ int main(int argc, char **argv)
     * credentials through the environment of the subsequently executed helper. */
    if (unsetenv("AIMEE_KB_STATUS_PROVISION_DSN") != 0)
    {
-      db2_management_status_provision_close(&ctx.db);
+      kb_store_management_status_provision_close(&ctx.db);
       if (restore_stderr(&saved_stderr) != 0)
          return EXIT_HARDENING;
       fixed_error("hardening");
@@ -476,7 +477,7 @@ int main(int argc, char **argv)
    if (vault_unseal(NULL, 0) != 0 || vault_custody_kms_hwm_refresh() != 0 ||
        vault_is_sealed() != 0 || !vault_custody_kms_hwm_ready())
    {
-      db2_management_status_provision_close(&ctx.db);
+      kb_store_management_status_provision_close(&ctx.db);
       if (restore_stderr(&saved_stderr) != 0)
          return EXIT_HARDENING;
       fixed_error("custody");
@@ -493,7 +494,7 @@ int main(int argc, char **argv)
    kb_mgmt_status_provision_result_t result =
        kb_mgmt_status_provision(custody_key_id, &seam, &output);
    int sealed = vault_seal();
-   db2_management_status_provision_close(&ctx.db);
+   kb_store_management_status_provision_close(&ctx.db);
    if (restore_stderr(&saved_stderr) != 0)
    {
       OPENSSL_cleanse(&output, sizeof(output));

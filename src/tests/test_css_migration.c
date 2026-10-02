@@ -8,14 +8,14 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-#include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/css_graph.h"
-#include "../modules/db2/c/css_migration.h"
+#include "../modules/kb/c/code_index.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/css_graph.h"
+#include "../modules/kb/c/css_migration.h"
 
 static void test_gate(void)
 {
@@ -30,30 +30,30 @@ int main(void)
 {
    test_gate();
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
-   int64_t pid = db2_code_index_project_upsert("mig", "/mig");
-   int64_t css_fid = db2_code_index_file_upsert(pid, "styles.css", "2026-01-01T00:00:00Z");
+   int64_t pid = kb_store_code_index_project_upsert("mig", "/mig");
+   int64_t css_fid = kb_store_code_index_file_upsert(pid, "styles.css", "2026-01-01T00:00:00Z");
    const char *css = ".btn { color: red; }\n"
                      ".flex { display: flex; }\n"
                      ".card__title { font-weight: bold; }\n" /* BEM-ish */
                      ":root { --brand: #fff; }\n";
    css_stylesheet_t *ss = css_analyze(css, strlen(css));
-   assert(ss && db2_css_graph_replace(css_fid, ss->rules, ss->rule_count) == 0);
+   assert(ss && kb_store_css_graph_replace(css_fid, ss->rules, ss->rule_count) == 0);
    css_stylesheet_free(ss);
 
-   int64_t comp = db2_code_index_file_upsert(pid, "Button.tsx", "2026-01-01T00:00:00Z");
+   int64_t comp = kb_store_code_index_file_upsert(pid, "Button.tsx", "2026-01-01T00:00:00Z");
    const char *tsx = "<button className=\"btn flex missing\" />";
    char toks[64][CSS_CLASS_TOKEN_MAX];
    int nt = css_extract_class_tokens(tsx, strlen(tsx), toks, 64);
    assert(nt == 3);
-   assert(db2_css_component_resolve(comp, toks, nt) == 0); /* btn,flex resolved; missing not */
+   assert(kb_store_css_component_resolve(comp, toks, nt) == 0); /* btn,flex resolved; missing not */
 
    /* enumerate: one unit (Button.tsx), total=3 tokens, 2 resolved */
-   int nu = db2_css_migration_enumerate("mig");
+   int nu = kb_store_css_migration_enumerate("mig");
    assert(nu == 1);
    css_migration_unit_t units[16];
-   int n = db2_css_migration_list("mig", NULL, units, 16);
+   int n = kb_store_css_migration_list("mig", NULL, units, 16);
    assert(n == 1);
    assert(strcmp(units[0].unit_path, "Button.tsx") == 0);
    assert(strcmp(units[0].state, "pending") == 0);
@@ -64,20 +64,20 @@ int main(void)
           CSS_MIGRATION_GATE_NEEDS_REVIEW);
 
    /* drive a state transition + oracle verdict */
-   assert(db2_css_migration_set_state("mig", "Button.tsx", "verified", 1, "oracle equivalent",
-                                      "2026-01-02T00:00:00Z") == 0);
-   n = db2_css_migration_list("mig", "verified", units, 16);
+   assert(kb_store_css_migration_set_state("mig", "Button.tsx", "verified", 1, "oracle equivalent",
+                                           "2026-01-02T00:00:00Z") == 0);
+   n = kb_store_css_migration_list("mig", "verified", units, 16);
    assert(n == 1 && units[0].oracle_equivalent == 1);
-   assert(db2_css_migration_list("mig", "pending", units, 16) == 0);
+   assert(kb_store_css_migration_list("mig", "pending", units, 16) == 0);
 
    /* re-enumerate preserves the in-flight state but refreshes coverage */
-   assert(db2_css_migration_enumerate("mig") == 1);
-   n = db2_css_migration_list("mig", NULL, units, 16);
+   assert(kb_store_css_migration_enumerate("mig") == 1);
+   n = kb_store_css_migration_list("mig", NULL, units, 16);
    assert(n == 1 && strcmp(units[0].state, "verified") == 0);
 
    /* degraded #2 rules doc derived from the exemplar style graph */
    char doc[4096];
-   int dl = db2_css_migration_rules_doc("mig", doc, sizeof(doc));
+   int dl = kb_store_css_migration_rules_doc("mig", doc, sizeof(doc));
    assert(dl > 0);
    assert(strstr(doc, "Convention Rules"));
    assert(strstr(doc, "BEM-like")); /* .card__title triggers the heuristic */
@@ -88,11 +88,12 @@ int main(void)
    /* Operational migration state is generation-scoped: a re-added checkout
     * cannot inherit the prior generation's verified unit. */
    char gen_err[256] = "";
-   assert(aimee_pg_exec(db2_conn(), "UPDATE projects SET current_generation=2 WHERE name='mig'",
-                        gen_err, sizeof(gen_err)) == 0);
-   assert(db2_css_migration_list("mig", NULL, units, 16) == 0);
+   assert(aimee_pg_exec(kb_store_conn(),
+                        "UPDATE projects SET current_generation=2 WHERE name='mig'", gen_err,
+                        sizeof(gen_err)) == 0);
+   assert(kb_store_css_migration_list("mig", NULL, units, 16) == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("css_migration: all tests passed\n");
    return 0;
 }

@@ -1,7 +1,7 @@
 /* kb_client_tool_registry.c: kb_client wrappers for the tool_registry.*
  * RPC family (lookup, snapshot).  Non-server test builds can short-circuit
- * into in-process DB2 when the sqlite shim is initialized; aimee-server
- * compiles this file with AIMEE_DB2_DISABLED and always uses the RPC path. */
+ * into in-process KB_STORE when the sqlite shim is initialized; aimee-server
+ * compiles this file with AIMEE_KB_STORE_DISABLED and always uses the RPC path. */
 
 #include "kb_client.h"
 #include "cJSON.h"
@@ -30,11 +30,11 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
    if (!name)
       return -1;
 
-   if (db2_is_initialized())
+   if (kb_store_is_initialized())
    {
       tool_registry_entry_t entry;
       memset(&entry, 0, sizeof(entry));
-      int rc = db2_tool_registry_lookup(name, &entry);
+      int rc = kb_store_tool_registry_lookup(name, &entry);
       if (rc != 0)
          return -1;
       if (out_found)
@@ -104,7 +104,7 @@ static int kbctr_collect_prompt(const char *name, const char *prompt, void *user
 
 char *kb_client_tool_registry_snapshot_json(void)
 {
-   if (db2_is_initialized())
+   if (kb_store_is_initialized())
    {
       cJSON *resp = cJSON_CreateObject();
       if (!resp)
@@ -112,7 +112,7 @@ char *kb_client_tool_registry_snapshot_json(void)
       cJSON_AddStringToObject(resp, "status", "ok");
       cJSON *prompts = cJSON_AddArrayToObject(resp, "prompts");
       struct kbctr_prompts_ctx ctx = {prompts};
-      db2_tool_registry_iter_prompts(kbctr_collect_prompt, &ctx);
+      kb_store_tool_registry_iter_prompts(kbctr_collect_prompt, &ctx);
       char *out = cJSON_PrintUnformatted(resp);
       cJSON_Delete(resp);
       return out;
@@ -124,7 +124,7 @@ char *kb_client_tool_registry_snapshot_json(void)
 
 /* Invoke a tool on an MCP plugin the KB hosts (config install: kb), over the
  * mTLS /v1/actions/mcp.call channel. Always an RPC — plugins run only in the
- * hosting daemon, never in-process here, so there is no DB2 short-circuit.
+ * hosting daemon, never in-process here, so there is no KB_STORE short-circuit.
  * On success returns 0 and, if out_result is non-NULL, sets it to an owned cJSON
  * (the plugin's tools/call result). On failure returns -1 with a message in
  * err_buf. |args| is borrowed (deep-copied into the request). */

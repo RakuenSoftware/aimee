@@ -9,7 +9,7 @@ boundaries and the [manual](../MANUAL.md) for use.
 | --- | --- | --- |
 | `aimee` | C11 | DB-free thin CLI, hooks, MCP/ACP stdio, local transport |
 | `aimee-server` | C11 | DB1, resource API, agents, tools, policy, vault, provider calls |
-| `aimee-kb` | C11 | DB2, memory, documents, code graph, retrieval, curation |
+| `aimee-kb` | C11 | KB_STORE, memory, documents, code graph, retrieval, curation |
 | `aimee-wfe` | Go | workflow definitions, lifecycle, artifacts, scheduler, worktrees, forge |
 | `aimee-runtime-web` | Go | authenticated browser proxy and UI service |
 
@@ -31,7 +31,7 @@ src/
   modules/              product modules and public include trees
     aimee/              PostgreSQL-backed server store contract
     postgres/           shared PostgreSQL transport module
-    db2/                KB PostgreSQL/pgvector owner
+    kb_store/                KB PostgreSQL/pgvector owner
     audit/              WORM audit, replay, observability bridge
     sandbox/            delegate isolation
   tests/                C unit and integration tests
@@ -86,9 +86,9 @@ See [Event bus](../docs/EVENT_BUS.md).
 
 ## Storage ownership
 
-DB1 and DB2 cannot call through each other's storage layer.
+DB1 and KB_STORE cannot call through each other's storage layer.
 
-- Server builds define the DB2-disabled boundary and never link `libpq`.
+- Server builds define the KB_STORE-disabled boundary and never link `libpq`.
 - The `aimee-kb` service never links SQLite; its separately credentialed WORM
   worker links the same SQLite implementation as `aimee-server`.
 - The thin client links neither database.
@@ -172,7 +172,7 @@ High-value gates:
 
 | Gate | Protects |
 | --- | --- |
-| tier and link checks | DB1/DB2/thin-client ownership |
+| tier and link checks | DB1/KB_STORE/thin-client ownership |
 | module boundary checks | public-header and dependency contracts |
 | route/API checks | descriptor, handler, OpenAPI, and client parity |
 | CLI help coverage | command implementation and help parity |

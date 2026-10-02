@@ -1,5 +1,5 @@
 /* tasks.c: high-level task helpers that compose data from multiple
- * stores. Storage primitives live in db1/db2; this file just wraps
+ * stores. Storage primitives live in db1/kb_store; this file just wraps
  * the snapshot composition (checkpoint_create) and the restore path
  * (which writes into memory). */
 #include "aimee.h"
@@ -18,7 +18,7 @@ int tasks_checkpoint_create(const char *label, const char *session_id, int64_t t
    if (!snap)
       return -1;
 
-   /* Active tasks (DB2 via aimee-kb) */
+   /* Active tasks (KB_STORE via aimee-kb) */
    {
       cJSON *arr = cJSON_AddArrayToObject(snap, "tasks");
       aimee_task_t tasks[32];
@@ -63,10 +63,10 @@ int tasks_checkpoint_create(const char *label, const char *session_id, int64_t t
       cJSON_Delete(response);
    }
 
-   /* Recent decisions (DB2 via aimee-kb) */
+   /* Recent decisions (KB_STORE via aimee-kb) */
    {
       cJSON *arr = cJSON_AddArrayToObject(snap, "decisions");
-      db2_decision_log_row_t decs[8];
+      kb_store_decision_log_row_t decs[8];
       int dc = kb_client_decision_log_list(NULL, 8, decs, 8);
       if (dc < 0)
       {

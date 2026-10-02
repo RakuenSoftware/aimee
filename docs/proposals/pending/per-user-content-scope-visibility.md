@@ -17,7 +17,7 @@ rewritten under the appropriate Go module, while C, SQL, and PostgreSQL remain m
 migrations, containment checks, and fail-closed enforcement.
 
 This correction restores the proposal to pending. It does not claim the cross-tenant read hole is
-fully fixed. Slices already present in `src/modules/db2/c/schema.sql` remain useful compatibility
+fully fixed. Slices already present in `src/modules/kb/c/schema.sql` remain useful compatibility
 controls, but their activation is still operator-gated and they are not the future authorization
 owner. The proposal moves to `done/` only after the Go implementation and all negative acceptance
 evidence below land.
