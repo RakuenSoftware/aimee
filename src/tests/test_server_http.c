@@ -155,7 +155,8 @@ static int stub_native_primitive_handler(const char *body, char *resp, int cap)
 {
    cJSON *request = cJSON_Parse(body);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "native_primitive")));
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "query")), "x") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "query")), "x") ==
+          0);
    cJSON_Delete(request);
    snprintf(resp, (size_t)cap, "{\"stub\":true}");
    return 200;
@@ -1186,8 +1187,8 @@ int main(void)
     * authorized recall owner, with the primitive mode set by the route. */
    {
       server_http_set_memory_recall_handler(stub_native_primitive_handler);
-      int st = server_http_route("POST", "/v1/native/primitive",
-                                 "{\"query\":\"x\"}", 13, resp, sizeof(resp));
+      int st = server_http_route("POST", "/v1/native/primitive", "{\"query\":\"x\"}", 13, resp,
+                                 sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"stub\":true"));
       st = server_http_route("POST", "/v1/native/primitive", "[]", 2, resp, sizeof(resp));

@@ -283,7 +283,8 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    {
       cJSON_Delete(req);
       snprintf(resp, (size_t)cap,
-               "{\"error\":{\"message\":\"native primitive requires personal memory\",\"type\":\"invalid_request_error\"}}");
+               "{\"error\":{\"message\":\"native primitive requires personal "
+               "memory\",\"type\":\"invalid_request_error\"}}");
       return 400;
    }
    if (!store_selection)
@@ -307,16 +308,28 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
          for (size_t g = 0; valid && g < sizeof(groups) / sizeof(groups[0]); ++g)
          {
             cJSON *group = cJSON_GetObjectItemCaseSensitive(recall, groups[g]);
-            if (!cJSON_IsArray(group)) { valid = 0; break; }
+            if (!cJSON_IsArray(group))
+            {
+               valid = 0;
+               break;
+            }
             cJSON *row = NULL;
             cJSON_ArrayForEach(row, group)
             {
                cJSON *version = cJSON_GetObjectItemCaseSensitive(row, "version");
                cJSON *content = cJSON_GetObjectItemCaseSensitive(row, "content");
-               if (!cJSON_IsObject(version) || !cJSON_IsString(content)) { valid = 0; break; }
+               if (!cJSON_IsObject(version) || !cJSON_IsString(content))
+               {
+                  valid = 0;
+                  break;
+               }
                cJSON *copy = cJSON_Duplicate(row, 1);
                if (!copy || !cJSON_AddItemToArray(rows, copy))
-               { cJSON_Delete(copy); valid = 0; break; }
+               {
+                  cJSON_Delete(copy);
+                  valid = 0;
+                  break;
+               }
             }
          }
          cJSON *out = valid ? cJSON_CreateObject() : NULL;
