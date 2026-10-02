@@ -39,7 +39,6 @@
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
 #include "request_context.h"
-#include "server_native_delivery.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_http_authz.h"    /* capability/route-gate policy + per-user write tier */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
@@ -1866,8 +1865,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
       long declared = strtol(clbuf, &clend, 10);
       int route_limit =
           !strcmp(path, "/v1/roundtable/review") ? SHTTP_MAX_ROUNDTABLE_BODY : SHTTP_MAX_BODY;
-      if (server_native_delivery_route(method, path))
-         route_limit = 131072;
       int invalid = errno == ERANGE || clend == clbuf || *clend != '\0' || declared < 0;
       if (invalid || declared > route_limit)
       {
@@ -2056,24 +2053,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
 
-   if (server_native_delivery_route(method, path))
-   {
-      server_http_identity_capture(fd, is_tcp, buf);
-      if (first_user_principal[0])
-         server_http_identity_override_principal(first_user_principal);
-      /* The backend response is Connection: close, including truncated transfers. */
-      server_http_keepalive_set(0);
-      int response_status = 0;
-      int forwarded = server_native_delivery_forward_query(fd, method, path, query,
-          server_http_identity_principal(), body, body_len, &response_status);
-      server_http_log_access(method, path, forwarded ? forwarded :
-          (response_status ? response_status : 502), request_id);
-      server_http_identity_clear();
-      if (forwarded)
-         send_response(fd, forwarded, "{\"error\":\"native publication unavailable\"}", request_id);
-      free(body);
-      return;
-   }
    char *resp = malloc(SHTTP_RESP_MAX);
    if (!resp)
    {
