@@ -89,30 +89,6 @@ static void test_set_then_load(void)
    PASS("set persists and load_persisted applies it");
 }
 
-static void test_set_token_from_stdin(void)
-{
-   reset_state();
-   int saved = dup(STDIN_FILENO), ends[2];
-   assert(saved >= 0 && pipe(ends) == 0);
-   const char code[] = "one-use-invitation\n";
-   assert(write(ends[1], code, sizeof(code) - 1) == (ssize_t)(sizeof(code) - 1));
-   close(ends[1]);
-   assert(dup2(ends[0], STDIN_FILENO) == STDIN_FILENO);
-   close(ends[0]);
-   clearerr(stdin);
-   char *args[] = {(char *)"set", (char *)"http://stdin-example.test:8740",
-                   (char *)"--token-stdin"};
-   assert(cli_remote_cmd(3, args, 1) == 0);
-   assert(dup2(saved, STDIN_FILENO) == STDIN_FILENO);
-   close(saved);
-   clearerr(stdin);
-   cli_remote_load_persisted();
-   char token[128] = {0};
-   assert(aimee_client_remote_token(token, sizeof(token)) == 1);
-   assert(strcmp(token, "one-use-invitation") == 0);
-   PASS("remote set reads invitation from stdin without a token argument");
-}
-
 static void test_env_wins_over_file(void)
 {
    reset_state();
@@ -196,7 +172,6 @@ int main(void)
    printf("test_cli_remote:\n");
    test_help_arity_and_help_token_handling();
    test_set_then_load();
-   test_set_token_from_stdin();
    test_env_wins_over_file();
    test_clear();
    test_set_creates_missing_home();

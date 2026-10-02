@@ -870,35 +870,7 @@ static int remote_help_flag(const char *arg)
 
 static void remote_usage(FILE *out)
 {
-   fprintf(out, "usage: aimee remote <set <url> [token|--token-stdin] | enroll | trust | status | clear>\n");
-}
-
-/* The native plugin can pass a one-use invitation without placing it in a
- * process argument. The normal remote_set path still owns pinning and CSR
- * enrollment; this is only a different credential input. */
-static int remote_set_from_stdin(const char *url, int json_output)
-{
-   char token[256] = {0};
-   int result = 2;
-   if (fgets(token, sizeof(token), stdin))
-   {
-      size_t n = strcspn(token, "\r\n");
-      int complete = token[n] == '\r' || token[n] == '\n' || feof(stdin);
-      token[n] = '\0';
-      if (complete && n > 0 && n < sizeof(token) - 1)
-      {
-         int valid = 1;
-         for (size_t i = 0; i < n; i++)
-            if ((unsigned char)token[i] <= 32 || (unsigned char)token[i] >= 127)
-               valid = 0;
-         if (valid)
-            result = remote_set(url, token, json_output);
-      }
-   }
-   volatile char *p = token;
-   for (size_t i = 0; i < sizeof(token); i++)
-      p[i] = 0;
-   return result;
+   fprintf(out, "usage: aimee remote <set <url> [token] | enroll | trust | status | clear>\n");
 }
 
 /* Mint an additional bearer for the configured remote and adopt it without
@@ -957,8 +929,6 @@ int cli_remote_cmd(int argc, char **argv, int json_output)
          remote_usage(stderr);
          return 2;
       }
-      if (argc == 3 && strcmp(argv[2], "--token-stdin") == 0)
-         return remote_set_from_stdin(argv[1], json_output);
       return remote_set(argc > 1 ? argv[1] : NULL, argc > 2 ? argv[2] : NULL, json_output);
    }
    if (argc != 1)

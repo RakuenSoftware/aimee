@@ -11,10 +11,6 @@ aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 ```
 
-For a program that receives a short-lived client invitation through standard
-input, `aimee remote set https://host:8743 --token-stdin` performs the same
-certificate enrollment without placing the invitation in a process argument.
-
 For the first user, copy this command from the setup wizard. The enrollment path pins the server
 certificate and Linux generates/enrolls a client mTLS certificate. The server binds that certificate
 to the authenticated wizard account with an explicit full grant. Verify the printed fingerprint out
