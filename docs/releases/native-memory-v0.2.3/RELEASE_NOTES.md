@@ -52,7 +52,12 @@ Qwen candidate had a GGUF normalization conversion error in local preparation;
 its failed results remain in the private validation record. The correction is
 present in these signed bytes. These release-path tests used a local mTLS
 primitive fixture with the standard thinclient profile; production Aimee
-authorization deployment is a separate integration check.
+authorization deployment is a separate integration check. A fresh
+`aimee:testing` server also accepted a genuinely enrolled thin client and
+served the native primitive; it returned HTTP 401 for an invalid bearer. That
+server held no writable memory records, so the real-server check did not test
+selected-record answers. This plugin requires an Aimee application release
+that includes `/v1/native/primitive`; public v0.4.6 did not at staging.
 
 Initial native preparation can take minutes while the host reads and processes
 model weights. The prepared bank is cached for later selections. This release

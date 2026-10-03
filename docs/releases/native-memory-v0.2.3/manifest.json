@@ -5,8 +5,8 @@
   "assets": {
     "aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl",
-      "sha256": "8d75a69881ba7a4ce972603cbf31d48751153af483787128604ee753ff95365d",
-      "bytes": 3449832
+      "sha256": "d023b8f420efd21c93fc3b7e0431023a254b2ade2d52490520ef91c0eff004ea",
+      "bytes": 3526231
     },
     "vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl",

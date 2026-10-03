@@ -7,9 +7,9 @@ attach these exact files:
 
 | Asset | SHA-256 | Size |
 | --- | --- | ---: |
-| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `8d75a69881ba7a4ce972603cbf31d48751153af483787128604ee753ff95365d` | 3,449,832 bytes |
+| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `d023b8f420efd21c93fc3b7e0431023a254b2ade2d52490520ef91c0eff004ea` | 3,526,231 bytes |
 | `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656` | 230,630 bytes |
-| `manifest.json` | `4146d3e11554ef3fa0dc17014b6f0c4a68bd0860a9f1909c17c5b0208e3da152` | 2,056 bytes |
+| `manifest.json` | `73d1abe28125a29b14026b34f9a2d6cbcff984baedd1536c4a98ca66d6db5cdb` | 2,056 bytes |
 
 The plugin wheel contains the `aimee-native` Rust executable, compiled local
 encoder modules, the portable native consumer, and the vLLM plugin. It contains
@@ -59,6 +59,12 @@ three selected records both in one combined answer and in three individual
 answers with Qwen. The earlier Qwen native-answer regression was traced to a GGUF
 normalization conversion in local preparation and corrected before this wheel
 was built. These release-path tests used a local mTLS primitive fixture with
-the standard thinclient profile; they do not substitute for a production Aimee
-authorization deployment. The stage remains a candidate until review and
+the standard thinclient profile. Separately, the wheel connected through an
+actual thin-client enrollment to a fresh `aimee:testing` server, fetched the
+native primitive, and received HTTP 401 when the bearer was invalidated. That
+fresh server had no authorized memory writes, so this check returned zero
+records; selected-record correctness is established by the mTLS release-path
+tests above. At staging, public Aimee v0.4.6 predates the primitive route, so
+the server must reach a public application release before users on the latest
+Aimee can use this plugin. The stage remains a candidate until review and
 publication.
