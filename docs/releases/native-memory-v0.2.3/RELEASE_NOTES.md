@@ -1,4 +1,4 @@
-# Aimee native memory for vLLM — self-hosted binary preview
+# Aimee native memory for vLLM: self-hosted binary preview
 
 This release lets a supported local vLLM model consume records selected by
 your own Aimee instance as native attention memory. The records are not added
