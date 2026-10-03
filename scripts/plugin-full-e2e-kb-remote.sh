@@ -134,7 +134,6 @@ PGARGV="[\"python3\",\"$RUN/aimee-pluggy-host.py\",\"--project\",\"aimee_demo\",
 # One mcp_clients entry per daemon, with DIFFERENT plugins, so "kb booted only
 # its own" is a sharp assertion rather than a process count.
 cat > "$AH/aimee.yaml" <<YAML
-db2_url: $DSN
 mcp_clients:
   - name: kbclient
     transport: stdio
@@ -219,7 +218,7 @@ grep -q "^serve=11265$" "$AH/modules.d/kb/postgres.grant" && \
 
 # ------------------------------------------------------------- start aimee-kb --
 echo
-echo "== start REAL aimee-kb (real postgres, real db2 schema) =="
+echo "== start REAL aimee-kb (real postgres, real kb_store schema) =="
 HOME="$RUN/home" AIMEE_NO_CACHE=1 \
 AIMEE_MODULE_BUS_SOCKET="$RUN/run/kb.sock" \
 AIMEE_MODULE_POLICY_DIR="$AH/modules.d/kb" \
@@ -230,12 +229,12 @@ curl -sf "http://127.0.0.1:$KBPORT/v1/health" >/dev/null 2>&1
 check $? "aimee-kb came up against a real PostgreSQL (${i}s)"
 
 echo "== attach the REAL postgres module to kb =="
-HOME="$RUN/home" AIMEE_DB2_URL="$DSN" AIMEE_MODULE_PRINCIPAL_REF=28 \
+HOME="$RUN/home" AIMEE_STORE_URL="$DSN" AIMEE_MODULE_PRINCIPAL_REF=28 \
 nohup "$RUN/aimee-module-postgres" "$RUN/run/kb.sock" > "$RUN/run/pg.log" 2>&1 &
 sleep 5
 HEALTH=$(curl -s "http://127.0.0.1:$KBPORT/v1/health")
-echo "$HEALTH" | grep -q '"db2_ok":true'
-check $? "kb reports db2_ok=true THROUGH the postgres module on the bus"
+echo "$HEALTH" | grep -q '"postgres_ok":true'
+check $? "kb reports postgres_ok=true THROUGH the postgres module on the bus"
 
 echo "== attach a plugin instance to the SAME kb bus =="
 ln -sf "$RUN/aimee-module" "$RUN/aimee-module-mcp-kbplug"
@@ -252,8 +251,8 @@ else
   pass "a plugin instance and the postgres module COEXIST on one kb bus"
 fi
 HEALTH2=$(curl -s "http://127.0.0.1:$KBPORT/v1/health")
-echo "$HEALTH2" | grep -q '"db2_ok":true'
-check $? "postgres was NOT displaced: db2_ok is still true"
+echo "$HEALTH2" | grep -q '"postgres_ok":true'
+check $? "postgres was NOT displaced: postgres_ok is still true"
 
 echo "== kb booted only ITS OWN mcp_clients =="
 pgrep -f "run/p_kbc.py" >/dev/null 2>&1
@@ -473,8 +472,8 @@ else
 fi
 
 echo "== kb is still healthy after all of it =="
-curl -s "http://127.0.0.1:$KBPORT/v1/health" | grep -q '"db2_ok":true'
-check $? "aimee-kb still reports db2_ok=true at the end of the run"
+curl -s "http://127.0.0.1:$KBPORT/v1/health" | grep -q '"postgres_ok":true'
+check $? "aimee-kb still reports postgres_ok=true at the end of the run"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "FULL E2E PASSED"; else echo "FULL E2E FAILED ($FAIL)"; fi

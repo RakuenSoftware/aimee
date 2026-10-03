@@ -27,7 +27,7 @@ static int failures = 0;
       }                                                                                            \
    } while (0)
 
-static void set_row(db2_org_spend_row_t *r, long long team, int has_project, long long project,
+static void set_row(kb_store_org_spend_row_t *r, long long team, int has_project, long long project,
                     const char *model, long long pt, long long ct, long long crt, long long cwt,
                     const char *cost, long long calls)
 {
@@ -75,7 +75,7 @@ int main(void)
    }
 
    /* ---- JSON shape + reconciliation ---- */
-   db2_org_spend_row_t rows[4];
+   kb_store_org_spend_row_t rows[4];
    /* two teams x two projects x two models, distinct costs. */
    set_row(&rows[0], 940001, 1, 100, "modelA", 10, 5, 0, 0, "0.0020000000", 1);
    set_row(&rows[1], 940001, 1, 100, "modelB", 20, 10, 0, 0, "0.0040000000", 2);
@@ -184,10 +184,11 @@ int main(void)
 
    /* Large-set regression: well past the former fixed 512-element scratch cap. Prove the
     * aggregation neither drops groups nor mis-reconciles at scale (fix #1: no silent
-    * truncation in the util; overflow beyond DB2_SPEND_MAX_ROWS is the db2 layer's job). */
+    * truncation in the util; overflow beyond KB_STORE_SPEND_MAX_ROWS is the kb_store layer's job).
+    */
    {
       const int N = 1000;
-      db2_org_spend_row_t *big = calloc((size_t)N, sizeof(*big));
+      kb_store_org_spend_row_t *big = calloc((size_t)N, sizeof(*big));
       CHECK(big != NULL, "large-set alloc");
       if (big)
       {

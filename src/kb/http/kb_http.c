@@ -6,9 +6,9 @@
 #include "aimee.h"
 #include "command_registry.h"
 #include "config.h"
-#include "config_database.h"        /* §2c: config_resolve_embedder_dims / is_pinned */
-#include "modules/db2/c/db2_pool.h" /* db2_pool_stats — health reports pool starvation */
-#include "lifecycle.h"              /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
+#include "config_database.h" /* §2c: config_resolve_embedder_dims / is_pinned */
+#include <aimee/postgres/client.h>
+#include "lifecycle.h" /* §2c: kb_store_dim_change_reset / kb_store_probe_embedder_dim */
 #include "kb_curator_queue.h"
 #include "kb_http.h"
 #include "kb_http_code.h"
@@ -22,8 +22,8 @@
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_service_kb.h"
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/canonical_index.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/canonical_index.h"
 #include "kb_enroll.h"
 #include "kb_pki.h"
 #include "kb_paths.h"
@@ -39,7 +39,7 @@
 #include "kb_http_rate.h"
 #include "kb_http_servers.h"
 #include "kb_http_telemetry.h"
-#include "modules/db2/c/enrollments.h"
+#include "modules/kb/c/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
@@ -48,16 +48,16 @@
 #include "kb_http_grants.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
-#include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/pgvec_kb_service.h"
-#include "modules/db2/c/kb_vectors.h"
-#include "modules/db2/c/kb_payload.h"
-#include "modules/db2/c/vector_index_ops.h"
-#include "modules/db2/c/kb_runtime_state.h"
-#include "modules/db2/c/corpus_jobs.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/pgvec_transport.h"
-#include "modules/db2/c/sketch.h"
+#include "modules/kb/c/lifecycle.h"
+#include "modules/kb/c/pgvec_kb_service.h"
+#include "modules/kb/c/kb_vectors.h"
+#include "modules/kb/c/kb_payload.h"
+#include "modules/kb/c/vector_index_ops.h"
+#include "modules/kb/c/kb_runtime_state.h"
+#include "modules/kb/c/corpus_jobs.h"
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/pgvec_transport.h"
+#include "modules/kb/c/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
@@ -130,31 +130,24 @@ void send_response(int fd, int status, const char *body)
 
 /* ── public route logic (also called by unit tests) ─────────────────────── */
 
-/* Health has to be able to say "I am sick".
- *
- * This endpoint returned a bare {"status":"ok"} unconditionally, so a kb whose
- * connection pool had been leaking for three hours reported ok on the one port
- * that still answered — 1096 failed health checks later, the only symptom
- * visible from outside was a TIMEOUT, which reads as a hung box rather than a
- * diagnosed fault. Report the pool, and fail the check when it is starved: every
- * member stuck past its ceiling with callers queued is a lease leak this process
- * cannot fix in place (the pool refuses to reclaim a live lease, and rightly).
- *
- * Non-2xx is the point. The container HEALTHCHECK is `curl -fsS`, so degraded
- * here is what finally makes Docker's unhealthy state mean something. It fires
- * before the pool reaper gives up and exits, so the softer signal comes first.
- *
- * Writes the pool object into `buf`; returns 1 when starved. */
+/* Provider admission reserves slots while opening sessions. Exhaustion refuses
+ * new native work immediately, so report saturation without waiting for a queue
+ * that the PostgreSQL provider deliberately does not maintain. The public
+ * waiters field preserves the old health shape and reports opening reservations. */
 static int kb_health_pool_json(char *buf, size_t cap)
 {
-   int size = 0, in_use = 0, waiters = 0;
-   long grants = 0, timeouts = 0, stuck = 0, poisoned = 0;
-   db2_pool_stats(&size, &in_use, &waiters, &grants, &timeouts, &stuck, &poisoned);
-   int starved = (size > 0 && in_use == size && waiters > 0);
+   aimee_postgres_session_stats_t stats;
+   if (aimee_postgres_session_stats(&stats))
+   {
+      snprintf(buf, cap, "\"pool\":{\"provider\":\"postgres\",\"available\":false}");
+      return 1;
+   }
+   int starved = stats.capacity > 0 && stats.in_use + stats.waiters >= stats.capacity;
    snprintf(buf, cap,
-            "\"pool\":{\"size\":%d,\"in_use\":%d,\"waiters\":%d,\"lease_timeouts\":%ld,"
-            "\"stuck\":%ld,\"poisoned\":%ld}",
-            size, in_use, waiters, timeouts, stuck, poisoned);
+            "\"pool\":{\"provider\":\"postgres\",\"size\":%u,\"in_use\":%u,\"waiters\":%u,"
+            "\"lease_timeouts\":%llu,\"stuck\":%llu,\"poisoned\":%llu}",
+            stats.capacity, stats.in_use, stats.waiters, (unsigned long long)stats.refused,
+            (unsigned long long)stats.expired, (unsigned long long)stats.discarded);
    return starved;
 }
 
@@ -210,7 +203,7 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
 /* ── Phase 5 backend declarations ────────────────────────────────────────── */
 /* index.h and memory.h are already included via aimee.h; use their real types.
- * db2/artifacts.h is NOT in the aimee.h chain, so declare those types locally. */
+ * kb_store/artifacts.h is NOT in the aimee.h chain, so declare those types locally. */
 
 extern char *kb_search_json_ex(const char *project, const char *query, const char *embedding_cmd,
                                int max_results, const char *fusion_mode_override);
@@ -218,7 +211,7 @@ extern char *kb_search_json_scoped_ex(const char *preferred_project, int all_pro
                                       const char *query, const char *embedding_cmd, int max_results,
                                       const char *fusion_mode_override);
 
-/* Matches db2_artifact_row_t in db2/artifacts.h */
+/* Matches kb_store_artifact_row_t in kb_store/artifacts.h */
 typedef struct
 {
    char id[37];
@@ -231,24 +224,24 @@ typedef struct
    char updated_at[32];
 } kbhttp_artifact_row_t;
 
-/* Matches db2_artifact_citation_t in db2/artifacts.h */
+/* Matches kb_store_artifact_citation_t in kb_store/artifacts.h */
 typedef struct
 {
    char source_kind[64];
    char source_id[256];
 } kbhttp_artifact_citation_t;
 
-/* Matches db2_artifact_link_row_t in db2/artifacts.h */
+/* Matches kb_store_artifact_link_row_t in kb_store/artifacts.h */
 typedef struct
 {
    char to_id[37];
    char link_kind[64];
 } kbhttp_artifact_link_row_t;
 
-extern int db2_artifact_read(const char *id, kbhttp_artifact_row_t *out,
-                             kbhttp_artifact_citation_t *citations, int max_citations,
-                             int *citation_count);
-extern int db2_artifact_links_read(const char *id, kbhttp_artifact_link_row_t *out, int max);
+extern int kb_store_artifact_read(const char *id, kbhttp_artifact_row_t *out,
+                                  kbhttp_artifact_citation_t *citations, int max_citations,
+                                  int *citation_count);
+extern int kb_store_artifact_links_read(const char *id, kbhttp_artifact_link_row_t *out, int max);
 
 /* ── Phase 5 helpers ─────────────────────────────────────────────────────── */
 
@@ -389,7 +382,7 @@ static int kb_http_vector_upsert_document(int64_t document_id, const float *vec,
    return pgvec_kb_vector_upsert_document(document_id, vec, dim, payload_json);
 }
 
-static const char *kb_http_queue_state(const db2_kb_service_async_queue_stats_t *stats)
+static const char *kb_http_queue_state(const kb_store_kb_service_async_queue_stats_t *stats)
 {
    if (stats->running > 0)
       return "running";
@@ -401,7 +394,7 @@ static const char *kb_http_queue_state(const db2_kb_service_async_queue_stats_t 
 }
 
 static void kb_http_corpus_pipeline_json(char *out_buf, int out_cap,
-                                         const db2_corpus_pipeline_stats_t *stats)
+                                         const kb_store_corpus_pipeline_stats_t *stats)
 {
    cJSON *root = cJSON_CreateObject();
    cJSON_AddStringToObject(
@@ -412,7 +405,7 @@ static void kb_http_corpus_pipeline_json(char *out_buf, int out_cap,
    /* ALWAYS emitted, including zero. "processed: 14, failed: 0" read as a fully
     * processed document when eight of those fourteen transitions did nothing; an
     * absent field would leave the same impression for anyone who did not know to
-    * look for it. See db2_corpus_pipeline_stats_t.skipped. */
+    * look for it. See kb_store_corpus_pipeline_stats_t.skipped. */
    cJSON_AddNumberToObject(root, "skipped", stats->skipped);
    cJSON_AddNumberToObject(root, "pending", stats->pending);
    cJSON_AddNumberToObject(root, "running", stats->running);
@@ -420,8 +413,8 @@ static void kb_http_corpus_pipeline_json(char *out_buf, int out_cap,
    cJSON_AddNumberToObject(root, "failed", stats->failed);
    cJSON_AddNumberToObject(root, "total", stats->total);
    cJSON *stages = cJSON_AddArrayToObject(root, "stages");
-   db2_corpus_pipeline_stage_count_t rows[64];
-   int n = db2_corpus_pipeline_stage_counts(rows, 64);
+   kb_store_corpus_pipeline_stage_count_t rows[64];
+   int n = kb_store_corpus_pipeline_stage_counts(rows, 64);
    for (int i = 0; i < n; i++)
    {
       cJSON *row = cJSON_CreateObject();
@@ -538,7 +531,7 @@ static void purge_fence_current(const char *project, char *out, size_t out_cap)
 {
    char gen[128] = "", pid[128] = "";
    out[0] = '\0';
-   if (db2_kb_purge_fence_read(project, gen, sizeof(gen), pid, sizeof(pid), NULL) == 1)
+   if (kb_store_kb_purge_fence_read(project, gen, sizeof(gen), pid, sizeof(pid), NULL) == 1)
       snprintf(out, out_cap, "%s %s", gen, pid);
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
@@ -996,7 +989,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
    /* POST /v1/reembed {confirm, force, dry_run} — embedder-autodim §2c double-gated
     * dim-change reset. Server-gated by kb.reembed_on_dim_change; the destructive run
     * needs confirm=true (no confirm => a dry-run report). Resets to the
-    * configured/derived dim (db2_embedding_dim()); a no-op when it already matches. */
+    * configured/derived dim (kb_store_embedding_dim()); a no-op when it already matches. */
    if (strcmp(path, "/v1/reembed") == 0)
    {
       if (strcmp(method, "POST") != 0)
@@ -1011,7 +1004,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       {
          int was = 0, recorded = 0, running = 0;
          int cforce = kb_http_json_bool(body, "force", 0);
-         int rc = db2_reembed_clear_maintenance(cforce, &was, &recorded, &running);
+         int rc = kb_store_reembed_clear_maintenance(cforce, &was, &recorded, &running);
          char msg[160] = "";
          if (rc == -1)
             snprintf(msg, sizeof(msg),
@@ -1044,13 +1037,13 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       int dry = kb_http_json_bool(body, "dry_run", 0) || !confirm; /* no confirm => dry-run */
       /* Target precedence: explicit operator target_dim (authoritative, bypasses the
        * probe) > operator pin > the embedder's CURRENT dim via probe (after a model
-       * swap, db2_embedding_dim() still reports the old/recorded value). */
+       * swap, kb_store_embedding_dim() still reports the old/recorded value). */
       int target = kb_http_json_int(body, "target_dim", 0);
       if (target <= 0)
       {
          if (config_embedder_dims_pinned_current())
             target = config_resolve_embedder_dims_current();
-         else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
+         else if (kb_store_probe_embedder_dim(8000, &target) != 0 || target <= 0)
          {
             snprintf(out_buf, (size_t)out_cap,
                      "{\"error\":\"could not determine the target dim from the embedder; pass "
@@ -1059,8 +1052,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             return 503;
          }
       }
-      db2_reembed_plan_t plan;
-      int rc = db2_dim_change_reset(target, force, dry, &plan);
+      kb_store_reembed_plan_t plan;
+      int rc = kb_store_dim_change_reset(target, force, dry, &plan);
       cJSON *o = cJSON_CreateObject();
       if (o)
       {
@@ -1109,7 +1102,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       /* §2c: while a dim-change re-embed is in flight the vector store is being
        * rebuilt at the new dim; serving against it would return partial/empty
        * results. Refuse explicitly (503) rather than mislead. */
-      if (db2_reembed_in_progress_get(NULL, NULL) == 1)
+      if (kb_store_reembed_in_progress_get(NULL, NULL) == 1)
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"re-embedding in progress, retry shortly\",\"status\":"
@@ -1324,7 +1317,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             return 405;
          }
          kbhttp_artifact_link_row_t links[64];
-         int nlinks = db2_artifact_links_read(seg2, links, 64);
+         int nlinks = kb_store_artifact_links_read(seg2, links, 64);
          if (nlinks < 0)
          {
             snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
@@ -1359,7 +1352,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          kbhttp_artifact_row_t row;
          kbhttp_artifact_citation_t citations[8];
          int ncitations = 0;
-         if (db2_artifact_read(seg2, &row, citations, 8, &ncitations) != 0)
+         if (kb_store_artifact_read(seg2, &row, citations, 8, &ncitations) != 0)
          {
             snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
             return 404;
@@ -1412,8 +1405,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       if (qparam(query_string, "since", since_s, sizeof(since_s)))
          since = strtoll(since_s, NULL, 10);
 
-      db2_curator_invalidation_t evs[128];
-      int n = db2_curator_invalidations_since((int64_t)since, evs, 128);
+      kb_store_curator_invalidation_t evs[128];
+      int n = kb_store_curator_invalidations_since((int64_t)since, evs, 128);
 
       cJSON *root = cJSON_CreateObject();
       cJSON *arr = cJSON_AddArrayToObject(root, "invalidations");
@@ -1521,13 +1514,13 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       }
       int force = kb_http_json_bool(body, "force", 0);
 
-      if (!db2_is_initialized())
+      if (!kb_store_is_initialized())
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"failed to open knowledge service store\"}");
          return 503;
       }
-      int kb_embed_dim = db2_embedding_dim();
+      int kb_embed_dim = kb_store_embedding_dim();
       if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)
          kb_embed_dim = 1024;
       if (pgvec_kb_service_ensure_kb_collection(kb_embed_dim) != 0)
@@ -1557,8 +1550,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
        * build request jumps the periodic sweep instead of sitting behind it.
        * Starvation behind the global backlog is what made someone inline this
        * work in the first place; priority is the fix for that, not blocking. */
-      int queued =
-          db2_kb_ingest_queue_enqueue(project, kb_path, "", force, DB2_KB_INGEST_PRIO_INTERACTIVE);
+      int queued = kb_store_kb_ingest_queue_enqueue(project, kb_path, "", force,
+                                                    KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
       if (queued < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue build\"}");
@@ -1601,7 +1594,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
 
-      if (!db2_is_initialized())
+      if (!kb_store_is_initialized())
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"failed to open knowledge service store\"}");
@@ -1621,7 +1614,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
          return 500;
       }
-      db2_kb_runtime_state_set_now("last_ingest_at");
+      kb_store_kb_runtime_state_set_now("last_ingest_at");
       {
          if (config_kb_curator_extract_docs_enabled())
             kb_curator_queue_docs_for_project(project);
@@ -1653,7 +1646,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      if (!db2_is_initialized())
+      if (!kb_store_is_initialized())
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":\"failed to open knowledge service store\"}");
@@ -1701,11 +1694,11 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             if (force)
             {
                pgvec_kb_vector_delete_current_project(pname);
-               db2_kb_service_clear_current_project(pname);
-               db2_kb_file_index_delete_current_project(pname);
+               kb_store_kb_service_clear_current_project(pname);
+               kb_store_kb_file_index_delete_current_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
-                                        DB2_KB_INGEST_PRIO_INTERACTIVE);
+            kb_store_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                             KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
             total_queued++;
          }
       }
@@ -1725,11 +1718,11 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
                if (force)
                {
                   pgvec_kb_vector_delete_current_project(pname);
-                  db2_kb_service_clear_current_project(pname);
-                  db2_kb_file_index_delete_current_project(pname);
+                  kb_store_kb_service_clear_current_project(pname);
+                  kb_store_kb_file_index_delete_current_project(pname);
                }
-               db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
-                                           DB2_KB_INGEST_PRIO_INTERACTIVE);
+               kb_store_kb_ingest_queue_enqueue(pname, projects[i], pws, force,
+                                                KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
                total_queued++;
             }
          }
@@ -1797,8 +1790,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      db2_kb_service_async_queue_stats_t stats;
-      if (db2_kb_service_async_queue_status(&stats) != 0)
+      kb_store_kb_service_async_queue_stats_t stats;
+      if (kb_store_kb_service_async_queue_status(&stats) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"queue unavailable\"}");
          return 503;
@@ -1819,8 +1812,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      db2_corpus_pipeline_stats_t stats;
-      if (db2_corpus_pipeline_status(&stats) != 0)
+      kb_store_corpus_pipeline_stats_t stats;
+      if (kb_store_corpus_pipeline_status(&stats) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"corpus pipeline unavailable\"}");
          return 503;
@@ -1839,8 +1832,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       int limit = kb_http_json_int(body, "limit", 0);
       if (limit < 0)
          limit = 0;
-      db2_corpus_pipeline_stats_t stats;
-      if (db2_corpus_pipeline_drain(limit, &stats) != 0)
+      kb_store_corpus_pipeline_stats_t stats;
+      if (kb_store_corpus_pipeline_drain(limit, &stats) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"corpus pipeline drain failed\"}");
          return 500;
@@ -1866,10 +1859,10 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       if (timeout < 0)
          timeout = 0;
 
-      db2_kb_service_async_queue_stats_t stats;
-      int rc = db2_kb_service_async_queue_drain(session_id(), embed_cmd, timeout,
-                                                pgvec_kb_vector_collection_name(),
-                                                kb_http_vector_upsert_document, NULL, &stats);
+      kb_store_kb_service_async_queue_stats_t stats;
+      int rc = kb_store_kb_service_async_queue_drain(session_id(), embed_cmd, timeout,
+                                                     pgvec_kb_vector_collection_name(),
+                                                     kb_http_vector_upsert_document, NULL, &stats);
       if (rc != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"queue drain failed\"}");
@@ -1912,7 +1905,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       {
          snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedder_command_current(NULL));
       }
-      int kb_embed_dim = db2_embedding_dim();
+      int kb_embed_dim = kb_store_embedding_dim();
       if (kb_embed_dim <= 0 || kb_embed_dim > EMBED_MAX_DIM)
          kb_embed_dim = 1024;
       if (pgvec_kb_service_ensure_kb_collection(kb_embed_dim) != 0)
@@ -1920,7 +1913,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"vector store unavailable\"}");
          return 503;
       }
-      if (!db2_is_initialized())
+      if (!kb_store_is_initialized())
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge store unavailable\"}");
          return 503;
@@ -1932,7 +1925,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
        * the chain expires. force=1 is preserved as the queued job's force flag. */
       kb_stats_t stats;
       memset(&stats, 0, sizeof(stats));
-      if (db2_kb_ingest_queue_enqueue(project, kb_path, "", 1, DB2_KB_INGEST_PRIO_INTERACTIVE) < 0)
+      if (kb_store_kb_ingest_queue_enqueue(project, kb_path, "", 1,
+                                           KB_STORE_KB_INGEST_PRIO_INTERACTIVE) < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue knowledge repair\"}");
          return 503;
@@ -1959,8 +1953,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       int dry_run = kb_http_json_bool(body, "dry_run", 0);
       pgvec_kb_service_reconcile_result_t reconcile;
       memset(&reconcile, 0, sizeof(reconcile));
-      if (pgvec_kb_service_reconcile_orphans(db2_kb_service_memory_record_exists,
-                                             db2_kb_service_kb_document_exists, dry_run,
+      if (pgvec_kb_service_reconcile_orphans(kb_store_kb_service_memory_record_exists,
+                                             kb_store_kb_service_kb_document_exists, dry_run,
                                              &reconcile) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"reconcile failed\"}");
@@ -1989,7 +1983,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
          return 400;
       }
-      int deleted = db2_kb_service_clear_project(project);
+      int deleted = kb_store_kb_service_clear_project(project);
       if (deleted < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"kb clear failed\"}");
@@ -2026,9 +2020,9 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
        * without takeover:true, else publishes the new fence. */
       char cur_gen[128] = "", cur_pid[128] = "";
       int fence_replaced = 0;
-      int arc =
-          db2_kb_purge_fence_acquire(project, generation, purge_id, takeover, cur_gen,
-                                     sizeof(cur_gen), cur_pid, sizeof(cur_pid), &fence_replaced);
+      int arc = kb_store_kb_purge_fence_acquire(project, generation, purge_id, takeover, cur_gen,
+                                                sizeof(cur_gen), cur_pid, sizeof(cur_pid),
+                                                &fence_replaced);
       if (arc < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence write failed\"}");
@@ -2063,22 +2057,22 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          const char *name;
          purge_store_fn fn;
       } purge_matrix[] = {
-          {"chunks", db2_kb_service_clear_project},
-          {"file_index", db2_kb_file_index_delete_project},
+          {"chunks", kb_store_kb_service_clear_project},
+          {"file_index", kb_store_kb_file_index_delete_project},
           {"vectors", pgvec_kb_vector_delete_project},
           {"code_embeddings", pgvec_code_delete_project},
           {"curator_code_unit_vectors", pgvec_curator_code_unit_delete_project},
-          {"canonical_index", db2_code_index_project_delete},
+          {"canonical_index", kb_store_code_index_project_delete},
           {"code_unit_jobs", kb_curator_code_unit_jobs_delete_project},
           {"pdf_vectors", pgvec_kbpdf_delete_project},
-          {"minhash", db2_sketch_minhash_signature_delete_project},
+          {"minhash", kb_store_sketch_minhash_signature_delete_project},
       };
       int all_ok = 1, fence_lost = 0;
       for (size_t si = 0; si < sizeof(purge_matrix) / sizeof(purge_matrix[0]); si++)
       {
          purge_store_add(stores, purge_matrix[si].name, purge_matrix[si].fn(project), &all_ok);
          if (si + 1 < sizeof(purge_matrix) / sizeof(purge_matrix[0]) &&
-             db2_kb_purge_fence_heartbeat(project, generation, purge_id) != 1)
+             kb_store_kb_purge_fence_heartbeat(project, generation, purge_id) != 1)
          {
             /* Ownership lost mid-fan-out: mark the remaining stores as
              * errored (fail closed) — the displaced owner's purge re-runs
@@ -2144,7 +2138,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
                            sizeof(purge_id), out_buf, out_cap) != 0)
          return 400;
-      int rc = db2_kb_purge_fence_heartbeat(project, generation, purge_id);
+      int rc = kb_store_kb_purge_fence_heartbeat(project, generation, purge_id);
       if (rc < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence heartbeat failed\"}");
@@ -2179,7 +2173,7 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
                            sizeof(purge_id), out_buf, out_cap) != 0)
          return 400;
-      int rc = db2_kb_purge_fence_clear(project, generation, purge_id);
+      int rc = kb_store_kb_purge_fence_clear(project, generation, purge_id);
       if (rc < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence clear failed\"}");

@@ -5,7 +5,7 @@ from pathlib import Path
 import unicodedata
 
 
-OUT_DIR = Path(__file__).resolve().parents[1] / "src/modules/db2/c"
+OUT_DIR = Path(__file__).resolve().parents[1] / "src/modules/kb/c"
 OUT_C = OUT_DIR / "fact_identity_unicode.c"
 OUT_H = OUT_DIR / "fact_identity_unicode.h"
 

@@ -22,9 +22,9 @@ func installTestHorizon(t *testing.T, c horizonConfiguration) {
 	t.Setenv("AIMEE_MEMORY_UTILITY_HORIZON_POLICY", string(raw))
 }
 func TestMemoryUtilityHorizonCanonicalPostgres(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("AIMEE_DB2_REPLAY_URL required")
+		t.Skip("AIMEE_KB_STORE_REPLAY_URL required")
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)

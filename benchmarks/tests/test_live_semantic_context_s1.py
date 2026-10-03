@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -342,6 +343,17 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         validator = load_release_validator()
         self.assertTrue(validator.build_files_match(
             "474bd69954237fca249eb44e942caeab4270ad5e"))
+
+    def test_release_build_matches_with_postgres_library_directory(self) -> None:
+        validator = load_release_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "libpq.pc").write_text(
+                "Name: libpq\nDescription: frozen link-plan fixture\nVersion: 18.0\n"
+                "Libs: -L/fixture/postgres/lib -lpq\n"
+                "Cflags: -I/fixture/postgres/include\n")
+            with mock.patch.dict(os.environ, {"PKG_CONFIG_PATH": directory}):
+                self.assertTrue(validator.build_files_match(
+                    "474bd69954237fca249eb44e942caeab4270ad5e"))
 
     def test_release_build_contract_tracks_flags_and_probe_dependencies(self) -> None:
         validator = load_release_validator()

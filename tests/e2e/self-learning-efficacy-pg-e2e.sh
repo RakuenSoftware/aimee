@@ -16,8 +16,7 @@ WORKDIR="${WORKDIR:-/tmp/self-learning-efficacy}"
 OUTPUT_DIR="${OUTPUT_DIR:?OUTPUT_DIR is required}"
 KB_PORT="${KB_PORT:-18755}"
 PGDB="${PGDB:-aimee_self_learning_efficacy}"
-export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///$PGDB?host=/var/run/postgresql}"
-export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
+export AIMEE_STORE_URL="${AIMEE_STORE_URL:?Set the PostgreSQL runtime credential}"
 OBJ="$AIMEE_SRC/build/obj"
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
@@ -80,7 +79,7 @@ attach() {
     [ -x "$home/.config/aimee/aimee-module-$name" ] || return 1
     env HOME="$home" AIMEE_HOME="$home/.config/aimee" \
         AIMEE_DB1_PATH="$home/.config/aimee/aimee.db" \
-        AIMEE_DB2_URL="$AIMEE_DB2_URL" AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         "$home/.config/aimee/aimee-module-$name" "$bus" \
         > "$WORKDIR/mod-$tag-$name.log" 2>&1 &
     MOD_PIDS="$MOD_PIDS $!"

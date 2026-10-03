@@ -35,7 +35,7 @@ static int worm_commits;
 
 /* The consumer thread never ends a unit of work, so a durable sink that takes a
  * per-thread resource on first use holds it until the process exits. That is not
- * hypothetical: aimee-kb's WORM append leases a pooled DB2 connection lazily, and
+ * hypothetical: aimee-kb's WORM append leases a pooled KB_STORE connection lazily, and
  * it pinned one of sixteen pool members from the first audit row onward, which
  * the pool reaper reported as a stuck lease held for the whole uptime. The bus
  * hands the sink an idle edge to let go on; this counts it. */

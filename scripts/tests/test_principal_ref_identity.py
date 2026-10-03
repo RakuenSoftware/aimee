@@ -126,9 +126,9 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
         original = CONTRACTS.read_text(encoding="utf-8")
         try:
             contracts = json.loads(original)
-            db2 = next(row for row in contracts["components"] if row["id"] == "db2")
-            db2["stages"] = [
-                {"id": index, "name": f"db2-stage-{index}", "event_kind": 11520 + index}
+            postgres = next(row for row in contracts["components"] if row["id"] == "postgres")
+            postgres["stages"] = [
+                {"id": index, "name": f"postgres-stage-{index}", "event_kind": 11264 + index}
                 for index in range(1, 257)
             ]
             CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
@@ -143,12 +143,12 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
         inventory_original = INVENTORY.read_text(encoding="utf-8")
         try:
             inventory = json.loads(inventory_original)
-            inventory["principal_refs"]["db2"] = 8_388_592
+            inventory["principal_refs"]["postgres"] = 8_388_592
             self.write(inventory)
             contracts = json.loads(contracts_original)
-            db2 = next(row for row in contracts["components"] if row["id"] == "db2")
-            db2["principal_ref"] = 8_388_592
-            db2["stages"][0]["event_kind"] = 4096 + 8_388_592 * 256 + 1
+            postgres = next(row for row in contracts["components"] if row["id"] == "postgres")
+            postgres["principal_ref"] = 8_388_592
+            postgres["stages"][0]["event_kind"] = 4096 + 8_388_592 * 256 + 1
             CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
             result = run_validator()
             self.assertNotEqual(result.returncode, 0)

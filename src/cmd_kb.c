@@ -98,7 +98,7 @@ static int kb_async_pending_from_resp(cJSON *resp)
 /* `kb build` was removed: knowledge-base document ingestion is no longer a
  * separate command. Prose/doc files are now chunked + embedded into the KB-docs
  * layer automatically during workspace ingestion (the curator drain's
- * kb_doc_refresh pass, reading content from DB2), which also works on the thin-
+ * kb_doc_refresh pass, reading content from KB_STORE), which also works on the thin-
  * client/remote deploy where the server cannot read the project from disk. */
 
 /* ------------------------------------------------------------------ */
@@ -466,8 +466,8 @@ static void kb_cmd_health(app_ctx_t *ctx, int argc, char **argv)
       {
          cJSON_AddStringToObject(obj, "status", "ok");
          cJSON_AddBoolToObject(obj, "process_ok", h.process_ok);
-         cJSON_AddBoolToObject(obj, "db2_ok", h.db2_ok);
-         cJSON_AddBoolToObject(obj, "db2_kb_tables_ok", h.db2_kb_tables_ok);
+         cJSON_AddBoolToObject(obj, "postgres_ok", h.postgres_ok);
+         cJSON_AddBoolToObject(obj, "knowledge_tables_ok", h.knowledge_tables_ok);
          cJSON_AddBoolToObject(obj, "pgvec_ok", h.pgvec_ok);
          cJSON_AddBoolToObject(obj, "pgvec_collection_ok", h.pgvec_collection_ok);
          cJSON_AddNumberToObject(obj, "pgvec_vectors", h.pgvec_vectors);
@@ -503,8 +503,8 @@ static void kb_cmd_health(app_ctx_t *ctx, int argc, char **argv)
    const char *fmt = "  %-18s%s\n";
    fprintf(stdout, "KB health\n");
    fprintf(stdout, fmt, "process:", h.process_ok ? "ok" : "down");
-   fprintf(stdout, fmt, "db2 schema:", h.db2_ok ? "ok" : "FAIL");
-   fprintf(stdout, fmt, "db2 kb tables:", h.db2_kb_tables_ok ? "ok" : "WARN (missing)");
+   fprintf(stdout, fmt, "kb_store schema:", h.postgres_ok ? "ok" : "FAIL");
+   fprintf(stdout, fmt, "kb_store kb tables:", h.knowledge_tables_ok ? "ok" : "WARN (missing)");
    fprintf(stdout, fmt, "pgvector ext:", h.pgvec_ok ? "ok" : "FAIL");
    fprintf(stdout, fmt, "pgvec table:", h.pgvec_collection_ok ? "ok" : "FAIL");
    fprintf(stdout, fmt, "embed model:", h.embed_ok ? h.embed_command : "not configured");

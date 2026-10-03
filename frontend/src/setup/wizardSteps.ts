@@ -17,7 +17,7 @@ export interface WizardStep {
   skipNote?: string;
   /** A step whose body is a bespoke component rather than the generic key inputs:
    * 'account' = replacement login, 'chooser' = primary chooser, 'kb' = knowledge-base fork, 'deploy' = deploy
-   * topology (LLM placement), 'db2' = shared-store (bundled vs existing Postgres),
+   * topology (LLM placement),
    * 'git_identity' = vaulted commit author, 'connection' = git-host auth,
    * 'workspace' = org enumerate + bulk clone.
    * Rendered specially by SetupWizard. */

@@ -1,5 +1,5 @@
-#include "modules/db2/c/management_status_key.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/management_status_key.h"
+#include "modules/kb/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -168,15 +168,15 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
 
 int main(void)
 {
-   db2_management_status_key_ctx_t c;
+   kb_store_management_status_key_ctx_t c;
    char e[64] = "";
-   assert(db2_management_status_key_ctx_open(&c, "postgres://status", e, sizeof(e)) == 0);
-   assert(db2_management_status_key_guard_begin(&c, 7) == 0 && c.transaction_active);
-   assert(db2_management_status_key_guard_begin(&c, 7) < 0);
-   db2_vault_key_use_envelope_t out;
-   assert(db2_management_status_key_candidate(&c, "key", "wire", 1, &out) < 0);
-   assert(db2_management_status_key_guard_end(&c, 1) == 0 && !c.transaction_active);
-   assert(db2_management_status_key_guard_end(&c, 1) < 0);
+   assert(kb_store_management_status_key_ctx_open(&c, "postgres://status", e, sizeof(e)) == 0);
+   assert(kb_store_management_status_key_guard_begin(&c, 7) == 0 && c.transaction_active);
+   assert(kb_store_management_status_key_guard_begin(&c, 7) < 0);
+   kb_store_vault_key_use_envelope_t out;
+   assert(kb_store_management_status_key_candidate(&c, "key", "wire", 1, &out) < 0);
+   assert(kb_store_management_status_key_guard_end(&c, 1) == 0 && !c.transaction_active);
+   assert(kb_store_management_status_key_guard_end(&c, 1) < 0);
 
    unsigned char attestation[] = "att";
    char use_id[65], digest[65], caller_fp[65], target_fp[65];
@@ -185,7 +185,7 @@ int main(void)
    memset(caller_fp, '3', 64);
    memset(target_fp, '4', 64);
    use_id[64] = digest[64] = caller_fp[64] = target_fp[64] = 0;
-   db2_management_status_admission_t admission = {
+   kb_store_management_status_admission_t admission = {
        .use_id = use_id,
        .custody_key_id = "platform:p5-status",
        .wire_key_id = "status-1",
@@ -201,23 +201,24 @@ int main(void)
        .hwm_attestation_len = 3,
    };
    memset(&out, 0, sizeof(out));
-   assert(db2_management_status_key_admit(&c, &admission, &out) == 1);
+   assert(kb_store_management_status_key_admit(&c, &admission, &out) == 1);
    assert(g_bind_mask == 0xfffu && out.seal_epoch == 7 && out.version == 3 &&
           out.ciphertext_len == 32 && out.hwm_attestation_len == 3);
    g_admit_replay = 1;
    memset(&out, 0, sizeof(out));
-   assert(db2_management_status_key_admit(&c, &admission, &out) == 0);
+   assert(kb_store_management_status_key_admit(&c, &admission, &out) == 0);
    assert(g_bind_mask == 0xfffu && out.seal_epoch == 7 && !out.ciphertext_len &&
           !out.hwm_attestation_len);
    g_malformed_replay = 1;
-   assert(db2_management_status_key_admit(&c, &admission, &out) == DB2_VAULT_KEY_USE_INTEGRITY);
+   assert(kb_store_management_status_key_admit(&c, &admission, &out) ==
+          KB_STORE_VAULT_KEY_USE_INTEGRITY);
    g_admit_replay = g_malformed_replay = 0;
 
    int64_t epoch = 0;
    int sealed = -1;
-   assert(db2_management_status_key_startup_begin(&c, &epoch, &sealed) == 0);
+   assert(kb_store_management_status_key_startup_begin(&c, &epoch, &sealed) == 0);
    assert(epoch == 7 && sealed == 0);
-   db2_management_status_key_ctx_close(&c);
+   kb_store_management_status_key_ctx_close(&c);
    assert(g_closed == 1 && g_rollbacks == 1 && !g_in_tx && !c.connection);
    puts("management_status_key_ctx: all tests passed");
    return 0;

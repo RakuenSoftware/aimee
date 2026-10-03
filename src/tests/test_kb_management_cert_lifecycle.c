@@ -20,12 +20,12 @@
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
-/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+/* The real symbol is kb_store_lease_begin_at; kb_store_lease_begin is a macro in kb_store.h
  * that records the caller's file:line for stuck-lease attribution. */
-void db2_lease_begin_at(const char *site)
+void kb_store_lease_begin_at(const char *site)
 {
 }
-void db2_lease_end(void)
+void kb_store_lease_end(void)
 {
 }
 int vault_server_kek(uint8_t kek[32])
@@ -64,13 +64,13 @@ int vault_secret_decrypt(const uint8_t dek[32], const uint8_t *aad, size_t aad_l
    return 0;
 }
 
-db2_management_client_instance_result_t
-db2_management_client_instance_binding_init(const char *issuer, const char *subject,
-                                            const uint8_t proof[32], const uint8_t custody[32],
-                                            db2_management_client_instance_binding_t *out)
+kb_store_management_client_instance_result_t
+kb_store_management_client_instance_binding_init(const char *issuer, const char *subject,
+                                                 const uint8_t proof[32], const uint8_t custody[32],
+                                                 kb_store_management_client_instance_binding_t *out)
 {
    if (!issuer || !subject || !proof || !custody || !out)
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID;
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_INVALID;
    memset(out, 0, sizeof(*out));
    strcpy(out->issuer, issuer);
    strcpy(out->subject, subject);
@@ -84,34 +84,34 @@ db2_management_client_instance_binding_init(const char *issuer, const char *subj
           EVP_DigestUpdate(md, proof, 32) == 1 && EVP_DigestUpdate(md, custody, 32) == 1 &&
           EVP_DigestFinal_ex(md, out->binding_digest, &n) == 1 && n == 32);
    EVP_MD_CTX_free(md);
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
 #define DB_UNUSED(name, request_type, output_type)                                                 \
-   db2_management_client_instance_result_t name(const request_type *r, output_type *o)             \
+   kb_store_management_client_instance_result_t name(const request_type *r, output_type *o)        \
    {                                                                                               \
       (void)r;                                                                                     \
       if (o)                                                                                       \
          memset(o, 0, sizeof(*o));                                                                 \
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;                                           \
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;                                      \
    }
-DB_UNUSED(db2_management_client_instance_grant_preflight,
-          db2_management_client_grant_preflight_request_t, db2_management_client_grant_preflight_t)
-DB_UNUSED(db2_management_client_instance_begin_initial, db2_management_client_initial_request_t,
-          db2_management_client_pending_t)
-DB_UNUSED(db2_management_client_instance_begin_renewal, db2_management_client_renewal_request_t,
-          db2_management_client_pending_t)
-DB_UNUSED(db2_management_client_instance_activate, db2_management_client_activation_request_t,
-          db2_management_client_active_t)
-db2_management_client_instance_result_t
-db2_management_client_instance_snapshot(const char id[33],
-                                        const db2_management_client_instance_binding_t *binding,
-                                        db2_management_client_active_t *out)
+DB_UNUSED(kb_store_management_client_instance_grant_preflight,
+          kb_store_management_client_grant_preflight_request_t,
+          kb_store_management_client_grant_preflight_t)
+DB_UNUSED(kb_store_management_client_instance_begin_initial,
+          kb_store_management_client_initial_request_t, kb_store_management_client_pending_t)
+DB_UNUSED(kb_store_management_client_instance_begin_renewal,
+          kb_store_management_client_renewal_request_t, kb_store_management_client_pending_t)
+DB_UNUSED(kb_store_management_client_instance_activate,
+          kb_store_management_client_activation_request_t, kb_store_management_client_active_t)
+kb_store_management_client_instance_result_t kb_store_management_client_instance_snapshot(
+    const char id[33], const kb_store_management_client_instance_binding_t *binding,
+    kb_store_management_client_active_t *out)
 {
    (void)id;
    (void)binding;
    memset(out, 0, sizeof(*out));
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
 }
 #undef DB_UNUSED
 
@@ -123,8 +123,8 @@ typedef struct
    char lineage[33];
    int pending;
    int active;
-   db2_management_client_pending_t issue;
-   db2_management_client_active_t enrollment;
+   kb_store_management_client_pending_t issue;
+   kb_store_management_client_active_t enrollment;
    unsigned begin_count;
    unsigned activate_count;
    unsigned snapshot_count;
@@ -134,12 +134,12 @@ typedef struct
    int mutate_identity_once;
    int mutate_attested_identity_once;
    kb_workload_result_t attest_failure_once;
-   db2_management_client_instance_result_t snapshot_failure;
+   kb_store_management_client_instance_result_t snapshot_failure;
    unsigned snapshot_failure_count;
    kb_management_cert_crash_point_t crash_point;
    int crash_armed;
    int arena_fail_step;
-   db2_management_client_issue_state_t terminal_on_begin;
+   kb_store_management_client_issue_state_t terminal_on_begin;
    int storage_fd;
    int corrupt_terminal_clear;
 } lifecycle_mock_t;
@@ -195,22 +195,22 @@ static kb_workload_result_t mock_copy(void *opaque, const uint8_t challenge[32],
    return KB_WORKLOAD_OK;
 }
 
-static db2_management_client_instance_result_t
-mock_preflight(void *opaque, const db2_management_client_grant_preflight_request_t *request,
-               db2_management_client_grant_preflight_t *out)
+static kb_store_management_client_instance_result_t
+mock_preflight(void *opaque, const kb_store_management_client_grant_preflight_request_t *request,
+               kb_store_management_client_grant_preflight_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    memset(out, 0, sizeof(*out));
    memcpy(out->installation_id, request->installation_id, 33);
    memcpy(out->replacement_lineage_id, mock->lineage, 33);
    out->expires_at_epoch = mock->now + 300;
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
 static void mock_pending_common(lifecycle_mock_t *mock, const char operation[65],
                                 const char installation[33],
-                                const db2_management_client_instance_binding_t *binding,
-                                int64_t generation, db2_management_client_issue_kind_t kind,
+                                const kb_store_management_client_instance_binding_t *binding,
+                                int64_t generation, kb_store_management_client_issue_kind_t kind,
                                 const uint8_t csr[32], const uint8_t spki[32])
 {
    memset(&mock->issue, 0, sizeof(mock->issue));
@@ -221,28 +221,28 @@ static void mock_pending_common(lifecycle_mock_t *mock, const char operation[65]
    mock->issue.team_id = 1;
    mock->issue.generation = generation;
    mock->issue.issue_kind = kind;
-   mock->issue.issue_state = DB2_MANAGEMENT_CLIENT_ISSUE_PENDING;
+   mock->issue.issue_state = KB_STORE_MANAGEMENT_CLIENT_ISSUE_PENDING;
    memcpy(mock->issue.csr_digest, csr, 32);
    memcpy(mock->issue.csr_spki_digest, spki, 32);
    mock->issue.pending_expires_at_epoch = mock->now + 600;
    mock->pending = 1;
 }
 
-static db2_management_client_instance_result_t
-mock_begin_initial(void *opaque, const db2_management_client_initial_request_t *request,
-                   db2_management_client_pending_t *out)
+static kb_store_management_client_instance_result_t
+mock_begin_initial(void *opaque, const kb_store_management_client_initial_request_t *request,
+                   kb_store_management_client_pending_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->begin_count++;
    if (!mock->pending)
    {
       mock_pending_common(mock, request->operation_id, request->installation_id, &request->binding,
-                          1, DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL, request->csr_digest,
+                          1, KB_STORE_MANAGEMENT_CLIENT_ISSUE_INITIAL, request->csr_digest,
                           request->csr_spki_digest);
       memcpy(mock->issue.authority_id, request->authority_id, 33);
    }
    else if (strcmp(mock->issue.operation_id, request->operation_id))
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_CONFLICT;
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_CONFLICT;
    *out = mock->issue;
    if (mock->terminal_on_begin)
    {
@@ -251,20 +251,20 @@ mock_begin_initial(void *opaque, const db2_management_client_initial_request_t *
       mock->pending = 0;
    }
    if (mock->active)
-      out->issue_state = DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+      out->issue_state = KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t
-mock_begin_renewal(void *opaque, const db2_management_client_renewal_request_t *request,
-                   db2_management_client_pending_t *out)
+static kb_store_management_client_instance_result_t
+mock_begin_renewal(void *opaque, const kb_store_management_client_renewal_request_t *request,
+                   kb_store_management_client_pending_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->begin_count++;
    if (!mock->pending)
    {
       mock_pending_common(mock, request->operation_id, request->installation_id, &request->binding,
-                          request->generation, DB2_MANAGEMENT_CLIENT_ISSUE_RENEW,
+                          request->generation, KB_STORE_MANAGEMENT_CLIENT_ISSUE_RENEW,
                           request->csr_digest, request->csr_spki_digest);
       memcpy(mock->issue.authority_id, mock->enrollment.authority_id, 33);
       mock->issue.has_previous = 1;
@@ -274,7 +274,7 @@ mock_begin_renewal(void *opaque, const db2_management_client_renewal_request_t *
       memcpy(mock->issue.previous_cert_fingerprint, request->previous_cert_fingerprint, 32);
    }
    else if (strcmp(mock->issue.operation_id, request->operation_id))
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_CONFLICT;
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_CONFLICT;
    *out = mock->issue;
    if (mock->terminal_on_begin)
    {
@@ -283,13 +283,13 @@ mock_begin_renewal(void *opaque, const db2_management_client_renewal_request_t *
       mock->pending = 0;
    }
    if (mock->active && !strcmp(mock->enrollment.operation_id, request->operation_id))
-      out->issue_state = DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+      out->issue_state = KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t
-mock_activate(void *opaque, const db2_management_client_activation_request_t *request,
-              db2_management_client_active_t *out)
+static kb_store_management_client_instance_result_t
+mock_activate(void *opaque, const kb_store_management_client_activation_request_t *request,
+              kb_store_management_client_active_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->activate_count++;
@@ -297,7 +297,7 @@ mock_activate(void *opaque, const db2_management_client_activation_request_t *re
    {
       *out = mock->enrollment;
       out->replayed = 1;
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
    }
    memset(&mock->enrollment, 0, sizeof(mock->enrollment));
    memcpy(mock->enrollment.installation_id, request->installation_id, 33);
@@ -309,7 +309,7 @@ mock_activate(void *opaque, const db2_management_client_activation_request_t *re
    mock->enrollment.enrollment_id = request->generation;
    memcpy(mock->enrollment.operation_id, request->operation_id, 65);
    mock->enrollment.issue_kind = request->issue_kind;
-   mock->enrollment.issue_state = DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
+   mock->enrollment.issue_state = KB_STORE_MANAGEMENT_CLIENT_ISSUE_ACTIVE;
    memcpy(mock->enrollment.csr_digest, request->csr_digest, 32);
    memcpy(mock->enrollment.csr_spki_digest, request->csr_spki_digest, 32);
    memcpy(mock->enrollment.public_bundle_digest, request->public_bundle_digest, 32);
@@ -328,13 +328,13 @@ mock_activate(void *opaque, const db2_management_client_activation_request_t *re
    mock->active = 1;
    mock->pending = 0;
    *out = mock->enrollment;
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t
+static kb_store_management_client_instance_result_t
 mock_snapshot(void *opaque, const char installation[33],
-              const db2_management_client_instance_binding_t *binding,
-              db2_management_client_active_t *out)
+              const kb_store_management_client_instance_binding_t *binding,
+              kb_store_management_client_active_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    (void)installation;
@@ -349,7 +349,7 @@ mock_snapshot(void *opaque, const char installation[33],
    if (!mock->active)
    {
       memset(out, 0, sizeof(*out));
-      return DB2_MANAGEMENT_CLIENT_INSTANCE_DENIED;
+      return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_DENIED;
    }
    *out = mock->enrollment;
    if (mock->mutate_identity_once)
@@ -365,7 +365,7 @@ mock_snapshot(void *opaque, const char installation[33],
    }
    if (mock->mutate_snapshot_once && --mock->mutate_snapshot_once == 0)
       out->revocation_generation++;
-   return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
+   return KB_STORE_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
 static int mock_crash(void *opaque, kb_management_cert_crash_point_t point)
@@ -791,7 +791,7 @@ static void test_active_identity_canonicalization(void)
                                                        "cert:issuer%3A%25name:ab%3Acd%25ef"));
    assert(!kb_management_cert_identity_matches_for_test("issuer:%name", "ab:cd%ef",
                                                         "cert:issuer:%name:ab:cd%ef"));
-   char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
    memset(issuer, '%', sizeof(issuer) - 1);
    issuer[sizeof(issuer) - 1] = '\0';
    assert(!kb_management_cert_identity_matches_for_test(issuer, "aa", "cert:overflow:aa"));
@@ -959,7 +959,7 @@ static void test_lifecycle_orchestration(void)
     * exact previous generation remains active. Contradiction and checked-file
     * failure retain the pending coordinate. */
    mock.now = mock.enrollment.cert_not_after_epoch - 1200;
-   mock.terminal_on_begin = DB2_MANAGEMENT_CLIENT_ISSUE_EXPIRED;
+   mock.terminal_on_begin = KB_STORE_MANAGEMENT_CLIENT_ISSUE_EXPIRED;
    mock.mutate_snapshot_once = 1;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_INTEGRITY);
@@ -1024,14 +1024,14 @@ static void test_lifecycle_orchestration(void)
    assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
    memset(&bundle, 0xa5, sizeof(bundle));
    memset(&loaded, 0xa5, sizeof(loaded));
-   mock.snapshot_failure = DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
+   mock.snapshot_failure = KB_STORE_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
    mock.snapshot_failure_count = 3;
    assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
           KB_MANAGEMENT_CERT_UNAVAILABLE);
    assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
    memset(&bundle, 0xa5, sizeof(bundle));
    memset(&loaded, 0xa5, sizeof(loaded));
-   mock.snapshot_failure = DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY;
+   mock.snapshot_failure = KB_STORE_MANAGEMENT_CLIENT_INSTANCE_RETRY;
    mock.snapshot_failure_count = 3;
    assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
           KB_MANAGEMENT_CERT_UNAVAILABLE);
@@ -1078,7 +1078,7 @@ static void test_lifecycle_orchestration(void)
    assert(kb_management_cert_lifecycle_open_for_test(&config, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
                                                      dir_fd, &mock_ops, &mock,
                                                      &lifecycle) == KB_MANAGEMENT_CERT_OK);
-   mock.terminal_on_begin = DB2_MANAGEMENT_CLIENT_ISSUE_QUARANTINED;
+   mock.terminal_on_begin = KB_STORE_MANAGEMENT_CLIENT_ISSUE_QUARANTINED;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_DENIED);
    assert(faccessat(dir_fd, "pending", F_OK, 0) != 0);

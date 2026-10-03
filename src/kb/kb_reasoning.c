@@ -1,12 +1,12 @@
-/* kb_reasoning.c: Datalog-based graph reasoning over DB2 artifacts.
+/* kb_reasoning.c: Datalog-based graph reasoning over KB_STORE artifacts.
  * See
  * docs/proposals/accepted/graph-reasoning-case-based-recall-and-contradiction-logic.md
  */
 
 #include "kb_reasoning.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
 #include "headers/platform_process.h"
@@ -27,7 +27,7 @@ static cJSON *build_fact_array(const char *scope_kind, const char *scope_id)
    if (!facts)
       return NULL;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return facts;
 
@@ -338,9 +338,9 @@ int kb_reasoning_case_write(const char *payload_json, char *id_out, int id_out_l
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
-   int rc = db2_artifact_write(id, "case", "proposed", "system", "", "", 1.0, payload_json);
+   int rc = kb_store_artifact_write(id, "case", "proposed", "system", "", "", 1.0, payload_json);
    if (rc != 0)
       return -1;
 
@@ -355,7 +355,7 @@ int kb_reasoning_case_write(const char *payload_json, char *id_out, int id_out_l
 
 void kb_reasoning_seed_ruleset(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -382,7 +382,7 @@ int kb_reasoning_case_recall(const char *trigger_json, const char *scope_kind, c
    if (!out || max_out <= 0)
       return -1;
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 

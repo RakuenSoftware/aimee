@@ -7,8 +7,8 @@
 
 #include <assert.h>
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -47,7 +47,7 @@ int main(void)
 {
    printf("learning_metrics: ");
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    /* The production router must not classify or persist a signal without the
     * separately supervised learning stage. */
@@ -218,7 +218,7 @@ int main(void)
       assert(max == 0.0);
    }
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("all tests passed\n");
    return 0;
 }

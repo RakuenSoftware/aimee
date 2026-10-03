@@ -58,10 +58,10 @@ typedef struct
    uint8_t public_bundle_digest[32];
    uint8_t custody_binding_digest[32];
    /* issuer remains the leaf issuer for source compatibility. */
-   char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
-   char ca_issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char ca_issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
    uint8_t ca_fingerprint[32];
-   char serial_norm[DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
+   char serial_norm[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
    uint8_t fingerprint[32];
    uint8_t spki_digest[32];
    int64_t not_before_epoch;

@@ -59,11 +59,11 @@ synthesized result after skipping the role.
 
 ## Vector identity
 
-The embedding output and DB2 vector-column dimension must match. The KB records the model and serving
+The embedding output and KB_STORE vector-column dimension must match. The KB records the model and serving
 identity, including pooling and prefixes, and refuses a mismatched vector space.
 
 Changing width requires the guarded derived-table reset. A same-width model, pooling, or prefix
-change still changes the vector space and currently needs a fresh DB2 plus source re-ingestion. See
+change still changes the vector space and currently needs a fresh KB_STORE plus source re-ingestion. See
 [Change the KB embedder](runbooks/change-embedder.md).
 
 ## Credentials and egress

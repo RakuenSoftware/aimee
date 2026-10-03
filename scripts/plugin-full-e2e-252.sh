@@ -4,7 +4,7 @@
 #   server leg  -- runs on the .252 HOST. Needs a real aimee-server and nothing
 #                  else, so it always runs.
 #   kb leg      -- runs INSIDE an LXC container with PostgreSQL, because a real
-#                  aimee-kb needs a real DB2. Pass CT=<vmid> to run it.
+#                  aimee-kb needs a real KB_STORE. Pass CT=<vmid> to run it.
 #
 # To make a container for the kb leg (about two minutes):
 #

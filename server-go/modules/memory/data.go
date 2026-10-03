@@ -978,7 +978,9 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	request.Kind = strings.TrimSpace(request.Kind)
 	request.Tier = strings.TrimSpace(request.Tier)
-	request.Key = strings.TrimSpace(request.Key)
+	if request.Operation != "fidelity-read" {
+		request.Key = strings.TrimSpace(request.Key)
+	}
 	request.Workspace = strings.TrimSpace(request.Workspace)
 	request.Project = strings.TrimSpace(request.Project)
 	request.SignalType = strings.TrimSpace(request.SignalType)
@@ -1690,6 +1692,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(entries)
 		}
+	case "fidelity-read":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || request.Key == "" || len(request.Key) > 128 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response.Payload, err = backend.fidelityRead(ctx, request.Key)
+
 	case "demotion-run", "demotion-check":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
@@ -3125,6 +3134,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
+		if code == MutationInstructionRefused {
+			rollbackOnly = true
+		}
 		proposal := proposedCorrection(err)
 		response = DataResponse{Code: &code, Proposal: proposal}
 		// Canonical admission has not written a version. The linked draft and

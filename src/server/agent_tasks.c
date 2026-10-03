@@ -471,6 +471,6 @@ out:
 }
 
 /* Agent result cache storage moved to src/db1/caches.c (db1_agent_cache_*).
- * One-shot hint lookup moved to db2/agent_hints.c
- * (db2_agent_hint_find_and_consume); callers go through that API
+ * One-shot hint lookup moved to kb_store/agent_hints.c
+ * (kb_store_agent_hint_find_and_consume); callers go through that API
  * directly. */

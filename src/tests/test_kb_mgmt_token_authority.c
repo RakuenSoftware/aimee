@@ -25,19 +25,19 @@ static void test_injected_record_validator(void)
 {
    kb_mgmt_token_authority_record_t record = {0};
 
-   aimee_db2_register_token_record_validators(NULL, identity_record_valid_unused);
-   assert(!db2_management_token_authority_record_validate(&record));
+   aimee_kb_store_register_token_record_validators(NULL, identity_record_valid_unused);
+   assert(!kb_store_management_token_authority_record_validate(&record));
 
-   aimee_db2_register_token_record_validators(management_record_valid_contract,
-                                              identity_record_valid_unused);
+   aimee_kb_store_register_token_record_validators(management_record_valid_contract,
+                                                   identity_record_valid_unused);
    contract_result = 1;
-   assert(db2_management_token_authority_record_validate(&record));
+   assert(kb_store_management_token_authority_record_validate(&record));
    contract_result = 0;
-   assert(!db2_management_token_authority_record_validate(&record));
+   assert(!kb_store_management_token_authority_record_validate(&record));
    contract_result = 2;
-   assert(!db2_management_token_authority_record_validate(&record));
+   assert(!kb_store_management_token_authority_record_validate(&record));
    contract_result = -1;
-   assert(!db2_management_token_authority_record_validate(&record));
+   assert(!kb_store_management_token_authority_record_validate(&record));
 }
 
 static void sha256(const void *data, size_t len, unsigned char out[32])

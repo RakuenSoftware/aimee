@@ -32,7 +32,7 @@ test-facing API audit is recorded in `docs/validation/core-modularization-slice-
 - `vault`: supplies the custody boundary for audit and checkpoint keys.
 
 Consumers include `execution-policy`/guardrails, server management and vault paths, trajectory export,
-audit CLI/API/dashboard readers, KB custody operations, and the separate DB2 KB WORM provider. Producers
+audit CLI/API/dashboard readers, KB custody operations, and the separate KB_STORE KB WORM provider. Producers
 own event meaning; audit owns safe record formation, storage, verification, and diagnostic results.
 
 ## Providers and readiness
@@ -102,7 +102,7 @@ named tests remain with their actual subsystem or integration boundary; a filena
 | `test_audit_action_log.c` | The core `log.c` JSON-line writer and `audit_action_log` API | Not assigned; no audit module implementation is under test |
 | `test_code_audit.c` | The independent CLI code-audit feature | Not assigned; code-health analysis is not the audit evidence module |
 | `test_code_audit_graph.c` | The independent code-audit graph algorithms | Not assigned; code-health analysis is not the audit evidence module |
-| `test_db2_code_audit.c` | DB2 code-audit assembly and PostgreSQL query shims | Not assigned; this is a DB2 code-intelligence test |
+| `test_kb_store_code_audit.c` | KB_STORE code-audit assembly and PostgreSQL query shims | Not assigned; this is a KB_STORE code-intelligence test |
 | `test_harness_memory_audit.c` | Memory-interception JSONL logging through `hmem_audit` | Not assigned; this is a memory harness test |
 | `test_kb_audit_worm.c` | The KB PostgreSQL store and artifact capture seam, using the shared canonical row-hash contract | Not assigned; this is a mixed KB/store integration test |
 | `test_kb_audit_worm_pg.c` | SQL and C append parity against a real PostgreSQL KB store | Not assigned; this is a mixed KB/PostgreSQL integration test |

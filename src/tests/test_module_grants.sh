@@ -204,24 +204,27 @@ run_seeding
 if grep -q '^request=11266$' "$target"; then ok "operator restriction preserved"
 else bad "request capability expanded over operator policy"; fi
 
-echo "10. KB legacy memory grants migrate without changing operator policy"
+echo "10. Legacy memory and PostgreSQL grants migrate without changing operator policy"
 sed -n '/^# >>> kb-module-grant-seeding/,/^# <<< kb-module-grant-seeding/p' \
     "$root/deploy/container/kb-role-runtime.sh" > "$tmp/kb-seeding.sh"
 for role in server kb; do
+    for provider in memory postgres; do
     setup
     mkdir -p "$AIMEE_HOME/modules.d/$role"
-    target="$AIMEE_HOME/modules.d/$role/memory.grant"
-    shipped="$AIMEE_MODULE_GRANT_SRC/memory.grant"
-    old=5889,5890,5891,5892,5893,5894
-    new=$old,5895
-    write_module_grant "$shipped" 7 "$real_exe" "$new"
-    write_module_grant "$target" 7 "$real_exe" "$old"
+    target="$AIMEE_HOME/modules.d/$role/$provider.grant"
+    shipped="$AIMEE_MODULE_GRANT_SRC/$provider.grant"
+    case "$provider" in
+        memory) principal=7; old=5889,5890,5891,5892,5893,5894; new=$old,5895 ;;
+        postgres) principal=28; old=11265,11266; new=$old,11267 ;;
+    esac
+    write_module_grant "$shipped" "$principal" "$real_exe" "$new"
+    write_module_grant "$target" "$principal" "$real_exe" "$old"
     role_block=$block
     [ "$role" = server ] || role_block="$tmp/kb-seeding.sh"
     sh "$role_block" 2>"$tmp/grant-warning"
-    [ "$(serve_of "$target")" = "$new" ] && ok "$role legacy read grant migrated" || bad "$role read grant stale"
+    [ "$(serve_of "$target")" = "$new" ] && ok "$role $provider legacy grant migrated" || bad "$role $provider grant stale"
     # An operator deliberately narrows a recorded grant to the old stage set.
-    write_module_grant "$target" 7 "$real_exe" "$old"
+    write_module_grant "$target" "$principal" "$real_exe" "$old"
     sh "$role_block" 2>"$tmp/grant-warning"
     [ "$(serve_of "$target")" = "$old" ] && ok "$role recorded restriction retained" || bad "$role operator policy expanded"
     # A pre-record policy that differs in another capability must also survive.
@@ -230,6 +233,25 @@ for role in server kb; do
     cp "$tmp/edited-grant" "$target"
     sh "$role_block" 2>"$tmp/grant-warning"
     cmp -s "$target" "$tmp/edited-grant" && ok "$role pre-record edit retained" || bad "$role pre-record edit overwritten"
+    done
 done
+
+echo "11. KB retires KbStore identity without expanding PostgreSQL policy"
+setup
+mkdir -p "$AIMEE_HOME/modules.d/kb"
+old="$AIMEE_HOME/modules.d/kb/kb_store.grant"
+write_module_grant "$old" 29 /retired/aimee-module-kb_store 11521
+cp "$old" "$tmp/retired-policy"
+write_module_grant "$AIMEE_MODULE_GRANT_SRC/postgres.grant" 28 "$real_exe" 11265,11266,11267
+sh "$tmp/kb-seeding.sh" 2>"$tmp/grant-warning"
+[ ! -e "$old" ] && ok "retired grant inactive" || bad "retired grant still blocks startup"
+archive=$(find "$AIMEE_HOME/modules.d/kb/.retired" -type f)
+cmp -s "$tmp/retired-policy" "$archive" && ok "retired policy preserved" || bad "retired policy lost"
+cmp -s "$AIMEE_MODULE_GRANT_SRC/postgres.grant" "$AIMEE_HOME/modules.d/kb/postgres.grant" \
+    && ok "PostgreSQL receives only its own capabilities" || bad "retired capabilities transferred"
+# A reused filename with another principal is not the retired identity.
+write_module_grant "$old" 240 "$real_exe" 65537
+sh "$tmp/kb-seeding.sh" 2>"$tmp/grant-warning"
+[ -f "$old" ] && ok "unrelated principal preserved" || bad "filename mistaken for identity"
 
 exit "$fail"

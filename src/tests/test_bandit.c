@@ -14,24 +14,24 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb_bandit.h"
 #include "../kb_bandit_registry.h"
-#include "../modules/db2/c/bandit.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "../modules/kb/c/bandit.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
 #include "config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* ---- 1. bandit_arm_register ---- */
@@ -112,9 +112,9 @@ static void test_bandit_sample_respects_selected_arm(void)
 
    assert(config_set_bandit_optimize_command("python3 ../scripts/bandit-sidecar.py") == 0);
    assert(config_set_bandit_exploration_fraction(0.0) == 0);
-   assert(db2_bandit_arm_stats_update("test_policy", "off", 0.0, 1.0, 101.0) == 0);
-   assert(db2_bandit_arm_stats_update("test_policy", "brief", 1.0, 101.0, 1.0) == 0);
-   assert(db2_bandit_arm_stats_update("test_policy", "full", 0.0, 1.0, 101.0) == 0);
+   assert(kb_store_bandit_arm_stats_update("test_policy", "off", 0.0, 1.0, 101.0) == 0);
+   assert(kb_store_bandit_arm_stats_update("test_policy", "brief", 1.0, 101.0, 1.0) == 0);
+   assert(kb_store_bandit_arm_stats_update("test_policy", "full", 0.0, 1.0, 101.0) == 0);
 
    char arm_ids[3][KB_BANDIT_MAX_ARM_ID] = {{0}};
    snprintf(arm_ids[0], sizeof(arm_ids[0]), "off");
@@ -144,7 +144,7 @@ static void test_bandit_reward_closed(void)
 
    /* Insert a synthetic decision directly. */
    const char *fake_id = "test-decision-uuid-0001234567890ab";
-   int rc = db2_bandit_decision_insert(fake_id, "test_dp2", "arm_beta", "", 0.8, 0);
+   int rc = kb_store_bandit_decision_insert(fake_id, "test_dp2", "arm_beta", "", 0.8, 0);
    assert(rc == 0);
 
    /* Close with a reward. */
@@ -152,9 +152,9 @@ static void test_bandit_reward_closed(void)
    assert(rc == 0);
 
    /* Verify arm stats were updated. */
-   db2_bandit_arm_stats_t stats;
+   kb_store_bandit_arm_stats_t stats;
    memset(&stats, 0, sizeof(stats));
-   rc = db2_bandit_arm_stats_read("test_dp2", "arm_beta", &stats);
+   rc = kb_store_bandit_arm_stats_read("test_dp2", "arm_beta", &stats);
    assert(rc == 0);
    /* After one reward=1.0 update: alpha = 1(prior) + 1.0 = 2.0, beta = 1(prior) + 0.0 = 1.0 */
    assert(stats.posterior_alpha >= 1.9 && stats.posterior_alpha <= 2.1);
@@ -187,23 +187,23 @@ static void test_bandit_explore_stats(void)
       char id[64];
       snprintf(id, sizeof(id), "test-explore-stats-%02d", i);
       int is_explore = (i < 3) ? 1 : 0; /* 3 of 12 = 25% */
-      int rc = db2_bandit_decision_insert(id, "test_dp_stats", "arm_x", "", 0.5, is_explore);
+      int rc = kb_store_bandit_decision_insert(id, "test_dp_stats", "arm_x", "", 0.5, is_explore);
       assert(rc == 0);
    }
 
    /* Sibling decision point — must not leak into the count. */
-   int rc = db2_bandit_decision_insert("test-other-dp-01", "other_dp", "arm_y", "", 0.5, 1);
+   int rc = kb_store_bandit_decision_insert("test-other-dp-01", "other_dp", "arm_y", "", 0.5, 1);
    assert(rc == 0);
 
    long long n_explore = 0, n_total = 0;
-   rc = db2_bandit_explore_stats("test_dp_stats", 0, &n_explore, &n_total);
+   rc = kb_store_bandit_explore_stats("test_dp_stats", 0, &n_explore, &n_total);
    assert(rc == 0);
    assert(n_total == 12);
    assert(n_explore == 3);
 
    /* Other decision point sees only its own row. */
    n_explore = n_total = 0;
-   rc = db2_bandit_explore_stats("other_dp", 0, &n_explore, &n_total);
+   rc = kb_store_bandit_explore_stats("other_dp", 0, &n_explore, &n_total);
    assert(rc == 0);
    assert(n_total == 1);
    assert(n_explore == 1);
@@ -278,18 +278,18 @@ static void test_bandit_recall_reward(void)
    assert(capped.result_count == 10 && capped.truncated);
    open_db();
    const char *id = "availability-only-decision";
-   assert(db2_bandit_decision_insert(id, "availability", "arm", "", 1.0, 0) == 0);
-   db2_bandit_arm_stats_t before, after;
-   assert(db2_bandit_arm_stats_read("availability", "arm", &before) == 0);
+   assert(kb_store_bandit_decision_insert(id, "availability", "arm", "", 1.0, 0) == 0);
+   kb_store_bandit_arm_stats_t before, after;
+   assert(kb_store_bandit_arm_stats_read("availability", "arm", &before) == 0);
    assert(kb_bandit_record_result_count(id, 1, 10) == 0);
    assert(kb_bandit_record_result_count(id, 10, 10) == 0);
-   assert(db2_bandit_arm_stats_read("availability", "arm", &after) == 0);
+   assert(kb_store_bandit_arm_stats_read("availability", "arm", &after) == 0);
    assert(before.n_rewards == after.n_rewards);
    assert(before.posterior_alpha == after.posterior_alpha);
    assert(before.posterior_beta == after.posterior_beta);
    char err[256] = "";
    aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "SELECT result_count, result_truncated, reward IS NULL, closed_at = '' "
                         "FROM bandit_decisions WHERE id = ?1",
                         err, sizeof(err));
@@ -311,30 +311,30 @@ static void test_bandit_enumeration(void)
    open_db();
 
    /* Two points, the first with two arms; a sibling point must not leak in. */
-   assert(db2_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
-          0);
-   assert(db2_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5, 0) ==
-          0);
-   assert(db2_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
-          0);
-   assert(db2_bandit_decision_insert("enum-b-1", "other_dp", "x", "", 0.5, 0) == 0);
+   assert(kb_store_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5,
+                                          0) == 0);
+   assert(kb_store_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5,
+                                          0) == 0);
+   assert(kb_store_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5,
+                                          0) == 0);
+   assert(kb_store_bandit_decision_insert("enum-b-1", "other_dp", "x", "", 0.5, 0) == 0);
 
    char buf[2048];
 
    /* Points list: both points present, none invented. */
-   assert(db2_bandit_decision_points_list(buf, sizeof(buf)) == 0);
+   assert(kb_store_bandit_decision_points_list(buf, sizeof(buf)) == 0);
    assert(strstr(buf, "\"kb_memory_retrieval_limit\"") != NULL);
    assert(strstr(buf, "\"other_dp\"") != NULL);
    assert(strstr(buf, "kb_fusion_mode") == NULL);
 
    /* Arms list: distinct arms for the point, scoped (no sibling-point arm). */
-   assert(db2_bandit_arms_list("kb_memory_retrieval_limit", buf, sizeof(buf)) == 0);
+   assert(kb_store_bandit_arms_list("kb_memory_retrieval_limit", buf, sizeof(buf)) == 0);
    assert(strstr(buf, "\"10\"") != NULL);
    assert(strstr(buf, "\"20\"") != NULL);
    assert(strstr(buf, "\"x\"") == NULL);
 
    /* Unknown point: empty array, not an error. */
-   assert(db2_bandit_arms_list("no_such_point", buf, sizeof(buf)) == 0);
+   assert(kb_store_bandit_arms_list("no_such_point", buf, sizeof(buf)) == 0);
    assert(strcmp(buf, "[]") == 0);
 
    close_db();
@@ -357,7 +357,7 @@ static void test_bandit_replay_evidence(void)
    assert(artifact_id[0] != '\0');
 
    /* Verify the artifact landed at kind=benchmark_trace. */
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(

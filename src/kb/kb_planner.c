@@ -3,9 +3,9 @@
  */
 
 #include "kb_planner.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "headers/platform_process.h"
 
 #include <cJSON.h>
@@ -68,9 +68,9 @@ int kb_planner_artifact_write(const char *kind, const char *scope_id, const char
    cJSON_Delete(parsed);
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
-   int rc = db2_artifact_write(id, kind, "proposed", "plan", scope_id, "", 0.5, payload);
+   int rc = kb_store_artifact_write(id, kind, "proposed", "plan", scope_id, "", 0.5, payload);
    if (rc != 0)
       return -1;
 

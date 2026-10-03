@@ -3,10 +3,10 @@
  *
  * §6 of the proposal makes the upgrade fail-closed: a deployment lands with zero grants
  * and denies every remote write until an operator populates them. §7 says the local UDS
- * operator does that populating. The primitives existed (db2_write_tier_grant_*) but
+ * operator does that populating. The primitives existed (kb_store_write_tier_grant_*) but
  * nothing exposed them, so the documented procedure had no tool. These routes are the
  * kb half of that tool; aimee-server reaches them on the operator's behalf, because the
- * server links neither DB2 nor libpq and cannot touch the grant table itself.
+ * server links neither KB_STORE nor libpq and cannot touch the grant table itself.
  *
  * AUTHORIZATION IS NOT HERE, and that is deliberate rather than an omission. Two
  * independent checks apply, established by different machinery:

@@ -611,7 +611,7 @@ int directive_check_tool(const char *tool_name, const char *args_json, char *rea
    if (!tool_name)
       return 0;
 
-   /* Hard directives live in DB2 (owned by aimee-kb).  The kb-side
+   /* Hard directives live in KB_STORE (owned by aimee-kb).  The kb-side
     * rules.list RPC returns rules ordered by weight DESC, so the
     * highest-priority directive is examined first. */
    rule_t rules[64];

@@ -14,7 +14,7 @@ static const char *expected_operation;
 static const char *reply;
 static int expected_limit, transport_result = 1, initialized = 1, calls;
 
-int db2_is_initialized(void)
+int kb_store_is_initialized(void)
 {
    return initialized;
 }

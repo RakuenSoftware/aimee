@@ -4,7 +4,7 @@
 #
 # Everything here needs a real aimee-server but no PostgreSQL, so it does not
 # need the scratch container. The kb-side results (postgres/plugin coexistence,
-# db2_ok through the bus, install:kb vs install:server) came from the completed
+# postgres_ok through the bus, install:kb vs install:server) came from the completed
 # portion of the container run and are recorded separately.
 #
 # Scope: its own HOME, bus socket and policy dir under /tmp/al2, removed at the

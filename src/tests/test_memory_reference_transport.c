@@ -1,7 +1,7 @@
 /* The actual retrieval-reference writer preserves the Go record version. */
 #include <assert.h>
 #include "json_fluent.h"
-#include "../modules/db2/c/demotion.c"
+#include "../modules/kb/c/demotion.c"
 
 static int available = 1;
 static const char *version = "2026-09-17T23:45:00Z";

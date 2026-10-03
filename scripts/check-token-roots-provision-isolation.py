@@ -15,7 +15,7 @@ PRIVATE = {
     "kb/kb_mgmt_offline_hardening.o",
     "kb/kb_mgmt_token_roots_provision_main.o",
     "kb/kb_mgmt_token_roots_provision.o",
-    "modules/db2/c/management_token_roots.o",
+    "modules/kb/c/management_token_roots.o",
 }
 
 
@@ -46,7 +46,7 @@ def check(extra: str = "") -> list[str]:
         failures.append(f"provisioner closure omits {obj}")
     for variable in (
         "KB_OBJS",
-        "KB_DB2_OBJS",
+        "KB_KB_STORE_OBJS",
         "SERVER_OBJS",
         "STATUS_PROVISIONER_OBJS",
         "STATUS_AUTHORITY_OBJS",

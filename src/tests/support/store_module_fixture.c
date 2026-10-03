@@ -109,7 +109,7 @@ static void store_module_fixture_reset_schema(void)
 {
    /* A caller that has just created a uniquely named disposable database has
     * nothing to reset. More importantly, dropping public there would also drop
-    * pgvector/pg_trgm, which belong to the DB2 half of that shared database.
+    * pgvector/pg_trgm, which belong to the KB_STORE half of that shared database.
     * This test-only opt-out is safe only for such a fresh database; ordinary
     * reusable fixtures keep the deterministic reset below. */
    const char *reset = getenv("AIMEE_TEST_STORE_RESET_SCHEMA");

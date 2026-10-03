@@ -291,7 +291,7 @@ func TestHygieneCursorBindsScopeAndSnapshotIdentity(t *testing.T) {
 }
 
 func TestHygieneGovernedPostgres(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
 		t.Skip("PostgreSQL replay fixture required")
 	}
@@ -310,7 +310,7 @@ func TestHygieneGovernedPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

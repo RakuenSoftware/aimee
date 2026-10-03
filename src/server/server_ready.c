@@ -225,13 +225,13 @@ void server_ready_sample_now(void)
       s.retry_after_ms = dependency.retry_after_ms;
       s.last_success_query_ms = dependency.last_success_ms;
       snprintf(s.last_ingest_at, sizeof(s.last_ingest_at), "%s", h.last_ingest_at);
-      s.retrieval = (s.kb == DEP_OK && h.db2_ok && h.db2_kb_tables_ok && h.pgvec_ok &&
+      s.retrieval = (s.kb == DEP_OK && h.postgres_ok && h.knowledge_tables_ok && h.pgvec_ok &&
                      h.pgvec_collection_ok && h.embed_ok && strcmp(dependency.state, "open") != 0)
                         ? DEP_OK
                         : DEP_FAIL;
       const char *failed = s.kb != DEP_OK                          ? "kb_transport"
-                           : !h.db2_ok                             ? "db2"
-                           : !h.db2_kb_tables_ok                   ? "kb_schema"
+                           : !h.postgres_ok                        ? "kb_store"
+                           : !h.knowledge_tables_ok                ? "kb_schema"
                            : !h.pgvec_ok                           ? "pgvector"
                            : !h.pgvec_collection_ok                ? "vector_collection"
                            : !h.embed_ok                           ? "embedder"

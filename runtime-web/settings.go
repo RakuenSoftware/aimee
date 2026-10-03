@@ -8,7 +8,7 @@ import (
 
 // Curated, safe-to-toggle aimee runtime settings exposed in the webchat Settings
 // UI. This is an ALLOWLIST: the browser may only read/write these keys, never
-// arbitrary/sensitive config (db2_url, *_key_cmd, endpoints, …). Each maps 1:1
+// arbitrary/sensitive config (provider settings, *_key_cmd, endpoints, …). Each maps 1:1
 // to an aimee config field reached via /v1/config/{get,set}; changes persist to
 // aimee.yaml and take effect on the next turn (the server reloads config per
 // request).

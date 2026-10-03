@@ -54,9 +54,9 @@ int delegate_token_budget_for_agents(const agent_config_t *cfg);
 int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out);
 int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
                agent_result_t *out);
-/* Check whether a tool call would violate any active hard directive in DB2.
+/* Check whether a tool call would violate any active hard directive in KB_STORE.
  * Returns -1 with reason_out filled on a likely violation, 0 otherwise. Reads
- * go through db2_rules_list. */
+ * go through kb_store_rules_list. */
 int directive_check_tool(const char *tool_name, const char *args_json, char *reason_out,
                          size_t reason_len);
 

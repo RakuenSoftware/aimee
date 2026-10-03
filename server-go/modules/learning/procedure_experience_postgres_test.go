@@ -10,7 +10,7 @@ import (
 )
 
 func TestProcedureLedgerPostgresImmutableScopedVersionsAndErasure(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("PostgreSQL fixture unavailable")
 	}
@@ -47,7 +47,7 @@ func TestProcedureLedgerPostgresImmutableScopedVersionsAndErasure(t *testing.T) 
 		return out
 	}
 	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
-	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

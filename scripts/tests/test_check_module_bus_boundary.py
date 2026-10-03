@@ -235,8 +235,8 @@ class ModuleBusBoundaryTests(unittest.TestCase):
 
     def test_lower_layers_are_not_peers(self) -> None:
         """Lower storage layers and bare filenames do not name peer modules."""
-        for include in ('"db1/user_memory.h"', '"db2/artifacts.h"',
-                        '"modules/db2/c/artifacts.h"', '"local_helper.h"', '<stdio.h>',
+        for include in ('"db1/user_memory.h"', '"kb_store/artifacts.h"',
+                        '"local_helper.h"', '<stdio.h>',
                         '"headers/util.h"'):
             with self.subTest(include=include):
                 self.assert_fixture(
@@ -244,21 +244,23 @@ class ModuleBusBoundaryTests(unittest.TestCase):
                     None,
                 )
 
-    def test_db2_c_boundary_is_not_checked_as_a_peer_until_bus_cutover(self) -> None:
-        def add_db2_source(root: Path) -> None:
-            target = root / "src/modules/db2/c/store.c"
+    def test_knowledge_domain_has_no_blanket_peer_exemption(self) -> None:
+        def add_domain_source(root: Path) -> None:
+            target = root / "src/modules/kb/c/store.c"
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text('#include "config/config.h"\n', encoding="utf-8")
+            target.write_text('#include <aimee/workspace/workspace.h>\n', encoding="utf-8")
+        self.assert_fixture(add_domain_source, "undeclared-cross-module")
 
+    def test_new_private_knowledge_consumer_is_refused(self) -> None:
         self.assert_fixture(
-            add_db2_source,
-            None,
+            self.append("src/modules/workspace/workspace.c", '#include "modules/kb/c/artifacts.h"\n'),
+            "undeclared-cross-module",
         )
 
     def test_every_declared_crossing_is_classified_exactly_once(self) -> None:
         groups = (checker.IR_SHARED_TYPE, checker.PENDING_BUS_MIGRATION,
                   checker.PRIVATE_HEADER_REACH, checker.CORE_LINKED_REACH,
-                  checker.FLAT_ROOT_REACH)
+                  checker.FLAT_ROOT_REACH, checker.KNOWLEDGE_HOST_REACH)
         union: set = set()
         for group in groups:
             self.assertEqual(union & group, set())

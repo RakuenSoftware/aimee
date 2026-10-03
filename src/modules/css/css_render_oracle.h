@@ -22,7 +22,7 @@
  * property difference are reported as non-equivalence. Every result carries an
  * explicit limitation banner (no silent "equivalent", proposal §8). The snapshot
  * JSON (the captured computed styles) is the origin artifact and is retained by
- * the storage layer (see db2/css_render.*), never re-derived for diffing.
+ * the storage layer (see kb_store/css_render.*), never re-derived for diffing.
  */
 #ifndef DEC_CSS_RENDER_ORACLE_H
 #define DEC_CSS_RENDER_ORACLE_H 1

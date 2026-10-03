@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static db2_vault_rotation_row_t g_row;
-static db2_vault_rotation_envelope_t g_envelope;
+static kb_store_vault_rotation_row_t g_row;
+static kb_store_vault_rotation_envelope_t g_envelope;
 static int g_scope;
 static int g_get_fail;
 static int g_provision_calls, g_probe_calls, g_revoke_calls;
@@ -26,17 +26,17 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
    snprintf(out, cap, "owner");
    return 0;
 }
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t team)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t team)
 {
    assert(p && p->authenticated && team == 7 && !g_scope);
    return g_scope = 1, 0;
 }
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    assert(g_scope);
    return g_scope = 0, 0;
 }
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
    assert(g_scope);
    g_scope = 0;
@@ -45,7 +45,7 @@ int kb_vault_live_keys_allowed(void)
 {
    return 1;
 }
-int db2_vault_rotation_get(int64_t id, db2_vault_rotation_row_t *out)
+int kb_store_vault_rotation_get(int64_t id, kb_store_vault_rotation_row_t *out)
 {
    assert(g_scope && id == g_row.id);
    if (g_get_fail)
@@ -53,8 +53,8 @@ int db2_vault_rotation_get(int64_t id, db2_vault_rotation_row_t *out)
    *out = g_row;
    return 0;
 }
-int db2_vault_rotation_claim(const char *actor, int64_t id, const char *expected, const char *owner,
-                             int ttl, int64_t *token)
+int kb_store_vault_rotation_claim(const char *actor, int64_t id, const char *expected,
+                                  const char *owner, int ttl, int64_t *token)
 {
    assert(g_scope && actor && id == g_row.id && !strcmp(expected, g_row.state) && owner &&
           ttl >= 5);
@@ -63,29 +63,29 @@ int db2_vault_rotation_claim(const char *actor, int64_t id, const char *expected
    *token = g_row.claim_token;
    return 0;
 }
-int db2_vault_rotation_release(const char *actor, int64_t id, const char *owner, int64_t token)
+int kb_store_vault_rotation_release(const char *actor, int64_t id, const char *owner, int64_t token)
 {
    assert(g_scope && actor && id == g_row.id && !strcmp(owner, g_row.claim_owner) &&
           token == g_row.claim_token);
    g_row.claim_owner[0] = 0;
    return 0;
 }
-int db2_vault_rotation_heartbeat(const char *actor, int64_t id, const char *owner, int64_t token,
-                                 int ttl)
+int kb_store_vault_rotation_heartbeat(const char *actor, int64_t id, const char *owner,
+                                      int64_t token, int ttl)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token && ttl >= 5);
    return 0;
 }
-int db2_vault_rotation_checkpoint_old_ref(const char *actor, int64_t id, const char *owner,
-                                          int64_t token, const char *ref)
+int kb_store_vault_rotation_checkpoint_old_ref(const char *actor, int64_t id, const char *owner,
+                                               int64_t token, const char *ref)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token && ref);
    snprintf(g_row.old_vendor_ref, sizeof(g_row.old_vendor_ref), "%s", ref);
    return 0;
 }
-int db2_vault_rotation_stage_claimed(const char *actor, int64_t id, const char *owner,
-                                     int64_t token, const char *ref,
-                                     const db2_vault_rotation_envelope_t *e)
+int kb_store_vault_rotation_stage_claimed(const char *actor, int64_t id, const char *owner,
+                                          int64_t token, const char *ref,
+                                          const kb_store_vault_rotation_envelope_t *e)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token && ref && e);
    g_envelope = *e;
@@ -93,8 +93,9 @@ int db2_vault_rotation_stage_claimed(const char *actor, int64_t id, const char *
    snprintf(g_row.state, sizeof(g_row.state), "staged");
    return 0;
 }
-int db2_vault_rotation_probe_admit(const char *actor, int64_t id, const char *owner, int64_t token,
-                                   const char *op, db2_vault_rotation_envelope_t *e)
+int kb_store_vault_rotation_probe_admit(const char *actor, int64_t id, const char *owner,
+                                        int64_t token, const char *op,
+                                        kb_store_vault_rotation_envelope_t *e)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token && op);
    if (g_probe_admit_fail)
@@ -102,9 +103,9 @@ int db2_vault_rotation_probe_admit(const char *actor, int64_t id, const char *ow
    *e = g_envelope;
    return 0;
 }
-int db2_vault_rotation_transition_claimed(const char *actor, int64_t id, const char *owner,
-                                          int64_t token, const char *expected, const char *next,
-                                          const char *receipt)
+int kb_store_vault_rotation_transition_claimed(const char *actor, int64_t id, const char *owner,
+                                               int64_t token, const char *expected,
+                                               const char *next, const char *receipt)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token &&
           !strcmp(expected, g_row.state));
@@ -113,8 +114,9 @@ int db2_vault_rotation_transition_claimed(const char *actor, int64_t id, const c
       snprintf(g_row.revoke_receipt, sizeof(g_row.revoke_receipt), "%s", receipt);
    return 0;
 }
-int db2_vault_rotation_fail_claimed(const char *actor, int64_t id, const char *owner, int64_t token,
-                                    const char *expected, const char *phase, const char *error)
+int kb_store_vault_rotation_fail_claimed(const char *actor, int64_t id, const char *owner,
+                                         int64_t token, const char *expected, const char *phase,
+                                         const char *error)
 {
    (void)error;
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token &&
@@ -125,8 +127,8 @@ int db2_vault_rotation_fail_claimed(const char *actor, int64_t id, const char *o
    snprintf(g_row.failure_phase, sizeof(g_row.failure_phase), "%s", phase);
    return 0;
 }
-int db2_vault_rotation_remediate(const char *actor, int64_t id, const char *owner, int64_t token,
-                                 int64_t anchor, const char *evidence)
+int kb_store_vault_rotation_remediate(const char *actor, int64_t id, const char *owner,
+                                      int64_t token, int64_t anchor, const char *evidence)
 {
    assert(g_scope && actor && id == g_row.id && owner && token == g_row.claim_token &&
           anchor == g_row.from_version && evidence && *evidence);
@@ -210,7 +212,7 @@ int vault_hwm_read(const char *key, uint64_t *version, uint8_t *att, size_t cap,
    return 0;
 }
 
-static int resolve(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
+static int resolve(void *ctx, const char *op, const kb_store_vault_rotation_row_t *row,
                    const kb_vault_rotation_lease_t *lease, char *ref, size_t cap)
 {
    (void)ctx;
@@ -225,7 +227,7 @@ static int resolve(void *ctx, const char *op, const db2_vault_rotation_row_t *ro
    snprintf(ref, cap, "old-ref");
    return KB_VAULT_OP_OK;
 }
-static int provision(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
+static int provision(void *ctx, const char *op, const kb_store_vault_rotation_row_t *row,
                      const kb_vault_rotation_lease_t *lease, unsigned char *secret, size_t cap,
                      size_t *len, char *ref, size_t ref_cap, int *reconciled)
 {
@@ -239,7 +241,7 @@ static int provision(void *ctx, const char *op, const db2_vault_rotation_row_t *
    *reconciled = g_reconciled;
    return KB_VAULT_OP_OK;
 }
-static int probe(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
+static int probe(void *ctx, const char *op, const kb_store_vault_rotation_row_t *row,
                  const kb_vault_rotation_lease_t *lease, const unsigned char *secret, size_t len)
 {
    (void)ctx;
@@ -247,7 +249,7 @@ static int probe(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
    g_probe_calls++;
    return KB_VAULT_OP_OK;
 }
-static int revoke(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
+static int revoke(void *ctx, const char *op, const kb_store_vault_rotation_row_t *row,
                   const kb_vault_rotation_lease_t *lease, const char *ref, char *receipt,
                   size_t cap)
 {
@@ -259,7 +261,7 @@ static int revoke(void *ctx, const char *op, const db2_vault_rotation_row_t *row
    snprintf(receipt, cap, "confirmed-unusable");
    return KB_VAULT_OP_OK;
 }
-static int reconcile(void *ctx, const char *op, const db2_vault_rotation_row_t *row,
+static int reconcile(void *ctx, const char *op, const kb_store_vault_rotation_row_t *row,
                      const kb_vault_rotation_lease_t *lease, char *ref, size_t ref_cap, int *exists,
                      char *evidence, size_t evidence_cap)
 {

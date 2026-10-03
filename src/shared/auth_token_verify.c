@@ -374,9 +374,9 @@ static int identity_key(const char *s)
  * of this commit — the management token suite caught it.
  *
  * This is the THIRD place the data-plane grammar is encoded; the others are the
- * subject CHECK in db2/schema.sql and db2_intent_canonical_actor in
- * db2/management_intent_fields.h. They cannot share code — the server is
- * deliberately free of DB2_OBJS and libpq (see the $(SERVER) rule and
+ * subject CHECK in kb_store/schema.sql and kb_store_intent_canonical_actor in
+ * kb_store/management_intent_fields.h. They cannot share code — the server is
+ * deliberately free of KB_STORE_OBJS and libpq (see the $(SERVER) rule and
  * scripts/check_tier_deps.sh) — but they must agree, and whichever is stricter
  * wins SILENTLY: a subject the database admits but this rejects mints a token the
  * server then refuses as malformed. Change all three together. */

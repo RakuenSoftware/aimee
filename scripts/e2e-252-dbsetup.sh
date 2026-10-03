@@ -3,7 +3,7 @@
 #
 #   aimee_e2e_store  the server's store, reached by the aimee module through
 #                    the postgres module
-#   aimee_e2e_kb     DB2, with pgvector, for aimee-kb
+#   aimee_e2e_kb     KB_STORE, with pgvector, for aimee-kb
 #
 # BOTH UTF8 EXPLICITLY. The container initdb's SQL_ASCII, where char_length and
 # octet_length are the same function, so a byte-versus-character constraint

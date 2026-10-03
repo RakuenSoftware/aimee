@@ -9,7 +9,7 @@
  *     artifacts; only a valid response in normal mode writes exactly one.
  *
  * run_synthesis_pass is static, so the unit is reached by including the .c
- * directly (same pattern as the other curator unit tests). db2 writes land in
+ * directly (same pattern as the other curator unit tests). kb_store writes land in
  * the in-memory sqlite shim and are counted via SQL.
  */
 #ifndef _GNU_SOURCE
@@ -26,17 +26,17 @@
 
 static int g_idle_release_calls;
 void reflection_test_release_idle(void);
-#define db2_lease_release_idle reflection_test_release_idle
+#define kb_store_lease_release_idle reflection_test_release_idle
 #include <sqlite3.h>
 
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "modules/kb/c/db_postgres.h"
 
 /* The unit under test (pulls its own headers). */
 #include "../kb/kb_reflection.c"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
-#undef db2_lease_release_idle
+#undef kb_store_lease_release_idle
 
 void reflection_test_release_idle(void)
 {
@@ -90,9 +90,9 @@ kb_service_ctx_t *g_kb_ctx = NULL;
 static int count_session_synthesis(void)
 {
    char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(), "SELECT COUNT(*) FROM artifacts WHERE kind='session_synthesis'",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       kb_store_conn(), "SELECT COUNT(*) FROM artifacts WHERE kind='session_synthesis'", err,
+       sizeof(err));
    assert(st);
    assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
    int n = aimee_pg_column_int(st, 0);
@@ -157,7 +157,7 @@ static void base_cfg(const char *cmd)
    write_cfg();
 }
 
-static void mk_row(db2_artifact_proposed_t *row)
+static void mk_row(kb_store_artifact_proposed_t *row)
 {
    memset(row, 0, sizeof(*row));
    snprintf(row->id, sizeof(row->id), "sess-1");
@@ -171,16 +171,16 @@ static void mk_row(db2_artifact_proposed_t *row)
 static void test_valid_writes_one(void)
 {
    g_idle_release_calls = 0;
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    base_cfg("printf '%s' '" VALID_JSON "'");
-   db2_artifact_proposed_t row;
+   kb_store_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == 0);
    assert(count_session_synthesis() == 1);
    assert(g_idle_release_calls == g_n_attempts);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  valid response, normal mode → 1 candidate written OK\n");
 }
 
@@ -188,18 +188,18 @@ static void test_valid_writes_one(void)
 static void test_shadow_writes_none(void)
 {
    g_idle_release_calls = 0;
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    base_cfg("printf '%s' '" VALID_JSON "'");
    g_shadow = 1;
    write_cfg();
-   db2_artifact_proposed_t row;
+   kb_store_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == 0); /* shadow is a clean no-write success */
    assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  valid response, shadow mode → 0 candidates written OK\n");
 }
 
@@ -207,16 +207,16 @@ static void test_shadow_writes_none(void)
 static void test_garbage_writes_none(void)
 {
    g_idle_release_calls = 0;
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    base_cfg("printf '%s' 'not json at all'");
-   db2_artifact_proposed_t row;
+   kb_store_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == -1); /* no valid candidates */
    assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  garbage response → defer, 0 candidates written OK\n");
 }
 
@@ -224,27 +224,27 @@ static void test_garbage_writes_none(void)
 static void test_command_failure_writes_none(void)
 {
    g_idle_release_calls = 0;
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    base_cfg("false");
-   db2_artifact_proposed_t row;
+   kb_store_artifact_proposed_t row;
    mk_row(&row);
 
    int rc = run_synthesis_pass(&row);
    assert(rc == -1);
    assert(count_session_synthesis() == 0);
    assert(g_idle_release_calls == g_n_attempts);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  command failure → 0 candidates written OK\n");
 }
 
 static void test_empty_pass_releases_before_backoff(void)
 {
    g_idle_release_calls = 0;
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    base_cfg("false");
    run_reflection_pass_releasing_lease();
    assert(g_idle_release_calls == 1);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  empty pass releases its DB lease before scheduler backoff OK\n");
 }
 

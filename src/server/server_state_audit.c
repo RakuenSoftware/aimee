@@ -75,7 +75,7 @@ int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
 /* /v1/audit/fidelity handler. Like the trace/provenance handlers, its op
  * (evidence.fidelity_retrieval_event) is a KB-only action (the fidelity_report /
- * fidelity_attribution artifacts live in DB2), so the server forwards it to
+ * fidelity_attribution artifacts are read by the KB memory owner), so the server forwards it to
  * aimee-kb via kb_client and passes the JSON response through. */
 int handle_evidence_fidelity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

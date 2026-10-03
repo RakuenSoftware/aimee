@@ -39,6 +39,15 @@ MEMORY_INCLUDE = re.compile(r'#\s*include\s*[<"][^>"\n]*(?:aimee/memory/|modules
 CAPTURED_MEMBERS = {"mode": r"MEM_DATE_CONSTRAINT_\w+"}
 
 
+def native_symbol_patterns(manifest: dict) -> list[str]:
+    # Preserve the immutable inventory and reject both historical spellings and
+    # their mechanical KB-domain rename. A namespace change grants no new owner.
+    names = set(manifest["native_symbols"])
+    names.update(name.replace("db2", "kb_store").replace("DB2", "KB_STORE")
+                 for name in manifest["native_symbols"])
+    return [CAPTURED_MEMBERS.get(name, re.escape(name)) for name in sorted(names)]
+
+
 def without_comments(text: str) -> str:
     # Keep string literals intact: // in a URL is not a comment, and an include
     # path or a dlsym string can restore a native memory dependency too.
@@ -108,8 +117,7 @@ def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
 
     if manifest.get("version") != 1 or not manifest.get("native_symbols") or not manifest.get("native_files"):
         raise ValueError("missing or invalid immutable native retirement inventory")
-    native_patterns = [re.escape(symbol) if symbol not in CAPTURED_MEMBERS
-                       else CAPTURED_MEMBERS[symbol] for symbol in manifest["native_symbols"]]
+    native_patterns = native_symbol_patterns(manifest)
     symbols = re.compile(r"\b(?:" + "|".join(native_patterns)
                          + r"|AIMEE_MEMORY_\w+|aimee_memory_\w+|server_module_memory_\w+"
                          + r"|kb_module_memory_\w+|kb_client_memory_\w+)\b")

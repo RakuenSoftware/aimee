@@ -10,7 +10,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "kb_curator_contradictions.h"
 
 static void seed(sqlite3 *db, const char *sql)
@@ -30,16 +30,16 @@ static int count(sqlite3 *db, const char *sql)
 
 static void test_empty(void)
 {
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    assert(kb_curator_detect_contradictions_one(NULL) == 0);
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  detect_contradictions graceful on empty/shim OK\n");
 }
 
 static void test_contradiction(void)
 {
-   db2_test_shim_open();
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   kb_store_test_shim_open();
+   sqlite3 *db = (sqlite3 *)kb_store_test_shim_handle();
    assert(db != NULL);
 
    /* Two claim artifacts (FK targets for artifact_links). */
@@ -59,13 +59,13 @@ static void test_contradiction(void)
    assert(count(db, "SELECT COUNT(*) FROM artifact_links WHERE kind='contradicts'"
                     " AND ((from_id='a1' AND to_id='a3') OR (from_id='a3' AND to_id='a1'))") == 0);
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("  detect_contradictions links a value-disagreeing claim pair OK\n");
 }
 
 int main(void)
 {
-   if (db2_test_shim_skip_on_postgres("curator_contradictions"))
+   if (kb_store_test_shim_skip_on_postgres("curator_contradictions"))
       return 0;
 
    test_empty();

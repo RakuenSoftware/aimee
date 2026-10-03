@@ -4,10 +4,10 @@
  * Recall is by goal similarity, so a near-identical goal surfaces the approach
  * that already failed for it.
  *
- * DB1, not DB2, for the reason S1's candidate ledger is: these are THIS
+ * DB1, not KB_STORE, for the reason S1's candidate ledger is: these are THIS
  * MACHINE'S observations about ITS OWN failed jobs. The source is `agent_jobs`,
- * which is DB1 and lives in the daemon; putting the store in DB2 made the
- * feature inert in the daemon's own build, which compiles DB2 out. Sharing
+ * which is DB1 and lives in the daemon; putting the store in KB_STORE made the
+ * feature inert in the daemon's own build, which compiles KB_STORE out. Sharing
  * approach memory across an org would be a deliberate promotion step, not a
  * default.
  *

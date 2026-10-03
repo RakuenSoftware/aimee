@@ -1,9 +1,9 @@
 /* Real-PostgreSQL proof for the KB side of the SQLite WORM bridge. Producers
  * submit immutable intents; the worker API claims and acknowledges delivery
  * without constructing or storing a PostgreSQL hash chain. */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "kb_audit_worm.h"
 #include "config_embedder_dims.h"
 
@@ -37,14 +37,14 @@ static int sql_submit(void *conn)
 
 static void run(void)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
    long long outbox_before = scalar(conn, "SELECT COUNT(*) FROM kb_audit_outbox");
    long long delivered_before = scalar(conn, "SELECT COUNT(*) FROM kb_audit_delivery");
 
-   assert(db2_kb_audit_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
+   assert(kb_store_kb_audit_append("primary", "u", "tool.read", "v1-1", "allow", "{}") == 0);
    assert(sql_submit(conn) == 0);
-   assert(db2_kb_audit_append("delegate", "mimo", "kb.query", "q1", "ok", "{}") == 0);
+   assert(kb_store_kb_audit_append("delegate", "mimo", "kb.query", "q1", "ok", "{}") == 0);
    assert(scalar(conn, "SELECT COUNT(*) FROM kb_audit_outbox") == outbox_before + 3);
 
    char err[256] = "";
@@ -73,7 +73,7 @@ static void run(void)
    assert(aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) == 0);
    assert(scalar(conn, "SELECT COUNT(*) FROM kb_audit_delivery") == delivered_before + count);
    long long pending = -1, age = -1;
-   assert(db2_kb_audit_pending(&pending, &age) == 0);
+   assert(kb_store_kb_audit_pending(&pending, &age) == 0);
    assert(pending == 0);
    printf("  PASS: mixed producers submit and claim/ack delivers %d intents\n", count);
 }
@@ -86,15 +86,15 @@ int main(void)
       printf("kb_audit_worm_pg: SKIP (AIMEE_TEST_PG_URL unset; real Postgres required)\n");
       return 0;
    }
-   db2_set_embedding_dim_default(CONFIG_EMBEDDER_DIMS_DEFAULT);
-   db2_set_embedding_dim(CONFIG_EMBEDDER_DIMS_DEFAULT);
-   if (db2_init(url) != 0)
+   kb_store_set_embedding_dim_default(CONFIG_EMBEDDER_DIMS_DEFAULT);
+   kb_store_set_embedding_dim(CONFIG_EMBEDDER_DIMS_DEFAULT);
+   if (kb_store_init(url) != 0)
    {
-      fputs("kb_audit_worm_pg: db2_init failed\n", stderr);
+      fputs("kb_audit_worm_pg: kb_store_init failed\n", stderr);
       return 1;
    }
    run();
-   db2_shutdown();
+   kb_store_shutdown();
    printf("kb_audit_worm_pg: all tests passed\n");
    return 0;
 }

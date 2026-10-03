@@ -49,7 +49,7 @@ int workspace_repo_identity(const char *cwd, char *project_out, size_t project_l
                             char *workspace_out, size_t workspace_len);
 
 /* Canonical index keys for a discovered repo root: the project name and its
- * workspace, used to key the shared db2 index (projects.name, kb_documents.project)
+ * workspace, used to key the shared kb_store index (projects.name, kb_documents.project)
  * and the ingest queue. Prefers the repository identity (workspace_repo_identity)
  * so a repo indexed from any machine resolves to one project. Returns -1 and
  * leaves both outputs empty when no durable identity can be read or persisted;

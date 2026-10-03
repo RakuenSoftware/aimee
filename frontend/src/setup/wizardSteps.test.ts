@@ -27,8 +27,8 @@ describe('isRestartKey / helpFor', () => {
   it('isRestartKey matches exactly the RESTART_KEYS set', () => {
     for (const k of RESTART_KEYS) expect(isRestartKey(k)).toBe(true);
     expect(isRestartKey('provider')).toBe(false);
-    // db2_url is a known restart key and appears in the wizard.
-    expect(isRestartKey('db2_url')).toBe(true);
+    // Listener changes require a restart.
+    expect(isRestartKey('kb_api_http_port')).toBe(true);
   });
 
   it('helpFor returns the settingsHelp copy, or "" for unknowns', () => {
@@ -54,7 +54,7 @@ describe('saveConfigValue (wizard write path)', () => {
   });
 
   it('a 4xx surfaces the server error and does not succeed', async () => {
-    const res = await saveConfigValue('db2_url', 'bad', { fetchImpl: stubFetch(400, { error: 'invalid url' }) });
+    const res = await saveConfigValue('kb_api_http_port', 'bad', { fetchImpl: stubFetch(400, { error: 'invalid url' }) });
     expect(res.ok).toBe(false);
     expect(res.error).toBe('invalid url');
   });

@@ -296,7 +296,7 @@ int handle_learning_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    const char *request_id = server_eval_json_str(req, "request_id");
 
-   /* Proxied to the knowledge service. The backlog is DB2 and the evidence
+   /* Proxied to the knowledge service. The backlog is KB_STORE and the evidence
     * probe needs the corpus; running the pass here would reach neither, and
     * with a probe installed it would have failed at the first query. */
    char *json = kb_client_learning_resolve_json(server_eval_json_int(req, "budget", 0));
@@ -340,7 +340,7 @@ int handle_learning_fate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (id <= 0 || !fate[0])
       return server_send_error(conn, "learning.fate requires id and fate", request_id);
 
-   /* Proxied to the knowledge service: the ledger is DB2, which this binary
+   /* Proxied to the knowledge service: the ledger is KB_STORE, which this binary
     * builds without. Recording it locally would write nowhere. */
    char *json = kb_client_learning_fate_json(id, fate, server_eval_json_str(req, "reason"));
    cJSON *doc = json ? cJSON_Parse(json) : NULL;
@@ -386,7 +386,7 @@ int handle_eval_candidates(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    /* The endogeneity gate decides whether admission is even possible, so it
     * belongs in the same view as the backlog it governs — and it must be the
     * SAME gate the admission path enforces. Computing it locally reported
-    * "nothing observed" forever, because the ledger it reads is DB2 and this
+    * "nothing observed" forever, because the ledger it reads is KB_STORE and this
     * binary builds without it. */
    char *gate_json = kb_client_learning_endogeneity_json(0);
    cJSON *gate_doc = gate_json ? cJSON_Parse(gate_json) : NULL;

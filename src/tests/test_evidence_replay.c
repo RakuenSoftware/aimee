@@ -1,6 +1,6 @@
 /* Unit tests for the structured-evidence replay engine (Part A).
  * Pure: drives the logic through an injected fake backend; the real index_*
- * symbols are stubbed so the link needs no db2. */
+ * symbols are stubbed so the link needs no kb_store. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

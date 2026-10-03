@@ -3,7 +3,7 @@
  * These checks read a kb.health payload, and the first version of this command read
  * kb_health_t's field names out of it instead. Those are different shapes: the
  * struct is what the server fills in internally, and the JSON uses none of its
- * names. The result was a confident FAIL on "DB2 schema present" and "vector store
+ * names. The result was a confident FAIL on "KB_STORE schema present" and "vector store
  * ready" against a kb that was perfectly healthy, which is the worst possible
  * failure for a diagnostic: it sends someone to debug storage that is fine.
  *

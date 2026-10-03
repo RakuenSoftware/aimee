@@ -83,7 +83,7 @@ add_executable(test_git_oauth_github test_git_oauth_github.c
 target_include_directories(test_git_oauth_github PRIVATE
   ${AIMEE_PROJECT_INCLUDE_DIRS}
   ${AIMEE_SRC_DIR}/db1
-  ${AIMEE_SRC_DIR}/db2
+  ${AIMEE_SRC_DIR}/kb_store
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 target_link_libraries(test_git_oauth_github PRIVATE Threads::Threads)
@@ -191,46 +191,6 @@ aimee_add_test(test_routing_module test_routing_module.c ../modules/routing/modu
 target_include_directories(test_routing_module PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/routing/include)
-aimee_add_test(test_db2_module_contract
-  test_db2_module_contract.c
-  ../modules/db2/client/generated.c
-  ../modules/db2/module_adapter.c)
-target_include_directories(test_db2_module_contract PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-aimee_add_test(test_bus_db2_module
-  test_bus_db2_module.c
-  ../modules/db2/client/generated.c
-  ../modules/db2/module_adapter.c)
-target_include_directories(test_bus_db2_module PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-target_link_libraries(test_bus_db2_module PRIVATE aimee-core-event-bus Threads::Threads)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  add_executable(test_bus_db2_process
-    test_bus_db2_process.c
-    ../modules/db2/client/generated.c)
-  target_include_directories(test_bus_db2_process PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-  target_link_libraries(test_bus_db2_process PRIVATE aimee-core-event-bus Threads::Threads)
-endif()
-aimee_add_test(test_db3_filters
-  test_db3_filters.c
-  ../modules/db2/db3_route.c)
-target_include_directories(test_db3_filters PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-target_link_libraries(test_db3_filters PRIVATE m)
-aimee_add_test(test_pgvec_db3
-  test_pgvec_db3.c
-  ../modules/db2/c/pgvec_db3.c
-  ../modules/db2/db3_route.c)
-target_include_directories(test_pgvec_db3 PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/c)
-target_link_libraries(test_pgvec_db3 PRIVATE m Threads::Threads)
 aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
@@ -355,10 +315,7 @@ set_tests_properties(test_toolset PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_compute_pool test_compute_pool.c ../server/compute_pool.c support/log_stub.c)
-add_executable(test_db2_pool test_db2_pool.c ../db2/db2_pool.c support/log_stub.c)
-aimee_enable_test_asserts(test_db2_pool)
-target_link_libraries(test_db2_pool PRIVATE Threads::Threads)
-add_test(NAME test_db2_pool COMMAND test_db2_pool)
+
 target_include_directories(test_compute_pool PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers

@@ -24,7 +24,7 @@
  */
 #include "kb_mgmt_token_authority_ipc.h"
 #include "kb/kb_mgmt_token_authority_service.h"
-#include "modules/db2/c/management_token_authority.h"
+#include "modules/kb/c/management_token_authority.h"
 #include "vault_custody_kms.h"
 #include "vault_server_key.h"
 
@@ -37,14 +37,14 @@ typedef struct
    const char *dsn;
 } reopen_config_t;
 
-static int reopen_database(void *opaque, db2_management_token_authority_ctx_t *db)
+static int reopen_database(void *opaque, kb_store_management_token_authority_ctx_t *db)
 {
    reopen_config_t *config = opaque;
    char error[256] = "";
    if (!config || !db)
       return -1;
-   db2_management_token_authority_close(db);
-   int rc = db2_management_token_authority_open(db, config->dsn, error, sizeof(error));
+   kb_store_management_token_authority_close(db);
+   int rc = kb_store_management_token_authority_open(db, config->dsn, error, sizeof(error));
    OPENSSL_cleanse(error, sizeof(error));
    return rc;
 }
@@ -97,8 +97,8 @@ static void describe_token(const char *jwt)
 
 int main(int argc, char **argv)
 {
-   aimee_db2_register_token_record_validators(kb_mgmt_token_authority_record_valid,
-                                              kb_identity_token_authority_record_valid);
+   aimee_kb_store_register_token_record_validators(kb_mgmt_token_authority_record_valid,
+                                                   kb_identity_token_authority_record_valid);
    if (argc != 4)
    {
       fprintf(stderr, "usage: identity-mint-live <dsn> <correlation_id> <jti>\n");
@@ -111,10 +111,10 @@ int main(int argc, char **argv)
       return 64;
    }
 
-   db2_management_token_authority_ctx_t database;
+   kb_store_management_token_authority_ctx_t database;
    memset(&database, 0, sizeof(database));
    char error[256] = "";
-   if (db2_management_token_authority_open(&database, dsn, error, sizeof(error)) != 0)
+   if (kb_store_management_token_authority_open(&database, dsn, error, sizeof(error)) != 0)
    {
       fprintf(stderr, "identity-mint-live: database open failed: %s\n", error);
       OPENSSL_cleanse(error, sizeof(error));
@@ -133,7 +133,7 @@ int main(int argc, char **argv)
        !vault_custody_kms_hwm_ready())
    {
       fprintf(stderr, "identity-mint-live: vault custody not ready (unseal/HWM)\n");
-      db2_management_token_authority_close(&database);
+      kb_store_management_token_authority_close(&database);
       return 68;
    }
    printf("vault: unsealed, HWM attestation ready\n");
@@ -157,7 +157,7 @@ int main(int argc, char **argv)
    }
 
    OPENSSL_cleanse(&out, sizeof(out));
-   db2_management_token_authority_close(&database);
+   kb_store_management_token_authority_close(&database);
    if (vault_seal() != 0)
    {
       fprintf(stderr, "identity-mint-live: vault re-seal failed\n");

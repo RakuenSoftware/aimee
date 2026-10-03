@@ -5,8 +5,8 @@
  *
  * For tests that exercise work_queue functionality directly via the
  * sqlite shim (e.g. unit-test-cmd-work), the stubs forward to the
- * underlying db2_* helpers when DB2 is initialized so the tests still
- * pass.  Tests that don't init DB2 get the empty-stub behaviour. */
+ * underlying kb_store_* helpers when KB_STORE is initialized so the tests still
+ * pass.  Tests that don't init KB_STORE get the empty-stub behaviour. */
 #include "aimee.h"
 #include "kb_client.h"
 #include "lifecycle.h"
@@ -26,7 +26,7 @@ int kb_client_task_list(const char *state, const char *session_id, int limit, ai
    return 0;
 }
 
-int kb_client_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out,
+int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max)
 {
    (void)outcome;
@@ -64,7 +64,7 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
 }
 
 /* tool_registry wrappers live in kb_client_tool_registry.c — that file
- * already short-circuits to in-process db2_* when DB2 is initialized via
+ * already short-circuits to in-process kb_store_* when KB_STORE is initialized via
  * the sqlite shim, so unit tests pick up the right behaviour without a
  * stub.  Tests that don't link kb_client_tool_registry.o also don't
  * reference these symbols, so omitting them here is safe. */

@@ -15,7 +15,7 @@ import (
 
 func sharedChangeMigration(t *testing.T) string {
 	t.Helper()
-	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	body, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func testSharedDerivedRevisionUpgrade(t *testing.T, kind string) {
  CREATE TABLE ` + table + `(id BIGINT PRIMARY KEY,memory_id BIGINT REFERENCES memories(id),` + columns + `);
  INSERT INTO memories(id,scope_type,scope_value,content) VALUES(1,'project','upgrade','original');
  INSERT INTO ` + table + ` VALUES(9007199254743001,1,` + values + `);`)
-	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	body, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestSharedLinkChangeJournal(t *testing.T) {
  CREATE POLICY visible ON memories USING(memory_row_scope_visible(scope_type,scope_value))
  WITH CHECK(memory_row_scope_visible(scope_type,scope_value));`)
 	exec(sharedChangeMigration(t))
-	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	body, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -641,7 +641,7 @@ func TestStructuredRecallRevisionUpgrade(t *testing.T) {
  prospective_memories_fts_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english',action_text)) STORED);
  INSERT INTO epistemic_directives(id,question) VALUES(1,'original question');
  INSERT INTO prospective_memories(id,action_text) VALUES(1,'original action');`)
-	raw, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	raw, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

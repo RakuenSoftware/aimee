@@ -203,6 +203,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
 		request.Operation = operation
+	case "fidelity-read":
+		request.Operation, request.Key = operation, args.stringOr("turn_id", "")
+		if request.Key == "" || len(request.Key) > 128 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "demotion-run", "demotion-check":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
@@ -312,7 +317,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "emitted": *response.Count})
-	case "fact-maintenance", "fact-review", "fact-candidates", "demotion-run", "demotion-check":
+	case "fact-maintenance", "fact-review", "fact-candidates", "demotion-run", "demotion-check", "fidelity-read":
 		return commandResult(response.Payload)
 	case "feedback-path":
 		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})

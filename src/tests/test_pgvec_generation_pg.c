@@ -38,11 +38,11 @@
  *  5. kb_pdf_embeddings does all of the above, because it is a separate
  *     relation with its own copy of the write path.
  */
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/pgvec_transport.h"
-#include "modules/db2/c/db_schema.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/pgvec_transport.h"
+#include "modules/kb/c/db_schema.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -59,7 +59,7 @@ static int g_dim;
 static void exec_or_die(const char *sql)
 {
    char errbuf[512] = "";
-   if (aimee_pg_exec(db2_conn(), sql, errbuf, sizeof(errbuf)) != 0)
+   if (aimee_pg_exec(kb_store_conn(), sql, errbuf, sizeof(errbuf)) != 0)
    {
       fprintf(stderr, "pgvec_generation_pg: exec failed: %s\n  sql: %s\n", errbuf, sql);
       exit(1);
@@ -74,7 +74,7 @@ static int read_generation(const char *table, int64_t point_id, int64_t *out, in
    char sql[256];
    snprintf(sql, sizeof(sql), "SELECT generation FROM %s WHERE point_id = :point_id", table);
    char errbuf[512] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(db2_conn(), sql, errbuf, sizeof(errbuf));
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(kb_store_conn(), sql, errbuf, sizeof(errbuf));
    if (!stmt)
    {
       fprintf(stderr, "pgvec_generation_pg: prepare failed: %s\n", errbuf);
@@ -183,21 +183,21 @@ int main(void)
       printf("pgvec_generation_pg: SKIP (AIMEE_TEST_PG_URL unset; real Postgres required)\n");
       return 0;
    }
-   if (db2_init(url) != 0)
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "pgvec_generation_pg: db2_init failed for %s\n", url);
+      fprintf(stderr, "pgvec_generation_pg: kb_store_init failed for %s\n", url);
       return 1;
    }
    /* The upsert guards the vector length against the DECLARED dimension, and the
     * column enforces the APPLIED one. They have to be the same number, and the
     * applied one is the fact on disk, so take it from there. */
-   g_dim = db2_embedding_dim_get(db2_conn());
+   g_dim = kb_store_embedding_dim_get(kb_store_conn());
    if (g_dim <= 0)
    {
       fprintf(stderr, "pgvec_generation_pg: no schema_embedding_dim recorded\n");
       return 1;
    }
-   db2_set_embedding_dim(g_dim);
+   kb_store_set_embedding_dim(g_dim);
    printf("pgvec_generation_pg: schema applied at %d dimensions\n", g_dim);
 
    exec_or_die("DELETE FROM kb_embeddings WHERE point_id IN (9001, 9002)");

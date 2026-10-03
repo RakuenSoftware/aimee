@@ -31,10 +31,10 @@ typedef struct
 typedef struct
 {
    kb_management_cert_intent_binding_t intent;
-   char ca_issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char ca_issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
    uint8_t ca_fingerprint[32];
-   char leaf_issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
-   char leaf_serial_norm[DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
+   char leaf_issuer[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char leaf_serial_norm[KB_STORE_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
    uint8_t leaf_fingerprint[32];
    uint8_t leaf_spki_digest[32];
    int64_t not_before_epoch;

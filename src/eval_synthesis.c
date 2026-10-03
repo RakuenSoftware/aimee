@@ -9,7 +9,7 @@
 #include "cJSON.h"
 #include "kb_client.h"
 #include "log.h"
-#include "modules/db2/c/db2_learning.h"
+#include "modules/kb/c/kb_store_learning.h"
 
 #include "approach_store.h"
 #include "platform_path.h"
@@ -143,8 +143,9 @@ static void eval_synthesis_scan_jobs(int window_days, const char *suite,
 static void eval_synthesis_scan_signals(int window_days, const char *suite,
                                         eval_synthesis_scan_stats_t *stats)
 {
-   db2_learning_negative_signal_t rows[EVAL_SYNTHESIS_SCAN_SIGNALS];
-   int n = db2_learning_negative_signals_recent(window_days, rows, EVAL_SYNTHESIS_SCAN_SIGNALS);
+   kb_store_learning_negative_signal_t rows[EVAL_SYNTHESIS_SCAN_SIGNALS];
+   int n =
+       kb_store_learning_negative_signals_recent(window_days, rows, EVAL_SYNTHESIS_SCAN_SIGNALS);
    if (n <= 0)
       return;
 
@@ -287,7 +288,7 @@ int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
     * not get to widen its own yardstick.
     *
     * The gate must be ASKED OF THE KNOWLEDGE SERVICE, not computed here. It
-    * reads the learning ledger, which is DB2, and this binary builds with DB2
+    * reads the learning ledger, which is KB_STORE, and this binary builds with KB_STORE
     * compiled out — a local check always answered "nothing observed" however
     * self-referential the ledger had become, which made the gate inert exactly
     * where it is enforced. A live run with both services up is what exposed

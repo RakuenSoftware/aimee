@@ -3,7 +3,7 @@
 #include "kb_http_accounts.h"
 
 #include "cJSON.h"
-#include "modules/db2/c/enrollments.h"
+#include "modules/kb/c/enrollments.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -28,7 +28,7 @@ static int query_limit(const char *qs, int def)
    return v;
 }
 
-static cJSON *enrollment_to_json(const db2_enrollment_row_t *r)
+static cJSON *enrollment_to_json(const kb_store_enrollment_row_t *r)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON_AddNumberToObject(o, "id", (double)r->id);
@@ -63,8 +63,8 @@ static int emit(cJSON *root, char *out_buf, int out_cap, int status)
 static int list_enrollments(const char *query_string, char *out_buf, int out_cap)
 {
    int limit = query_limit(query_string, 50);
-   db2_enrollment_row_t rows[ENROLL_LIST_MAX];
-   int n = db2_enrollment_list(limit, rows, ENROLL_LIST_MAX);
+   kb_store_enrollment_row_t rows[ENROLL_LIST_MAX];
+   int n = kb_store_enrollment_list(limit, rows, ENROLL_LIST_MAX);
    if (n < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollments unavailable\"}");
@@ -89,8 +89,8 @@ static int revoke_enrollment(const char *path, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"bad enrollment id\"}");
       return 400;
    }
-   db2_enrollment_row_t row;
-   int rc = db2_enrollment_revoke((int64_t)id, &row);
+   kb_store_enrollment_row_t row;
+   int rc = kb_store_enrollment_revoke((int64_t)id, &row);
    if (rc == 1)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment not found\"}");
@@ -115,8 +115,8 @@ static int revoke_enrollment(const char *path, char *out_buf, int out_cap)
 /* GET /v1/scopes — the scope lattice: distinct scopes with cert counts. */
 static int list_scopes(char *out_buf, int out_cap)
 {
-   db2_enrollment_row_t rows[ENROLL_LIST_MAX];
-   int n = db2_enrollment_list(ENROLL_LIST_MAX, rows, ENROLL_LIST_MAX);
+   kb_store_enrollment_row_t rows[ENROLL_LIST_MAX];
+   int n = kb_store_enrollment_list(ENROLL_LIST_MAX, rows, ENROLL_LIST_MAX);
    if (n < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"scopes unavailable\"}");
@@ -197,7 +197,8 @@ static cJSON *admin_values_to_array(const char *stored)
    return csv_to_array(stored ? stored : "");
 }
 
-static int oidc_config_to_json(const db2_console_oidc_t *c, char *out_buf, int out_cap, int status)
+static int oidc_config_to_json(const kb_store_console_oidc_t *c, char *out_buf, int out_cap,
+                               int status)
 {
    cJSON *root = cJSON_CreateObject();
    cJSON_AddStringToObject(root, "issuer", c->issuer);
@@ -227,8 +228,8 @@ static int oidc_config_to_json(const db2_console_oidc_t *c, char *out_buf, int o
 /* GET /v1/config/oidc — the console OIDC login config (empty if unset). */
 static int get_oidc_config(char *out_buf, int out_cap)
 {
-   db2_console_oidc_t c;
-   int rc = db2_console_oidc_get(&c);
+   kb_store_console_oidc_t c;
+   int rc = kb_store_console_oidc_get(&c);
    if (rc < 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config store unavailable\"}");
@@ -292,7 +293,7 @@ static int put_oidc_config(const char *body, char *out_buf, int out_cap)
       }
    }
 
-   db2_console_oidc_t c;
+   kb_store_console_oidc_t c;
    memset(&c, 0, sizeof(c));
    snprintf(c.issuer, sizeof(c.issuer), "%s", iss_s);
    snprintf(c.audience, sizeof(c.audience), "%s", aud_s);
@@ -317,15 +318,15 @@ static int put_oidc_config(const char *body, char *out_buf, int out_cap)
    free(vals_json);
    cJSON_Delete(req);
 
-   if (db2_console_oidc_put(&c) != 0)
+   if (kb_store_console_oidc_put(&c) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config store unavailable\"}");
       return 503;
    }
    audit_log("console_oidc_config_put", "issuer=%s jwks_url=%s", c.issuer, c.jwks_url);
    /* Re-read to return the canonical stored form (with updated_at). */
-   db2_console_oidc_t stored;
-   if (db2_console_oidc_get(&stored) == 0)
+   kb_store_console_oidc_t stored;
+   if (kb_store_console_oidc_get(&stored) == 0)
       return oidc_config_to_json(&stored, out_buf, out_cap, 200);
    return oidc_config_to_json(&c, out_buf, out_cap, 200);
 }

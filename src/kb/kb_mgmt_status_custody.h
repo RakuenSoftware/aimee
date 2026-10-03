@@ -8,7 +8,7 @@
 typedef struct
 {
    const char *custody_key_id;
-   db2_management_status_key_ctx_t *database;
+   kb_store_management_status_key_ctx_t *database;
 } kb_mgmt_status_custody_t;
 
 typedef enum

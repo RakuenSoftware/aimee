@@ -11,7 +11,7 @@ spelling of "has an IP" from the name alone. When it guesses has_ip, the gate
 returns NOVEL and stages a provisional rel_type plus a Class-C edge.
 
 Note the asymmetry this exposes: entities have alias resolution
-(db2_entity_alias_bind binds "Billie" to a canonical node), relations have none.
+(kb_store_entity_alias_bind binds "Billie" to a canonical node), relations have none.
 
 SYNONYMS below is hand-built from what the models actually emitted. It is a
 measurement aid, not a proposed production mapping — a real one should be derived

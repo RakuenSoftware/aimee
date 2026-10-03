@@ -5,17 +5,17 @@
  * Per pending evidence_index_ops row: read the evidence artifact, extract its
  * "content", embed it via the configured embedding_command (or the builtin
  * hash embedder), format the 384-dim result as a pgvector text literal, and
- * store it through db2_evidence_store_vector (which also marks the op 'ok').
+ * store it through kb_store_evidence_store_vector (which also marks the op 'ok').
  * On any failure the op is marked failed so the queue makes forward progress.
- * DB2 only; no DB1 access from this file. */
+ * KB_STORE only; no DB1 access from this file. */
 
 #include "kb_evidence_embed.h"
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/db2/c/db2.h" /* db2_lease_release_idle */
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/evidence_vectors.h"
+#include "modules/kb/c/kb_store.h" /* kb_store_lease_release_idle */
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/evidence_vectors.h"
 #include "log.h"
 #include "memory.h"
 
@@ -103,8 +103,8 @@ static char *evidence_vec_to_text(const float *vec, int dim)
 
 int kb_evidence_embed_one(const char *embed_cmd)
 {
-   db2_evidence_pending_t pend;
-   int got = db2_evidence_list_pending(&pend, 1);
+   kb_store_evidence_pending_t pend;
+   int got = kb_store_evidence_list_pending(&pend, 1);
    if (got < 0)
       return -1;
    if (got == 0)
@@ -112,10 +112,10 @@ int kb_evidence_embed_one(const char *embed_cmd)
 
    const char *model = config_embedder_command_current(embed_cmd);
 
-   db2_artifact_row_t row;
-   if (db2_artifact_read(pend.artifact_id, &row, NULL, 0, NULL) != 0)
+   kb_store_artifact_row_t row;
+   if (kb_store_artifact_read(pend.artifact_id, &row, NULL, 0, NULL) != 0)
    {
-      db2_evidence_mark_failed(pend.artifact_id, "artifact not found");
+      kb_store_evidence_mark_failed(pend.artifact_id, "artifact not found");
       aimee_log(LOG_WARN, "kb.evidence.embed", "artifact %s missing; op marked failed",
                 pend.artifact_id);
       return 1;
@@ -124,14 +124,14 @@ int kb_evidence_embed_one(const char *embed_cmd)
    char content[4096];
    if (evidence_extract_content(row.payload_json, content, sizeof(content)) != 0)
    {
-      db2_evidence_mark_failed(pend.artifact_id, "no embeddable content");
+      kb_store_evidence_mark_failed(pend.artifact_id, "no embeddable content");
       return 1;
    }
 
    /* Drop the pool lease before the embedder round-trip so the evidence-embed
     * drain can't pin a connection past the 300s stuck-lease ceiling (see
     * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
    float vec[EVIDENCE_EMBED_DIM];
    cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
    cJSON_AddStringToObject(embed_0_args, "base_url", model);
@@ -147,7 +147,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    {
       char err[128];
       snprintf(err, sizeof(err), "embed dim %d != %d", dim, EVIDENCE_EMBED_DIM);
-      db2_evidence_mark_failed(pend.artifact_id, err);
+      kb_store_evidence_mark_failed(pend.artifact_id, err);
       aimee_log(LOG_WARN, "kb.evidence.embed", "%s for %s (model=%s)", err, pend.artifact_id,
                 model);
       return 1;
@@ -156,15 +156,15 @@ int kb_evidence_embed_one(const char *embed_cmd)
    char *vec_text = evidence_vec_to_text(vec, dim);
    if (!vec_text)
    {
-      db2_evidence_mark_failed(pend.artifact_id, "vector format failed");
+      kb_store_evidence_mark_failed(pend.artifact_id, "vector format failed");
       return 1;
    }
 
-   int rc = db2_evidence_store_vector(pend.artifact_id, pend.collection, vec_text);
+   int rc = kb_store_evidence_store_vector(pend.artifact_id, pend.collection, vec_text);
    free(vec_text);
    if (rc != 0)
    {
-      db2_evidence_mark_failed(pend.artifact_id, "store failed");
+      kb_store_evidence_mark_failed(pend.artifact_id, "store failed");
       aimee_log(LOG_WARN, "kb.evidence.embed", "store_vector failed for %s", pend.artifact_id);
       return 1;
    }

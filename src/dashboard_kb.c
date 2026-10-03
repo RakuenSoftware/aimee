@@ -1,9 +1,9 @@
 #include "json_fluent.h"
 #include "module_commands.h"
-/* dashboard_kb.c: dashboard JSON helpers that touch only DB2 + audit.log.
+/* dashboard_kb.c: dashboard JSON helpers that touch only KB_STORE + audit.log.
  *
  * These are the dashboard endpoints the kb sidecar's request handlers
- * (db2/kb_service_backend_agent.c → db2_kb_service_dashboard_*) call
+ * (kb_store/kb_service_backend_agent.c → kb_store_kb_service_dashboard_*) call
  * directly when the daemon proxies "dashboard.*" RPCs through to kb.
  * They live here, not in dashboard.c, so the $(KB) link rule can pull
  * them in without dragging the rest of dashboard.c (api_doctor, cors_*,
@@ -11,14 +11,14 @@
  * into the daemon-adjacent binaries.
  *
  * Note on api_logs: the kb-side version intentionally omits the DB1
- * agent_log rows. aimee-kb is being pinned to DB2 only (architecture
+ * agent_log rows. aimee-kb is being pinned to KB_STORE only (architecture
  * lock rule 2), so reaching into db1_agent_log_* from this file would
  * violate that boundary. The daemon-side dashboard handler is free to
  * splice agent_log rows into the response if it ever needs to. */
 #include "aimee.h"
 #include "cJSON.h"
-#include "modules/db2/c/decision_log.h"
-#include "modules/db2/c/memory_query.h"
+#include "modules/kb/c/decision_log.h"
+#include "modules/kb/c/memory_query.h"
 #include "dashboard.h"
 #include "lifecycle.h"
 #include "headers/memory.h"
@@ -175,10 +175,10 @@ char *api_logs(void)
    dashboard_log_row_t rows[DASHBOARD_MAX_LOG_ROWS];
    int row_count = 0;
 
-   /* decision_log rows (DB2). */
+   /* decision_log rows (KB_STORE). */
    {
-      db2_decision_log_row_t dl[100];
-      int n = db2_decision_log_list(NULL, 100, dl, 100);
+      kb_store_decision_log_row_t dl[100];
+      int n = kb_store_decision_log_list(NULL, 100, dl, 100);
       for (int i = 0; i < n && row_count < DASHBOARD_MAX_LOG_ROWS; i++)
       {
          dashboard_log_row_t *row = &rows[row_count++];
@@ -235,7 +235,7 @@ char *api_logs(void)
 
 char *api_dashboard_reminders(void)
 {
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return NULL;
    cJSON *args = cJSON_CreateObject();
    if (!args)
@@ -276,7 +276,7 @@ char *api_dashboard_recall(void)
 
 char *api_dashboard_directives(void)
 {
-   if (!db2_is_initialized())
+   if (!kb_store_is_initialized())
       return NULL;
    cJSON *args = cJSON_CreateObject();
    if (!args)

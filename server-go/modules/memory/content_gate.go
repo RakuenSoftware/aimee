@@ -2,8 +2,11 @@ package memory
 
 import (
 	"errors"
-	"github.com/JBailes/aimee/server-go/bus"
 	"regexp"
+	"strings"
+
+	"github.com/JBailes/aimee/server-go/bus"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -114,4 +117,39 @@ func screenMemoryWrite(key, content string) (string, error) {
 		return "", errSensitiveMemory
 	}
 	return screenMemoryText(content)
+}
+
+// This bounded admission check rejects direct attempts to replace the agent's
+// instruction hierarchy. It is not a general injection classifier: quoted
+// evidence and user-authored text retain their authority, and serving-time
+// integrity checks remain mandatory even after admission succeeds.
+var errInstructionMemory = errors.New("memory: model-authored instruction override refused")
+var instructionOverride = regexp.MustCompile(`(?i)^(ignore|disregard|forget|override)\s+(all\s+)?(previous|prior|system|developer|safety)\s+(instructions?|prompts?|rules?|polic(y|ies))\b`)
+
+func screenModelMemory(authority int, texts ...string) error {
+	if authority != AuthorityModel {
+		return nil
+	}
+	for _, text := range texts {
+		fence := ""
+		for _, line := range strings.Split(norm.NFKC.String(text), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+				marker := line[:3]
+				if fence == "" {
+					fence = marker
+				} else if fence == marker {
+					fence = ""
+				}
+				continue
+			}
+			if fence != "" {
+				continue
+			}
+			if instructionOverride.MatchString(line) {
+				return errInstructionMemory
+			}
+		}
+	}
+	return nil
 }

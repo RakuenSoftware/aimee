@@ -55,7 +55,8 @@ class ComposeVaultTests(unittest.TestCase):
         model['x-aimee-vault']['AIMEE_KB_SERVICE_IDENTITY_TOKEN'] = 'fixture-identity'
         [(owner, packet)] = module.payloads(model)
         self.assertEqual(owner, 'aimee-kb')
-        self.assertIn('AIMEE_DB2_URL=', packet)
+        self.assertNotIn('AIMEE_DB2_URL=', packet)
+        self.assertIn('AIMEE_STORE_MIGRATION_URL=', packet)
         self.assertIn('AIMEE_KB_API_BEARER_TOKEN=fixture-authority\0', packet)
         self.assertIn('AIMEE_KB_SERVICE_IDENTITY_TOKEN=fixture-identity\0', packet)
 
@@ -78,7 +79,8 @@ class ComposeVaultTests(unittest.TestCase):
         args, options = calls[-1]
         self.assertIn('AIMEE_VAULT_STORE_MIGRATION=1', args)
         self.assertNotIn('AIMEE_VAULT_ENV_OVERWRITE=1', args)
-        self.assertIn(b'AIMEE_DB2_URL=', options['input'])
+        self.assertNotIn(b'AIMEE_DB2_URL=', options['input'])
+        self.assertIn(b'AIMEE_STORE_MIGRATION_URL=', options['input'])
         with self.assertRaises(ValueError):
             module.main(['--migrate-store-connections', 'config'])
 

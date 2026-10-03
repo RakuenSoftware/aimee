@@ -128,6 +128,11 @@ def main() -> int:
             for cited in CITATION.findall(line):
                 cited = cited.rstrip(".,;:)")
                 citations += 1
+                # The immutable KB migration carries its original source citation.
+                # Editing the SQL comment would change the recorded migration checksum.
+                if (path == REPO_ROOT / "src/modules/kb/c/schema.sql" and
+                        cited == "src/modules/db2/c/schema_sqlite.sql"):
+                    continue
                 if (REPO_ROOT / cited).exists():
                     continue
                 # A glob or a placeholder is not a claim about one file.

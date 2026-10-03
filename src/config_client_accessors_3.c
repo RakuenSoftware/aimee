@@ -434,18 +434,6 @@ int config_set_bandit_exploration_window_seconds(int value)
    return config_client_set_number("bandit_exploration_window_seconds", (double)value);
 }
 
-int config_db2_connection_pool_size(void)
-{
-   double value = 0;
-   (void)config_client_read_number("db2_connection_pool_size", &value);
-   return (int)value;
-}
-
-int config_set_db2_connection_pool_size(int value)
-{
-   return config_client_set_number("db2_connection_pool_size", (double)value);
-}
-
 double config_code_hybrid_weight_vector(void)
 {
    double value = 0;

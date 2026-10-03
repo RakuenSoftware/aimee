@@ -1,27 +1,28 @@
 /* corpus_jobs_http_stub.c: corpus pipeline stubs for kb_http route tests. */
 
 #include "corpus_jobs.h"
-#include "modules/db2/c/artifacts.h"
+#include "modules/kb/c/artifacts.h"
 
 #include <stdio.h>
 #include <string.h>
 
-int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out)
+int kb_store_corpus_pipeline_status(kb_store_corpus_pipeline_stats_t *out)
 {
    if (out)
-      *out = (db2_corpus_pipeline_stats_t){.pending = 2, .running = 1, .complete = 3, .total = 6};
+      *out =
+          (kb_store_corpus_pipeline_stats_t){.pending = 2, .running = 1, .complete = 3, .total = 6};
    return 0;
 }
 
-int db2_corpus_pipeline_drain(int limit, db2_corpus_pipeline_stats_t *out)
+int kb_store_corpus_pipeline_drain(int limit, kb_store_corpus_pipeline_stats_t *out)
 {
    (void)limit;
    if (out)
-      *out = (db2_corpus_pipeline_stats_t){.complete = 6, .total = 6, .processed = 3};
+      *out = (kb_store_corpus_pipeline_stats_t){.complete = 6, .total = 6, .processed = 3};
    return 0;
 }
 
-int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int max_out)
+int kb_store_corpus_pipeline_stage_counts(kb_store_corpus_pipeline_stage_count_t *out, int max_out)
 {
    if (!out || max_out < 2)
       return -1;
@@ -35,11 +36,11 @@ int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int
 }
 
 /* Canned facet hit so the /v1/search filter route is exercisable without a live
- * DB2 (precision of the real db2_artifact_filter_facets is covered by
+ * KB_STORE (precision of the real kb_store_artifact_filter_facets is covered by
  * test_artifacts.c). Echoes the requested kind so the wiring is observable. */
-int db2_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
-                               const char *status, const char *priority, const char *component,
-                               db2_artifact_row_t *out, int max)
+int kb_store_artifact_filter_facets(int64_t release_id, const char *project, const char *kind,
+                                    const char *status, const char *priority, const char *component,
+                                    kb_store_artifact_row_t *out, int max)
 {
    (void)release_id;
    (void)project;
@@ -55,13 +56,14 @@ int db2_artifact_filter_facets(int64_t release_id, const char *project, const ch
    return 1;
 }
 
-int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
-                                      const char *exclude_project, const char *kind,
-                                      const char *status, const char *priority,
-                                      const char *component, db2_artifact_row_t *out, int max)
+int kb_store_artifact_filter_facets_scoped(int64_t release_id, const char *project,
+                                           const char *exclude_project, const char *kind,
+                                           const char *status, const char *priority,
+                                           const char *component, kb_store_artifact_row_t *out,
+                                           int max)
 {
-   int n = db2_artifact_filter_facets(release_id, project, kind, status, priority, component, out,
-                                      max);
+   int n = kb_store_artifact_filter_facets(release_id, project, kind, status, priority, component,
+                                           out, max);
    if (n > 0)
    {
       snprintf(out[0].scope_kind, sizeof(out[0].scope_kind), "project");
@@ -74,7 +76,7 @@ int db2_artifact_filter_facets_scoped(int64_t release_id, const char *project,
 }
 
 /* Stub active release so the /v1/search release-binding wiring is observable. */
-int64_t db2_kb_release_get_active(void)
+int64_t kb_store_kb_release_get_active(void)
 {
    return 7;
 }

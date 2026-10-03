@@ -1342,7 +1342,7 @@ check_output "dashboard agents clean install has an empty roster" '"agents":[]' 
 # 4. Session management
 # ============================================================
 
-# Sessions are persisted through the DB1 sessions stage, which the db1/db2
+# Sessions are persisted through the DB1 sessions stage, which the db1/kb_store
 # event-bus conversion has moved OUT of this process: db1_client/sessions.c
 # calls obs_bus_module_available() first and answers "failed to create session"
 # with nothing serving the stage. The server does not launch modules; a

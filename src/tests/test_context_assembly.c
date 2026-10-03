@@ -5,26 +5,26 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "db1_client/db1.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
-#include "../modules/db2/c/db_postgres.h"
-#include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_query.h"
-#include "../modules/db2/c/memory_relations.h"
-#include "../modules/db2/c/memory_vectors.h"
+#include "../modules/kb/c/kb_store.h"
+#include "../modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
+#include "../modules/kb/c/db_postgres.h"
+#include "../modules/kb/c/lifecycle.h"
+#include "../modules/kb/c/memory_query.h"
+#include "../modules/kb/c/memory_relations.h"
+#include "../modules/kb/c/memory_vectors.h"
 
 static void setup(void)
 {
    /* db1_init is idempotent: reuse a single in-memory db1 across all
     * tests. anti-pattern test cases clear the table at the start. */
-   db2_test_shim_open();
-   db2_set_ephemeral(1);
+   kb_store_test_shim_open();
+   kb_store_set_ephemeral(1);
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 static int count_text(const char *haystack, const char *needle)
@@ -45,7 +45,7 @@ static void test_unit_cursor_drains_more_than_one_page(void)
 
    char err[256] = "";
    aimee_pg_stmt_t *insert =
-       aimee_pg_prepare(db2_conn(),
+       aimee_pg_prepare(kb_store_conn(),
                         "INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text)"
                         " VALUES(?1,'chunk',?2,?3)",
                         err, sizeof(err));
@@ -64,7 +64,7 @@ static void test_unit_cursor_drains_more_than_one_page(void)
    aimee_pg_finalize(insert);
 
    aimee_pg_stmt_t *count = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM memory_units WHERE memory_id=?1", err, sizeof(err));
+       kb_store_conn(), "SELECT COUNT(*) FROM memory_units WHERE memory_id=?1", err, sizeof(err));
    assert(count != NULL);
    aimee_pg_bind_int64(count, "?1", parent.id);
    assert(aimee_pg_step(count, err, sizeof(err)) == AIMEE_PG_ROW);
@@ -78,7 +78,7 @@ static void test_unit_cursor_drains_more_than_one_page(void)
    do
    {
       int64_t ids[17];
-      int n = db2_memory_unit_list_ids_after(parent.id, after, ids, 17, &has_more);
+      int n = kb_store_memory_unit_list_ids_after(parent.id, after, ids, 17, &has_more);
       assert(n > 0 && n <= 17);
       for (int i = 0; i < n; i++)
       {
@@ -96,21 +96,21 @@ static void test_unit_cursor_drains_more_than_one_page(void)
             "INSERT INTO memory_embeddings(point_id)"
             " SELECT id+%lld FROM memory_units WHERE memory_id=%lld",
             (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
    snprintf(sql, sizeof(sql), "INSERT INTO memory_embeddings(point_id) VALUES(%lld)",
             (long long)parent.id);
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
    snprintf(sql, sizeof(sql),
             "INSERT INTO vector_index_ops(point_id,memory_id)"
             " SELECT id+%lld,NULL FROM memory_units WHERE memory_id=%lld",
             (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
    snprintf(sql, sizeof(sql), "INSERT INTO vector_index_ops(point_id,memory_id) VALUES(%lld,NULL)",
             (long long)parent.id);
-   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
 
    assert(memory_delete(parent.id) == 0);
-   aimee_pg_stmt_t *remaining = aimee_pg_prepare(db2_conn(),
+   aimee_pg_stmt_t *remaining = aimee_pg_prepare(kb_store_conn(),
                                                  "SELECT (SELECT COUNT(*) FROM memory_embeddings)"
                                                  "     + (SELECT COUNT(*) FROM vector_index_ops)",
                                                  err, sizeof(err));
@@ -185,8 +185,8 @@ static void test_withheld_memories_cannot_reenter_production_reads(void)
 
    /* Episode cards bypass the ordinary fact candidate pool, so exercise that
     * production query too. */
-   db2_memory_unit_episode_card_insert(archived.id, "card-a", "ARCHIVED_CARD_HIDDEN");
-   db2_memory_unit_episode_card_insert(suppressed.id, "card-s", "SUPPRESSED_CARD_HIDDEN");
+   kb_store_memory_unit_episode_card_insert(archived.id, "card-a", "ARCHIVED_CARD_HIDDEN");
+   kb_store_memory_unit_episode_card_insert(suppressed.id, "card-s", "SUPPRESSED_CARD_HIDDEN");
    ctx = memory_assemble_context("what happened in the session overview?");
    assert(ctx != NULL);
    assert(strstr(ctx, "ARCHIVED_CARD_HIDDEN") == NULL);
@@ -347,7 +347,7 @@ static void test_graph_boost_integration(void)
    static const char *edge_sql = "INSERT INTO entity_edges (source, relation, target, weight)"
                                  " VALUES ('spire', 'provides', 'auth', 3)";
    char edge_err[128] = "";
-   (void)aimee_pg_exec(db2_conn(), edge_sql, edge_err, sizeof(edge_err));
+   (void)aimee_pg_exec(kb_store_conn(), edge_sql, edge_err, sizeof(edge_err));
 
    /* Search for "auth" - spire should get a graph boost */
    char *ctx = memory_assemble_context("auth certificates");
@@ -378,14 +378,14 @@ static void test_task_hint_formats_xml_and_negative_context(void)
        "UPDATE memories SET valid_until=pg_now_text(),lifecycle_state='superseded' WHERE id=%lld;"
        "INSERT INTO memory_links(source_id,target_id,relation) VALUES(%lld,%lld,'supersedes')",
        (long long)old_mem.id, (long long)new_mem.id, (long long)old_mem.id);
-   assert(aimee_pg_exec(db2_conn(), history_sql, history_err, sizeof(history_err)) == 0);
+   assert(aimee_pg_exec(kb_store_conn(), history_sql, history_err, sizeof(history_err)) == 0);
    memory_insert(TIER_L2, KIND_FACT, "frontend facts",
                  "Frontend clients subscribe to event updates over HTTP streams.", 0.9, "s2",
                  &fact);
    anti_pattern_t ap;
-   assert(db2_anti_pattern_insert("websocket reconnect loop",
-                                  "Avoid stale websocket reconnect loops in browser transport",
-                                  "test", "", 0.9, &ap) == 0);
+   assert(kb_store_anti_pattern_insert("websocket reconnect loop",
+                                       "Avoid stale websocket reconnect loops in browser transport",
+                                       "test", "", 0.9, &ap) == 0);
 
    char *ctx = memory_assemble_context("frontend transport websocket reconnect");
    assert(ctx != NULL);

@@ -107,8 +107,8 @@ static int health_get_handler(const char *url, const char *extra_headers, char *
    }
    assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
    if (response_buf)
-      *response_buf = strdup("{\"status\":\"ok\",\"db2_ok\":true,"
-                             "\"db2_kb_tables_ok\":true,\"pgvec_ok\":true,"
+      *response_buf = strdup("{\"status\":\"ok\",\"postgres_ok\":true,"
+                             "\"knowledge_tables_ok\":true,\"pgvec_ok\":true,"
                              "\"pgvec_collection_ok\":true,\"pgvec_vectors\":42,"
                              "\"pgvec_indexed_vectors\":41,\"embed_ok\":true,"
                              "\"embed_command\":\"embed --json\",\"freshness_days\":3,"
@@ -840,8 +840,8 @@ static void test_health_uses_v1_api_when_configured(void)
    assert(kb_client_health(&health) == 0);
    assert(health.process_ok == 1);
    assert(strcmp(health.version, "v0.3.0-test") == 0);
-   assert(health.db2_ok == 1);
-   assert(health.db2_kb_tables_ok == 1);
+   assert(health.postgres_ok == 1);
+   assert(health.knowledge_tables_ok == 1);
    assert(health.pgvec_ok == 1);
    assert(health.pgvec_collection_ok == 1);
    assert(health.pgvec_vectors == 42);
@@ -894,8 +894,8 @@ static int degraded_health_get_handler(const char *url, const char *extra_header
    }
    assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
    if (response_buf)
-      *response_buf = strdup("{\"status\":\"degraded\",\"db2_ok\":true,"
-                             "\"db2_kb_tables_ok\":true,\"pgvec_ok\":true,"
+      *response_buf = strdup("{\"status\":\"degraded\",\"postgres_ok\":true,"
+                             "\"knowledge_tables_ok\":true,\"pgvec_ok\":true,"
                              "\"pgvec_collection_ok\":true,\"pgvec_vectors\":0,"
                              "\"embed_ok\":false,\"embed_command\":\"\","
                              "\"chunk_count\":0,\"embedding_count\":0,"
@@ -924,7 +924,7 @@ static void test_health_degraded_is_reachable_and_carries_blockers(void)
    assert(strchr(health.blockers, '\n') != NULL);
    /* The siblings still parse — a degraded response is a full response. */
    assert(health.embed_ok == 0);
-   assert(health.db2_ok == 1);
+   assert(health.postgres_ok == 1);
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
@@ -945,7 +945,7 @@ static int legacy_health_get_handler(const char *url, const char *extra_headers,
    if (strstr(url, "/v1/version"))
       return 404;
    if (response_buf)
-      *response_buf = strdup("{\"status\":\"ok\",\"db2_ok\":true,\"pgvec_ok\":true}");
+      *response_buf = strdup("{\"status\":\"ok\",\"postgres_ok\":true,\"pgvec_ok\":true}");
    return 200;
 }
 

@@ -1,6 +1,6 @@
 /* branch_ownership.c: per-session branch ownership for the MCP git tools.
  *
- * Records live behind the DB2 git ownership API. The operations here are
+ * Records live behind the KB_STORE git ownership API. The operations here are
  * the only writers; mcp_git_* uses the guard helpers
  * (branch_own_guard, branch_own_guard_for) to gate writes on a branch the
  * current session does not own. Worktrees and the main checkout share one

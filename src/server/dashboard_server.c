@@ -4,9 +4,9 @@
  * handlers call directly.
  *
  * api_metrics, api_delegations, and api_vector_status are split out of
- * dashboard.c so the daemon link can drop CMD_OBJS / DB2_OBJS: the rest
+ * dashboard.c so the daemon link can drop CMD_OBJS / KB_STORE_OBJS: the rest
  * of dashboard.c (api_memory_stats, api_traces, api_token_audit,
- * api_plans, api_logs, api_dashboard_*, etc.) reads DB2 directly and
+ * api_plans, api_logs, api_dashboard_*, etc.) reads KB_STORE directly and
  * cannot link into a daemon that doesn't carry libpq. The three helpers
  * here read DB1 (db1_agent_log_*) and route through kb_client for the
  * one pgvector-bound piece (vector status), so they're daemon-safe.

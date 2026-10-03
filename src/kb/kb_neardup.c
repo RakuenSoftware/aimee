@@ -1,6 +1,6 @@
 #include "kb_neardup.h"
 
-#include "modules/db2/c/artifacts.h"
+#include "modules/kb/c/artifacts.h"
 #include "log.h"
 #include "cJSON.h"
 
@@ -45,9 +45,9 @@ int kb_neardup_propose(const char *project, const char *file_path, const char *m
       return -1;
 
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
-   int rc = db2_artifact_write(id, "kb_near_duplicate", "proposed", "kb_project", project,
-                               "kb-ingest", jaccard, json);
+   kb_store_artifact_gen_id(id, sizeof(id));
+   int rc = kb_store_artifact_write(id, "kb_near_duplicate", "proposed", "kb_project", project,
+                                    "kb-ingest", jaccard, json);
    free(json);
    if (rc != 0)
       return rc;
@@ -60,9 +60,9 @@ int kb_neardup_propose(const char *project, const char *file_path, const char *m
       free(target_id);
       return -1;
    }
-   rc = db2_artifact_cite(id, "kb_file", source_id);
+   rc = kb_store_artifact_cite(id, "kb_file", source_id);
    if (rc == 0)
-      rc = db2_artifact_cite(id, "kb_file", target_id);
+      rc = kb_store_artifact_cite(id, "kb_file", target_id);
    free(source_id);
    free(target_id);
    if (rc != 0)

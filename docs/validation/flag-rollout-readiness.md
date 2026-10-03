@@ -11,6 +11,17 @@ that discipline to the rest of the tree.
 
 ---
 
+## Current-reading correction, 2026-09-29
+
+This report preserves historical rollout evidence. Its lifecycle row below named
+`memory_core_helpers.inc`, which is absent at `6cd136947`. The
+`config_memory_lifecycle_enabled` and `config_memory_lifecycle_hide_archived` accessors have no
+production caller beyond their definitions in this checkout. Treat that pair as inert, not as a
+prerequisite for archival exclusion. Go
+[`currentMemorySQL`](../../server-go/modules/memory/eligibility.go) enforces lifecycle, suppression,
+and validity directly. Current guidance is in [Knowledge](../KNOWLEDGE.md#memory-lifecycle).
+The rest of this historical matrix has not been requalified by this correction.
+
 ## The gate (must clear in order)
 
 A flag may flip default-ON only after **all six** clear:

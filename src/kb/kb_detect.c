@@ -4,9 +4,9 @@
  */
 
 #include "kb_detect.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "aimee.h"
 #include "log.h"
 
@@ -64,7 +64,7 @@ int kb_detect_observe(double mean_dense_score, int n_candidates)
 
    /* Write drift_signal evidence artifact (advisory; does not demote anything). */
    char id[64];
-   db2_artifact_gen_id(id, sizeof(id));
+   kb_store_artifact_gen_id(id, sizeof(id));
 
    char payload[512];
    snprintf(payload, sizeof(payload),
@@ -72,8 +72,8 @@ int kb_detect_observe(double mean_dense_score, int n_candidates)
             "\"z_score\":%.4f,\"ema\":%.6f,\"observed\":%.6f,\"n_obs\":%d}",
             z, g_ema.ema, mean_dense_score, g_ema.n);
 
-   int rc =
-       db2_artifact_write(id, "drift_signal", "proposed", "system", "kb_hybrid", "", 1.0, payload);
+   int rc = kb_store_artifact_write(id, "drift_signal", "proposed", "system", "kb_hybrid", "", 1.0,
+                                    payload);
    if (rc == 0)
    {
       aimee_log(LOG_DEBUG, "kb_detect", "drift_signal emitted id=%s z=%.2f ema=%.4f obs=%.4f", id,

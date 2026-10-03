@@ -406,6 +406,7 @@ static void test_shed_emits_overflow(void)
    memcpy(&durable_overflow, g_loss_payload, sizeof durable_overflow);
    must(durable_overflow.shed_kind == KIND_A && durable_overflow.dst_slot == obs.reply.handle_id,
         "durable overflow names the lost kind and destination");
+   obs_bus_flush();
    must(worm_count("bus.overflow") == worm_before + 1, "overflow reached the durable WORM ledger");
 
    detach(&pub);
@@ -486,6 +487,7 @@ static void test_producer_reaped_tap_only(void)
    must(durable_reap.lost_seq != 0 && durable_reap.lost_kind == KIND_A &&
             durable_reap.src_slot == pub.reply.handle_id,
         "durable reap names the lost sequence, kind, and producer");
+   obs_bus_flush();
    must(worm_count("bus.producer_reaped") == worm_before + 1,
         "producer reap reached the durable WORM ledger");
 
@@ -503,6 +505,12 @@ int main(void)
    unlink(worm_path);
    must(audit_worm_init_at(worm_path) == 0, "initialize WORM loss ledger");
    must(obs_bus_set_durable_sink(worm_sink, NULL) == 0, "install WORM loss sink");
+   char home[512];
+   snprintf(home, sizeof home, "%s/aimee-bus-flow-XXXXXX", platform_tmpdir());
+   must(mkdtemp(home) != NULL, "create isolated bus home");
+   setenv("AIMEE_HOME", home, 1);
+   must(obs_bus_start() == 0, "start asynchronous durability writer");
+   obs_bus_flush();
    printf("test_bus_flow:\n");
    test_block_holds_then_delivers();
    test_block_is_per_producer();
@@ -511,6 +519,7 @@ int main(void)
    test_control_lost_when_reserve_exhausted();
    test_producer_reaped_tap_only();
    must(audit_worm_verify_chain(NULL, 0) == 0, "loss ledger hash chain verifies");
+   obs_bus_stop();
    audit_worm_close();
    unlink(worm_path);
    printf("test_bus_flow: OK\n");

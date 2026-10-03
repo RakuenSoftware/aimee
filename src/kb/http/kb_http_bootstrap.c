@@ -7,7 +7,7 @@
 #include "kb_http_bootstrap.h"
 
 #include "cJSON.h"
-#include "modules/db2/c/enrollments.h"
+#include "modules/kb/c/enrollments.h"
 #include "kb_enroll.h"
 #include "kb_http_identity_login.h"
 #include "kb_identity.h"
@@ -79,7 +79,7 @@ static int enroll_redeem_route(const char *method, const char *path, const char 
           kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
           kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
           enrollment_expiry(expires_at) != 0 ||
-          db2_enrollment_insert(scope, fp, issuer, serial, expires_at, 0, NULL) != 0)
+          kb_store_enrollment_insert(scope, fp, issuer, serial, expires_at, 0, NULL) != 0)
       {
          free(cert);
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");

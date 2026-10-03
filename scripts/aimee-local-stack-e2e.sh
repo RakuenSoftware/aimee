@@ -8,7 +8,7 @@
 # covers the two local topologies from scripts/e2e-matrix.sh:
 #
 #   --mode full    (T5) local aimee-server + local aimee-kb (needs local
-#                  Postgres+pgvector at AIMEE_DB2_URL). Server reaches the kb over
+#                  Postgres+pgvector at AIMEE_STORE_URL). Server reaches the kb over
 #                  a local socket; proves the full self-hosted stack.
 #   --mode hybrid  (T6) local aimee-server only, pointed at an EXTERNAL kb over
 #                  HTTP via AIMEE_KB_API_URL (e.g. a Docker aimee-kb on :8741).
@@ -19,9 +19,8 @@
 #
 # Env:
 #   MODE          full | hybrid                 (default full; or pass --mode)
-#   AIMEE_DB2_URL Postgres URL for the kb        (full mode; default
-#                 postgresql://aimee@localhost/aimee_shared via local peer auth)
-#   AIMEE_STORE_URL PostgreSQL URL for server DB1 (optional; isolated per run)
+#   AIMEE_STORE_URL PostgreSQL non-owner runtime credential (required)
+#   AIMEE_STORE_MIGRATION_URL PostgreSQL schema-owner credential (required)
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
 #   EMBEDDER_URL  embedder endpoint        (full mode; optional)
@@ -90,6 +89,9 @@ check() {
   fi
 }
 
+: "${AIMEE_STORE_URL:?Set the PostgreSQL runtime credential}"
+: "${AIMEE_STORE_MIGRATION_URL:?Set the PostgreSQL schema-owner credential}"
+
 # --- build ----------------------------------------------------------------
 if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 ]]; then
   bold "==> Building aimee client + server + kb + required modules"
@@ -103,16 +105,18 @@ export AIMEE_DELEGATE_EGRESS_BIN="$REPO/aimee-delegate-egress"
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
-# Give the DB1 store the same per-run PostgreSQL isolation as the integration
-# harness.  Without this, a second live run inherits the immutable first-user
-# claim and cannot exercise enrollment honestly.
-if [[ -n "${AIMEE_STORE_URL:-}" && "$AIMEE_STORE_URL" != *"search_path="* ]]; then
+# Give both provider profiles the same disposable namespace. Existing operator
+# namespaces are respected; the provider validates their agreement at startup.
+if [[ "$AIMEE_STORE_URL" != *"search_path="* && "$AIMEE_STORE_MIGRATION_URL" != *"search_path="* ]]; then
   LIVE_STORE_SCHEMA="local_stack_${$}_${RANDOM}"
-  case "$AIMEE_STORE_URL" in
-    *\?*) AIMEE_STORE_URL="${AIMEE_STORE_URL}&search_path=${LIVE_STORE_SCHEMA}" ;;
-    *)    AIMEE_STORE_URL="${AIMEE_STORE_URL}?search_path=${LIVE_STORE_SCHEMA}" ;;
-  esac
-  export AIMEE_STORE_URL
+  for name in AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL; do
+    value="${!name}"
+    case "$value" in
+      *\?*) value="${value}&search_path=${LIVE_STORE_SCHEMA}" ;;
+      *) value="${value}?search_path=${LIVE_STORE_SCHEMA}" ;;
+    esac
+    export "$name=$value"
+  done
 fi
 cleanup_run_root() {
   if [[ "${AIMEE_E2E_KEEP_RUN_ROOT:-0}" == "1" ]]; then
@@ -297,13 +301,15 @@ start_kb_modules() {
     "$AIMEE_HOME/kb-config-module.log" kb_config_pid
   arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
     "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
-    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+    "AIMEE_STORE_URL=$AIMEE_STORE_URL" \
+    "AIMEE_STORE_MIGRATION_URL=$AIMEE_STORE_MIGRATION_URL"
 }
 
 start_server_modules() {
   arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
     "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
-    "AIMEE_STORE_URL=$AIMEE_STORE_URL"
+    "AIMEE_STORE_URL=$AIMEE_STORE_URL" \
+    "AIMEE_STORE_MIGRATION_URL=$AIMEE_STORE_MIGRATION_URL"
   arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
     "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
     "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
@@ -383,11 +389,10 @@ ulimit -S -s 65536 || true
 
 if [[ "$MODE" == "full" ]]; then
   bold "==> Mode FULL (T5): local server + local kb"
-  export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
   # DB1 is a module-owned family too. Its aimee module reaches storage only
   # through the Postgres module on the SERVER bus; an unset store URL leaves
   # that declared edge present but unusable and the mTLS ramp correctly refuses.
-  export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
+  export AIMEE_STORE_URL="${AIMEE_STORE_URL:-postgresql:///aimee_shared}"
   # This is an environment harness, so provision the extensions its fresh
   # database needs before migrations run. A server should not require runtime
   # CREATE EXTENSION authority, and silently running without pgvector would make
@@ -395,14 +400,14 @@ if [[ "$MODE" == "full" ]]; then
   extension_error=""
   if command -v psql >/dev/null 2>&1; then
     pg_extension_cmd=(psql)
-    if [[ "$(id -u)" == "0" && "$AIMEE_DB2_URL" =~ ^postgres(ql)?:///[^/?]+$ ]] && \
+    if [[ "$(id -u)" == "0" && "$AIMEE_STORE_URL" =~ ^postgres(ql)?:///[^/?]+$ ]] && \
        command -v runuser >/dev/null 2>&1; then
       # A local peer-auth E2E database is normally owned by a non-superuser.
       # Use the cluster administrator only for CREATE EXTENSION; daemons and
-      # every schema migration continue under AIMEE_DB2_URL's runtime role.
+      # every schema migration continue under AIMEE_STORE_URL's runtime role.
       pg_extension_cmd=(runuser -u postgres -- psql)
     fi
-    if ! "${pg_extension_cmd[@]}" "$AIMEE_DB2_URL" -v ON_ERROR_STOP=1 \
+    if ! "${pg_extension_cmd[@]}" "$AIMEE_STORE_MIGRATION_URL" -v ON_ERROR_STOP=1 \
       -c 'CREATE EXTENSION IF NOT EXISTS vector' \
       -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
       >/dev/null 2>"$RUN_ROOT/extension-provision.err"; then
@@ -424,7 +429,7 @@ if [[ "$MODE" == "full" ]]; then
   # human-authority operation and must not be made to pass by weakening KB's
   # actor check just because this harness uses loopback HTTP.
   export AIMEE_KB_API_BEARER_TOKEN="${AIMEE_KB_API_BEARER_TOKEN:-$BEARER}"
-  echo "    DB2: ${AIMEE_DB2_URL}"
+  echo "    PostgreSQL runtime credential configured"
   start_kb_modules
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
   # accepted the memory vectors or refused them on a dim mismatch.

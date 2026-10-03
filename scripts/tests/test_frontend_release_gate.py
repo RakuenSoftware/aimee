@@ -22,7 +22,7 @@ class FrontendReleaseGateTests(unittest.TestCase):
         run = aggregate.split("        run: |\n", 1)[1]
         script = "\n".join(line[10:] for line in run.splitlines() if line.startswith("          "))
         env = dict(os.environ, CHANGE_SCOPE_RESULT="success", DOCS_ONLY="false",
-                   SHARDS_RESULT="success", SHARDS_PG_RESULT="success", DB2_REPLAY_RESULT="success",
+                   SHARDS_RESULT="success", SHARDS_PG_RESULT="success", POSTGRES_REPLAY_RESULT="success",
                    P1_RESULT="success", GO_RESULT="success", LSP_REAL_RESULT="success")
         for result in ("success", "failure", "cancelled", "skipped"):
             with self.subTest(result=result):

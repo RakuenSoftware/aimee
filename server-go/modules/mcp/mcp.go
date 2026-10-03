@@ -55,10 +55,10 @@ import (
 // highest currently allocated kind (11010, block 43)". That was wrong, and a
 // live run on a real aimee-kb proved it: each ref reserves a whole 256-kind
 // block whether or not it uses every stage, and 4096 + 28*256 = 11264 is exactly
-// postgres's block. The old range squatted the blocks of postgres (28), db2 (29)
+// postgres's block. The old range squatted the blocks of postgres (28), kb_store (29)
 // and db1 (30). It survived testing only because a scratch host runs none of
 // them; against a real kb the plugin was refused at attach, and had it attached
-// first it would have silently denied postgres instead -- taking db2 health down
+// first it would have silently denied postgres instead -- taking kb_store health down
 // with it. Two allocation authorities for one namespace is the defect; this has
 // one.
 //

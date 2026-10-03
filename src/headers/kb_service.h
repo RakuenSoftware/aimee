@@ -21,7 +21,7 @@ struct kb_service_ctx
    int worker_count;
    pthread_t worker_threads[KB_WORKER_MAX];
 
-   /* In-process KB ingest worker pool (DB2-direct; sized by kb.worker_count).
+   /* In-process KB ingest worker pool (KB_STORE-direct; sized by kb.worker_count).
     * See kb_ingest_workers.c. */
    pthread_t ingest_threads[KB_WORKER_MAX];
    int ingest_count;

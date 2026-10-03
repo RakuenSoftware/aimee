@@ -1,7 +1,7 @@
 /* test_kb_client_index.c: pin the wire contract for kb_client_index_scan.
  *
  * Regression: kb_client_index_scan used to ignore the response status
- * field, so a kb-side error like "canonical index unavailable (DB2 not
+ * field, so a kb-side error like "canonical index unavailable (KB_STORE not
  * initialized)" was flattened into a successful empty scan and the CLI
  * cheerfully printed "==> Scan complete: 0 project(s), 0 file(s) scanned".
  * These tests pin the parse helper so that contract can't drift again. */
@@ -36,10 +36,11 @@ static void test_transport_failure_is_no_kb(void)
 static void test_kb_error_surfaces_message(void)
 {
    /* This is the exact response shape an out-of-the-box aimee-kb returns
-    * when DB2 is not initialised. Before the fix this returned 0 with
+    * when KB_STORE is not initialised. Before the fix this returned 0 with
     * everything zeroed; the user saw "Scan complete: 0 projects". */
-   cJSON *resp = parse_resp("{\"status\":\"error\","
-                            "\"message\":\"canonical index unavailable (DB2 not initialized)\"}");
+   cJSON *resp =
+       parse_resp("{\"status\":\"error\","
+                  "\"message\":\"canonical index unavailable (KB_STORE not initialized)\"}");
    kb_client_index_scan_result_t res;
    int rc = kb_client_index_scan_apply_response(resp, &res);
    assert(rc == -1);
@@ -162,18 +163,19 @@ static int int_field(cJSON *obj, const char *key)
 
 static void test_format_kb_error_propagates_message(void)
 {
-   /* The regression: kb said "DB2 not initialized" but the wire response
+   /* The regression: kb said "KB_STORE not initialized" but the wire response
     * used to be {status:ok, projects:0, files:0}. Pin the new contract:
     * kb-side errors flow through as status:error with the kb message. */
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
    res.skipped = 1;
    snprintf(res.reason, sizeof(res.reason), "error");
-   snprintf(res.message, sizeof(res.message), "canonical index unavailable (DB2 not initialized)");
+   snprintf(res.message, sizeof(res.message),
+            "canonical index unavailable (KB_STORE not initialized)");
 
    cJSON *resp = format(-1, &res);
    assert(strcmp(str_field(resp, "status"), "error") == 0);
-   assert(strstr(str_field(resp, "message"), "DB2 not initialized") != NULL);
+   assert(strstr(str_field(resp, "message"), "KB_STORE not initialized") != NULL);
    /* Must NOT carry projects/files — that fooled the CLI before. */
    assert(cJSON_GetObjectItemCaseSensitive(resp, "projects") == NULL);
    assert(cJSON_GetObjectItemCaseSensitive(resp, "files") == NULL);

@@ -9,8 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "memory.h"
 #include "session_briefing.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -103,9 +103,9 @@ int main(void)
       free(bundled);
    }
 
-   /* DB2 holds prospective_memories and the directive helpers' tables;
+   /* KB_STORE holds prospective_memories and the directive helpers' tables;
     * the shim helper opens an in-memory backing for the test. */
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    /* --- empty DB: both helpers return NULL so the session-start
     *     output stays clean when there's nothing to surface. --- */
@@ -226,7 +226,7 @@ int main(void)
       free(q);
    }
 
-   db2_test_shim_close();
+   kb_store_test_shim_close();
    printf("all tests passed\n");
    return 0;
 }

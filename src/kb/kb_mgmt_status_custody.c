@@ -17,15 +17,15 @@ typedef struct
 {
    unsigned char *signature;
    size_t signature_size;
-   db2_management_status_key_ctx_t *database;
+   kb_store_management_status_key_ctx_t *database;
    unsigned char *transcript;
    size_t transcript_size;
    unsigned char *request_hash;
    unsigned char *use_hash;
    uint8_t *fresh_att;
    size_t fresh_att_size;
-   db2_vault_key_use_envelope_t *candidate;
-   db2_vault_key_use_envelope_t *admitted;
+   kb_store_vault_key_use_envelope_t *candidate;
+   kb_store_vault_key_use_envelope_t *admitted;
    int guard_open;
    int keep_signature;
    int mutex_locked;
@@ -37,7 +37,7 @@ static void custody_cleanup(void *opaque)
    int ignored;
    (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &ignored);
    if (c->guard_open)
-      (void)db2_management_status_key_guard_end(c->database, 0);
+      (void)kb_store_management_status_key_guard_end(c->database, 0);
    OPENSSL_cleanse(c->transcript, c->transcript_size);
    OPENSSL_cleanse(c->request_hash, 32);
    OPENSSL_cleanse(c->use_hash, 32);
@@ -87,10 +87,10 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
    unsigned char transcript[2048], request_hash[32] = {0}, use_hash[32] = {0};
    char request_digest[65], use_id[65];
    size_t transcript_len = 0;
-   uint8_t fresh_att[DB2_VAULT_KEY_USE_ATTEST_MAX] = {0};
+   uint8_t fresh_att[KB_STORE_VAULT_KEY_USE_ATTEST_MAX] = {0};
    size_t fresh_att_len = 0;
    uint64_t version = 0;
-   db2_vault_key_use_envelope_t candidate, admitted;
+   kb_store_vault_key_use_envelope_t candidate, admitted;
    memset(&candidate, 0, sizeof(candidate));
    memset(&admitted, 0, sizeof(admitted));
    kb_mgmt_status_custody_result_t rc = KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
@@ -130,15 +130,15 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
                       &fresh_att_len) ||
        !version || version > INT64_MAX ||
        vault_hwm_verify(cfg->custody_key_id, version, fresh_att, fresh_att_len) ||
-       db2_management_status_key_candidate(cfg->database, cfg->custody_key_id, status->key_id,
-                                           (int64_t)version, &candidate) ||
+       kb_store_management_status_key_candidate(cfg->database, cfg->custody_key_id, status->key_id,
+                                                (int64_t)version, &candidate) ||
        candidate.version != (int64_t)version ||
        vault_hwm_verify(cfg->custody_key_id, version, candidate.hwm_attestation,
                         candidate.hwm_attestation_len))
       goto done;
 
    uint64_t local_epoch = vault_use_epoch_snapshot();
-   db2_management_status_admission_t p = {
+   kb_store_management_status_admission_t p = {
        .use_id = use_id,
        .custody_key_id = cfg->custody_key_id,
        .wire_key_id = status->key_id,
@@ -153,7 +153,7 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
        .hwm_attestation = candidate.hwm_attestation,
        .hwm_attestation_len = candidate.hwm_attestation_len,
    };
-   int admitted_rc = db2_management_status_key_admit(cfg->database, &p, &admitted);
+   int admitted_rc = kb_store_management_status_key_admit(cfg->database, &p, &admitted);
    if (admitted_rc == 0)
    {
       rc = KB_MGMT_STATUS_CUSTODY_CONFLICT;
@@ -161,8 +161,8 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
    }
    if (admitted_rc < 0)
    {
-      rc = admitted_rc == DB2_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
-                                                      : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+      rc = admitted_rc == KB_STORE_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
+                                                           : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
       goto done;
    }
    if (admitted_rc != 1 || admitted.version != (int64_t)version ||
@@ -173,13 +173,13 @@ kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *st
       rc = KB_MGMT_STATUS_CUSTODY_INTEGRITY;
       goto done;
    }
-   if (db2_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
+   if (kb_store_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
       goto done;
    cleanup.guard_open = 1;
    if (kb_vault_protected_use(local_epoch, "org:p5-status", "management", "ed25519", &admitted,
                               sign_only, status) != KB_VAULT_KEY_USE_OK)
       goto done;
-   if (db2_management_status_key_guard_end(cfg->database, 1))
+   if (kb_store_management_status_key_guard_end(cfg->database, 1))
    {
       cleanup.guard_open = 0;
       goto done;
@@ -216,10 +216,10 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
    unsigned char transcript[512], request_hash[32] = {0}, use_hash[32] = {0};
    char request_digest[65], use_id[65];
    size_t transcript_len = 0;
-   uint8_t fresh_att[DB2_VAULT_KEY_USE_ATTEST_MAX] = {0};
+   uint8_t fresh_att[KB_STORE_VAULT_KEY_USE_ATTEST_MAX] = {0};
    size_t fresh_att_len = 0;
    uint64_t version = 0;
-   db2_vault_key_use_envelope_t candidate, admitted;
+   kb_store_vault_key_use_envelope_t candidate, admitted;
    memset(&candidate, 0, sizeof(candidate));
    memset(&admitted, 0, sizeof(admitted));
    kb_mgmt_status_custody_result_t rc = KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
@@ -265,14 +265,14 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
                       &fresh_att_len) ||
        !version || version > INT64_MAX ||
        vault_hwm_verify(cfg->custody_key_id, version, fresh_att, fresh_att_len) ||
-       db2_management_status_key_candidate(cfg->database, cfg->custody_key_id, checkpoint->key_id,
-                                           (int64_t)version, &candidate) ||
+       kb_store_management_status_key_candidate(cfg->database, cfg->custody_key_id,
+                                                checkpoint->key_id, (int64_t)version, &candidate) ||
        candidate.version != (int64_t)version ||
        vault_hwm_verify(cfg->custody_key_id, version, candidate.hwm_attestation,
                         candidate.hwm_attestation_len))
       goto checkpoint_done;
    uint64_t local_epoch = vault_use_epoch_snapshot();
-   db2_management_status_admission_t p = {
+   kb_store_management_status_admission_t p = {
        .use_id = use_id,
        .custody_key_id = cfg->custody_key_id,
        .wire_key_id = checkpoint->key_id,
@@ -287,7 +287,7 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
        .hwm_attestation = candidate.hwm_attestation,
        .hwm_attestation_len = candidate.hwm_attestation_len,
    };
-   int admitted_rc = db2_management_status_key_admit(cfg->database, &p, &admitted);
+   int admitted_rc = kb_store_management_status_key_admit(cfg->database, &p, &admitted);
    if (admitted_rc == 0)
    {
       rc = KB_MGMT_STATUS_CUSTODY_CONFLICT;
@@ -295,8 +295,8 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
    }
    if (admitted_rc < 0)
    {
-      rc = admitted_rc == DB2_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
-                                                      : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+      rc = admitted_rc == KB_STORE_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
+                                                           : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
       goto checkpoint_done;
    }
    if (admitted_rc != 1 || admitted.version != (int64_t)version ||
@@ -307,13 +307,13 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
       rc = KB_MGMT_STATUS_CUSTODY_INTEGRITY;
       goto checkpoint_done;
    }
-   if (db2_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
+   if (kb_store_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
       goto checkpoint_done;
    cleanup.guard_open = 1;
    if (kb_vault_protected_use(local_epoch, "org:p5-status", "management", "ed25519", &admitted,
                               sign_checkpoint_only, checkpoint) != KB_VAULT_KEY_USE_OK)
       goto checkpoint_done;
-   if (db2_management_status_key_guard_end(cfg->database, 1))
+   if (kb_store_management_status_key_guard_end(cfg->database, 1))
    {
       cleanup.guard_open = 0;
       goto checkpoint_done;

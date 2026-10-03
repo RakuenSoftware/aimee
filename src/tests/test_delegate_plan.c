@@ -177,8 +177,8 @@ static void test_changes_table_canonicalizes_schema_paths(void)
                           "### Changes\n"
                           "| File | Change |\n"
                           "|------|--------|\n"
-                          "| `src/db2/db2_schema.sql`, "
-                          "`src/db2/db2_schema_sqlite.sql` | Mirror tables. |\n"
+                          "| `src/modules/kb/c/schema.sql`, "
+                          "`src/modules/kb/c/schema_sqlite.sql` | Mirror tables. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
                           "- [ ] Delegates receive existing schema files.\n";
@@ -190,11 +190,11 @@ static void test_changes_table_canonicalizes_schema_paths(void)
 
    cJSON *packets = arr(plan, "packets");
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
-                           "src/modules/db2/c/schema_sqlite.sql"));
+                           "src/modules/kb/c/schema_sqlite.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "read_context"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_changes_table_canonicalizes_schema_paths\n");
 }
@@ -228,21 +228,29 @@ static void test_legacy_db1_schema_path_is_reported_not_rewritten(void)
    /* And it does not appear under the path it used to be rewritten to. */
    assert(!str_arr_contains(arr(plan, "missing_owned_files"), "src/modules/db1/schema.sql"));
    cJSON_Delete(plan);
+   plan = delegate_plan_build_from_text("docs/p.md",
+                                        "# Old schema\n### Changes\n| File | Change |\n|---|---|\n"
+                                        "| `src/db2/db2_schema.sql` | Update schema. |\n",
+                                        err, sizeof(err));
+   assert(plan != NULL);
+   assert(str_arr_contains(arr(plan, "missing_owned_files"), "src/db2/db2_schema.sql"));
+   cJSON_Delete(plan);
    printf("  PASS: test_legacy_db1_schema_path_is_reported_not_rewritten\n");
 }
 
 static void test_schema_path_canonicalization_ignores_near_misses(void)
 {
-   const char *proposal = "# Proposal: Near Miss Paths\n"
-                          "\n"
-                          "### Changes\n"
-                          "| File | Change |\n"
-                          "|------|--------|\n"
-                          "| `my_src/db2/db2_schema.sql` (new) | Leave unrelated path alone. |\n"
-                          "| `src/modules/db2/c/schema.sql` | Already canonical. |\n"
-                          "\n"
-                          "## Acceptance Criteria\n"
-                          "- [ ] Only exact legacy schema paths are rewritten.\n";
+   const char *proposal =
+       "# Proposal: Near Miss Paths\n"
+       "\n"
+       "### Changes\n"
+       "| File | Change |\n"
+       "|------|--------|\n"
+       "| `my_src/modules/kb/c/schema.sql` (new) | Leave unrelated path alone. |\n"
+       "| `src/modules/kb/c/schema.sql` | Already canonical. |\n"
+       "\n"
+       "## Acceptance Criteria\n"
+       "- [ ] Only exact legacy schema paths are rewritten.\n";
 
    char err[256] = "";
    cJSON *plan = delegate_plan_build_from_text("docs/p.md", proposal, err, sizeof(err));
@@ -251,9 +259,9 @@ static void test_schema_path_canonicalization_ignores_near_misses(void)
 
    cJSON *packets = arr(plan, "packets");
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
-                           "my_src/db2/db2_schema.sql"));
+                           "my_src/modules/kb/c/schema.sql"));
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
-                           "src/modules/db2/c/schema.sql"));
+                           "src/modules/kb/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_schema_path_canonicalization_ignores_near_misses\n");
 }

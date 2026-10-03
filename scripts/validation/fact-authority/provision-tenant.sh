@@ -2,8 +2,8 @@
 # Provision a tenant so write-tier grant administration can SUCCEED.
 #
 # Every earlier run of test-grant-admin.sh saw the same refusal, and that is all
-# it could see: the acting principal belonged to no team, so db2_tenant_scope_begin
-# returned DB2_ERR_TENANT_DENIED (-104) and the route answered 403 before any
+# it could see: the acting principal belonged to no team, so kb_store_tenant_scope_begin
+# returned KB_STORE_ERR_TENANT_DENIED (-104) and the route answered 403 before any
 # grant logic ran. A probe that only ever observes a refusal cannot tell a
 # working authorization path from a broken one -- it is the same shape as a probe
 # refused at an auth wall, which this suite has been caught by twice.

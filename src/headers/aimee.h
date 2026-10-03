@@ -103,8 +103,8 @@
 /* Embedding retrieval.
  * EMBED_MAX_DIM is the largest embedder output we buffer for. A deployment runs
  * ONE selected embedder;
- * config.embedder_dims selects which, and the DB2 halfvec columns are created at
- * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
+ * config.embedder_dims selects which, and the KB_STORE halfvec columns are created at
+ * that dimension (see kb_store/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
  * (inclusive) — wider outputs must be reduced to 4000 by the embedding boundary
  * before indexing. */
 #define EMBED_MAX_DIM 4000
@@ -112,7 +112,7 @@
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
  * one place — config (config_embedder_dims_default / config_embedder_dims_effective,
  * headers/config_database.h). Layers that must not depend on config, like
- * db2, have it injected at startup rather than keeping a copy. A #define here would be
+ * kb_store, have it injected at startup rather than keeping a copy. A #define here would be
  * a second declaration that can disagree with the embedder actually running. */
 
 #define EMBED_SIMILARITY_THRESHOLD 0.7
@@ -162,7 +162,7 @@ typedef enum
 /* Application context (replaces globals, passed through command handlers).
  *
  * No caller-owned DB connection on app_ctx_t: DB1 is owned by the db1 module (db1_init /
- * db1_conn) and DB2 (incl. pgvector) is owned cross-process by aimee-kb.
+ * db1_conn) and KB_STORE (incl. pgvector) is owned cross-process by aimee-kb.
  * Code that needs DB1 calls db1_init() directly. */
 typedef struct
 {
@@ -203,7 +203,7 @@ void now_utc(char *buf, size_t len);
  * text form "2026-08-09 19:07:23" (pg_now_text, from SQL). A trailing 'Z' and a
  * missing time are both tolerated; a date alone reads as midnight.
  *
- * One reader must accept both because one column can hold both: the same DB2
+ * One reader must accept both because one column can hold both: the same KB_STORE
  * timestamp column is written by C via now_utc() and by SQL via pg_now_text(),
  * depending on the code path that touched the row. Parsers that admitted only
  * one spelling did not fail loudly on the other -- they returned 0, "the epoch",

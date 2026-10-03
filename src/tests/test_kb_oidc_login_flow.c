@@ -249,7 +249,7 @@ static void test_happy_path(EVP_PKEY *idp_key, const char *jwks)
 
    /* The target server survived the redirect, so the intent the callback files
     * names the server the LOGIN asked for rather than anything the callback
-    * carried. This is the field db2_identity_intent_start takes. */
+    * carried. This is the field kb_store_identity_intent_start takes. */
    assert(!strcmp(resumed.target_server_id, "srv-a"));
 
    /* The login is spent: nothing is left to replay. */

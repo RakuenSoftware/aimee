@@ -1,6 +1,6 @@
 -- 2026-embed-dim-1024.sql
 --
--- One-time DB2 (Postgres + pgvector) migration for the embedder change from
+-- One-time KB_STORE (Postgres + pgvector) migration for the embedder change from
 -- all-MiniLM-L6-v2 (384-dim) to perplexity-ai/pplx-embed-v1-0.6b (1024-dim).
 --
 -- WHY THIS IS A SEPARATE, MANUAL SCRIPT (not auto-applied on startup):
@@ -12,7 +12,7 @@
 --   so a routine restart can never silently wipe the corpus.
 --
 -- BEFORE RUNNING:
---   1. BACK UP DB2 (pg_dump) — this clears every stored embedding.
+--   1. BACK UP KB_STORE (pg_dump) — this clears every stored embedding.
 --   2. Deploy the new embedder image (EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b)
 --      and confirm /health reports "dim": 1024.
 --   Ideally test on a restored copy of the DB first.

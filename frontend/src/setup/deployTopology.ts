@@ -61,7 +61,7 @@ export function embedderChangeImpact(
  * bundled model or an external endpoint. The plain aimee-kb image carries no weights
  * and exists for the external case; it is not a way to run without one.
  *   external — an operator-run endpoint. Its width cannot be derived, so `dims`
- *              is required; anything up to EMBED_MAX_DIM (4000, the DB2 column
+ *              is required; anything up to EMBED_MAX_DIM (4000, the KB_STORE column
  *              ceiling) is valid. */
 export type EmbedderSelection =
   | { kind: 'bundled'; model: string }

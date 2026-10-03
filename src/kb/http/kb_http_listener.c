@@ -1,7 +1,7 @@
 /* kb_http_listener.c: bounded concurrent plain-HTTP listener for aimee-kb. */
 
 #include "kb_http.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
 #include <sys/stat.h>
@@ -58,9 +58,9 @@ static void serve_connection(int fd, const char *peer)
    kb_login_throttle_set_peer(peer);
    handle_connection(fd);
    kb_login_throttle_set_peer("");
-   /* db2_conn() leases lazily per thread. A worker is one request, so return
+   /* kb_store_conn() leases lazily per thread. A worker is one request, so return
     * its lease instead of relying on implementation-defined TLS teardown. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
    close(fd);
 }
 
