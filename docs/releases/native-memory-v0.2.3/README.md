@@ -7,9 +7,9 @@ attach these exact files:
 
 | Asset | SHA-256 | Size |
 | --- | --- | ---: |
-| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `2a0445c7cf70f80035e5f719e1ca87ee1a4246fad930e3236dc17077e0e59b5a` | 3,443,215 bytes |
+| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `6190e0772166e963dc3e5a20e19bb9ba65581209c6e95c5b9e5d1a320b8d68ec` | 3,446,679 bytes |
 | `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656` | 230,630 bytes |
-| `manifest.json` | `782b1b997a2be9bf3a83030a4907c242dda4f9c21462f2073d8ebb005ef8b331` | 1,562 bytes |
+| `manifest.json` | `e677478b98063665b334dd75382824b145cfc3cb8f91d46c4cc2c6539b4aaf66` | 1,562 bytes |
 
 The plugin wheel contains the `aimee-native` Rust executable, compiled local
 encoder modules, the portable native consumer, and the vLLM plugin. It contains
@@ -52,6 +52,5 @@ delivery.
 The exact plugin wheel passed an enrolled end-to-end test on an RTX 5080 with
 Gemma4 12B Q8 GGUF: both selected facts were answered with 34 prompt tokens,
 and access revocation caused HTTP 503 on the next request. Qwen3.8 27B Q8
-GGUF-only preparation produced a complete bank. Its live GGUF consumer run
-remains a separate validation item because its 28 GB checkpoint cannot run on
-the 16 GB 5080 and the RX 7900 XTXs were occupied during this candidate test.
+GGUF live validation of these exact bytes is still in progress on two RX 7900
+XTXs. Its 28 GB checkpoint does not fit on the 16 GB RTX 5080.
