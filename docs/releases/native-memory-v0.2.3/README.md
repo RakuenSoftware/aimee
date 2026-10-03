@@ -9,7 +9,7 @@ attach these exact files:
 | --- | --- | ---: |
 | `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `b4b9d7fe7249bf304cadabbfea0bde53bcdd84d8f7186e3a9aa74180f9380736` | 3,526,478 bytes |
 | `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656` | 230,630 bytes |
-| `manifest.json` | `7ef5cf010d96df6eaccef91609fecd188143a43733520166552e9fc1a2fa6376` | 1,562 bytes |
+| `manifest.json` | `7fc6eed5eb09e9de856e92ca927b439f90a7b53be911b2f84531a82c0b4e2977` | 2,056 bytes |
 
 The plugin wheel contains the `aimee-native` Rust executable, compiled local
 encoder modules, the portable native consumer, and the vLLM plugin. It contains
@@ -49,13 +49,11 @@ do not mark it “Latest.” A clean external installation of the plugin wheel
 with its `[gguf]` extra must succeed from the public URLs before announcing
 delivery.
 
-The exact GLIBC 2.34-compatible candidate passed an enrolled end-to-end test
-with Gemma4 12B Q8 GGUF on an RTX 5080: both facts came from one native bank
-with 34 prompt tokens, and revocation caused HTTP 503 on the next request.
-The preceding candidate passed the same two-record check with Gemma4 26B Q8
-and Qwen3.8 27B Q8 on two RX 7900 XTXs, with 34 and 29 prompt tokens.
-Its only wheel-member differences from the current candidate are the rebuilt
-launcher and integrity record. A separate test on an earlier candidate recovered
+The exact GLIBC 2.34-compatible candidate passed enrolled end-to-end tests
+with Gemma4 12B Q8 GGUF on an RTX 5080, plus Gemma4 26B Q8 and Qwen3.8 27B
+Q8 on two RX 7900 XTXs. Each answered both selected facts from one native
+bank; prompt-token counts were 34, 34, and 29 respectively. Revocation caused
+HTTP 503 on the next request in all three tests. A separate earlier test recovered
 three selected records both in one combined answer and in three individual
 answers with Qwen. The earlier Qwen native-answer regression was traced to a GGUF
 normalization conversion in local preparation and corrected before this wheel

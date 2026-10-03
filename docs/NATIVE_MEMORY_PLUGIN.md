@@ -42,12 +42,11 @@ take minutes while the local host reads the weights. Reusable banks are cached
 after preparation. The Qwen3.8 27B hybrid profile uses the V1 model runner;
 leave `serve.v2_model_runner` false.
 
-The staged wheel passed an enrolled end-to-end check with Gemma4 12B Q8 on
-an RTX 5080: two selected records over mTLS, both facts from one native bank,
-34 prompt tokens, and refusal after authorization was revoked. The preceding
-candidate passed the same check with Gemma4 26B Q8 and Qwen3.8 27B Q8 on two
-RX 7900 XTXs; the current candidate only rebuilds the launcher against
-GLIBC 2.34. A separate fresh Aimee
+The staged wheel passed enrolled end-to-end checks with Gemma4 12B Q8 on an
+RTX 5080, and Gemma4 26B Q8 and Qwen3.8 27B Q8 on two RX 7900 XTXs. Each
+answered two selected records from one native bank and refused a request
+after authorization was revoked. Prompt-token counts were 34, 34, and 29.
+The wheel also runs in a GLIBC 2.34 container. A separate fresh Aimee
 testing server accepted an ordinary enrolled thin client and rejected an
 invalid bearer with HTTP 401; that server held no writable memory records.
 These are tested profiles, not certification of every model or GPU. Aimee's

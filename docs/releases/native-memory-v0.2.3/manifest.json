@@ -34,7 +34,25 @@
     "selected_records": 2,
     "prompt_tokens": 34,
     "revoked_request_http_status": 503,
-    "binary_disclosure_audit": true
+    "binary_disclosure_audit": true,
+    "additional_models": [
+      {
+        "model": "Qwen3.8 27B Q8 GGUF",
+        "gpu": "2 x RX 7900 XTX",
+        "enrolled_thinclient": true,
+        "selected_records": 2,
+        "prompt_tokens": 29,
+        "revoked_request_http_status": 503
+      },
+      {
+        "model": "Gemma4 26B Q8 GGUF",
+        "gpu": "2 x RX 7900 XTX",
+        "enrolled_thinclient": true,
+        "selected_records": 2,
+        "prompt_tokens": 34,
+        "revoked_request_http_status": 503
+      }
+    ]
   },
   "source_included": false,
   "model_weights_included": false,
