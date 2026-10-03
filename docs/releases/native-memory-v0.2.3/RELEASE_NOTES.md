@@ -40,12 +40,13 @@ automatically. If there are multiple GGUF files, set `gguf_weights` to the
 intended file. Qwen3.8 27B's tested hybrid profile uses vLLM's V1 runner;
 leave `serve.v2_model_runner` false.
 
-The staged candidate wheel passed enrolled end-to-end checks with Gemma4 12B
-Q8 on an RTX 5080 and Gemma4 26B Q8 on two RX 7900 XTXs. In each check it
-fetched two records over mTLS, prepared one native bank, answered both facts
-with 34 prompt tokens, and returned HTTP 503 after authorization was revoked.
-Qwen3.8 27B Q8 passed the same enrolled flow on two RX 7900 XTXs with
-29 prompt tokens and HTTP 503 after revocation. A separate test on the
+The exact GLIBC 2.34-compatible candidate passed an enrolled end-to-end check
+with Gemma4 12B Q8 on an RTX 5080. It fetched two records over mTLS,
+prepared one native bank, answered both facts with 34 prompt tokens, and
+returned HTTP 503 after authorization was revoked. The preceding candidate
+passed the same check with Gemma4 26B Q8 and Qwen3.8 27B Q8 on two RX 7900
+XTXs, with 34 and 29 prompt tokens respectively; only the launcher build and
+wheel integrity record changed. A separate test on the
 preceding candidate recovered three selected facts with Qwen in one answer and in three
 individual answers; its combined question used 27 prompt tokens. An earlier
 Qwen candidate had a GGUF normalization conversion error in local preparation;
