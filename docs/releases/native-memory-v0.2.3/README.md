@@ -49,8 +49,10 @@ do not mark it “Latest.” A clean external installation of the plugin wheel
 with its `[gguf]` extra must succeed from the public URLs before announcing
 delivery.
 
-The exact plugin wheel passed an enrolled end-to-end test on an RTX 5080 with
+The staged plugin wheel passed an enrolled end-to-end test on an RTX 5080 with
 Gemma4 12B Q8 GGUF: both selected facts were answered with 34 prompt tokens,
 and access revocation caused HTTP 503 on the next request. Qwen3.8 27B Q8
-GGUF live validation of these exact bytes is still in progress on two RX 7900
-XTXs. Its 28 GB checkpoint does not fit on the 16 GB RTX 5080.
+GGUF live validation on two RX 7900 XTXs found a native-answer regression;
+the same model answered the facts when supplied as text without native memory.
+This signed stage is provisional and must not be published until the regression
+is resolved or the supported scope is explicitly narrowed and revalidated.

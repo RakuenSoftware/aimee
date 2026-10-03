@@ -39,14 +39,16 @@ automatically. If there are multiple GGUF files, set `gguf_weights` to the
 intended file. Qwen3.8 27B's tested hybrid profile uses vLLM's V1 runner;
 leave `serve.v2_model_runner` false.
 
-The exact candidate wheel passed an enrolled end-to-end check on an RTX 5080
+The staged candidate wheel passed an enrolled end-to-end check on an RTX 5080
 with Gemma4 12B Q8 in a GGUF-only directory: it fetched two records over mTLS,
 prepared a local bank, answered both facts with 34 prompt tokens, and returned
-HTTP 503 after authorization was revoked. Qwen3.8 27B Q8 also prepared a
-GGUF-only two-record bank; that 28 GB checkpoint has not yet had a live
-GGUF-only consumer check in this candidate because the 5080 cannot hold it.
-Earlier vLLM consumer checks cover Qwen3.8 27B and Gemma4 12B/26B on RX 7900
-XTX GPUs. This is a model-family preview, not certification of every model.
+HTTP 503 after authorization was revoked. Qwen3.8 27B Q8 prepared and served
+a GGUF-only two-record bank on two RX 7900 XTXs, but the native answers did
+not reliably recover the selected facts. A direct text-only Qwen control on
+the same Q8 model answered them correctly. The Qwen path remains a release
+blocker while its native bank and attention interaction is diagnosed. Earlier
+vLLM consumer checks cover Qwen3.8 27B and Gemma4 12B/26B on RX 7900 XTX
+GPUs; they do not validate this self-hosted candidate.
 
 Initial native preparation can take minutes while the host reads and processes
 model weights. The prepared bank is cached for later selections. This release
