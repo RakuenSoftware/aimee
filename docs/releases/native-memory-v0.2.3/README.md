@@ -7,9 +7,9 @@ attach these exact files:
 
 | Asset | SHA-256 | Size |
 | --- | --- | ---: |
-| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `d165b32d6a5eb885e233999d3c73ee0224d79852642c97909c3dc22f1bf2ddab` | 3,448,481 bytes |
+| `aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl` | `8d75a69881ba7a4ce972603cbf31d48751153af483787128604ee753ff95365d` | 3,449,832 bytes |
 | `vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl` | `09f2fb8b5f22a1f7b1bc965948b7d6085136ae1084876f15a1c1740c63aa9656` | 230,630 bytes |
-| `manifest.json` | `a2996cf325abf1308af22fe2f4e93006458a4d4aba84ea3fc746f8bde82205bb` | 1,826 bytes |
+| `manifest.json` | `4146d3e11554ef3fa0dc17014b6f0c4a68bd0860a9f1909c17c5b0208e3da152` | 2,056 bytes |
 
 The plugin wheel contains the `aimee-native` Rust executable, compiled local
 encoder modules, the portable native consumer, and the vLLM plugin. It contains
@@ -49,12 +49,16 @@ do not mark it “Latest.” A clean external installation of the plugin wheel
 with its `[gguf]` extra must succeed from the public URLs before announcing
 delivery.
 
-The staged plugin wheel passed an enrolled end-to-end test on an RTX 5080 with
-Gemma4 12B Q8 GGUF: both selected facts were answered with 34 prompt tokens,
-and access revocation caused HTTP 503 on the next request. Qwen3.8 27B Q8
-GGUF passed the same enrolled flow on two RX 7900 XTXs: both selected facts
-were answered from one native bank with 29 prompt tokens, and revocation
-caused HTTP 503. The earlier Qwen native-answer regression was traced to a
-GGUF normalization conversion in local preparation and corrected before this
-wheel was built. Gemma4 26B and a broader three-record Qwen check remain
-pending; this signed stage is still a candidate, not a published release.
+The candidate passed enrolled end-to-end tests with Gemma4 12B Q8 GGUF on an
+RTX 5080 and Gemma4 26B Q8 GGUF on two RX 7900 XTXs. Each answered both
+selected facts from one native bank with 34 prompt tokens; revocation caused
+HTTP 503 on the next request. Qwen3.8 27B Q8 GGUF also recovered both facts
+from one native bank in 29 prompt tokens on the two RX 7900 XTXs; revocation
+returned HTTP 503. A separate test on the preceding candidate recovered
+three selected records both in one combined answer and in three individual
+answers with Qwen. The earlier Qwen native-answer regression was traced to a GGUF
+normalization conversion in local preparation and corrected before this wheel
+was built. These release-path tests used a local mTLS primitive fixture with
+the standard thinclient profile; they do not substitute for a production Aimee
+authorization deployment. The stage remains a candidate until review and
+publication.
