@@ -33,7 +33,8 @@ aimee-native serve --config ./aimee.json
 }
 ```
 
-The model directory needs a matching `config.json`, tokenizer files, and
+The model directory needs a matching `config.json`, tokenizer files (including
+`chat_template.jinja` when supplied by the checkpoint), and
 either safetensors or a single model GGUF. The launcher detects that GGUF
 automatically. If there are multiple GGUF files, set `gguf_weights` to the
 intended file. Qwen3.8 27B's tested hybrid profile uses vLLM's V1 runner;
@@ -42,13 +43,14 @@ leave `serve.v2_model_runner` false.
 The staged candidate wheel passed an enrolled end-to-end check on an RTX 5080
 with Gemma4 12B Q8 in a GGUF-only directory: it fetched two records over mTLS,
 prepared a local bank, answered both facts with 34 prompt tokens, and returned
-HTTP 503 after authorization was revoked. Qwen3.8 27B Q8 prepared and served
-a GGUF-only two-record bank on two RX 7900 XTXs, but the native answers did
-not reliably recover the selected facts. A direct text-only Qwen control on
-the same Q8 model answered them correctly. The Qwen path remains a release
-blocker while its native bank and attention interaction is diagnosed. Earlier
-vLLM consumer checks cover Qwen3.8 27B and Gemma4 12B/26B on RX 7900 XTX
-GPUs; they do not validate this self-hosted candidate.
+HTTP 503 after authorization was revoked. Qwen3.8 27B Q8 passed the same
+enrolled flow on two RX 7900 XTXs, answering both selected records from one
+native bank with 29 prompt tokens and returning HTTP 503 after revocation.
+An earlier Qwen candidate had a GGUF normalization conversion error in local
+preparation; its failed results remain in the private validation record.
+The correction is present in these signed bytes. Gemma4 26B and a broader
+three-record Qwen check remain pending. Earlier vLLM consumer checks cover
+those models but do not replace exact-wheel self-hosted validation.
 
 Initial native preparation can take minutes while the host reads and processes
 model weights. The prepared bank is cached for later selections. This release

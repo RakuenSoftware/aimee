@@ -5,8 +5,8 @@
   "assets": {
     "aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/aimee_vllm-0.2.3-1-cp312-cp312-linux_x86_64.whl",
-      "sha256": "6190e0772166e963dc3e5a20e19bb9ba65581209c6e95c5b9e5d1a320b8d68ec",
-      "bytes": 3446679
+      "sha256": "d165b32d6a5eb885e233999d3c73ee0224d79852642c97909c3dc22f1bf2ddab",
+      "bytes": 3448481
     },
     "vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl": {
       "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.2.3/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl",
@@ -34,7 +34,17 @@
     "selected_records": 2,
     "prompt_tokens": 34,
     "revoked_request_http_status": 503,
-    "binary_disclosure_audit": true
+    "binary_disclosure_audit": true,
+    "additional_models": [
+      {
+        "model": "Qwen3.8 27B Q8 GGUF",
+        "gpu": "2 x RX 7900 XTX",
+        "enrolled_thinclient": true,
+        "selected_records": 2,
+        "prompt_tokens": 29,
+        "revoked_request_http_status": 503
+      }
+    ]
   },
   "source_included": false,
   "model_weights_included": false,
