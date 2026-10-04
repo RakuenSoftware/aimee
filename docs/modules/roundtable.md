@@ -94,8 +94,9 @@ The server resolves activation once at startup because administrative hot toggli
 Changing `modules.roundtable` or its environment fallback therefore requires a server restart. While
 disabled, roundtable-owned raw methods are absent from `server.info`, HTTP operation routes return 404,
 and MCP tools are absent from `tools/list`, `find_tools`, and `describe_tool`; direct raw method or MCP
-calls return unknown-method/tool semantics. A provider registration conflict aborts server startup rather
-than advertising unusable routes.
+calls return unknown-method/tool semantics. The delegates registry reports an explicit conflict
+when another provider is registered. Current source has no startup call that registers the declared
+roundtable adapter, so registration and executable panel availability require separate evidence.
 
 Build selection is separate from runtime activation. `AIMEE_WITH_ROUNDTABLE=0` for Make omits the owner
 implementation, its private include root, and the listed server/workflow/database composition objects.
