@@ -60,10 +60,11 @@ Make and CMake until descriptor-driven generation lands.
 
 The required delegates roster applies common eligibility, authorization, random-seat, and availability
 policy. Roundtable adds named presets and deliberation-specific seat/persona policy; chair and verifier
-calls use delegate providers. `src/modules/roundtable/roundtable_provider.c` implements the
-`aimee_panel_provider_t` adapter and `roundtable_provider_configure` installs it only when startup
-activation succeeds. The adapter forwards to `delegate_ensemble_run` and `delegate_roundtable_run` while
-all required callers stay behind `aimee_panel_aggregate` and `aimee_panel_run`. Readiness must
+calls use delegate providers. The required delegates owner's `panel_provider.c` implements
+registration and the `aimee_panel_aggregate` and `aimee_panel_run` facades. The optional
+`delegate_ensemble.c` retains `delegate_ensemble_run` and `delegate_roundtable_run` execution;
+`roundtable_activation.c` owns activation and surface classification. A declaration of
+`roundtable_provider_configure` alone does not establish a registered provider. Readiness must
 separate activation, usable seats, provider credentials/health, budget, preset validity, capture store,
 and pipeline state. A compiled route or saved preset is not proof of an executable panel.
 

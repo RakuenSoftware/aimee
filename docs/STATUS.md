@@ -1,16 +1,18 @@
 # Feature status
 
-This page describes the current testing tree. `Done` means the path is implemented and covered by
+This page describes the **1.0.0 release target**, inspected integration code and the replaceable-memory PR, checked on
+2026-10-04. Published [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) predates
+some of these paths. PR status and release qualification are separate from implementation status. `Done` means the path is implemented and covered by
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
 Use [Server and KB](SERVER_AND_KB.md) for placement and deployment boundaries. The
 [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records remaining source-confirmed gaps.
 
-The 0.4.6 candidate adds governed memory revisions, source checks at provider dispatch,
+The published 0.4.6 release adds governed memory revisions, source checks at provider dispatch,
 reviewed corrections, erasure protection, and durable async run ownership. See the
 [release preparation](validation/release-0.4.6-preparation-2026-09-27.md) for completed checks
-and remaining publication gates. Optional adaptive policies are not promoted by this release;
+and its point-in-time preparation gates. Optional adaptive policies are not promoted by this release;
 MR-07 remains observe-only, selection and utility-horizon policies remain disabled, and clean
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
@@ -22,11 +24,11 @@ workspace registration alone does not start a client runner.
 | Shared-memory event bus | Done | One host per daemon; typed routing, private queue pairs, backpressure, arena leases, capture. Linux v0. |
 | C and pure-Go bus clients | Done | Shared golden vectors and cross-language conformance; no cgo. |
 | Audit and observability on the bus | Done | Actions, memory writes, guardrails, vault, sandbox, MCP, and tool outcomes. |
-| External bus clients | Next | Inline cross-process attachment exists on a follow-on branch; not the integrated runtime path. |
-| Workflow triggers on the bus | Next | Trigger event contracts and routing exist on a follow-on branch. |
+| External bus clients | Next | Executable-bound module clients attach cross-process today. A general external/untrusted client API is not the supported public runtime path. |
+| Workflow triggers on the bus | Next | Go trigger scanning and HTTP fire exist; general bus trigger delivery is not integrated. |
 | Module replay | Next | Capture replay is observational; it does not re-execute modules. |
-| Source-module boundaries | In progress | Owned headers, descriptors, dependency gates, and attested docs are landing by module. |
-| Go workflow control plane | Done | Go owns workflow scheduling; C owns runtime, storage, tools, and policy seams. |
+| Source-module boundaries | Done for the canonical catalog | 34 module descriptors and 26 Go process identities are checked for ownership, placement and exported builds. Deeper C resource/domain migration remains work. |
+| Go workflow control plane | Done | Go WFE owns workflow lifecycle; Go domain/memory/PostgreSQL modules own their state and decisions. C remains the resource host and mechanical enforcement boundary. |
 | Versioned `/v1` operations | Done | Named routes replace the generic RPC endpoint. |
 
 ## Memory and code
@@ -38,7 +40,9 @@ workspace registration alone does not start a client runner.
 | PostgreSQL deployment | Done | Separate PostgreSQL service per standard composition; ordinary persistent storage by default, LUKS opt-in. Both roles use the Go PostgreSQL provider; native KB algorithms use session transport. |
 | KB-free personal recall | Done | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
 | Current-memory eligibility | Done | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
-| Memory reliability program | In progress | Versioned KB replacement and operator typed-fact review exist; reviewed correction proposals and personal revision history are implemented; production-role hardening and end-to-end qualification still need explicit evidence. |
+| Memory reliability baseline | Done, qualified per recorded gates | Governed revisions, correction review UI, source revalidation, rejection identity, runtime-role refusal protection and erasure replay are implemented. Qualification evidence is scoped to the cited release and Atlas reports; optional adaptive policies remain gated. |
+| Replaceable memory / Cognee | Implemented and deployed-tested in PR #3005 | Generic Store contract, native default, Cognee 1.6.2 alternative; canonical guarantees stay in Aimee. Required real-provider CI is added. Not included in 0.4.6; 256-record scope bound and restart interruption apply. |
+| Native-memory model delivery | Integrated source; plugin preview staged separately | Enrolled `/v1/native/primitive` selects personal source records. Separate vLLM plugin prepares model-native banks locally; supported profiles and publication limits are in its guide. |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |

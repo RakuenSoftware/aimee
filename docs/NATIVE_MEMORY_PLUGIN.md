@@ -6,6 +6,12 @@ the machine running vLLM prepares and caches model-specific memory locally.
 Your Aimee server does not download the model. The selected records do not
 become chat messages or prompt tokens.
 
+![Aimee selects records while the enrolled inference host prepares model-specific attention memory](images/architecture/native-attention.svg)
+
+The storage and retrieval backend remains selected through Aimee's
+[generic memory contract](modules/memory.md#memory-backend-contract). This model plugin has a
+separate lifecycle from that engine selection and from the application 1.0.0 release.
+
 The first binary preview is staged for the separate
 `native-memory-v0.2.3` GitHub Release. It requires a current Aimee server with
 `POST /v1/native/primitive`; older servers do not provide the source primitive.

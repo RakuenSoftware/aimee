@@ -4,8 +4,8 @@ An embedder change for one KB corpus is a data migration, not a role toggle. Mod
 dimension, pooling, and query/document prefixes define the vector space. If any of them changes
 while old vectors remain, retrieval can return plausible but incorrect rankings.
 
-The selected KB runs its embedder in the KB image, in its selected embedder sidecar, or at the remote
-endpoint configured for that role. The synthesis sidecar is a separate role and does not participate
+The selected KB uses its embedding sidecar, an explicitly configured operator command, or its
+remote endpoint. Standard application images do not bundle the embedding model. The synthesis sidecar is a separate role and does not participate
 in the vector migration.
 
 ## Prove the candidate before changing production
@@ -64,6 +64,9 @@ vectors explicitly:
 ```bash
 aimee memory embed --all
 ```
+
+This advanced memory embedding operation targets the configured KB. It does not rebuild
+personal Server vectors.
 
 `--force` bypasses the confirmation prompt and foreign-key protections; reserve it for a reviewed
 recovery where the dry-run output explains why it is required.

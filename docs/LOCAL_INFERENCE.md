@@ -1,20 +1,22 @@
 # Local inference
 
-aimee has two model roles: embedding and synthesis. `aimee-kb` owns both role contracts, even when
-another process executes a model.
+Aimee instances use embedding and synthesis roles. Server owns personal runtime data; KB owns
+shared knowledge. Each role uses its configured model endpoints through the existing network and
+credential owners. Model execution runs separately from the application in the standard deployment.
 
 | Role | Local execution | Remote execution |
 | --- | --- | --- |
-| embedding | bundled in `aimee-kb` or an optional embedder sidecar | configured embedding endpoint |
+| embedding | embedding sidecar | configured embedding endpoint |
 | synthesis | model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar | OpenAI-compatible endpoint |
 
-`kb_ranker` combines lexical, dense, and recency features without a reranking model. Curator
+The native Go memory engine combines lexical, dense and graph signals without requiring a
+reranking model. Curator
 extraction and reasoning use one synthesis role with stage-specific budgets.
 
 ## Embedding
 
-The default `bekko-a25m` embedder uses 384 dimensions. A fresh bundled deployment can embed without
-a GPU or model download. Configure an external endpoint with `embedder_url`, `embedder_model`, and
+The default `bekko-a25m` embedder uses 384 dimensions. The standard embedding sidecar includes the weights and runs on
+CPU. Pulling its image downloads those weights; ordinary startup needs no separate model download. Configure an external endpoint with `embedder_url`, `embedder_model`, and
 `embedder_dims`, or their documented environment overrides.
 
 Model identity includes dimension, pooling, prefixes, and serving identity. Changing any part after
@@ -31,8 +33,8 @@ measured CPU, and added about 1.8 GB to the image. The
 Set `synthesis_endpoint`, `synthesis_model`, and `synthesis_api_key` for an external provider. Empty
 `synthesis_endpoint` disables synthesis while embedding, search, recall, and indexing continue.
 
-The managed local profile deploys one model-specific `aimee-llm` sidecar. The KB reaches it over
-mTLS with a dedicated client certificate. The sidecar image fixes the model family; the KB records
+The managed local profile deploys one model-specific `aimee-llm` sidecar. The owning instance reaches it over
+mTLS with a dedicated client certificate. The sidecar image fixes the model family; the instance records
 the model identity it requests.
 
 | Image | Model | Measured local role |
@@ -53,7 +55,7 @@ Change one capacity setting at a time and record model digest, device placement,
 first-token latency, total latency, throughput, stable slots, and structured-output quality. Reduce
 context or slots when an out-of-memory restart interrupts readiness under mixed load.
 
-The KB reports role health separately from process liveness. A failed role produces explicit
+KB reports role health separately from process liveness. A failed role produces explicit
 degradation and no dense or synthesized result.
 
 ## Configuration example
@@ -67,3 +69,11 @@ synthesis_model: your-model
 
 Use the [generated configuration reference](gen/configuration.md) for exact keys and environment
 overrides. See [KB model backends](KB_LLM_BACKENDS.md) for placement and trust boundaries.
+
+## Native attention memory
+
+The [vLLM native memory plugin](NATIVE_MEMORY_PLUGIN.md) prepares selected Aimee records into
+model-specific attention banks on the inference host. Its separately staged release and GPU
+requirements differ from the embedding and synthesis sidecars. It consumes Aimee records;
+it is not a replacement storage or retrieval engine. Cognee instead implements the
+[generic memory backend contract](modules/memory.md#memory-backend-contract).

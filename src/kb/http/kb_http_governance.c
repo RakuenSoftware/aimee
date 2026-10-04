@@ -126,7 +126,8 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
    if (kb_module_memory_reset_derived() != 0)
    {
       cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"derived memory cleanup failed; retry erasure request\"}");
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"derived memory cleanup failed; retry erasure request\"}");
       return 503;
    }
    int event_created = 0, coverage_complete = 0;

@@ -116,7 +116,8 @@ cJSON *server_module_memory_data(const cJSON *request)
    }
    uint64_t budget = MODULE_MEMORY_DATA_DEADLINE_NS;
    const char *backend = getenv("AIMEE_MEMORY_BACKEND");
-   if (backend && backend[0] && strcmp(backend, "native") != 0 && strcmp(backend, "aimee-native") != 0)
+   if (backend && backend[0] && strcmp(backend, "native") != 0 &&
+       strcmp(backend, "aimee-native") != 0)
       budget = 120ULL * 1000000000ULL;
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request, "operation");
    if (cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0)
@@ -1129,10 +1130,12 @@ void server_module_stage_adapters_configure(void)
 int server_module_memory_reset_derived(void)
 {
    const char *backend = getenv("AIMEE_MEMORY_BACKEND");
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 || strcmp(backend, "aimee-native") == 0)
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
+       strcmp(backend, "aimee-native") == 0)
       return 0;
    cJSON *request = cJSON_CreateObject();
-   if (!request) return -1;
+   if (!request)
+      return -1;
    cJSON_AddStringToObject(request, "operation", "reset-derived");
    cJSON *reply = server_module_memory_data(request);
    cJSON_Delete(request);

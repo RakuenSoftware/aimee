@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="650" viewBox="0 0 1160 650" role="img" aria-labelledby="title desc"><title id="title">Replaceable memory, fixed Aimee guarantees</title><desc id="desc">The existing memory owner applies admission, scope, identity and lifecycle. Native and Cognee adhere to a generic Store contract. Cognee indexes derived datasets and returns identities revalidated against Aimee canonical records.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<text class="title" x="580.0" y="32" text-anchor="middle">Replaceable memory, fixed Aimee guarantees</text>
+<rect x="25" y="90" width="240" height="120" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="145.0" y="118" text-anchor="middle">Authenticated request</text>
+<text class="body" x="145.0" y="144" text-anchor="middle">Store / scope / principal</text>
+<text class="body" x="145.0" y="167" text-anchor="middle">Existing C host and module bus</text>
+<rect x="355" y="75" width="395" height="150" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="552.5" y="103" text-anchor="middle">Aimee memory owner</text>
+<text class="body" x="552.5" y="129" text-anchor="middle">Authorization · identity · versions</text>
+<text class="body" x="552.5" y="152" text-anchor="middle">Audit · lifecycle · cancellation</text>
+<text class="body" x="552.5" y="175" text-anchor="middle">Generic Store + optional cleanup</text>
+<polyline points="265,150 355,150" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="865" y="90" width="270" height="120" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="1000.0" y="118" text-anchor="middle">Canonical Aimee records</text>
+<text class="body" x="1000.0" y="144" text-anchor="middle">Existing PostgreSQL provider</text>
+<text class="body" x="1000.0" y="167" text-anchor="middle">Authoritative source + revisions</text>
+<polyline points="750,150 865,150" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="808" y="130" text-anchor="middle">source reads / writes</text>
+<rect x="135" y="320" width="320" height="115" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="295.0" y="348" text-anchor="middle">Native engine (default)</text>
+<text class="body" x="295.0" y="374" text-anchor="middle">Existing storage / retrieval modules</text>
+<text class="body" x="295.0" y="397" text-anchor="middle">Extended native contracts remain</text>
+<rect x="650" y="320" width="390" height="115" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="845.0" y="348" text-anchor="middle">Cognee adapter (selected alternative)</text>
+<text class="body" x="845.0" y="374" text-anchor="middle">Generic contract, scoped revision datasets</text>
+<text class="body" x="845.0" y="397" text-anchor="middle">Returned identities checked against source</text>
+<polyline points="480,225 480,272 295,272 295,320" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="326" y="255" text-anchor="middle">backend factory</text>
+<polyline points="625,225 625,272 845,272 845,320" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="823" y="255" text-anchor="middle">backend factory</text>
+<rect x="650" y="490" width="390" height="115" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="845.0" y="518" text-anchor="middle">Existing egress + Vault → Cognee</text>
+<text class="body" x="845.0" y="544" text-anchor="middle">Bounded add / cognify / search / cleanup</text>
+<text class="body" x="845.0" y="567" text-anchor="middle">Cognee is derived state; no new authority</text>
+<polyline points="845,435 845,490" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="body" x="580" y="633" text-anchor="middle">A replacement engine does not acquire another placement, caller authority or canonical identity.</text>
+</svg>

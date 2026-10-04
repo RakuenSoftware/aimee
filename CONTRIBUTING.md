@@ -9,13 +9,12 @@ Small, finished changes are easiest to review.
 3. Check [docs/proposals](docs/proposals/) for an accepted design or an owner already doing the work.
 4. Preview the blast radius for shared symbols, routes, config, storage, and wire contracts.
 
-Do not cross the DB1/KB_STORE boundary. The server's store and `aimee-kb` are separate databases with
-separate owners, and the thin client owns neither.
+Preserve Server/KB placement and database authority. They share the Go PostgreSQL provider and
+caller contracts, while retaining separate stores, homes and Vaults. The thin client owns neither.
 
-This used to read "`aimee-server` owns SQLite", which is no longer true and would send you to the
-wrong place. The server's store is PostgreSQL, served by the `aimee` module, which opens no database
-itself: it reaches the `postgres` module over the event bus, and that module owns the connection and
-the DSN (`AIMEE_STORE_URL`). `aimee-kb` owns KB_STORE and pgvector, also PostgreSQL.
+The `aimee` domain module owns Server runtime behavior; `memory` owns personal/shared memory
+in its declared placement. Both call `postgres` over the local event bus. Only that provider opens
+database connections. Native KB algorithms use its session transport and hold no libpq pool.
 
 `aimee-server` still links libsqlite3 for the audit WORM ledger. That store is separate from DB1.
 The `aimee` and `aimee-kb` binaries link no SQLite:
@@ -35,8 +34,8 @@ make docs-gen-check
 Run the narrow test target while iterating. Run the full unit suite before sending a change. Add
 ASAN or TSAN for memory ownership, concurrency, event-bus, and shutdown work.
 
-`make unit-tests` links KB_STORE against a sqlite shim that *translates* its SQL, so engine-level
-behaviour is unverified by it. `make unit-tests-pg` runs the same binaries against a real
+Some native knowledge fixtures in `make unit-tests` use a SQLite compatibility shim that translates
+PostgreSQL SQL. It is a test shim, not a production provider; engine behavior requires real PostgreSQL. `make unit-tests-pg` runs the same binaries against a real
 PostgreSQL, which is what CI gates on:
 
 ```bash
@@ -44,8 +43,13 @@ make unit-tests-pg AIMEE_TEST_KB_STORE_TEMPLATE_URL=postgresql://user@host/aimee
 ```
 
 It rebuilds the template database, then clones it per test process. Point it at a disposable
-server: it creates and drops databases beside the template. Touching KB_STORE SQL without running it is
+server: it creates and drops databases beside the template. Changing knowledge SQL without running it is
 how a statement that Postgres rejects outright can sit in a green tree.
+
+Memory/backend changes also run the required `memory-backends` CI job: race tests for the contract
+adapters and egress, then pinned real Cognee API/storage acceptance. Reproduce it using the
+[memory provider guide](docs/modules/memory.md#memory-backend-contract). Required PostgreSQL
+owner/replay checks use real restricted roles; SQLite fixtures cannot replace those gates.
 
 The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
 

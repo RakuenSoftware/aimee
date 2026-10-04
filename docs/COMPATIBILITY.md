@@ -67,8 +67,10 @@ client with `aimee help --all` and the protocol handshake.
 ## Build requirements
 
 Server builds need a C11 toolchain, GNU Make, SQLite with FTS5, libcurl, OpenSSL, pthreads, PAM on
-Linux, and libpq for the KB build. Go builds cover the workflow and browser services. PostgreSQL 18,
-pgvector, and pgvectorscale are included in the default KB container.
+Linux, and the remaining dependencies listed in the Makefile. Go builds cover supervised modules,
+workflow and browser services; use the version declared in `server-go/go.mod`. Native application
+hosts do not own libpq pools. PostgreSQL 18 and pgvector run in the separate store service;
+pgvectorscale is optional where available. Some retained development fixtures still use libpq.
 
 The Makefile is canonical for Linux development. CMake carries portable thin-client and test builds.
 

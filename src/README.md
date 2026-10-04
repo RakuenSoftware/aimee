@@ -8,51 +8,58 @@ boundaries and the [manual](../MANUAL.md) for use.
 | Artifact | Language | Owner |
 | --- | --- | --- |
 | `aimee` | C11 | DB-free thin CLI, hooks, MCP/ACP stdio, local transport |
-| `aimee-server` | C11 | DB1, resource API, agents, tools, policy, vault, provider calls |
-| `aimee-kb` | C11 | KB_STORE, memory, documents, code graph, retrieval, curation |
-| `aimee-wfe` | Go | workflow definitions, lifecycle, artifacts, scheduler, worktrees, forge |
-| `aimee-runtime-web` | Go | authenticated browser proxy and UI service |
+| `aimee-server` | C11 | Server resource API, authentication and mechanical enforcement; Go modules own domain state and policy stages |
+| `aimee-kb` | C11 | Shared knowledge resource API and remaining native corpus algorithms; Go owns memory and PostgreSQL transport |
+| `aimee-module-*` | Go | Admitted module processes, including role composition, memory, PostgreSQL, providers and egress |
+| `aimee-wfe` | Go | Workflow definitions, lifecycle, artifacts, scheduler, worktrees and forge |
+| `aimee-runtime-web` | Go | Authenticated browser proxy and UI service |
+| `aimee-kb-worm` | C11 | Separately credentialed delivery from mutation outbox to the SQLite evidence chain |
 
-The server image supervises `aimee-server` and `aimee-wfe` as peers. Workflow lifecycle has one
-writer: Go. The C server supplies typed agent, credential, policy, and forge resources; it does not
-advance workflow state.
+The Server image supervises `aimee-server` and `aimee-wfe` as peers. The Go role composition
+supervises its module fleet. Workflow lifecycle has one writer: WFE. The C server supplies typed
+agent, credential, policy and forge resources; it does not advance workflow state.
 
 ## Source map
 
 ```text
 src/
-  core/                 extraction-ready shared C libraries
-    connection/         TCP, deadline/cancel, HTTP/1, auth, TLS/mTLS
-    event_bus/           local shared-memory host and module clients
-  cli_*                 thin-client commands and transport
-  server/               server listeners, handlers, agent/resource plane
-  kb/                   KB daemon and HTTP surface
-  db1_client/           typed client for the server store module
-  modules/              product modules and public include trees
-    aimee/              PostgreSQL-backed server store contract
-    postgres/           shared PostgreSQL transport module
-    kb_store/                KB PostgreSQL/pgvector owner
-    audit/              WORM audit, replay, observability bridge
-    sandbox/            delegate isolation
-  tests/                C unit and integration tests
+  core/                  shared C connection and event-bus libraries
+  cli_*                  thin-client commands and transport
+  server/                listeners and resource/enforcement plane
+  kb/                    knowledge daemon and HTTP/resource surface
+  db1_client/            typed callers for the server-domain contract
+  modules/               descriptor-owned modules and include trees
+    kb/c/                knowledge schema and remaining native corpus algorithms
+    audit/               WORM implementation and native bridge
+    sandbox/             container/resource mechanics
+  tests/                 C protocol, resource and integration fixtures
 
 server-go/
-  bus/                   pure-Go event-bus client and conformance
+  bus/                   pure-Go event-bus client/runtime
+  aimee/                 caller-side server-domain contract
+  db/                    shared database caller contract
+  memory/                generic memory contract and client
+  modules/               policy/domain owners and process handlers
+    server/, kb/         role identity and composition
+    memory/              native bridge and Cognee adapter
+    postgres/            sole database transport and storage bootstrap
+    providers/, egress/  provider preparation and governed network transport
   internal/wfe/          definitions, catalog, canonical snapshots
-  internal/engine/       scheduler, runners, worktrees, forge, roundtables
-  internal/workflowstore/          workflow view of the store-module contract
-  internal/api/          workflow/control-plane routes
+  internal/engine/       lifecycle, scheduler, worktrees and forge
+  internal/workflowstore/ workflow view of the domain contract
+  internal/api/          workflow/control-plane resource APIs
 
-runtime-web/             Go browser service
-control-web/             Go knowledge-base administration service
+runtime-web/             browser provider
+control-web/             knowledge administration provider
 frontend/                browser application
 api/                     OpenAPI sources and SDK generation
-scripts/                 checks, generation, deployment, smoke tests
+scripts/                 checks, generation, deployment and evaluation
 ```
 
-Embedding and synthesis are KB-owned roles. Each can run inside the selected KB container or use a
-remote endpoint. The current server configuration names one KB URL; fleet selection is the next
-routing boundary. There is no standalone inference runtime artifact.
+Embedding and optional synthesis are configured per owning instance. Standard Compose runs them
+in separate sidecars; remote endpoints are also supported. Server personal vectors do not move to
+KB when it connects. The current Server config selects one KB URL; fleet routing remains design
+work. Model-specific `aimee-llm-*` synthesis artifacts are separate from the retired generic gateway.
 
 ## Event bus
 

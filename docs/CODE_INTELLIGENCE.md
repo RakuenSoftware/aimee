@@ -1,7 +1,9 @@
 # Code intelligence
 
 aimee stores code as symbols, references, calls, imports, repository dependencies, embeddings, and
-git co-change. The graph lives in KB_STORE and can span every repository in a workspace.
+git co-change. Server owns the private index; an explicitly selected KB owns shared code.
+Their scope/capability surfaces differ. A published graph can span repositories within its owning
+store without relocating personal code to KB.
 
 ## Local-first scope
 

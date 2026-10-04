@@ -220,7 +220,8 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_Delete(begin);
       char msg[192];
-      snprintf(msg, sizeof(msg), "private derived memory cleanup failed; retry request_id=%s", request_id);
+      snprintf(msg, sizeof(msg), "private derived memory cleanup failed; retry request_id=%s",
+               request_id);
       return server_send_error(conn, msg, NULL);
    }
    char *complete_json = kb_client_subject_erasure_complete(request_id, db1_count, &status);

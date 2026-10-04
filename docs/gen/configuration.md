@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config module, env vars scanned from `getenv()` in `src/`, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
+> Auto-generated from the canonical source tables by `scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config module, env vars scanned from native and Go runtime sources, and the workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 This reference covers every configurable surface:
 
@@ -28,7 +28,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `aimee_synthesis_model` | string | n/a |
+| `aimee_synthesis_model` | string | Legacy model-selection key retained by config metadata; current separate sidecars use `synthesis_model` and their endpoint configuration. |
 | `aimee_with_llamacpp` | string | Compatibility image flag. Managed 0.4.0 profiles deploy a model-specific synthesis sidecar instead of bundling a generic llama.cpp gateway. |
 | `audit_action_enabled` | bool | Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap. |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
@@ -37,7 +37,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
-| `client_tool_transport_preference` | string | n/a |
+| `client_tool_transport_preference` | string | Client integration preference: `cli-first` (default) or `mcp-first`; registration still checks the client's supported transport. |
 | `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off). |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
@@ -114,8 +114,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 | `wfe_live_forge_enabled` | bool | Gate for the autonomous live forge (default-OFF). Enable it explicitly only for approved autonomous workflows. When off, the forge provider is not registered and every forge op fails closed; even when on, each operation re-checks this flag and the merge-target rail. |
 | `wfe_proposals_autoscan_enabled` | bool | Automatically scan watched proposal directories; off requires explicit trigger.fire. |
-
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `aimee_synthesis_model`, `client_tool_transport_preference`
 
 ### Advanced tuning keys (85)
 
@@ -289,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 301 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -301,7 +299,9 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory. |
+| `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
+| `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
@@ -334,14 +334,19 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_BACKGROUND_THREADS` | Background worker thread count. |
 | `AIMEE_COMPUTE_THREADS` | Compute-pool thread count. |
+| `AIMEE_CONTROL_WEB_ENABLED` | Enable the separately authenticated control-web administration service. |
 | `AIMEE_DEPLOY_COMPOSE_FILE` | Path to the managed compose file the server-orchestrated deploy runs (default /opt/aimee/deploy/aimee-managed.compose.yaml). |
 | `AIMEE_DEPLOY_ENABLED` | Set to 1 to enable the server-orchestrated deploy: the setup wizard runs `docker compose up -d` for the managed sibling service (aimee-kb) via a mounted Docker socket. Off unless the deploy compose sets it. |
 | `AIMEE_GITHUB_OAUTH_CLIENT_ID` | Client ID of a GitHub OAuth App for the webchat "Sign in with GitHub" button; populates the github.com git credential. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_MGMT_STATUS_KEY_ID` | Identifier of the management-status verification key. |
 | `AIMEE_MGMT_STATUS_PUBLIC_KEY` | Hex-encoded Ed25519 key used to verify management-status staples. |
+| `AIMEE_MODULE_EVENT_BASE` | Installed module event base used by the module runtime. |
+| `AIMEE_MODULE_PLACEMENT` | Supervisor-provided module placement (`server` or `kb`), validated against the installed identity. |
+| `AIMEE_MODULE_PRINCIPAL_REF` | Supervisor-provided admitted module principal reference; not a caller-selected authority. |
 | `AIMEE_MODULE_ROUNDTABLE` | Enable the optional roundtable module; invalid values fail closed to off. |
 | `AIMEE_MODULE_RUNTIME_WEB` | Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default. |
+| `AIMEE_PEER_DIRECTORY` | Peer directory selection. The compatibility value `db1` selects the runtime session directory. |
 | `AIMEE_PROVIDER_CONTEXT_LIMITS` | Deployment-owned final provider byte ceiling, e.g. `{"schema_version":1,"max_request_bytes":65536}`. Empty/unset means no deployment cap; JSON zero is literal. Go admission applies the stricter deployment/caller limit and fails closed on malformed policy or overflow. Set before starting the host; recreate the container or restart the native host to change it. Token caps are not yet supported. |
 | `AIMEE_RUNTIME_WEB_ENABLED` | Enable the browser runtime and its optional runtime-web process. The shipped container default is on; `0`, `false`, `off`, or `no` disables both unless `AIMEE_MODULE_RUNTIME_WEB` explicitly enables the process. |
 | `AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT` | Permit the operator-configured search backend (`search.searxng_url`) to resolve to a private, loopback, or link-local address. Off by default: every outbound fetch is validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this is set. Deliberately an environment variable rather than a config key, because `config.set` is reachable from inside the running system and pointing the search backend at a cloud metadata address would exfiltrate instance credentials through a tool that looks like search. Set to exactly `1`; any other value is off. Never widens fetches of model-supplied or search-result URLs, which stay denied. |
@@ -442,15 +447,37 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
+| `AIMEE_KB_STORE_EVAL_URL` | Separate KB_STORE URL used by evaluation harnesses; never the production default. The harness applies the KB_STORE schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server. |
+| `AIMEE_POSTGRES_STORAGE` | PostgreSQL storage mode: `plain` by default or opt-in `luks`. See Storage tiers for custody and recovery requirements. |
+| `AIMEE_POSTGRES_STORAGE_SOCKET` | Local control socket for the PostgreSQL storage service. |
+| `AIMEE_POSTGRES_VOLUME_MIB` | Size in MiB for a newly provisioned encrypted PostgreSQL volume; does not resize an existing volume. |
 | `AIMEE_TEST_KB_STORE_TEMPLATE_URL` | Test-only. Postgres template database the KB_STORE test shim clones per test process, so unit tests run against the real engine instead of the sqlite shim (which translates KB_STORE's SQL rather than executing it). Build the template with `make kb-store-test-template` and the suite with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test binaries; no production code path consults it. |
 
 ### Memory
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_COGNEE_URL` | Cognee API base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset. |
 | `AIMEE_CONTEXT_NO_KB` | Skip KB lookups during context assembly. |
+| `AIMEE_GRAPH_FUSION` | Native memory graph-fusion switch; accepted on/off values are validated by the Go owner. |
+| `AIMEE_MEMORY_BACKEND` | Select the generic memory engine: `native` (default), `aimee-native`, or `cognee`. Unknown selections fail startup. See the memory module contract. |
+| `AIMEE_MEMORY_BACKEND_AUTH` | Alternative memory authentication mode: `bearer` by default, or explicit `none` for an isolated development endpoint. |
+| `AIMEE_MEMORY_BACKEND_TOKEN` | First-boot bearer transport for the alternative memory service; sealed into Vault and removed from the environment before runtime. |
+| `AIMEE_MEMORY_BACKEND_URL` | Selected alternative memory API base URL. Requests use the existing egress owner. |
+| `AIMEE_MEMORY_CITATIONS_MODE` | Citation rendering mode for memory recall. |
+| `AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED` | Strip unverified citations from recall output. |
 | `AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED` | Enable the async cognify pipeline. |
+| `AIMEE_MEMORY_COREF_MODE` | Coreference-resolution mode. |
+| `AIMEE_MEMORY_COREF_WINDOW` | Coreference context window; default 5, clamped to 1–12. |
 | `AIMEE_MEMORY_HEALTH_ENABLED` | Set to 1 to opt into bounded receipt health collection and optional serving metadata. Default off; disabling it preserves required provider receipts. |
+| `AIMEE_MEMORY_HEALTH_SAMPLE_PPM` | Bounded retrieval-health sampling rate in parts per million; used only when health collection is enabled. |
+| `AIMEE_MEMORY_PAGERANK_ENABLED` | Opt into the native shared-memory PageRank ranking arm. Integer override clamped to 0 or 1; personal recall has no shared graph. |
+| `AIMEE_MEMORY_PAGERANK_ITERATIONS` | Native shared-memory PageRank iterations; default 6, integer override clamped to 1–16. |
+| `AIMEE_MEMORY_PAGERANK_RELATIONS` | Relation types included in memory PageRank. |
+| `AIMEE_MEMORY_PAGERANK_WEIGHT` | Validated weight for the optional native PageRank ranking arm; default 0.35. |
+| `AIMEE_MEMORY_RECALL_GATE` | Recall acknowledgement gate: observe by default, `enforce` to suppress eligible acknowledgement queries, or `off` to disable. |
+| `AIMEE_MEMORY_SELECTION_POLICY` | Opt-in versioned typed-selection reporting policy. Only the owner's supported policy version activates it; default off. |
+| `AIMEE_MEMORY_UTILITY_HORIZON_POLICY` | Operator JSON utility-horizon artifact, bounded to 64 KiB, with `shadow` or `enforce` mode. Unset disables it; invalid artifacts fail validation. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
 
 ### Delegates & backends
@@ -516,6 +543,7 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_PANEL_SEAT_WAIT_SECS` | Maximum wait for a roundtable seat to acquire an eligible agent. |
 | `AIMEE_PR_BASE_MODE` | What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free. |
 | `AIMEE_WFE_ENGINE` | Workflow runtime selector; current server images require `go`. |
+| `AIMEE_WFE_HTTP_SOCKET` | Unix socket for the Go workflow control plane. |
 | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | Grace period before an unowned workflow worktree can be collected. |
 | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | Enable automatic scheduling of admitted autonomous work items. |
 | `AIMEE_WORKFLOW_BASE` | Legacy C workflow fallback for the freeze/diff base. It does not set the Go WFE integration branch. |
@@ -534,10 +562,18 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_VERIFY_PARALLEL` | Run `aimee git verify` steps in parallel. |
 | `AIMEE_VERIFY_STEP_TIMEOUT_MS` | Per-step timeout (ms) for git verify. |
 
+### Models
+
+| Variable | Description |
+|----------|-------------|
+| `AIMEE_EMBED_HTTP_TIMEOUT_MS` | Embedding request timeout in milliseconds for the Go embedding owner. |
+| `AIMEE_MODEL_CAPABILITY_OVERRIDES` | Override model capability flags (reasoning/tools/vision/…). |
+
 ### TLS & networking
 
 | Variable | Description |
 |----------|-------------|
+| `AIMEE_EGRESS_CREDENTIAL_HELPER` | Privileged credential helper executable used by the egress owner. Startup validates its path and custody; credentials remain in Vault. |
 | `AIMEE_KB_MTLS_MAX_CONNECTIONS` | Maximum concurrent connections accepted by the KB mTLS listener. |
 | `AIMEE_KB_STATUS_TLS_CA` | CA file used by the management-status authority. |
 | `AIMEE_KB_STATUS_TLS_CERT` | TLS certificate for the management-status authority. |
@@ -579,7 +615,7 @@ The binaries read 247 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_RECEIPT_RETENTION`, `AIMEE_MODEL_SERVICES_ENABLED`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_MODULE_RUNTIME_BIN`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_TEST_MODULE_BIN`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_WORM_PATH`, `AIMEE_WORM_POSTGRES_URL`
+`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_ENVIRONMENT`, `AIMEE_EVAL_SCHEMA`, `AIMEE_EXPLORATION_ENFORCE`, `AIMEE_EXPLORATION_EXPERIMENT`, `AIMEE_FORGE_SERVICE_SOCKET`, `AIMEE_FORGE_SERVICE_URL`, `AIMEE_GIT_AUTHOR_EMAIL`, `AIMEE_GIT_AUTHOR_NAME`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_PLUGIN_ARGV`, `AIMEE_MCP_PLUGIN_CWD`, `AIMEE_MCP_PLUGIN_PERMISSION`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_RECEIPT_RETENTION`, `AIMEE_MODEL_SERVICES_ENABLED`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_MODULE_RUNTIME_BIN`, `AIMEE_OAUTH_REDIRECT_BASE`, `AIMEE_OBSERVABILITY_ALLOW_INSECURE_OTLP`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_TEST_MEMORY_PLACEMENT`, `AIMEE_TEST_MODULE_BIN`, `AIMEE_TEST_STORE_REQUIRED`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_VECTOR_MAX_RETRY`, `AIMEE_VERSION`, `AIMEE_WEBCHAT_PAM_SERVICE`, `AIMEE_WFE_RUNNER_SOCKET`, `AIMEE_WFE_RUNNER_URL`, `AIMEE_WIZARD_APPLIANCE`, `AIMEE_WORM_PATH`, `AIMEE_WORM_POSTGRES_URL`
 
 ## External & provider environment
 
@@ -599,6 +635,9 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 
 | Variable | Description |
 |----------|-------------|
+| `EMBEDDER_DIMS` | Embedding dimension override; must match the stored vector-space identity. |
+| `EMBEDDER_URL` | Compatibility embedding endpoint override when the AIMEE-prefixed endpoint is unset. |
+| `SYNTHESIS_AUTH_REQUIRED` | Require authenticated synthesis for the configured endpoint; checked by the curator provider. |
 | `SYNTHESIS_CA_FILE` | CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued. |
 | `SYNTHESIS_CERT_FILE` | Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names. |
 | `SYNTHESIS_ENDPOINT` | OpenAI-compatible base URL used by the KB, including a managed model-specific mTLS sidecar. |
@@ -628,10 +667,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `CODEX_HOME` | Codex home directory (Codex-frontend integration). |
 | `CODEX_SANDBOX` | Codex sandbox mode. |
 | `CODEX_THREAD_ID` | Codex conversation/thread id. |
-
-### Undocumented (add to `EXT_DESC`/`EXT_OS_IGNORE` in gen-reference-docs.py)
-
-`EMBEDDER_DIMS`, `EMBEDDER_URL`, `SYNTHESIS_AUTH_REQUIRED`
 
 ## Workflow engine
 
@@ -717,7 +752,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 
 ### `agents.json`: agent / model definitions
 
-`{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent object's non-credential fields (credential fields are vault-held and deliberately not enumerated here):
+`{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent non-credential fields and nested metadata read by the routing owner (credential fields are vault-held and deliberately not enumerated here):
 
 | Field | Description |
 |-------|-------------|
@@ -729,6 +764,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `auto_compact_pct` | Context % at which to auto-compact. |
 | `backend` | Execution backend (http / cli / ssh / docker). |
 | `catalog_provider` | Catalog vendor key used for model lookups (`anthropic`, `openai`, …), when it differs from the wire `provider`. |
+| `catalog_provider_explicit` | Catalog resolution metadata indicating an explicit provider selection. |
 | `cidr` | Allowed CIDR (relay / tunnel networking). |
 | `cli_cmd` | CLI command for a cli-backend agent. |
 | `cli_idle_timeout_ms` | Idle timeout (ms) for a CLI agent. |
@@ -741,6 +777,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `default_agent` | Top-level: name of the default agent. |
 | `default_delegate` | Delegate this agent hands work to when a task arrives with no explicit delegate. Lets a project pin its own worker without every caller passing --delegate. |
 | `desc` | Human description of the agent. |
+| `eligible` | Routing-competence eligibility metadata, not a bypass of runtime admission. |
 | `enabled` | Whether the agent is active. |
 | `endpoint` | Provider endpoint URL. |
 | `exec_roles` | Roles this agent may execute with tools. |
@@ -752,12 +789,14 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `inject_respond_tool` | Inject the `respond` tool. |
 | `ip` | Bind/target IP (relay / tunnel). |
 | `is_server_hosted` | Whether the provider session is hosted by the aimee server. |
+| `max_output` | Model capability metadata for maximum output tokens. |
 | `max_parallel` | Max concurrent calls to this agent. |
 | `max_reconnects` | Max reconnect attempts (streaming / relay). |
 | `max_scope` | Largest task scope this agent may be given (`bounded` or `whole_task`). Routing never relaxes this. |
 | `max_tokens` | Max output tokens. |
 | `max_turns` | Max agent-loop turns. |
 | `middleware` | Per-agent middleware overrides (e.g. `context_window`, `max_tokens`). |
+| `minimum` | Minimum threshold within routing-competence configuration. |
 | `model` | Model name. |
 | `models` | Provider-general registration: the models to expand into individual routable agents. Omit to expand every routable model the catalog lists. |
 | `name` | Agent identifier. |
@@ -775,11 +814,16 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `registration` | Name of the provider registration this agent was expanded from. Set automatically; used to prefer same-provider peers during fallback. |
 | `relay_key` | Relay auth key. |
 | `relay_ssh` | SSH relay config. |
+| `revision` | Catalog or routing-competence revision metadata. |
+| `role` | Role within routing-competence metadata. |
 | `roles` | Roles this agent serves (review, plan, …); `"all"` = every role. |
+| `routing_competence` | Versioned competence metadata used by provider/model eligibility checks. |
+| `score` | Competence score within routing metadata. |
 | `session_reuse` | Reuse a session across calls. |
 | `ssh_entry` | SSH entry point (ssh backend). |
 | `ssh_key` | SSH key path (ssh backend). |
 | `stall_threshold` | Stall-detection threshold. |
+| `status` | Model catalog response status; nested metadata rather than a top-level agent setting. |
 | `target_host` | Target host (relay / tunnel). |
 | `target_port` | Target port (relay / tunnel). |
 | `tier_price_exempt` | Reason this agent is exempt from the `cost_tier`-vs-price lint (e.g. a flat-rate seat whose per-token price is not meaningful). |
@@ -788,8 +832,6 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnel` | Tunnel config. |
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
-
-> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `catalog_provider_explicit`, `eligible`, `max_output`, `minimum`, `revision`, `role`, `routing_competence`, `score`, `status`
 
 ### Toolsets: `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 

@@ -255,10 +255,13 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    uint32_t response_len = 0;
    cJSON *root = NULL;
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request_json, "operation");
-   uint64_t budget = cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0
-                         ? 120ULL * 1000000000ULL : KB_MODULE_MEMORY_DATA_DEADLINE_NS;
+   uint64_t budget =
+       cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0
+           ? 120ULL * 1000000000ULL
+           : KB_MODULE_MEMORY_DATA_DEADLINE_NS;
    const char *backend = getenv("AIMEE_MEMORY_BACKEND");
-   if (backend && backend[0] && strcmp(backend, "native") != 0 && strcmp(backend, "aimee-native") != 0)
+   if (backend && backend[0] && strcmp(backend, "native") != 0 &&
+       strcmp(backend, "aimee-native") != 0)
       budget = 120ULL * 1000000000ULL;
    if (request && request_len > 0 && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY &&
        request_len <= UINT32_MAX && response &&
@@ -425,10 +428,12 @@ void kb_module_stage_adapters_configure(void)
 int kb_module_memory_reset_derived(void)
 {
    const char *backend = getenv("AIMEE_MEMORY_BACKEND");
-   if (!backend || !backend[0] || strcmp(backend, "native") == 0 || strcmp(backend, "aimee-native") == 0)
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
+       strcmp(backend, "aimee-native") == 0)
       return 0;
    cJSON *request = cJSON_CreateObject();
-   if (!request) return -1;
+   if (!request)
+      return -1;
    cJSON_AddStringToObject(request, "operation", "reset-derived");
    cJSON *reply = kb_module_memory_data(request);
    cJSON_Delete(request);

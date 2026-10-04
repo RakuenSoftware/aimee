@@ -4,6 +4,12 @@ A single user needs Server, its PostgreSQL store, and an embedding service. A sh
 Server and KB use the same application image, with the role established permanently on first boot.
 Each deployment has its own Vault and standardized PostgreSQL container.
 
+This guide follows the **1.0.0 release target**. The previous published application release is
+0.4.6; a checkout of `testing` has newer behavior. Check [What's new](WHATS_NEW.md) before assuming a tagged image includes
+an integration feature. The Cognee adapter and native-memory primitive require their newer builds.
+
+![Standard personal Server deployment and separately deployed optional shared KB](images/architecture/deployment.svg)
+
 ## 1. Start a local server
 
 Use Docker with Linux containers and Compose v2.24.4 or newer. PostgreSQL uses an ordinary

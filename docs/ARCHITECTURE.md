@@ -7,48 +7,11 @@ owns a shared corpus. [Server and KB](SERVER_AND_KB.md) is the canonical ownersh
 
 ## Processes
 
-```mermaid
-flowchart LR
-    T[AI tool] -->|hooks / MCP / ACP| C[aimee thin client]
-    B[Browser] --> W[aimee-runtime-web]
+![Current Server and KB compositions: C resource hosts and bus, supervised Go modules, separate PostgreSQL and evidence stores](images/architecture/processes.svg)
 
-    subgraph RUNTIME[Server container]
-        S[aimee-server resource plane]
-        F[aimee-wfe workflow harness]
-        SB[server event-bus host]
-        SM[supervised process modules]
-        M[aimee domain module]
-        MM[Go memory: server placement]
-        PG[postgres module]
-
-        S <--> SB
-        F -->|typed DB1 calls| SB
-        SB <--> SM
-        SB <--> M
-        SB <--> MM
-        M --> PG
-        MM --> PG
-    end
-
-    subgraph KNOWLEDGE[KB container]
-        K[aimee-kb resource plane]
-        KB[kb event-bus host]
-        KM[supervised process modules]
-        K <--> KB
-        KB <--> KM
-    end
-
-    C -->|local UDS or authenticated /v1| S
-    W -->|authenticated /v1| S
-    W -->|workflow API| F
-    F -->|typed resource calls| S
-    S -.->|optional typed /v1| K
-    S -->|provider API| P[model providers]
-    K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
-    PG --> D1[(Server PostgreSQL + personal vectors)]
-    KM --> KPG[postgres module]
-    KPG --> D2[(PostgreSQL + vectors)]
-```
+The diagram is a process/ownership view. SQL between modules crosses the local event bus; the
+PostgreSQL provider alone owns the database connection. Optional modules depend on placement and
+activation. A Go process identity is not a claim that every adjacent C resource handler has migrated.
 
 Both containers use the same application image. A Go `server` or `kb` composition module
 establishes the immutable first-boot identity and supervises the standard module processes.
@@ -121,11 +84,11 @@ the event bus, so that governance and auditing see all of it.
 External communication is banned from every module, with two structural doors: communication
 initiated from outside arrives over the event bus through C, and communication a module
 initiates leaves through the `egress` module. Direction selects the door; it never grants a
-module the right to open a connection itself. Until `egress` exists, a module may make
-internally-initiated outbound calls (the delegate module reaching an LLM and the git module
-reaching its forge are both valid and load-bearing), but every such call must be logged to
-the event bus. There is no unmonitored external communication. See [One egress
-module](proposals/pending/module-egress-single-point.md).
+module the right to open a connection itself. The required `egress` module now owns governed outbound HTTP/SSE for Go process modules,
+including providers, embeddings, forge, roundtable, MCP and the Cognee adapter. PostgreSQL and
+sandbox transports retain their declared resource-owner boundaries. Transitional C resource paths
+remain explicit owners; their existence is not permission for a Go module to dial directly.
+See [egress](modules/egress.md).
 
 ```mermaid
 flowchart LR
@@ -195,6 +158,16 @@ Standard compositions each deploy a separate PostgreSQL container with ordinary 
 and opt-in LUKS2. Local embedding is a separate service; synthesis is optional. Personal rows and
 vectors stay on Server even when a shared KB is connected.
 
+## Memory engine boundary
+
+![Memory owner retains authorization and canonical records while native and Cognee implement the generic contract](images/architecture/memory-backends.svg)
+
+The native engine is the default. The replaceable-memory implementation in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds Cognee as an alternative retrieval
+engine; published 0.4.6 does not include it. Factories plug into the existing memory owner rather
+than adding a provider supervisor or authority process. Extended native operations retain their
+own contracts. See the [memory contract](modules/memory.md#memory-backend-contract).
+
 ## Request paths
 
 ### Local tool hook
@@ -212,8 +185,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 1. `remote.conf` resolves the server URL, certificate pin, bearer, and client identity.
 2. Native TLS verifies the endpoint.
 3. The server maps the principal to route capabilities and a write tier.
-4. Read operations dispatch normally. A write also needs a KB-signed identity token, matching
-   server/team trust, and the user's grant.
+4. Read operations dispatch normally. A write needs an admitted write identity: the first owner's verified certificate-bound grant,
+   or a KB-signed identity token with matching server/team trust and the user's exact grant.
 5. Workspace and document commands upload bytes from the client; the server never resolves a path
    on the client's machine.
 

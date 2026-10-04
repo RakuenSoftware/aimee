@@ -10,7 +10,7 @@ Claude Code sub-agents (the `Agent`/`Task` tool) are **banned** in this repo; us
 **aimee delegates** instead (`aimee delegate <role> …`, `aimee delegate roundtable …`).
 
 Why the script is needed: aimee's own sub-agent ban lives in the runtime gateway
-(`src/gateway_policy.c` → `gateway_policy_strip_tools` → `is_subagent_tool_name`,
+(`src/modules/gateway/gateway_policy.c` → `gateway_policy_strip_tools` → `is_subagent_tool_name`,
 canonicalizing `Task`/`Agent`/`spawn_agent` → `"Subagent"`). That only strips tools
 flowing **through aimee's `/v1` gateway** to model providers, so it governs *aimee's
 own* agents. It never sees Claude Code's harness-level `Agent`/`Task` tool. This
@@ -68,8 +68,8 @@ server round-trip. `block_subagent.py` remains a hand-wired option for checkouts
 ## `enforce_worktree.py`: keep edits out of the shared main clone
 
 aimee already isolates its **own** work in worktrees (every delegate / work item
-runs in a locked `aimee/wi/<id>` worktree, `src/server/delegate_checkout.c`,
-`src/workflow/wfe_blocks.c`). But the **primary** session (Claude Code in a tmux
+runs in a locked `aimee/wi/<id>` worktree, `src/modules/delegates/delegate_checkout.c`,
+the Go workflow engine under `server-go/internal/engine/`). But the **primary** session (Claude Code in a tmux
 TUI) edits files with the harness's `Edit`/`Write` tools, which never traverse
 aimee's `/v1` gateway, the same blind spot the sub-agent ban describes. So nothing
 stopped the primary from editing the **shared main clone** directly, and concurrent

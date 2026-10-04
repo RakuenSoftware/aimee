@@ -395,7 +395,7 @@ The former C fidelity writer APIs had no production callers and were removed wit
 the C reader. This does not enable the deferred fidelity judge or add a new write
 API. Existing rows and the public audit response fields remain readable.
 
-## Replaceable backends and derived erasure
+### Replaceable backends and derived erasure
 
 The independent `server-go/memory` contract supplies existing wire framing, scopes,
 record types and the Store interface. Native remains the default; setting
@@ -416,11 +416,27 @@ Startup completes canonical restore replay and configured derived cleanup before
 publishing the memory handler. A failed cleanup prevents readiness. No additional
 binding process, subject ledger, erasure coordinator or audit owner is introduced.
 
-## Memory backend contract
+### Memory backend contract
+
+This contract and the Cognee adapter are implemented in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005), after published 0.4.6.
+Use a build containing that change for the configuration below.
+
+```mermaid
+flowchart LR
+    Request[Admitted scoped request] --> Owner[Existing Aimee memory owner]
+    Owner --> Source[Canonical records through PostgreSQL provider]
+    Owner --> Contract[Generic Store contract]
+    Contract --> Native[Native engine using existing modules]
+    Contract --> Adapter[Cognee adapter]
+    Adapter --> Egress[Existing egress and Vault]
+    Egress --> Cognee[Cognee derived datasets]
+    Adapter --> Source
+```
 
 The public Go contract is `github.com/JBailes/aimee/server-go/memory`. It contains scopes, public record types, the existing event/stage IDs and client framing. It imports no native memory implementation. The existing memory descriptor, bus admission and supervisor remain the host infrastructure.
 
-## Required operations
+### Required operations
 
 Implement `memory.Store`: Get, Search, Put and Delete. `memory.Backend` adds a capability declaration with provider name, contract version 1 and the implemented operations. Use the caller context for cancellation. Exact reads return `memory.ErrNotFound` for unavailable records; deletion reports whether the canonical source changed. Empty search queries list eligible records. Keep IDs as int64, and versions as exact decimal strings. Scope is supplied by the admitted host, never inferred from query text.
 
@@ -430,7 +446,7 @@ The optional `DerivedStore.Forget(ctx, scope, id)` extension removes derived sta
 
 Providers with derived storage also implement `DerivedResetter.ResetDerived(ctx)`. This discards all derived copies owned by the current Aimee node, verifies their absence and preserves canonical records and other nodes' namespaces. The existing private/shared subject-erasure coordinator invokes the internal `reset-derived` data operation after canonical erasure and before completion acknowledgement. Missing capability, failure, cancellation and unknown outcomes prevent acknowledgement; the existing request ID and erasure journal provide retries. There is no additional ledger, coordinator or process. Providers which maintain no derived copies need neither extension.
 
-## Version 1 contract reference
+### Version 1 contract reference
 
 ```go
 type Store interface {
@@ -478,7 +494,7 @@ Return errors usable with `errors.Is`:
 
 Keep credentials out of contract arguments, records, errors and logs. Transport is injected by host composition. Provider-specific retries must stay within the supplied context and preserve idempotency; do not retry a non-idempotent write by guessing that a lost response means it never committed. `ClientStore` preserves existing structured host refusals as `RefusalError`; callers must not reinterpret an authorization refusal as a backend outage.
 
-## Add a backend to Aimee
+### Add a backend to Aimee
 
 1. Add a provider package under `server-go/modules/memory/<provider>/` which imports the public `server-go/memory` contract. Implement `Backend` using the supplied canonical `Store` and an injected transport/client. Avoid native SQL, bus admission and credential resolution inside this package.
 2. Keep canonical storage and native extended APIs in the existing owner. For derived indexing, implement both `DerivedStore` and `DerivedResetter`, including cleanup verification and retries after unknown outcomes. Providers without derived copies need neither.
@@ -523,7 +539,7 @@ var _ memory.Backend = (*Backend)(nil)
 
 The current factory selects compiled Go adapters. Installing an SDK or Python package by itself does not register a provider. An independently hosted module must use the existing executable registration and memory event/stage contract and implement the same guarantees; no runtime plugin discovery mechanism is added here.
 
-## Hosting
+### Hosting
 
 A backend can use any implementation internally. Cognee imports only the generic contract and standard library. Its host supplies an authorized `Store` and a transport function; it has no supervisor, SQL, Vault, audit or admission implementation.
 
@@ -541,7 +557,7 @@ For a complete baseline Store implementation, pass `native.ContractDataStore{Sto
 
 Consumers can use `memory.ClientStore{Client: client, TraceID: trace}` for the four typed operations over the existing bus. The compatibility client in the native package delegates to the same independent client. No wire IDs changed.
 
-## Cognee configuration
+### Cognee configuration
 
 Set `AIMEE_MEMORY_BACKEND=cognee` and `AIMEE_MEMORY_BACKEND_URL=https://your-cognee-origin` (the alias `AIMEE_COGNEE_URL` is also accepted). An empty backend, `native` or `aimee-native` selects native. Unknown names or invalid origins fail startup. A custom Go backend is injected with `WithMemoryBackend`; it does not need to pretend to be Cognee or use Cognee's API.
 
@@ -561,7 +577,7 @@ Subject-wide erasure now includes the configured Cognee node namespace. Cleanup 
 
 At module startup, the existing canonical erasure replay runs first; configured derived storage is reset before publishing the memory handler. Failure prevents startup/readiness. Thus restoring an external Cognee index does not bypass retained canonical erasure intents when the memory owner restarts. Restore node identity and surviving canonical control metadata as prescribed by the existing backup boundary, and restart the memory owner after restoring Cognee. Coverage concerns managed live provider state; independently retained vendor backups or detached provider accounts are outside `managed_application_stores`, as with the existing erasure workflow.
 
-## Verification
+### Verification
 
 `go test -race -short ./...` covers contract framing, the native bridge, HTTP routing, scope isolation, stale-record refusal, cancelled requests, failed deletion retry, verified node reset, foreign-node isolation, restored derived copies and in-flight indexing barriers. Native erasure route tests verify that cleanup failure cannot emit completion evidence and that the same request ID can retry. The existing `memory-owner-replay-check` exercises real PostgreSQL compatibility.
 
@@ -569,7 +585,7 @@ For a disposable real Cognee server, run the opt-in test with `AIMEE_COGNEE_TEST
 
 API references: [Cognee CHUNKS implementation](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/retrieval/chunks_retriever.py), [Cognee API introduction](https://docs.cognee.ai/api-reference/introduction).
 
-## Continuous integration
+### Continuous integration
 
 The `memory-backends` job in `.github/workflows/ci.yml` runs race tests for the independent contract, native bridge, memory lifecycle, Cognee adapter and egress. It installs pinned `cognee[api]==1.6.2` in a disposable virtual environment and runs the real API with SQLite/LanceDB/Ladybug storage and deterministic local model fixtures. The runner requires an actual `TestCogneeLiveContract` pass, so an unset environment or skipped live test cannot make the job green. The required `unit-tests` aggregate includes this job. Existing real-PostgreSQL replay remains a separate required gate.
 
@@ -584,3 +600,21 @@ python3 scripts/validation/memory/run-cognee-contract.py \
 ```
 
 Use a new artifact directory for each run. The runner starts API/model processes on ephemeral loopback ports, waits for readiness, runs retrieval/delete/cross-scope erasure and retry checks, and stops every process even on failure. Retained artifacts contain fixture storage, server diagnostics, the Go test log and a JSON result. It needs no external model service, production credentials or vendor account. Deterministic models validate protocol and storage behavior; they do not establish retrieval quality on production corpora.
+
+#### Subject erasure and readiness
+
+```mermaid
+flowchart LR
+    Request[Existing erasure request and journal] --> Canonical[Canonical erasure and replay]
+    Canonical --> Cleanup[Selected provider cleanup]
+    Cleanup -->|verified success| Complete[Completion coverage]
+    Cleanup -->|failure: same request ID| Request
+    Startup[Memory startup or restore] --> Replay[Canonical replay]
+    Replay --> Reset[Provider reset]
+    Reset --> Ready[Memory ready]
+```
+
+Subject-wide erasure can already have committed canonical removal when provider cleanup fails.
+The failure prevents completion coverage and retries with the existing journal/request ID; it is
+not a distributed transaction. Ordinary admitted record deletion separately calls `Forget` before
+its source mutation. Startup replays canonical erasure and resets selected derived state before readiness.

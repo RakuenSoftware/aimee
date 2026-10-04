@@ -37,7 +37,7 @@ least-privilege roles and secret injection; filesystem DB paths and SQLite compa
 
 ## Surfaces
 
-Normal service access uses the authenticated module bus contracts and the Go/native
+Normal service access uses the authenticated `postgres` module bus contracts and the Go/native
 transport clients. Offline migration and restricted operator tools launch this same
 provider through an inherited private pipe; they do not open PostgreSQL themselves. Operators observe readiness through server health. There is no public REST SQL route,
 interactive query console, or client flag that widens the registered operation catalog.
@@ -128,7 +128,7 @@ An idle-session reaper closes abandoned connections; expired handles fail closed
 SQLSTATE, column OIDs, and exact PostgreSQL text representations cross the wire;
 SQL NULL remains distinct from an empty value.
 
-## Native knowledge sessions and upgrades
+### Native knowledge sessions and upgrades
 
 KB owns its knowledge schema and SQL algorithms under `src/modules/kb/c`. The
 retired KbStore module, wire contract, standalone process and native connection pool

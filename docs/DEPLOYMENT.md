@@ -4,6 +4,11 @@ Deploy Server for a human's runtime and personal memory; deploy KB separately fo
 They use the same application image and module implementations with independent identities,
 Vaults, databases, and models. [Server and KB](SERVER_AND_KB.md) defines the ownership contract.
 
+![Separate Server and optional KB Compose projects, each with home and Vault, PostgreSQL and model sidecars](images/architecture/deployment.svg)
+
+The topology is current integration behavior. Published image versions and newer memory adapter
+builds have distinct support; see [release status](WHATS_NEW.md) before selecting a tag.
+
 ## Standard local Server
 
 `compose.yaml` starts a KB-free Server, standardized PostgreSQL, and a local embedder.
@@ -207,3 +212,13 @@ restricted grants. Domain schema changes run through the migration owner.
 Automatic adoption of older database layouts is removed. Startup does not rename
 `aimee_shared`, discover an `aimee` administrator, or transfer existing application
 objects. Existing volumes must already use the current database and role layout.
+
+## Optional memory engine
+
+Native memory is the default. The replaceable-memory build in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) can select Cognee through the
+[generic memory contract](modules/memory.md#memory-backend-contract). Configure the selected
+instance's backend URL and seal its API credential into its existing Vault before starting it.
+The backend's durable live store is a separate recovery dependency; it does not replace the
+instance's canonical PostgreSQL store or Vault. Follow the guide's authentication, JWT persistence,
+capacity, timeout, erasure and backup limits. There is no standard Cognee service in `compose.yaml`.
