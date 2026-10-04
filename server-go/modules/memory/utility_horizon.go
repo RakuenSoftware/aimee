@@ -158,7 +158,7 @@ func evaluateUtilityHorizon(record horizonRecord, p horizonPolicy, purpose strin
 	// Anchor identity must match the exact evaluated version. A confirmation
 	// from another owner, another record, or an old revision cannot renew it.
 	id, err := strconv.ParseInt(record.Version.RecordID, 10, 64)
-	if err != nil || !record.Version.validFor(id) || anchor.Version != record.Version || anchor.EventID == "" || len(anchor.EventID) > 128 {
+	if err != nil || !record.Version.ValidFor(id) || anchor.Version != record.Version || anchor.EventID == "" || len(anchor.EventID) > 128 {
 		return unknown("anchor_version_unavailable")
 	}
 	at, err := time.Parse(time.RFC3339Nano, anchor.At)

@@ -242,7 +242,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 			return nil, err
 		}
 		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
-		if !r.Version.validFor(r.ID) {
+		if !r.Version.ValidFor(r.ID) {
 			rows.Close()
 			return nil, fmt.Errorf("invalid graph memory version")
 		}

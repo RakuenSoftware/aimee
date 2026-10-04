@@ -104,7 +104,7 @@ manifest, retaining the bus grant checks. Do not add an identity mutation to
 own composition fails the required-module check; retire its principal identity
 rather than reusing the number for another module.
 
-## Native knowledge host
+### Native knowledge host
 
 KB owns its existing knowledge SQL and persisted graph definitions under
 `src/modules/kb/c`. Database I/O is exclusively the PostgreSQL module's session

@@ -142,7 +142,7 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		t.Fatal(err)
 	}
 	for _, fact := range b.Facts {
-		if fact.Version == nil || !fact.Version.validFor(fact.ID) || fact.Version.OwnerID != owner {
+		if fact.Version == nil || !fact.Version.ValidFor(fact.ID) || fact.Version.OwnerID != owner {
 			t.Fatal("unversioned briefing fact", fact)
 		}
 	}

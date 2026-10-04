@@ -20,12 +20,14 @@ KB service bearer.
 The typed-fact page invokes KB operator approve, reject, and undo actions. This is separate from
 memory correction proposals, which retain a protected record while a model drafts a replacement.
 
-Correction-proposal listing and verified-user review already exist in the memory API for both
-placements. No caller of `review_correction` or `correction-review` was found in `frontend` or
-`control-web` at `6cd136947`; the typed-fact page must not be presented as that missing interface.
-Personal corrections belong to Server and require explicit `store=user` on those review operations.
-See [Knowledge](KNOWLEDGE.md#corrections-and-history) and the
-[review recommendation](reviews/agent-memory-atlas-2026-09-29.md#5-complete-the-user-visible-correction-workflow).
+The runtime browser's Memory Center now lists and reviews correction proposals for both
+placements. Review checks the expected version, content digest and placement before accepting a
+replacement. Personal corrections belong to Server and require explicit `store=user` on those
+review operations. The control-web typed-fact page remains a separate operator interface.
+See [Knowledge](KNOWLEDGE.md#corrections-and-history) and
+[the implementation](../frontend/src/pages/Memory.tsx). The earlier
+[review recommendation](reviews/agent-memory-atlas-2026-09-29.md#5-complete-the-user-visible-correction-workflow)
+records the gap before this interface was added.
 
 ## Deploy
 

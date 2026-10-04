@@ -16,4 +16,6 @@ int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_t
  * Returns a newly allocated response object, or NULL on transport/refusal. */
 cJSON *kb_module_memory_data(const cJSON *request);
 
+int kb_module_memory_reset_derived(void);
+
 #endif

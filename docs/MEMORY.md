@@ -21,14 +21,30 @@ user authority, the proposal ID, exact expected version, and payload digest. A m
 its own draft. These contracts live in [public_correction_proposals.go](../server-go/modules/memory/public_correction_proposals.go),
 [correction_proposals.go](../server-go/modules/memory/correction_proposals.go), and
 [personal_proposals.go](../server-go/modules/memory/personal_proposals.go).
-A correction-proposal UI caller is still absent from the inspected frontend; typed-fact console
-review is a separate flow.
+The browser Memory Center provides correction-proposal listing, source/draft comparison and
+approve/reject actions with exact version and digest. Its store selector separates personal and
+shared review. Typed-fact console review remains a separate flow.
 
 Personal exact-ID reads can request `include_version` and select a retained revision with
 `at_version`; corrections and retirement accept `expected_version`. Historical payloads stay out of
 normal recall. The [personal revision implementation](../server-go/modules/memory/personal_versions.go)
 requires the matching owner and surviving parent. This differs from KB valid-time `read_policy` and
 legacy `as_of` inspection.
+
+## Replaceable retrieval engine
+
+The generic contract in `server-go/memory` supports Get, Search, Put and Delete. Native memory
+adapts the existing implementation; the Cognee adapter consumes that contract and uses the
+existing egress/Vault transport. Aimee retains canonical records and their admitted identity,
+versions, audit and lifecycle. Advanced native operations are separate capabilities.
+
+![Memory owner and canonical source with selectable native or Cognee retrieval](images/architecture/memory-backends.svg)
+
+This implementation is tracked in [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005),
+newer than published 0.4.6. Use the [contract and provider guide](modules/memory.md#memory-backend-contract)
+for engine selection, optional cleanup, authoring and required CI. The
+[native](validation/memory-native-ct-253-2026-10-04.md) and
+[Cognee](validation/memory-cognee-ct-253-2026-10-04.md) deployment reports record bounded validation.
 
 ## Language and bus boundary
 

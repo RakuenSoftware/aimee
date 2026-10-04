@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "0c443c496f61506607d4fc7bee97d8c65e5ce0d491211ff1f5e401364a631fd8"
+          "sha256": "eff8fd6526ab0330fdd0ececc5126a9e930369fd70384fd7ab47178203a03fc5"
         }
       ]
     },
@@ -439,7 +439,7 @@
         },
         {
           "path": "src/headers/aimee_version.h",
-          "sha256": "66b951cc5fe0107984d4eabe461394ad38aca61a657cc6b6f4b83363f844bf50"
+          "sha256": "6dedfdc6dab0108173be9e69df4db78cf57fe7575181ed8e9cc063f62480d744"
         },
         {
           "path": "src/headers/anchor_snapshot.h",
@@ -1227,7 +1227,7 @@
         },
         {
           "path": "src/headers/module_stage_adapters.h",
-          "sha256": "1a3f43565e46720266282f783122f9b257f2967af8921ebc107466615f1cf6b7"
+          "sha256": "4c077fb9e23e39da55b11c517a26719f38e01b1207a25a640c716354bdee462f"
         },
         {
           "path": "src/headers/msg_session_key.h",
@@ -1992,7 +1992,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "bc90cc779ad8f9d3a72f024bb75c031801639c395887e09e16c5fb25fb6ee1a1",
+      "sha256": "2a657ddf95e53fcf098cbd0826a798a5cc829a5b8fb3732ae8335c1376dcaff0",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

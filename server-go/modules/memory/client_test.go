@@ -42,6 +42,32 @@ func clientForHandler(t *testing.T, handler bus.ModuleHandler) *Client {
 	return client
 }
 
+func TestLegacyClientNilReceiverReturnsConfigurationError(t *testing.T) {
+	ctx := context.Background()
+	for _, client := range []*Client{nil, {}} {
+		checks := []struct {
+			name string
+			call func() error
+		}{
+			{"rerank", func() error { _, err := client.Rerank(ctx, 0, 1); return err }},
+			{"fact", func() error { _, err := client.CheckFact(ctx, 0, NodeKind(1), "relation", NodeKind(1)); return err }},
+			{"privacy", func() error { _, err := client.RequestsSensitive(ctx, 0, "text"); return err }},
+			{"scan", func() error { _, err := client.ScanTurn(ctx, 0, "text"); return err }},
+			{"sensitivities", func() error { _, err := client.Sensitivities(ctx, 0, []string{"relation"}); return err }},
+			{"extract", func() error { _, err := client.Extract(ctx, 0, "text", 1); return err }},
+			{"commands", func() error { _, err := client.Commands(ctx, 0); return err }},
+			{"embed", func() error { _, err := client.Embed(ctx, 0, EmbedRequest{}); return err }},
+			{"command", func() error { _, err := client.Command(ctx, 0, "status", nil); return err }},
+			{"fact-write", func() error { _, err := client.CheckFactWrite(ctx, 0, FactWriteRequest{}); return err }},
+		}
+		for _, check := range checks {
+			if err := check.call(); !errors.Is(err, ErrClientConfig) {
+				t.Errorf("%s: got %v, want configuration error", check.name, err)
+			}
+		}
+	}
+}
+
 func TestClientGateAndExtractionConformance(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil))
 	ctx := context.Background()

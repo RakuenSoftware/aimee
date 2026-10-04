@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 )
 
 // Placement is the data-ownership role of this instance of the shared memory
@@ -28,20 +29,14 @@ func ParsePlacement(value string) (Placement, error) {
 	}
 }
 
-type Scope struct {
-	Type  string `json:"type"`
-	Value string `json:"value,omitempty"`
-}
+type Scope = memorycontract.Scope
 
-// The host uses this marker to restrict reads when no caller context exists.
-// It is never a writable project or workspace.
 const missingScopeValue = "__aimee_scope_missing__"
-
 const (
-	ScopeUser      = "user"
-	ScopeGlobal    = "global"
-	ScopeWorkspace = "workspace"
-	ScopeProject   = "project"
+	ScopeUser      = memorycontract.ScopeUser
+	ScopeGlobal    = memorycontract.ScopeGlobal
+	ScopeWorkspace = memorycontract.ScopeWorkspace
+	ScopeProject   = memorycontract.ScopeProject
 )
 
 // normalizeScope is the hard boundary between the two deployments of the same

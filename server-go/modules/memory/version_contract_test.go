@@ -61,7 +61,7 @@ func TestExpectedVersionValidation(t *testing.T) {
 		}
 	}
 	var version MemoryRecordVersion
-	if json.Unmarshal([]byte(valid), &version) != nil || !version.validFor(9007199254740993) {
+	if json.Unmarshal([]byte(valid), &version) != nil || !version.ValidFor(9007199254740993) {
 		t.Fatal(version)
 	}
 	projected, err := json.Marshal(consoleMemoryRecord(publicMemoryRecord{ID: 9007199254740993, Version: &version}))

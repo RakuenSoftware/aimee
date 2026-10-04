@@ -254,11 +254,20 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    uint8_t *response = calloc(AIMEE_MODULE_MESSAGE_MAX_BODY + 1u, 1u);
    uint32_t response_len = 0;
    cJSON *root = NULL;
+   const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request_json, "operation");
+   uint64_t budget =
+       cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0
+           ? 120ULL * 1000000000ULL
+           : KB_MODULE_MEMORY_DATA_DEADLINE_NS;
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (backend && backend[0] && strcmp(backend, "native") != 0 &&
+       strcmp(backend, "aimee-native") != 0)
+      budget = 120ULL * 1000000000ULL;
    if (request && request_len > 0 && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY &&
        request_len <= UINT32_MAX && response &&
        call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
                                (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                               &response_len, KB_MODULE_MEMORY_DATA_DEADLINE_NS) == 0)
+                               &response_len, budget) == 0)
       root = cJSON_ParseWithLength((const char *)response, response_len);
    free(request);
    free(response);
@@ -414,4 +423,21 @@ void kb_module_stage_adapters_configure(void)
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
    learning_router_register_signal_classifier(learning_classify);
+}
+
+int kb_module_memory_reset_derived(void)
+{
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
+       strcmp(backend, "aimee-native") == 0)
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "operation", "reset-derived");
+   cJSON *reply = kb_module_memory_data(request);
+   cJSON_Delete(request);
+   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
+   cJSON_Delete(reply);
+   return ok ? 0 : -1;
 }

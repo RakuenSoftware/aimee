@@ -31,6 +31,11 @@ The server and KB each run a bounded shared-memory event bus. Governed actions, 
 guardrail decisions, vault access, sandbox degradation, MCP activity, and tool outcomes pass through
 one ordered audit tap. See [Event bus](docs/EVENT_BUS.md).
 
+This manual follows the 1.0.0 release work. Published 0.4.6 predates the new memory backend
+contract and native primitive. Use [What's new](docs/WHATS_NEW.md) to distinguish current source
+behavior from released images. The [architecture](docs/ARCHITECTURE.md) shows the native hosts,
+Go module owners and storage boundaries.
+
 ## First use
 
 After the services are running, enroll the client and check every boundary:
@@ -116,6 +121,20 @@ aimee wm list
 Do not use working memory for team facts. It is local, session-scoped DB1 state.
 
 See [Knowledge](docs/KNOWLEDGE.md) and [Retrieval](docs/retrieval-stack.md).
+
+### Select a memory engine
+
+Native Aimee memory is the default. The 1.0.0 work adds Cognee 1.6.2 through the
+[generic memory contract](docs/modules/memory.md#memory-backend-contract). Selecting an engine
+does not change the personal/shared selector, record identity, authorization or correction review.
+Aimee retains canonical records and validates provider results against their current revisions.
+
+Configure the selected backend on each instance that will use it, using the documented URL and
+Vault credential transport. Restart the memory owner after changing the selection. Cognee's first
+adapter refuses scopes above 256 eligible records; its derived cleanup must succeed before
+subject-erasure completion. Test a scoped read, search, mutation and erasure before reopening traffic.
+The [native attention plugin](docs/NATIVE_MEMORY_PLUGIN.md) separately consumes selected records
+on a supported inference host; it does not choose the storage engine.
 
 ## Code intelligence
 

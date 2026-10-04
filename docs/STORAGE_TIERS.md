@@ -51,8 +51,9 @@ pending intents; a failure to submit the required transactional intent fails the
 
 The Server and KB worker share the WORM implementation but keep separate files, keys, and process
 compartments. Detailed provenance and immutable content-free audit metadata have different retention
-contracts. The [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records the remaining runtime
-privilege discrepancy for rejection records; do not infer least privilege from a role's name.
+contracts. The [Atlas review and resolution](reviews/agent-memory-atlas-2026-09-29.md) records the refusal-row
+privilege fix: current provisioning and schema replay revoke runtime DELETE/TRUNCATE, with an
+actual-login regression. Verify the deployed grants; a role's name does not establish its privileges.
 
 ## Deployment and recovery
 
@@ -63,3 +64,7 @@ location, not ownership. Never reuse a Server home or database volume for a KB r
 Back up each instance's home, Vault, PostgreSQL data, workspaces, and audit evidence together.
 Use consistent PostgreSQL dumps or coordinated snapshots, and preserve the original identity when
 restoring. Follow [Deployment](DEPLOYMENT.md#volumes-and-backup) and [WORM worker](WORM_WORKER.md).
+
+With the replaceable-memory build, Cognee holds derived retrieval datasets while canonical records
+remain in the selected Aimee instance. Its live-store reset and vendor backup retention are separate
+obligations; see the [memory contract](modules/memory.md#memory-backend-contract).

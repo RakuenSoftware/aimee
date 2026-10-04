@@ -147,3 +147,11 @@ remain a failure. KB availability and local personal-memory availability are sep
   enforcement inside each placement. Separate containers alone do not prove correct database grants.
 - **Versioned evidence.** [The Atlas review](reviews/agent-memory-atlas-2026-09-29.md) distinguishes
   the reviewed commit and the remaining gaps after the latest upstream update.
+
+## Engines preserve the role boundary
+
+The [generic memory contract](modules/memory.md#memory-backend-contract) is implemented by native
+memory and the Cognee adapter in PR #3005. Selecting an engine does not merge instances or widen a
+scope. Each node uses its own canonical source and derived namespace. The fixed Aimee owner still
+applies authorization, identity, audit and lifecycle; external retrieval goes through existing egress.
+This is newer than published 0.4.6. A unified Aimee node with parent connections remains separate work.

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 )
 
 // The memory module declares the commands it owns.
@@ -66,13 +67,7 @@ const (
 // all derived from Group+Verb -- not maintained separately, which is how
 // memory.recall became memory_recall while memory.search became search_memory,
 // verb first, leaving no mechanical mapping between the surfaces.
-type Command struct {
-	Group      string
-	Verb       string
-	Summary    string
-	Surfaces   uint32
-	Visibility uint32
-}
+type Command = memorycontract.Command
 
 // declaredCommands is what this module owns.
 //

@@ -17,7 +17,7 @@ func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r Data
 	creating := r.Operation == "store"
 	if s.placement != PlacementServer || (!creating && r.Operation != "supersede" && r.Operation != "delete") ||
 		!verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) ||
-		(!creating && (r.ExpectedVersion == nil || !r.ExpectedVersion.validFor(r.ID))) ||
+		(!creating && (r.ExpectedVersion == nil || !r.ExpectedVersion.ValidFor(r.ID))) ||
 		(creating && (r.ExpectedVersion != nil || r.Key == "" || r.Kind == "" || r.Content == "")) ||
 		(r.Operation != "delete" && r.Confidence == nil) {
 		return Record{}, nil, errors.New("memory: invalid private idempotent mutation")

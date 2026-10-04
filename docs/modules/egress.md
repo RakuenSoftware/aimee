@@ -17,7 +17,7 @@ versioned bounded wire in `aimee/egress/module_api.h`; redirects require a fresh
 - `audit`: receives content-free authorization and transfer outcomes for the WORM evidence path.
 - `module-runtime`: attests principal `32`, caller identities, executable ownership, lifecycle, and stage grants.
 
-Memory embedding, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses
+Provider requests, memory embedding and backend calls, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses
 a distinct request-only bus identity so one consumer cannot borrow another consumer's destination policy.
 
 ## Providers and readiness
@@ -37,7 +37,8 @@ secrets such as `AIMEE_MCP_<principal>_TOKEN`. Ordinary callers cannot add a hos
 
 There is no public proxy URL or CLI tunnel. Callers use authenticated `egress` bus stages; operators see health,
 metrics, and audit outcomes. Forge credentials arrive as short-lived encrypted envelopes, while MCP
-credentials are resolved by exact principal. External response content returns only to the requesting caller.
+credentials are resolved by exact principal. The memory backend receives only its configured origin
+and allowed Cognee API routes, using the instance's existing Vault credential helper. External response content returns only to the requesting caller.
 
 ## Data and migrations
 

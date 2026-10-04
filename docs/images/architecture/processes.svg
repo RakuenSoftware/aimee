@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="765" viewBox="0 0 1240 765" role="img" aria-labelledby="title desc"><title id="title">Processes and storage in the current composition</title><desc id="desc">Server and KB each run a C resource host and bus, a Go role supervisor and module fleet. The Go PostgreSQL provider reaches a separate database. WORM evidence is separate from canonical storage.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<text class="title" x="620.0" y="32" text-anchor="middle">Processes and storage in the current composition</text>
+<rect x="25" y="60" width="570" height="660" rx="14" fill="#f8fafc" stroke="#c8d3df" stroke-width="2"/>
+<text class="label" x="43" y="88" text-anchor="start">Server instance · separate home / Vault / identity</text>
+<rect x="55" y="110" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="205.0" y="138" text-anchor="middle">aimee-server</text>
+<text class="body" x="205.0" y="164" text-anchor="middle">C resource API and authentication</text>
+<text class="body" x="205.0" y="187" text-anchor="middle">Mechanical enforcement / transport</text>
+<rect x="380" y="110" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="472.5" y="138" text-anchor="middle">Go role supervisor</text>
+<text class="body" x="472.5" y="164" text-anchor="middle">server</text>
+<text class="body" x="472.5" y="187" text-anchor="middle">Supervises module fleet</text>
+<rect x="55" y="250" width="510" height="65" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="310.0" y="278" text-anchor="middle">C event-bus host</text>
+<text class="body" x="310.0" y="304" text-anchor="middle">Admitted principals, grants, bounded frames</text>
+<polyline points="205,205 205,250" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="255" y="234" text-anchor="middle">requests</text>
+<rect x="55" y="365" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="205.0" y="393" text-anchor="middle">Go process modules</text>
+<text class="body" x="205.0" y="419" text-anchor="middle">aimee domain · memory · tools</text>
+<text class="body" x="205.0" y="442" text-anchor="middle">Policy and bounded domain behavior</text>
+<polyline points="205,315 205,365" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="295" y="345" text-anchor="middle">typed module events</text>
+<rect x="380" y="365" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="472.5" y="393" text-anchor="middle">Go postgres</text>
+<text class="body" x="472.5" y="419" text-anchor="middle">SQL / transactions</text>
+<text class="body" x="472.5" y="442" text-anchor="middle">Migration transport</text>
+<polyline points="355,390 380,390" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="335" y="486" text-anchor="middle">Module SQL crosses the local bus; no native libpq pool.</text>
+<rect x="380" y="510" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="472.5" y="538" text-anchor="middle">PostgreSQL 18</text>
+<text class="body" x="472.5" y="564" text-anchor="middle">Runtime + personal</text>
+<text class="body" x="472.5" y="587" text-anchor="middle">Canonical source data</text>
+<polyline points="472,460 472,510" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="55" y="510" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="205.0" y="538" text-anchor="middle">Role-specific peer</text>
+<text class="body" x="205.0" y="564" text-anchor="middle">aimee-wfe: workflow lifecycle</text>
+<text class="body" x="205.0" y="587" text-anchor="middle">Workflow lifecycle writer</text>
+<rect x="55" y="635" width="510" height="60" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="310.0" y="663" text-anchor="middle">Separate WORM evidence</text>
+<text class="body" x="310.0" y="689" text-anchor="middle">Tap observations and mutation delivery are distinct milestones</text>
+<polyline points="55,280 40,280 40,665 55,665" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<rect x="645" y="60" width="570" height="660" rx="14" fill="#f8fafc" stroke="#c8d3df" stroke-width="2"/>
+<text class="label" x="663" y="88" text-anchor="start">Optional KB instance · separate home / Vault / identity</text>
+<rect x="675" y="110" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="825.0" y="138" text-anchor="middle">aimee-kb</text>
+<text class="body" x="825.0" y="164" text-anchor="middle">C resource API and authentication</text>
+<text class="body" x="825.0" y="187" text-anchor="middle">Mechanical enforcement / transport</text>
+<rect x="1000" y="110" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="1092.5" y="138" text-anchor="middle">Go role supervisor</text>
+<text class="body" x="1092.5" y="164" text-anchor="middle">optional</text>
+<text class="body" x="1092.5" y="187" text-anchor="middle">Supervises module fleet</text>
+<rect x="675" y="250" width="510" height="65" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="930.0" y="278" text-anchor="middle">C event-bus host</text>
+<text class="body" x="930.0" y="304" text-anchor="middle">Admitted principals, grants, bounded frames</text>
+<polyline points="825,205 825,250" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="875" y="234" text-anchor="middle">requests</text>
+<rect x="675" y="365" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="825.0" y="393" text-anchor="middle">Go process modules</text>
+<text class="body" x="825.0" y="419" text-anchor="middle">memory · knowledge modules</text>
+<text class="body" x="825.0" y="442" text-anchor="middle">Policy and bounded domain behavior</text>
+<polyline points="825,315 825,365" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="915" y="345" text-anchor="middle">typed module events</text>
+<rect x="1000" y="365" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="1092.5" y="393" text-anchor="middle">Go postgres</text>
+<text class="body" x="1092.5" y="419" text-anchor="middle">SQL / transactions</text>
+<text class="body" x="1092.5" y="442" text-anchor="middle">Migration transport</text>
+<polyline points="975,390 1000,390" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="955" y="486" text-anchor="middle">Module SQL crosses the local bus; no native libpq pool.</text>
+<rect x="1000" y="510" width="185" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="1092.5" y="538" text-anchor="middle">PostgreSQL 18</text>
+<text class="body" x="1092.5" y="564" text-anchor="middle">Shared corpus + vectors</text>
+<text class="body" x="1092.5" y="587" text-anchor="middle">Canonical source data</text>
+<polyline points="1092,460 1092,510" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="675" y="510" width="300" height="95" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="825.0" y="538" text-anchor="middle">Role-specific peer</text>
+<text class="body" x="825.0" y="564" text-anchor="middle">aimee-kb-worm: outbox delivery</text>
+<text class="body" x="825.0" y="587" text-anchor="middle">Evidence chain writer</text>
+<rect x="675" y="635" width="510" height="60" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="930.0" y="663" text-anchor="middle">Separate WORM evidence</text>
+<text class="body" x="930.0" y="689" text-anchor="middle">Tap observations and mutation delivery are distinct milestones</text>
+<polyline points="825,605 825,635" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="body" x="620" y="748" text-anchor="middle">26 Go process identities in the catalog; required and optional placement determines what runs.</text>
+</svg>

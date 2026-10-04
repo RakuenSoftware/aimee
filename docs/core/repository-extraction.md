@@ -15,8 +15,9 @@ pin. It does not push or create remote repositories.
 
 The core repository is a standalone installable CMake package. Every module
 repository preserves its descriptor-owned sources, headers, tests, and docs,
-and builds a separate Linux process against only the host-free event-bus client
-target. Its generated grant is executable/UID/principal-bound and starts with no
+and builds its declared execution target. The current catalog has 26 Go process identities
+and no C process identities. Go processes use the shared module runtime and event-bus contract;
+retained native sources serve host adapters and standalone fixtures. Its generated grant is executable/UID/principal-bound and starts with no
 event capabilities; capabilities are added only with the corresponding stable
 event schema. A C module may also declare non-owned `header_dependencies` needed
 by a transitional standalone build. Those inputs must be sorted, normalized,
@@ -27,8 +28,8 @@ digest.
 
 Container builds use the same descriptor contract through a two-step runtime
 bundle. `export_c_repositories.py --runtime-bundle <directory>` writes generated
-process mains, grants, placement lists, and `c-build.json`. Then
-`build_c_module_runtime_bundle.py` compiles each C process from its generated
+process mains, grants, placement lists, and `c-build.json`. The current application compiles the generated Go entry points. The supported C execution path
+remains available to descriptors that declare it: `build_c_module_runtime_bundle.py` compiles each C process from its generated
 main, every descriptor-owned C source, the canonical event-bus client sources,
 and its declared include roots, header dependencies, pkg-config packages, and
 system libraries. Header dependencies are admitted as build inputs but never

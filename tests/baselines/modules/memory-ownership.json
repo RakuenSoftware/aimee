@@ -132,6 +132,16 @@
         "server-go/modules/memory/client_test.go"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
+    },
+    "credential-custody": {
+      "owner": "Existing Vault first-boot credential owner",
+      "contract": "Alternative memory bearer sealed through existing generic first-boot custody",
+      "reason": "The added token name is credential transport, not memory storage or retrieval logic.",
+      "evidence": [
+        "src/modules/vault/vault_env_bootstrap.c",
+        "server-go/modules/memory/backend_erasure_test.go"
+      ],
+      "cutover_dependency": "Vault custody precedes memory startup; egress reads the credential through its existing helper."
     }
   },
   "original_files": {
@@ -1824,9 +1834,10 @@
     "src/headers/module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
-        "server_module_memory_data"
+        "server_module_memory_data",
+        "server_module_memory_reset_derived"
       ],
-      "sha256": "1a3f43565e46720266282f783122f9b257f2967af8921ebc107466615f1cf6b7"
+      "sha256": "4c077fb9e23e39da55b11c517a26719f38e01b1207a25a640c716354bdee462f"
     },
     "src/headers/rel_types.h": {
       "disposition": "storage-protocol",
@@ -1852,20 +1863,23 @@
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
+        "AIMEE_MEMORY_BACKEND",
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_EVENT_EMBED",
         "AIMEE_MEMORY_STAGE_DATA",
         "AIMEE_MEMORY_STAGE_EMBED",
-        "kb_module_memory_data"
+        "kb_module_memory_data",
+        "kb_module_memory_reset_derived"
       ],
-      "sha256": "3607b393e45777b9a69db4c7d11b8a26f286b4501a2eef35b91a0ffb73280dea"
+      "sha256": "fe1f725317e2d8bc3947367ba83245749a2c15039e52f90a1c14260102dbb026"
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
-        "kb_module_memory_data"
+        "kb_module_memory_data",
+        "kb_module_memory_reset_derived"
       ],
-      "sha256": "7ef635a8516aa4a529758388d4b61890277f11e4a078388f02644a901276414e"
+      "sha256": "15ab1bf713e42b4076dff320b73d0ac5ba6a4f67870b856f459d0388c384044d"
     },
     "src/kb/kb_service.c": {
       "disposition": "protocol-catalog",
@@ -2104,11 +2118,13 @@
     "src/server/module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
+        "AIMEE_MEMORY_BACKEND",
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_STAGE_DATA",
-        "server_module_memory_data"
+        "server_module_memory_data",
+        "server_module_memory_reset_derived"
       ],
-      "sha256": "f11a70592526c17aa795300c3a24d64c71b4e771c116fdc3819e57d0c4644dbf"
+      "sha256": "4996b3af65a1ef36a65045eeaa3dec46c0c0441f1d240d7f60db05b0e72b0537"
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2465,9 +2481,11 @@
     "src/tests/test_module_json_call.c": {
       "disposition": "host-fixture",
       "symbols": [
-        "server_module_memory_data"
+        "AIMEE_MEMORY_BACKEND",
+        "server_module_memory_data",
+        "server_module_memory_reset_derived"
       ],
-      "sha256": "2633f7881a3eef1257ef977c4c34b073f4a182750665d4c3ec8d501ee28df972"
+      "sha256": "da90696ca508cc7967042fe696784fe1b96cfba4c764f539c7e8822fd15323b5"
     },
     "src/tests/test_pgvec_neardup.c": {
       "disposition": "legacy-fixture",
@@ -2570,6 +2588,41 @@
         "kb_client_memory_scope_context_apply"
       ],
       "sha256": "a9a98f5c46a694e89f1888fed98e7663c0fcb1ce488b391f6dfe99ed9e648d4e"
+    },
+    "src/kb/http/kb_http_governance.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_module_memory_reset_derived"
+      ],
+      "sha256": "a058a6d3ca0e27fb5925dc2be10001b56f63169795db47462c2cbccfc5edaf65"
+    },
+    "src/modules/vault/vault_env_bootstrap.c": {
+      "disposition": "credential-custody",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "87f3ee945e14ff2918caf9a52fff68747195fb1e920b45744d511b967d592bdf"
+    },
+    "src/server/server_state_vectors.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "server_module_memory_reset_derived"
+      ],
+      "sha256": "254d5b8c0892d9e4ad1ec9738dd0ff690011e16faafd655b34b11265d96255ae"
+    },
+    "src/tests/test_kb_http_routes.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_module_memory_reset_derived"
+      ],
+      "sha256": "708f086a90888b6223543b2b1f92fc912c6689ff624f8bfc0f3cd8c62daf6472"
+    },
+    "src/tests/test_server_erasure_protocol.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "server_module_memory_reset_derived"
+      ],
+      "sha256": "01b4465d868b7f995fb3fcb7d3290e1a603b9438455aea915cbe5c1b5b8b7cb0"
     }
   },
   "generated_files": {

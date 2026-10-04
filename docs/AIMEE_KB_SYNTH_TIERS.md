@@ -1,7 +1,8 @@
 # KB model tiers
 
-Tiers size model roles that run inside an `aimee-kb` container. They do not name separate inference
-services. A KB can instead use a remote endpoint for either role.
+Tiers are planning estimates for the model services used by a KB. Standard compositions run
+embedding and optional model-specific synthesis in separate sidecars; either role can instead
+use its configured remote endpoint. The KB application image is not a bundled model runner.
 
 | Tier | Intended host | Typical synthesis shape |
 | --- | --- | --- |
@@ -10,8 +11,8 @@ services. A KB can instead use a remote endpoint for either role.
 | `mid` | about 24 GB GPU | Gemma 4 26B-A4B class, two slots |
 | `large` | about 32 GB GPU | same class with more slots and context |
 
-These are planning estimates, not readiness guarantees. Internal model availability depends on the
-KB image and deployment profile. A remote endpoint owns its own sizing and concurrency.
+These are planning estimates, not readiness guarantees. Local model availability depends on the
+selected sidecar and deployment profile. A remote endpoint owns its own sizing and concurrency.
 
 Embedding width is not a tier property. It belongs to the selected embedder and the corpus vector
 schema. See [Retrieval stack](retrieval-stack.md).

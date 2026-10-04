@@ -9,7 +9,7 @@
  * series IS a decision, so it is an explicit edit of this one line and nothing
  * infers it. */
 #ifndef AIMEE_VERSION_SERIES
-#define AIMEE_VERSION_SERIES "0.4"
+#define AIMEE_VERSION_SERIES "1.0"
 #endif
 
 /* Full version -- can be overridden at compile time via -DAIMEE_VERSION='"..."'

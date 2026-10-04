@@ -1166,7 +1166,7 @@
     "server-go/modules/execution-policy/exploration_test.go": "1b875fd18b817048795d7de1411da2da33d5aaa9fafb479de390d00303744aa3",
     "server-go/modules/memory/action_evidence_test.go": "8df9a33fe75553c1114147a553adfc978359e36823dace2b9ebb87888fcf0bc1",
     "server-go/modules/memory/candidate_fusion_test.go": "a4687d48f54cd2b05d9b0daf3003011f11d7afa8f6a884f4e0f3de086c0be5e5",
-    "server-go/modules/memory/client_test.go": "f12079ec43dbf13783857c4165937e1674b7aba5f4b9229061ee1cdf50f77c23",
+    "server-go/modules/memory/client_test.go": "3e290e03b687cf4230d6bce89a1107561b15f46d366f889fad541d2b101b8919",
     "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go": "c1f0328ef246f56e9833ff92fcb64b2c62374c9d0b3a6ac27839a8097c0b48ee",
     "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go": "bffbf1976659eb8e732fecc58bdbd8b2da8e03f0fcd340960c7074cfd0a72b46",
     "server-go/modules/memory/collection_source_test.go": "feae68626a4bac301aae5cd5060dca1f5e4780fef3d57a42969548e7b5875289",
@@ -1196,8 +1196,8 @@
     "server-go/modules/memory/typed_context_test.go": "7bc35b6f870fb77898898bdfd7bf6101df79587e59c1ce48f5d742f357228072",
     "server-go/modules/memory/unit_recall_test.go": "c1f3eec7be014314621eb99cedd95464813b4288843ea919025883220933f62b",
     "server-go/modules/memory/utility_horizon_test.go": "7ede02cedb85f2dbc5207233997f81b90d223b1fd7399e91cd05ff87500d377c",
-    "server-go/modules/memory/validity_test.go": "6081a551f6e338725090fb0bcb7255c986dab0c1c02786045d69d972adaa4b41",
-    "server-go/modules/memory/version_contract_test.go": "1ccc8370b5eb4ec4765c35de326e903b979193bec6cf3711e5d6873b8bc8b45b",
+    "server-go/modules/memory/validity_test.go": "3ba691d0c405d9b2f3b73e570be6560139940566be24ba109cbc60e185be7667",
+    "server-go/modules/memory/version_contract_test.go": "1fa1363ab3614d5bb1667b61f3b057231f67687bfa3c4ffe67e4787cee7435ca",
     "tests/eval/memory_mr05_coverage_cases.json": "a649ded23fb403b836439946e34b157258ef1378f40fc17990970068aef709bc",
     "tests/eval/memory_reliability_acceptance.json": "e1df9571cb91222e78e276e17410e89ff8f04a9506b82a409fba0f450d175e2d",
     "tests/eval/memory_retrieval_corpus.json": "a38aacb1d4cd9d925f0d16d63f73bbc31fda2da72c7b2dd9bba7ffc662bfea01"
@@ -1245,5 +1245,14 @@
         "server-go/modules/memory/version_contract_test.go"
       ]
     }
+  },
+  "fixture_review": {
+    "date": "2026-10-04",
+    "reason": "Generic contract extraction exports ValidFor without changing its checks; two frozen callers use the public spelling. The client fixture adds nil-receiver refusal coverage. Existing cases, groups and required outcomes are unchanged.",
+    "files": [
+      "server-go/modules/memory/client_test.go",
+      "server-go/modules/memory/validity_test.go",
+      "server-go/modules/memory/version_contract_test.go"
+    ]
   }
 }

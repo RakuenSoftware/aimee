@@ -162,3 +162,15 @@ memory corrections, revision-aware retrieval, and scoped curation are implemente
 permissions, and individual policy modes still control which paths run. Multi-KB fleet routing remains
 planned. The [status page](STATUS.md) and [Atlas review](reviews/agent-memory-atlas-2026-09-29.md)
 separate current implementation from remaining qualification and improvement work.
+
+## Memory engine and model delivery
+
+The [generic memory contract](modules/memory.md#memory-backend-contract) lets an implementation
+replace baseline storage/retrieval behavior under the existing Aimee owner. Native is the default;
+Cognee is the first alternative retrieval adapter in PR #3005, newer than release 0.4.6. Its selected
+results resolve back to canonical Aimee records, and erasure must clean the managed derived store
+before completion. Extended fact, document, code and learning operations retain their own contracts.
+
+The separate [native-memory plugin](NATIVE_MEMORY_PLUGIN.md) delivers selected personal source
+records to supported local vLLM models. It does not choose which canonical owner or audience a
+record belongs to.

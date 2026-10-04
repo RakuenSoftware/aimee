@@ -57,7 +57,7 @@ func decodeHorizonConfiguration(raw string) (*horizonConfiguration, error) {
 	seen := map[MemoryRecordVersion]bool{}
 	for _, o := range c.Overrides {
 		id, err := strconv.ParseInt(o.Version.RecordID, 10, 64)
-		if err != nil || !o.Version.validFor(id) || !validHorizonRule(o.Rule) || seen[o.Version] {
+		if err != nil || !o.Version.ValidFor(id) || !validHorizonRule(o.Rule) || seen[o.Version] {
 			return nil, errors.New("memory: invalid or duplicate horizon override")
 		}
 		seen[o.Version] = true

@@ -3,11 +3,15 @@
 Use `GET /v1/health` only as the process liveness probe. It returns success while a
 dependency outage is recoverable, so the supervisor does not restart-loop a healthy
 server. Use `GET /v1/ready` to admit or drain retrieval-bearing traffic. Readiness is
-false until DB1, KB transport, the KB schema/vector collection, the embedder, and the
-E5a dependency breaker can serve the advertised retrieval contract. It also stays
-false until every required same-container module process is attached to the server's
-local event bus: memory, learning, routing, delegates, tools, workspace, git, skills,
-and response-composition.
+false until the local runtime store and required module processes can serve the advertised
+contract. Required owners include memory, learning, routing, delegates, tools, workspace, git,
+skills and response-composition; runtime-web is also required when that deployment enables it.
+
+A standalone Server can become ready without a KB connection. When a KB is configured, readiness
+also checks KB transport, schema/vector collection, embedding and the dependency breaker. A
+configured KB outage can therefore drain readiness even while personal operations still work.
+A readiness response does not establish semantic retrieval quality or cover every selected
+backend operation; always follow it with a scoped retrieval probe.
 
 The shipped Compose files use `restart: unless-stopped` and intentionally healthcheck
 `/v1/health`. Orchestrators with separate probes should configure liveness at
@@ -50,9 +54,9 @@ digest, and server version before recovery.
 
 ## Recover safely
 
-1. If `db1=fail`, verify the server volume is mounted and writable. Restore the mount
-   or credentials, then restart only `aimee-server`.
-2. If `kb=fail`, verify `aimee-kb` liveness and network/DNS reachability. Recover KB;
+1. If `db1=fail`, verify the PostgreSQL provider, store connectivity, schema and runtime credentials.
+   Repair the named dependency, retaining its volume and canonical records.
+2. If a configured `kb=fail`, verify `aimee-kb` liveness and network/DNS reachability. Recover KB;
    do not repeatedly restart the server. The breaker permits one half-open probe after
    `retry_after_ms`.
 3. If `retrieval=fail` with `kb=ok`, inspect KB health fields (`postgres_ok`,
@@ -71,3 +75,8 @@ digest, and server version before recovery.
 Do not delete queues, DB volumes, benchmark artifacts, or breaker evidence as a
 recovery shortcut. Escalate if the breaker repeatedly reopens or the last successful
 ingest/query timestamps do not advance after the dependency is healthy.
+
+For Cognee, also verify the selected URL, Vault credential, governed egress and derived cleanup
+state. Startup replays canonical erasure and resets the selected provider before admitting memory
+work. Provider recovery must pass both scoped retrieval and erasure verification; a green HTTP
+listener alone is insufficient. See the [backend setup and recovery contract](../modules/memory.md#memory-backend-contract).

@@ -87,6 +87,12 @@ func (s *postgresDataStore) recordRetrievalAvailability(ctx context.Context, dec
 }
 
 func (s *postgresDataStore) adaptiveSearch(ctx context.Context, request DataRequest) ([]Record, error) {
+	if s.backendFactory != nil {
+		if request.Scope.Type != "" {
+			return s.Search(ctx, request.Scope, request.Query, request.Kind, request.Tier, request.Limit)
+		}
+		return s.SearchVisible(ctx, request)
+	}
 	decision := retrievalDecision{limit: request.Limit}
 	if request.AutomaticLimit {
 		_ = s.retrievalPolicyAttempt(ctx, func() error { return s.selectRetrievalLimit(ctx, &decision) })

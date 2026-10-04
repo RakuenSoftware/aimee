@@ -39,7 +39,7 @@ func (p *taskPromotion) valid() bool {
 		}
 	}
 	id, e := strconv.ParseInt(p.Target.RecordID, 10, 64)
-	return e == nil && p.Target.validFor(id) && (&sourceRevalidation{SchemaVersion: 1, CheckID: p.ProjectionID, Sources: p.Sources}).valid()
+	return e == nil && p.Target.ValidFor(id) && (&sourceRevalidation{SchemaVersion: 1, CheckID: p.ProjectionID, Sources: p.Sources}).valid()
 }
 func handleTaskPromotion(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
 	if invocation.PrincipalRef != 0 || options.placement != PlacementServer || !verifiedRetryCaller(options.commandContext) {

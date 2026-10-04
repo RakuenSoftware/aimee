@@ -162,7 +162,7 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 			return nil, err
 		}
 		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
-		if !r.Version.validFor(r.ID) {
+		if !r.Version.ValidFor(r.ID) {
 			return nil, errors.New("memory: invalid PageRank neighbor version")
 		}
 		if !seen[r.ID] && len(neighbors) < pageRankCandidateCap/2 {

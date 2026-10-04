@@ -23,11 +23,14 @@ class FrontendReleaseGateTests(unittest.TestCase):
         script = "\n".join(line[10:] for line in run.splitlines() if line.startswith("          "))
         env = dict(os.environ, CHANGE_SCOPE_RESULT="success", DOCS_ONLY="false",
                    SHARDS_RESULT="success", SHARDS_PG_RESULT="success", POSTGRES_REPLAY_RESULT="success",
-                   P1_RESULT="success", GO_RESULT="success", LSP_REAL_RESULT="success")
-        for result in ("success", "failure", "cancelled", "skipped"):
-            with self.subTest(result=result):
-                proc = subprocess.run(["bash", "-c", script], env=dict(env, FRONTEND_RESULT=result), capture_output=True)
-                self.assertEqual(proc.returncode == 0, result == "success")
+                   P1_RESULT="success", GO_RESULT="success", MEMORY_BACKENDS_RESULT="success", LSP_REAL_RESULT="success")
+        for lane in ("FRONTEND_RESULT", "MEMORY_BACKENDS_RESULT"):
+            for result in ("success", "failure", "cancelled", "skipped"):
+                with self.subTest(lane=lane, result=result):
+                    trial = dict(env, FRONTEND_RESULT="success")
+                    trial[lane] = result
+                    proc = subprocess.run(["bash", "-c", script], env=trial, capture_output=True)
+                    self.assertEqual(proc.returncode == 0, result == "success", proc.stderr.decode())
 
 
 if __name__ == "__main__":

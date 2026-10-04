@@ -14,6 +14,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -138,48 +139,9 @@ func (b *embedBreaker) reportFailure(nowMS int64) {
 // NowMS lets the caller supply the clock (the C side has an injectable clock for
 // the same reason): a breaker tested against the wall clock can only be tested
 // by sleeping.
-type EmbedRequest struct {
-	Operation string   `json:"operation,omitempty"`
-	MemoryID  int64    `json:"memory_id,omitempty"`
-	BaseURL   string   `json:"base_url"`
-	InputType string   `json:"input_type"`
-	Text      string   `json:"text"`
-	Texts     []string `json:"texts,omitempty"`
-	MaxDim    int      `json:"max_dim"`
-	Limit     int      `json:"limit,omitempty"`
-	NowMS     int64    `json:"now_ms,omitempty"`
-}
+type EmbedRequest = memorycontract.EmbedRequest
+type EmbedResponse = memorycontract.EmbedResponse
 
-// EmbedResponse separates the ways this can decline, because they are different
-// facts and a caller that conflates them misreports the embedder's health:
-//
-//	Unavailable  the breaker suppressed the call; nothing was sent
-//	Unauthorized the service was REACHED and refused us (401/403)
-//	Error        the call was attempted and failed
-//
-// Unauthorized is the subtle one: it proves reachability, so it must not count
-// as a failure — and it closes an earlier outage, or a half-open breaker would
-// turn the next authorization result back into "unavailable".
-type EmbedResponse struct {
-	Vectors                 [][]float32        `json:"vectors,omitempty"`
-	Vector                  []float32          `json:"vector,omitempty"`
-	Dim                     int                `json:"dim"`
-	Truncated               bool               `json:"truncated,omitempty"`
-	Unavailable             bool               `json:"unavailable,omitempty"`
-	RetryAfterMS            int64              `json:"retry_after_ms,omitempty"`
-	Unauthorized            bool               `json:"unauthorized,omitempty"`
-	Error                   string             `json:"error,omitempty"`
-	ServingID               string             `json:"serving_id,omitempty"`
-	IdentityState           string             `json:"identity_state,omitempty"`
-	EmbeddingIdentity       *EmbeddingIdentity `json:"embedding_identity,omitempty"`
-	EmbeddingIdentityDigest string             `json:"embedding_identity_digest,omitempty"`
-	Embedded                bool               `json:"embedded,omitempty"`
-	Repaired                int                `json:"repaired,omitempty"`
-	Failed                  int                `json:"failed,omitempty"`
-}
-
-// EmbedIsHTTP reports whether a configured embedder command names an HTTP
-// endpoint rather than a program to run.
 func EmbedIsHTTP(command string) bool {
 	return strings.HasPrefix(command, "http://") || strings.HasPrefix(command, "https://")
 }

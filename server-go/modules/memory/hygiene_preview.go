@@ -177,7 +177,7 @@ SELECT jsonb_build_object('owner_id',h.owner_id,'generation',h.generation,
 		}
 		id, err := strconv.ParseInt(row.ID, 10, 64)
 		version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: selected.Owner, RecordID: row.ID, RecordRevision: row.Revision}
-		if err != nil || !version.validFor(id) {
+		if err != nil || !version.ValidFor(id) {
 			return out, errors.New("memory: invalid hygiene source version")
 		}
 		last = id

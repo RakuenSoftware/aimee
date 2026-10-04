@@ -2,6 +2,7 @@
  * policy-verdict action audit. See kb_http_governance.h. All routes are
  * console-admin-ACL'd upstream. */
 #include "kb_http_governance.h"
+#include "kb/kb_module_stage_adapters.h"
 
 #include "cJSON.h"
 #include "config.h"
@@ -121,6 +122,13 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
       snprintf(out_buf, (size_t)out_cap,
                "{\"error\":\"authenticated owner transport unavailable\"}");
       return 403;
+   }
+   if (kb_module_memory_reset_derived() != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"derived memory cleanup failed; retry erasure request\"}");
+      return 503;
    }
    int event_created = 0, coverage_complete = 0;
    int64_t pending_owners = 0;

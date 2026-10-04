@@ -114,7 +114,7 @@ CREATE TEMP TABLE memories (
 		t.Fatalf("selection=%v why=%v held=%d err=%v", ids(records), why, held, err)
 	}
 	for _, row := range records {
-		if !row.Version.validFor(row.ID) || row.Version.RecordRevision != "1" {
+		if !row.Version.ValidFor(row.ID) || row.Version.RecordRevision != "1" {
 			t.Fatalf("activated version missing: %+v", row)
 		}
 	}

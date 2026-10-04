@@ -1,6 +1,7 @@
 # KB model backends
 
-Embedding and synthesis are `aimee-kb` capabilities. Local synthesis executes in an optional,
+Embedding and synthesis are configured per owning instance. This page covers the KB roles;
+Server has its own local memory-model configuration. Local synthesis executes in an optional,
 model-specific `aimee-llm` sidecar that the KB reaches over mTLS. The server never calls that
 sidecar directly.
 
@@ -8,9 +9,9 @@ sidecar directly.
 
 Each KB configures the roles independently:
 
-| Role | Internal | Remote | Off |
+| Role | Local | Remote | Off |
 | --- | --- | --- | --- |
-| embedding | Run the bundled embedder in the KB image or its selected embedder sidecar. | Call the configured embedding endpoint. | A KB with no embedder refuses dense work. |
+| embedding | Run the selected embedding sidecar; an operator command is a separate configured path. | Call the configured embedding endpoint. | A KB with no embedder refuses dense work. |
 | synthesis | Run the selected model in an `aimee-llm-*` sidecar. | Call the configured synthesis endpoint. | Curator and answer-synthesis stages report degradation. |
 
 A KB hosts the embedding role locally or remotely and may disable synthesis. Available local models
@@ -29,12 +30,12 @@ they do.
 
 ## Multiple KBs
 
-Model placement is per KB, not global to the server. A fleet can include, for example, a KB with an
-bundled embedder, another with a local synthesis sidecar, and a KB that calls remote endpoints for
+Model placement is per KB, not global to the server. A fleet can include, for example, a KB with a
+local embedding sidecar, another with a local synthesis sidecar, and a KB that calls remote endpoints for
 both roles. Routing must first select a KB with the correct corpus and authority, then verify that it
 has the required role. It must not route to a model independently of the KB.
 
-The current managed and split profiles deploy one KB. See [KB fleet and model placement](KB_FLEET.md)
+Current Server profiles deploy no KB by default and configure one optional KB URL. A KB uses its own Compose project. See [KB fleet and model placement](KB_FLEET.md)
 for the target routing contract and current implementation boundary.
 
 ## Role contracts

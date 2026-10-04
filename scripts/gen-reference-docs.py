@@ -135,6 +135,8 @@ CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_F
 # surface). A key in the generated table with no entry here renders "n/a" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
+    "aimee_synthesis_model": "Legacy model-selection key retained by config metadata; current separate sidecars use `synthesis_model` and their endpoint configuration.",
+    "client_tool_transport_preference": "Client integration preference: `cli-first` (default) or `mcp-first`; registration still checks the client's supported transport.",
     "kb_pdf_tier": "Structured-PDF pipeline preset: off (plain pdftotext, default) | basic (ingest+vector) | full (all stages).",
     "kb_curator_tier": "KB curator pipeline preset: off | lite (core extract+index) | full (all stages, default).",
 
@@ -542,7 +544,7 @@ def render_config(fields, sections, flat):
            "",
            "> Auto-generated from the canonical source tables by "
            "`scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config "
-           "module, env vars scanned from `getenv()` in `src/`, and the "
+           "module, env vars scanned from native and Go runtime sources, and the "
            "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
@@ -669,6 +671,7 @@ ENV_PAIR_BY_NAME_RE = re.compile(
 ENV_DYNAMIC = {
     "AIMEE_FORGE_APP_PRIVATE_KEY",
     "AIMEE_FORGE_TOKEN",
+    "AIMEE_MEMORY_BACKEND_TOKEN",
     "AIMEE_KB_CONN",
     "AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
     "AIMEE_SERVER_TLS_PRIVATE_KEY",
@@ -1081,8 +1084,37 @@ ENV_DESC = {
 }
 
 
+# Deployment wiring and provider settings consumed only by Go owners.
+ENV_DESC.update({
+    "AIMEE_MEMORY_BACKEND": ("Memory", "Select the generic memory engine: `native` (default), `aimee-native`, or `cognee`. Unknown selections fail startup. See the memory module contract."),
+    "AIMEE_COGNEE_URL": ("Memory", "Cognee API base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset."),
+    "AIMEE_MEMORY_BACKEND_URL": ("Memory", "Selected alternative memory API base URL. Requests use the existing egress owner."),
+    "AIMEE_MEMORY_BACKEND_AUTH": ("Memory", "Alternative memory authentication mode: `bearer` by default, or explicit `none` for an isolated development endpoint."),
+    "AIMEE_MEMORY_BACKEND_TOKEN": ("Memory", "First-boot bearer transport for the alternative memory service; sealed into Vault and removed from the environment before runtime."),
+    "AIMEE_EGRESS_CREDENTIAL_HELPER": ("TLS & networking", "Privileged credential helper executable used by the egress owner. Startup validates its path and custody; credentials remain in Vault."),
+    "AIMEE_POSTGRES_STORAGE": ("Database & vectors", "PostgreSQL storage mode: `plain` by default or opt-in `luks`. See Storage tiers for custody and recovery requirements."),
+    "AIMEE_POSTGRES_STORAGE_SOCKET": ("Database & vectors", "Local control socket for the PostgreSQL storage service."),
+    "AIMEE_POSTGRES_VOLUME_MIB": ("Database & vectors", "Size in MiB for a newly provisioned encrypted PostgreSQL volume; does not resize an existing volume."),
+    "AIMEE_MODULE_PLACEMENT": ("Server runtime", "Supervisor-provided module placement (`server` or `kb`), validated against the installed identity."),
+    "AIMEE_MODULE_PRINCIPAL_REF": ("Server runtime", "Supervisor-provided admitted module principal reference; not a caller-selected authority."),
+    "AIMEE_MODULE_EVENT_BASE": ("Server runtime", "Installed module event base used by the module runtime."),
+    "AIMEE_CONTROL_WEB_ENABLED": ("Server runtime", "Enable the separately authenticated control-web administration service."),
+    "AIMEE_EMBED_HTTP_TIMEOUT_MS": ("Models", "Embedding request timeout in milliseconds for the Go embedding owner."),
+    "AIMEE_MEMORY_COREF_WINDOW": ("Memory", "Coreference context window; default 5, clamped to 1–12."),
+    "AIMEE_MEMORY_HEALTH_SAMPLE_PPM": ("Memory", "Bounded retrieval-health sampling rate in parts per million; used only when health collection is enabled."),
+    "AIMEE_MEMORY_PAGERANK_ENABLED": ("Memory", "Opt into the native shared-memory PageRank ranking arm. Integer override clamped to 0 or 1; personal recall has no shared graph."),
+    "AIMEE_MEMORY_PAGERANK_ITERATIONS": ("Memory", "Native shared-memory PageRank iterations; default 6, integer override clamped to 1–16."),
+    "AIMEE_MEMORY_PAGERANK_WEIGHT": ("Memory", "Validated weight for the optional native PageRank ranking arm; default 0.35."),
+    "AIMEE_MEMORY_RECALL_GATE": ("Memory", "Recall acknowledgement gate: observe by default, `enforce` to suppress eligible acknowledgement queries, or `off` to disable."),
+    "AIMEE_MEMORY_SELECTION_POLICY": ("Memory", "Opt-in versioned typed-selection reporting policy. Only the owner's supported policy version activates it; default off."),
+    "AIMEE_MEMORY_UTILITY_HORIZON_POLICY": ("Memory", "Operator JSON utility-horizon artifact, bounded to 64 KiB, with `shadow` or `enforce` mode. Unset disables it; invalid artifacts fail validation."),
+    "AIMEE_GRAPH_FUSION": ("Memory", "Native memory graph-fusion switch; accepted on/off values are validated by the Go owner."),
+    "AIMEE_PEER_DIRECTORY": ("Server runtime", "Peer directory selection. The compatibility value `db1` selects the runtime session directory."),
+})
+
+
 def parse_env_vars():
-    """Every AIMEE_* env var read outside src/tests/ (test-only vars excluded)."""
+    """Every literal AIMEE_* env read in native and Go runtime sources, excluding tests."""
     found = set()
     for f in sorted(SRC.rglob("*")):
         if f.suffix not in (".c", ".h", ".inc") or "/tests/" in f.as_posix():
@@ -1094,6 +1126,12 @@ def parse_env_vars():
             found.add(m.group(1))
         for m in ENV_PAIR_BY_NAME_RE.finditer(text):
             found.update(m.groups())
+    go_env = re.compile(r'os\.(?:Getenv|LookupEnv)\(\s*"(AIMEE_[A-Z0-9_]+)"\s*\)')
+    for directory in (ROOT / "server-go", ROOT / "runtime-web", ROOT / "control-web"):
+        for f in sorted(directory.rglob("*.go")):
+            if f.name.endswith("_test.go") or any(part in {"testdata", "fixtures", "vendor"} for part in f.parts):
+                continue
+            found.update(go_env.findall(f.read_text(encoding="utf-8")))
     return found | ENV_DYNAMIC
 
 
@@ -1101,7 +1139,8 @@ def render_env(found):
     out = ["## Environment variables",
            "",
            f"The binaries read {len(found)} `AIMEE_*` environment variables (scanned "
-           "from `getenv()` in `src/`, excluding tests, plus the generic first-boot "
+           "from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, "
+           "excluding test files and fixtures, plus the generic first-boot "
            "credential inputs). Depending on the setting, these "
            "variables either override config-store values or provide fallbacks when no "
            "explicit config value is present. Module-activation variables use fallback "
@@ -1174,6 +1213,9 @@ EXT_GROUP_ORDER = ["Provider credentials", "Provider endpoints", "Reasoning effo
                    "Network / proxy", "Editor", "Codex / Claude integration"]
 
 EXT_DESC = {
+    "EMBEDDER_URL": ("Provider endpoints", "Compatibility embedding endpoint override when the AIMEE-prefixed endpoint is unset."),
+    "EMBEDDER_DIMS": ("Provider endpoints", "Embedding dimension override; must match the stored vector-space identity."),
+    "SYNTHESIS_AUTH_REQUIRED": ("Provider endpoints", "Require authenticated synthesis for the configured endpoint; checked by the curator provider."),
     "OPENAI_API_KEY": ("Provider credentials", "OpenAI API key (default for OpenAI-family agents)."),
     "ANTHROPIC_API_KEY": ("Provider credentials", "Anthropic API key (read via the agent's `api_key_env`)."),
     "GEMINI_API_KEY": ("Provider credentials", "Google Gemini API key (read via the agent's `api_key_env`)."),
@@ -1399,6 +1441,15 @@ def render_workflow(catalog, default_rounds):
 # ─── Separate config files (agents.json, toolsets) ────────────────────────────
 
 AGENT_FIELD_DESC = {
+    "catalog_provider_explicit": "Catalog resolution metadata indicating an explicit provider selection.",
+    "eligible": "Routing-competence eligibility metadata, not a bypass of runtime admission.",
+    "max_output": "Model capability metadata for maximum output tokens.",
+    "minimum": "Minimum threshold within routing-competence configuration.",
+    "revision": "Catalog or routing-competence revision metadata.",
+    "role": "Role within routing-competence metadata.",
+    "routing_competence": "Versioned competence metadata used by provider/model eligibility checks.",
+    "score": "Competence score within routing metadata.",
+    "status": "Model catalog response status; nested metadata rather than a top-level agent setting.",
     "agents": "Top-level: array of agent definitions.",
     "default_agent": "Top-level: name of the default agent.",
     "name": "Agent identifier.",
@@ -1499,7 +1550,8 @@ def render_config_files(agent_fields):
            "### `agents.json`: agent / model definitions",
            "",
            "`{\"default_agent\": \"<name>\", \"agents\": [ {<agent>}, … ]}`. Each agent "
-           "object's non-credential fields (credential fields are vault-held and "
+           "non-credential fields and nested metadata read by the routing owner "
+           "(credential fields are vault-held and "
            "deliberately not enumerated here):",
            "",
            "| Field | Description |",

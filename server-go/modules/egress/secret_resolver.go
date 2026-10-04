@@ -31,12 +31,19 @@ func newVaultCredentialResolver() credentialResolver {
 }
 
 func (r *vaultCredentialResolver) Resolve(ctx context.Context, principal uint32, handle string) ([]byte, error) {
-	want := "mcp:" + strconv.FormatUint(uint64(principal), 10)
-	if r == nil || principal < 200+PluginClientOffset || principal >= 456+PluginClientOffset ||
-		handle != want || r.run == nil {
+	if r == nil || r.run == nil {
 		return nil, errors.New("credential handle is unavailable")
 	}
-	name := "AIMEE_MCP_" + strconv.FormatUint(uint64(principal), 10) + "_TOKEN"
+	var name string
+	if principal == MemoryClientRef && handle == "memory-backend" {
+		name = "AIMEE_MEMORY_BACKEND_TOKEN"
+	} else {
+		want := "mcp:" + strconv.FormatUint(uint64(principal), 10)
+		if principal < 200+PluginClientOffset || principal >= 456+PluginClientOffset || handle != want {
+			return nil, errors.New("credential handle is unavailable")
+		}
+		name = "AIMEE_MCP_" + strconv.FormatUint(uint64(principal), 10) + "_TOKEN"
+	}
 	secret, err := r.run(ctx, name)
 	if err != nil || len(secret) == 0 || len(secret) > maxResolvedCredentialBytes || bytes.ContainsAny(secret, "\x00\r\n") {
 		clear(secret)

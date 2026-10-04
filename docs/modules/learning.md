@@ -9,7 +9,7 @@ configuration, memories, skills, rules, or workflows without the applicable evid
 
 ## Public contracts
 
-`src/modules/learning/learning.h` defines signal inputs, dispatch results, proposals, actions, metrics,
+`src/modules/learning/include/aimee/learning/learning.h` defines signal inputs, dispatch results, proposals, actions, metrics,
 and the router API. `learning_implicit.h`, `learning_bundle.h`, and `learning_evidence.h` cover detection,
 evidence assembly, and candidate generation, while KB_STORE persistence currently remains in
 `src/modules/kb/c/kb_store_learning.h` and related source files as explicit physical-ownership debt.
