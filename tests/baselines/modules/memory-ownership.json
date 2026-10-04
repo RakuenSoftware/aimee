@@ -2125,7 +2125,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "8a0dabd801df65e26b48c4d9d2678e5a2fc0b1b86cf8ff2ada134589cf3f806f"
+      "sha256": "f192c105e7a6a43b4d2a264cb07d883fc6cecb8b04249e2a63c5f5a78e9cea62"
     },
     "src/server/server_code_index.c": {
       "disposition": "host-transport",
@@ -2160,7 +2160,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "631594eda56266fda8d2e893d2992bd49d32baf8cab7ad77b0be75b7fedc1f95"
+      "sha256": "561e36f49184be3c587ad14a5723f70395c599f03bf6073c7a640413bf1c1bb4"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2592,10 +2592,10 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "025a5d3d421b64ec15fd16f7438941e561ce40c869f6b88b69847c150b10959c",
+      "sha256": "6c43890d75d064dacaf2ef9e49456c1b2b32e2bafe797ab2ad30413d10b75fc5",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "66301bd3dca5ec79dba634adef4b34b15e3f93384b6198fecde6331c9eb86e84"
+        "api/openapi-server-v1.yaml": "2756434ac4dbb1f9ae12592592f472ef5346c9ce53588623e308ef76874f3c5c"
       }
     }
   },
