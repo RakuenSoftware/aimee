@@ -21,7 +21,7 @@ type kbDeletion struct {
 // request transaction's RLS context; a known version grants no additional scope.
 func (s *postgresDataStore) prepareKBDeletion(ctx context.Context, id int64, authority int, expected *MemoryRecordVersion) (kbDeletion, error) {
 	d := kbDeletion{id: id, authority: authority, target: MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}}
-	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !expected.validFor(id) || (authority != AuthorityUser && authority != AuthorityModel) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !expected.ValidFor(id) || (authority != AuthorityUser && authority != AuthorityModel) {
 		return d, errors.New("memory: invalid conditional deletion")
 	}
 	var epistemic, origin, state string
@@ -52,6 +52,9 @@ func (s *postgresDataStore) applyKBDeletion(ctx context.Context, d kbDeletion) (
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "delete-as", ID: d.id, Authority: d.authority}, DataResponse{Deleted: err == nil}, err, "")
 	}()
+	if err = s.forgetBackend(ctx, d.scope, d.id); err != nil {
+		return nil, err
+	}
 	receipt = &MemoryMutationReceipt{SchemaVersion: 2, TargetVersion: d.target, Outcome: "destroyed"}
 	if d.authority == AuthorityUser {
 		var id int64
@@ -81,7 +84,7 @@ func (s *postgresDataStore) deleteKBVersion(ctx context.Context, id int64, autho
 // Retried destruction confirms the original commit without inventing a current
 // canonical version. It cannot erase a resurrected ID or reveal a hidden row.
 func (s *postgresDataStore) deleteKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (receipt *MemoryMutationReceipt, err error) {
-	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || r.Operation != "delete-as" || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || r.Operation != "delete-as" || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) {
 		return nil, errors.New("memory: invalid idempotent deletion")
 	}
 	if authority == AuthorityUser && !caller.UserAuthority {

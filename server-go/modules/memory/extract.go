@@ -1,6 +1,10 @@
 package memory
 
-import "strings"
+import (
+	"strings"
+
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
+)
 
 // Pattern-first fact extraction and the retraction scan, ported from
 // src/modules/memory/memory_extract_patterns.c.
@@ -37,15 +41,7 @@ const (
 	valueMax = 128
 )
 
-// Triple is a candidate fact found before the model. RelType is a normalized
-// guess; the gate still decides whether it is written and how.
-type Triple struct {
-	Subject     string
-	RelType     string
-	Object      string
-	SubjectKind NodeKind
-	ObjectKind  NodeKind
-}
+type Triple = memorycontract.Triple
 
 func isSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'

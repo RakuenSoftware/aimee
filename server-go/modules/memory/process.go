@@ -128,9 +128,28 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	// deterministic memory operations remain usable. Operations requiring egress
 	// report its absence through the normal owner contracts.
 	executor := processEgress(ctx, socket)
+	factory, err := configuredMemoryBackend(executor)
+	if err != nil {
+		closeConnection()
+		return nil, err
+	}
+	data.(*postgresDataStore).backendFactory = factory
+	if factory != nil {
+		replayCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err = resetDerivedBackend(replayCtx, data)
+		cancel()
+		if err != nil {
+			closeConnection()
+			return nil, fmt.Errorf("memory: derived erasure replay: %w", err)
+		}
+	}
 	StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
 	StartSharedIndex(ctx, data, executor)
-	log.Printf("memory module: placement=%s storage=postgres", placement)
+	backendName := "aimee-native"
+	if factory != nil {
+		backendName = os.Getenv("AIMEE_MEMORY_BACKEND")
+	}
+	log.Printf("memory module: placement=%s storage=postgres backend=%s", placement, backendName)
 	return NewHandler(executor, WithDataStore(placement, data), func(options *handlerOptions) { options.dataContext = ctx }), nil
 }
 

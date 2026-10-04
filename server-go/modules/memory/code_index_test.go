@@ -198,7 +198,7 @@ INSERT INTO entity_edges(id,source,target,confidence_class,utility_score) VALUES
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 || !on[1].Version.validFor(2) || on[1].Version.RecordRevision != "1" {
+	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 || !on[1].Version.ValidFor(2) || on[1].Version.RecordRevision != "1" {
 		t.Fatalf("KB graph or visibility: %+v", on)
 	}
 	t.Setenv("AIMEE_GRAPH_FUSION", "off")

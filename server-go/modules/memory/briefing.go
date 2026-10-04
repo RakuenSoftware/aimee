@@ -123,7 +123,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 			return nil, err
 		}
 		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
-		if !r.Version.validFor(r.ID) {
+		if !r.Version.ValidFor(r.ID) {
 			rows.Close()
 			return nil, fmt.Errorf("memory: briefing source version unavailable")
 		}

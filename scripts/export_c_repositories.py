@@ -622,7 +622,7 @@ def go_module_main(module_id: str, principal_ref: int,
         for stage in stages
     )
     handler = "handler.NewDefaultHandler()" if module_id == "delegates" else "handler.Handle"
-    if module_id == "economizer":
+    if module_id in {"economizer", "egress"}:
         handler = "handler.NewHandler()"
     extra_imports = ""
     watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
@@ -698,6 +698,11 @@ def go_module_main(module_id: str, principal_ref: int,
         setup = """\tmoduleHandler, err := handler.NewHandler(os.Getenv("AIMEE_HOME"))
 \tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 """
+    if module_id == "sandbox":
+        handler = "handler.NewHandler(moduleStore)"
+        setup = """\tmoduleStore, err := handler.NewStore(os.Getenv("AIMEE_HOME"))
+\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+"""
     handler_import = f'\thandler "github.com/JBailes/aimee/server-go/modules/{module_id}"\n' if module_id != "aimee" else ""
     return f"""package main
 
@@ -755,13 +760,14 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/memory": {"memory"},
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
-    "server-go/modules/module-runtime/identity": {"server", "kb"},
+    "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers", "memory"},
-    "server-go/modules/egress": {"providers", "memory"},
+    "server-go/modules/egress": {"providers", "memory", "git", "roundtable"},
     "server-go/modules/audit": {"memory"},
-    "server-go/modules/execution-policy": {"aimee"},
+    "server-go/modules/execution-policy": {"aimee", "tools"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory", "postgres"},

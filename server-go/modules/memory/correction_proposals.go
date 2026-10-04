@@ -144,7 +144,7 @@ type correctionReviewRequest struct {
 
 func validProposalID(id string) bool {
 	v := MemoryRecordVersion{SchemaVersion: 1, OwnerID: id, RecordID: "1", RecordRevision: "1"}
-	return v.validFor(1)
+	return v.ValidFor(1)
 }
 func (r *correctionReviewRequest) valid() bool {
 	if r == nil || !validProposalID(r.ProposalID) || len(r.Digest) != 64 || strings.ToLower(r.Digest) != r.Digest || (r.Action != "approve" && r.Action != "reject") {
@@ -152,7 +152,7 @@ func (r *correctionReviewRequest) valid() bool {
 	}
 	_, err := hex.DecodeString(r.Digest)
 	id, idErr := strconv.ParseInt(r.Expected.RecordID, 10, 64)
-	return err == nil && idErr == nil && r.Expected.validFor(id)
+	return err == nil && idErr == nil && r.Expected.ValidFor(id)
 }
 
 var errCorrectionReviewConflict = errors.New("memory: correction review no longer matches the draft, target or decision")

@@ -428,6 +428,8 @@ int vault_env_egress_parent_attest(void)
 
 static int mcp_egress_credential_name_ok(const char *name)
 {
+   if (name && strcmp(name, "AIMEE_MEMORY_BACKEND_TOKEN") == 0)
+      return 1;
    static const char prefix[] = "AIMEE_MCP_";
    static const char suffix[] = "_TOKEN";
    if (!name || strncmp(name, prefix, sizeof(prefix) - 1) != 0)

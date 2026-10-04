@@ -262,7 +262,7 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 			h.memoryParents[i].SchemaVersion = 1
 			h.memoryParents[i].OwnerID = h.ownerID
 			id, err := strconv.ParseInt(h.memoryParents[i].RecordID, 10, 64)
-			if err != nil || !h.memoryParents[i].validFor(id) {
+			if err != nil || !h.memoryParents[i].ValidFor(id) {
 				return nil, errors.New("memory: assertion dependency version is unavailable")
 			}
 		}

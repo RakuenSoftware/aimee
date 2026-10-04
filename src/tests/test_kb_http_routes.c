@@ -1,3 +1,4 @@
+static int derived_cleanup_failure, derived_cleanup_calls;
 #include <aimee/postgres/client.h>
 #include "module_commands.h"
 #include "support/module_runtime_fixture.h"
@@ -6589,6 +6590,17 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(s == 200 && strstr(buf, "\"status\":\"pending_owners\"") != NULL);
    assert(strstr(buf, "\"coverage_complete\":false") != NULL);
    assert(strstr(buf, "\"event_created\":false") != NULL);
+   /* A failed remote cleanup cannot emit completion evidence. The same
+    * existing request ID can retry after partial/unknown remote outcomes. */
+   int completed_before = g_erasure_complete_calls;
+   derived_cleanup_failure = 1;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 503 && g_erasure_complete_calls == completed_before);
+   derived_cleanup_failure = 0;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200 && g_erasure_complete_calls == completed_before + 1);
    g_erasure_pending_owners = 0;
 }
 
@@ -7985,4 +7997,10 @@ int main(void)
    test_maintenance_repair_queues_too();
    printf("ok\n");
    return 0;
+}
+
+int kb_module_memory_reset_derived(void)
+{
+   derived_cleanup_calls++;
+   return derived_cleanup_failure ? -1 : 0;
 }

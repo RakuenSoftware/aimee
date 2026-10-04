@@ -133,6 +133,9 @@ func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string
 				return Record{}, err
 			}
 		}
+		if err := s.forgetBackend(ctx, wanted.Scope, old.ID); err != nil {
+			return Record{}, err
+		}
 		if expected == nil {
 			_, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state='retired',updated_at=now() WHERE id=$1`, old.ID)
 		} else {

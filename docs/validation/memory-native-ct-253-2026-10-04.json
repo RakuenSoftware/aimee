@@ -1,0 +1,43 @@
+{
+  "host": "192.168.1.253",
+  "ctid": 9203,
+  "hostname": "aimee-native-validation-20261004",
+  "backend": "native",
+  "versions": {
+    "postgres": "postgres (PostgreSQL) 18.0",
+    "go": "go version go1.26.7 linux/amd64",
+    "python": "Python 3.13.5"
+  },
+  "binary_sha256": {
+    "aimee": "5a0f913cc6f1c363e92fef042982b112f7922608d30e84c2296dc8af5ca57148",
+    "aimee-server": "b0df1cc13053c65ee82ae366aa2d6001240570b979056d0e1171f7ae1f0cbfd7",
+    "aimee-kb": "21c51af05622eb3bf14a88af55244d12b4eaaa89031aa8901c373d01ae4207e3",
+    "aimee-delegate-egress": "9d319a520e51d5d623b690547ef57883150742b0f367cf9e127997b5b33ab355",
+    "src/build/obj/aimee-module": "5fe7c122439b41ba9ad31bc79475fb3a9ea57b43373f80c85ba8e2c4c7a52ac8",
+    "src/build/obj/aimee-module-config": "ea8fa259cbb3c40a6455d097db57d8c72a4d28e487f7b4b0dfda89e541d0ccfe"
+  },
+  "shared_model_services_used": false,
+  "source_bundle_sha256": "e85f50a94133798f89db746151c1bd06e4fb591c5f276a5a9d1bfaa2c8d92e20",
+  "deployment_checks": {
+    "status": "passed",
+    "backend": "native",
+    "private_id": 1,
+    "shared_id": 1,
+    "checks": [
+      "private/shared deployed store/get/search",
+      "placement isolation",
+      "native subject completion",
+      "idempotent completion",
+      "retained canonical records",
+      "actual author canonical subject erasure",
+      "memory supervisor restart preserves erased absence and shared record"
+    ]
+  },
+  "restart_observation": "One request in flight during deliberate memory termination returned error after 60.06s; next readiness request succeeded in 0.09s. Existing supervisor restarted the native memory child.",
+  "cleanup": {
+    "ct_configuration_absent": true,
+    "vm_configuration_absent": true,
+    "storage_volumes_absent": true,
+    "remote_payloads_removed": true
+  }
+}

@@ -93,7 +93,7 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if v == nil {
 			v = record.observedVersion
 		}
-		if v != nil && (!v.validFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
+		if v != nil && (!v.ValidFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
 			return nil, fmt.Errorf("memory: record %d version changed during public enrichment", record.ID)
 		}
 		r.Version = record.Version

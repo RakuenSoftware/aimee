@@ -29,7 +29,7 @@ func lifecycleDigest(r DataRequest, authority int) (string, error) {
 func (s *postgresDataStore) lifecycleKBIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext, correlation string) (*MemoryMutationReceipt, error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB ||
 		(r.Operation != "reject" && r.Operation != "restore") || !verifiedRetryCaller(caller) ||
-		!validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) {
+		!validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) {
 		return nil, errors.New("memory: invalid idempotent lifecycle mutation")
 	}
 	authority := AuthorityModel

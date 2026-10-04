@@ -115,7 +115,12 @@ cJSON *server_module_memory_data(const cJSON *request)
       return NULL;
    }
    uint64_t budget = MODULE_MEMORY_DATA_DEADLINE_NS;
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (backend && backend[0] && strcmp(backend, "native") != 0 && strcmp(backend, "aimee-native") != 0)
+      budget = 120ULL * 1000000000ULL;
    const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request, "operation");
+   if (cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0)
+      budget = 120ULL * 1000000000ULL;
    if (cJSON_IsString(operation) && strcmp(operation->valuestring, "code-index") == 0)
    {
       const cJSON *index = cJSON_GetObjectItemCaseSensitive(request, "code_index");
@@ -1119,4 +1124,19 @@ void server_module_stage_adapters_configure(void)
    skill_trigger_register_match_provider(skill_trigger_match);
    response_dedup_register_key_provider(response_key);
    server_error_kind_register_http_status_provider(runtime_web_http_status);
+}
+
+int server_module_memory_reset_derived(void)
+{
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 || strcmp(backend, "aimee-native") == 0)
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   if (!request) return -1;
+   cJSON_AddStringToObject(request, "operation", "reset-derived");
+   cJSON *reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
+   cJSON_Delete(reply);
+   return ok ? 0 : -1;
 }

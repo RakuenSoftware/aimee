@@ -2,69 +2,58 @@
 package memory
 
 import (
+	"context"
 	"encoding/binary"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 const (
-	EventExtractIndex uint32 = 5889
-	EventWrite        uint32 = 5890
-	EventEmbed        uint32 = 5891
-	EventRetrieve     uint32 = 5892
-	EventRerank       uint32 = 5893
-
-	StageExtractIndex uint32 = 1
-	StageWrite        uint32 = 2
-	StageEmbed        uint32 = 3
-	StageRetrieve     uint32 = 4
-	StageRerank       uint32 = 5
-
-	requestMagic  uint32 = 0x4b4e524d
-	responseMagic uint32 = 0x464e434d
-	wireVersion   uint32 = 1
-	requestLen           = 16
-	responseLen          = 8
-
-	gateRequestMagic  uint32 = 0x54524757
-	gateResponseMagic uint32 = 0x56524757
-	relTypeMax               = 256
-	gateRequestLen           = 20 + relTypeMax
-	gateResponseLen          = 8
-
-	extractRequestMagic      uint32 = 0x51525458
-	extractResponseMagic     uint32 = 0x53525458
-	extractRequestHeaderLen         = 16
-	extractResponseHeaderLen        = 8
-	// Field capacities of one triple, mirroring pattern_triple_t's buffers. A
-	// field is never emitted longer than these -- ExtractPatterns already trims
-	// to them -- but the C decoder refuses an over-long field outright, so
-	// emitting one would be a hard failure rather than a truncation.
-	tripleSubjectMax = 128
-	tripleRelTypeMax = 64
-	tripleObjectMax  = 128
-
-	piiRequestMagic     uint32 = 0x51524950
-	piiResponseMagic    uint32 = 0x53524950
-	piiRequestHeaderLen        = 12
-	piiResponseLen             = 8
-
-	scanRequestMagic      uint32 = 0x51525452
-	scanResponseMagic     uint32 = 0x53525452
-	scanRequestHeaderLen         = 12
-	scanResponseHeaderLen        = 16
-
-	sensRequestMagic      uint32 = 0x51525350
-	sensResponseMagic     uint32 = 0x53525350
-	sensRequestHeaderLen         = 12
-	sensResponseHeaderLen        = 8
-)
-
-const (
-	ConfidenceLow uint32 = iota + 1
-	ConfidenceMedium
-	ConfidenceHigh
+	EventExtractIndex        = memorycontract.EventExtractIndex
+	EventWrite               = memorycontract.EventWrite
+	EventEmbed               = memorycontract.EventEmbed
+	EventRetrieve            = memorycontract.EventRetrieve
+	EventRerank              = memorycontract.EventRerank
+	StageExtractIndex        = memorycontract.StageExtractIndex
+	StageWrite               = memorycontract.StageWrite
+	StageEmbed               = memorycontract.StageEmbed
+	StageRetrieve            = memorycontract.StageRetrieve
+	StageRerank              = memorycontract.StageRerank
+	requestMagic             = memorycontract.RequestMagic
+	responseMagic            = memorycontract.ResponseMagic
+	wireVersion              = memorycontract.WireVersion
+	requestLen               = memorycontract.RequestLen
+	responseLen              = memorycontract.ResponseLen
+	gateRequestMagic         = memorycontract.GateRequestMagic
+	gateResponseMagic        = memorycontract.GateResponseMagic
+	relTypeMax               = memorycontract.RelTypeMax
+	gateRequestLen           = memorycontract.GateRequestLen
+	gateResponseLen          = memorycontract.GateResponseLen
+	extractRequestMagic      = memorycontract.ExtractRequestMagic
+	extractResponseMagic     = memorycontract.ExtractResponseMagic
+	extractRequestHeaderLen  = memorycontract.ExtractRequestHeaderLen
+	extractResponseHeaderLen = memorycontract.ExtractResponseHeaderLen
+	tripleSubjectMax         = memorycontract.TripleSubjectMax
+	tripleRelTypeMax         = memorycontract.TripleRelTypeMax
+	tripleObjectMax          = memorycontract.TripleObjectMax
+	piiRequestMagic          = memorycontract.PiiRequestMagic
+	piiResponseMagic         = memorycontract.PiiResponseMagic
+	piiRequestHeaderLen      = memorycontract.PiiRequestHeaderLen
+	piiResponseLen           = memorycontract.PiiResponseLen
+	scanRequestMagic         = memorycontract.ScanRequestMagic
+	scanResponseMagic        = memorycontract.ScanResponseMagic
+	scanRequestHeaderLen     = memorycontract.ScanRequestHeaderLen
+	scanResponseHeaderLen    = memorycontract.ScanResponseHeaderLen
+	sensRequestMagic         = memorycontract.SensRequestMagic
+	sensResponseMagic        = memorycontract.SensResponseMagic
+	sensRequestHeaderLen     = memorycontract.SensRequestHeaderLen
+	sensResponseHeaderLen    = memorycontract.SensResponseHeaderLen
+	ConfidenceLow            = memorycontract.ConfidenceLow
+	ConfidenceMedium         = memorycontract.ConfidenceMedium
+	ConfidenceHigh           = memorycontract.ConfidenceHigh
 )
 
 // Handle dispatches a memory stage call.
@@ -79,7 +68,46 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			apply(&options)
 		}
 	}
+	// One gate belongs to the existing memory handler. Acquire it before a
+	// request opens a DB snapshot: an old in-flight indexing request cannot
+	// recreate derived copies after an erasure reset has acknowledged success.
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+		if hasSelectedBackend(options.data) && (invocation.StageID == StageData || invocation.StageID == StageCommand) {
+			ctx := options.dataContext
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			remaining := invocation.Remaining(dataTimeout)
+			if remaining <= 0 || invocation.Cancelled() {
+				return nil, bus.ModuleStatusCancelled
+			}
+			timer := time.NewTimer(remaining)
+			defer timer.Stop()
+
+			poll := time.NewTicker(10 * time.Millisecond)
+			defer poll.Stop()
+			acquired := false
+			for !acquired {
+				select {
+				case <-gate:
+					acquired = true
+					defer func() { gate <- struct{}{} }()
+				case <-ctx.Done():
+					return nil, bus.ModuleStatusCancelled
+				case <-timer.C:
+					return nil, bus.ModuleStatusCancelled
+				case <-poll.C:
+					if invocation.Cancelled() {
+						return nil, bus.ModuleStatusCancelled
+					}
+				}
+			}
+			if invocation.Cancelled() {
+				return nil, bus.ModuleStatusCancelled
+			}
+		}
 		switch invocation.StageID {
 		case StageWrite:
 			return handleWrite(invocation, request)

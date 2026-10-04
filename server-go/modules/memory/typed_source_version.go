@@ -69,7 +69,7 @@ const maxTypedMemoryParents = 64
 func (h assertionHit) sourceVersion() *typedSourceVersion {
 	version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: h.ownerID,
 		RecordID: h.StableID, RecordRevision: strconv.Itoa(h.Version)}
-	if !version.validFor(h.ID) {
+	if !version.ValidFor(h.ID) {
 		return nil
 	}
 	state := "unavailable"
@@ -150,7 +150,7 @@ func validTypedSource(ref typedProjectionRef) bool {
 			channel = "native_reminders"
 		}
 		id, err := strconv.ParseInt(ref.ID, 10, 64)
-		if err != nil || ref.Channel != channel || ref.Source.MemoryParentState != "observed" || !ref.Source.Version.validFor(id) || (ref.Source.Kind == "memory_reminder" && len(ref.Source.MemoryParents) != 0) {
+		if err != nil || ref.Channel != channel || ref.Source.MemoryParentState != "observed" || !ref.Source.Version.ValidFor(id) || (ref.Source.Kind == "memory_reminder" && len(ref.Source.MemoryParents) != 0) {
 			return false
 		}
 	case "semantic_assertion":
@@ -197,13 +197,13 @@ func validTypedSource(ref typedProjectionRef) bool {
 		recordID = ref.Source.Version.RecordID
 	}
 	id, err := strconv.ParseInt(recordID, 10, 64)
-	if err != nil || !ref.Source.Version.validFor(id) || len(ref.Source.MemoryParents) > maxTypedMemoryParents {
+	if err != nil || !ref.Source.Version.ValidFor(id) || len(ref.Source.MemoryParents) > maxTypedMemoryParents {
 		return false
 	}
 	var previous int64
 	for _, parent := range ref.Source.MemoryParents {
 		id, err := strconv.ParseInt(parent.RecordID, 10, 64)
-		if err != nil || id <= previous || parent.OwnerID != owner || !parent.validFor(id) {
+		if err != nil || id <= previous || parent.OwnerID != owner || !parent.ValidFor(id) {
 			return false
 		}
 		previous = id

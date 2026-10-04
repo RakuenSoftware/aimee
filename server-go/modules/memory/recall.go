@@ -203,6 +203,15 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 		return nil, err
 	}
 	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "eligible_native_active_context_sql", Candidates: len(active), Quota: activeCap, IndexReadiness: "query_executed"})
+	if s.backendFactory != nil && s.placement == PlacementKB && query != "" {
+		request := s.backendRequest
+		request.Query = query
+		request.Limit = activeCap
+		active, err = s.SearchVisible(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if s.placement == PlacementServer && query != "" {
 		active, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, query, "", "", activeCap)
 		if err != nil {

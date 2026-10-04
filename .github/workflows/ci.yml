@@ -468,6 +468,44 @@ jobs:
   # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
   # wildcard and runs `./...` in each, so a new package is covered by
   # construction rather than by somebody remembering.
+  memory-backends:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Contract, native bridge, Cognee adapter and egress race tests
+        working-directory: server-go
+        run: go test -race ./memory ./modules/memory ./modules/memory/cognee ./modules/egress
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Install pinned real Cognee API
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cognee-venv"
+          "$RUNNER_TEMP/cognee-venv/bin/pip" install 'cognee[api]==1.6.2'
+      - name: Real Cognee storage, retrieval and erasure contract (required, no skip)
+        run: |
+          python3 scripts/validation/memory/run-cognee-contract.py \
+            --python "$RUNNER_TEMP/cognee-venv/bin/python" \
+            --artifacts "$RUNNER_TEMP/cognee-contract"
+      - name: Retain Cognee diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cognee-memory-contract
+          path: |
+            ${{ runner.temp }}/cognee-contract/contract.log
+            ${{ runner.temp }}/cognee-contract/server.log
+            ${{ runner.temp }}/cognee-contract/summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
   go-unit-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -1097,7 +1135,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, frontend-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1111,6 +1149,7 @@ jobs:
           POSTGRES_REPLAY_RESULT: ${{ needs.postgres-knowledge-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          MEMORY_BACKENDS_RESULT: ${{ needs.memory-backends.result }}
           FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
         run: |
@@ -1132,6 +1171,10 @@ jobs:
           }
           [ "$POSTGRES_REPLAY_RESULT" = success ] || {
             echo "PostgreSQL session replay result: $POSTGRES_REPLAY_RESULT" >&2
+            exit 1
+          }
+          [ "$MEMORY_BACKENDS_RESULT" = success ] || {
+            echo "Memory backend contract result: $MEMORY_BACKENDS_RESULT" >&2
             exit 1
           }
           # Folded in here rather than left as its own context so it BLOCKS.
