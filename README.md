@@ -2,7 +2,8 @@
 
 Aimee gives your AI tools a persistent working environment. Your memory, code index, sessions
 and workflows live in a runtime you operate, so changing a model or coding client preserves the
-work around it. Use it from an enrolled CLI, a coding assistant or the browser.
+work around it. You keep the client and model you prefer; Aimee supplies the state and governed
+execution behind them.
 
 For a project, that means a new session can recover decisions you kept, inspect a published code
 index and hand bounded work to a delegate. A correction updates the stored record and its revision;
@@ -15,6 +16,62 @@ and proposes actions. Durable workflows retain their execution state across indi
 calls. You take on a server, its backups and its upgrades in exchange for control of that state.
 
 ![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge and Cognee retrieval are optional](docs/images/architecture/overview.svg)
+
+## Security is part of the runtime
+
+We assume a model, a prompt, retrieved text and a tool argument can all be hostile. Aimee puts
+access checks in the services that own the data and the backends that execute the action. A model
+cannot grant itself permission by asking for it, and a different UI cannot bypass those checks.
+
+The shipped runtime makes specific, tested guarantees:
+
+- **Data ownership stays explicit.** The thin client has no database linkage. Server reaches shared
+  knowledge through KB's authorized API and has no direct access to its database. KB has no direct
+  access to Server's personal database. A failed lookup cannot change the selected store.
+- **Remote authority is checked per operation.** Network routes require an authenticated principal
+  and declared capability. A shared bearer is read-only; remote writes require a KB-signed identity
+  and a live per-user grant. Expired grants, replayed tokens and unavailable replay storage refuse
+  the write. Credential-free KB access is restricted to process-local loopback and has no owner
+  mutation authority.
+- **Execution stays inside its grant.** Registered tools check schema, policy, assigned workspace
+  and backend authority. Write-capable delegates require container isolation; failure to establish
+  it refuses the delegate rather than falling back to the host. Containers receive no provider or
+  forge credentials and no network access by default.
+- **Credentials have an owner.** Provider and integration secrets live in the owning instance's
+  Vault. Long-lived application containers carry no credential-shaped environment keys. Governed
+  requests resolve credentials after authorization; ordinary delegate execution receives no copy.
+- **Evidence can be checked.** New v2 WORM rows bind content, attribution and ordering in a
+  verifiable chain. Historical v1 rows retain their explicitly partial coverage. An external
+  witness is needed to establish evidence against a compromised host.
+
+These guarantees cover the registered runtime paths. Operator-admitted native modules remain
+trusted code. The managed composition gives Server the host Docker socket and therefore host
+control; choose the standard composition when you manage model containers separately. Storage
+volumes are not encrypted by default; LUKS is an explicit deployment option.
+
+[Security](docs/SECURITY.md) defines the trust boundaries, and the
+[claim register](docs/security-claims.json) ties each release claim to its enforcement owner,
+negative tests and limits.
+
+## Keep your harness and UI
+
+Aimee's state belongs to your runtime, independent of the harness that calls it. A coding client
+can use MCP tools over stdio; an agent UI can use the ACP bridge; a model-facing application can
+connect through OpenAI Chat Completions or Responses, or Anthropic Messages ingress. A custom
+application can call the named HTTP API or use a generated SDK. The browser is another client of
+that same runtime.
+
+This is the basis of compatibility with any harness or UI that implements one of those contracts.
+It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,
+Claude Desktop and OpenCode have documented integration paths. New clients can use the shared
+protocols without moving your memory or rebuilding the server around their UI.
+
+The available integration determines what Aimee can observe and govern. Client hooks expose
+session and tool events where the harness supports them. MCP governs calls made through Aimee;
+it does not intercept actions a client executes independently. Protocol support also does not
+supply a model with missing tool, image or streaming capabilities. See
+[Compatibility](docs/COMPATIBILITY.md) for client coverage and
+[Public API](docs/PUBLIC_API.md) for authentication and versioned contracts.
 
 ## Your runtime, with shared knowledge when you need it
 
@@ -61,8 +118,9 @@ introduced a generic contract for the memory API and is merged into the integrat
 Cognee 1.6.2 is the first alternative retrieval engine. Aimee retains canonical records,
 authorization, identity, audit and lifecycle. A replacement uses the existing module infrastructure.
 
-Both backends passed deployed private/shared API and lifecycle checks in disposable containers.
-Cognee also passed provider-outage retry and derived-state cleanup. Its first adapter bounds a
+Native memory passed deployed private/shared API and lifecycle checks in disposable containers.
+Cognee adapter checks cover provider-outage retry and derived-state cleanup; qualification of the
+installed image remains a release gate. Its first adapter bounds a
 retrieval scope to 256 eligible records and refuses larger scopes explicitly. This implementation
 is part of the 1.0.0 release work and is absent from the older 0.4.6 image. The
 [contract and authoring guide](docs/modules/memory.md#memory-backend-contract) describes integration,

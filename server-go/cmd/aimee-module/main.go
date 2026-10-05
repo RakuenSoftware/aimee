@@ -648,6 +648,22 @@ func run(ctx context.Context, args []string) error {
 		defer postgres.Close()
 	}
 	if config.ModuleName == "egress" {
+		ownerContext, stopOwner := context.WithCancel(ctx)
+		defer stopOwner()
+		handler, closeVault, vaultDone, err := egress.PrepareHandler(ownerContext)
+		if err != nil {
+			return err
+		}
+		defer closeVault()
+		config.Handler = handler
+		go func() {
+			select {
+			case <-vaultDone:
+				stopOwner()
+			case <-ownerContext.Done():
+			}
+		}()
+		ctx = ownerContext
 		/* The bus host authenticates /proc/<pid>/exe during attach. Becoming
 		 * non-dumpable first makes that identity check fail even for the same
 		 * uid. The runtime invokes this hook immediately after authenticated
