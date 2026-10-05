@@ -320,10 +320,23 @@ def main():
             status, recalled = call('recall', dict(store=store, scope='all', task_hint='needle', limit_tokens=8192))
             check(store + ' recall traverses the selected real Cognee backend', status == 200 and
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(recalled))
-            cli = gate.cli('recall', '--query', 'needle', '--store', store, '--scope', 'all')
+            cli = gate.cli('recall', '--query', 'needle', '--store', store, '--scope', 'all', '--limit-tokens', '8192')
+            if store == 'kb' and 'kb ' + marker not in json.dumps(cli):
+                check('shared CLI recall respects native activation cooldown',
+                    cli.get('recall', {}).get('activation_held', 0) > 0)
+                # Compare entry-point transport using a repeatable synthetic
+                # record policy. Production's default one-turn cooldown stays
+                # covered above and suppression is checked independently below.
+                matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                    '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c',
+                    'UPDATE memories SET activation_cooldown_turns=0 WHERE id=' + records['kb']['id'])
+                cli = gate.cli('recall', '--query', 'needle', '--store', store,
+                    '--scope', 'all', '--limit-tokens', '8192')
+            last_result = dict(path='native CLI recall', result=cli)
             check(store + ' native CLI recall reaches real Cognee',
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(cli))
-            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store, scope='all'))
+            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store, scope='all', limit_tokens=8192))
+            last_result = dict(path='MCP recall', status=code_mcp, result=recalled_mcp)
             check(store + ' MCP recall reaches real Cognee with canonical scope', code_mcp == 200 and
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in recalled_mcp)
         status, exported = call('/v1/native/primitive', dict(task_hint='needle', session_start=True, limit_tokens=8192))
@@ -420,7 +433,10 @@ os.kill(pids[0],signal.SIGTERM)
               'retained canonical ' + marker in json.dumps(result))
         before = Proxy.requests
         status, listed = call('search', dict(store='user', keywords=[], limit=10))
-        check('empty-query listing remains canonical and bypasses Cognee',
+        check('public search refuses empty keywords without contacting Cognee',
+            status == 400 and listed.get('kind') == 'invalid_argument' and Proxy.requests == before)
+        status, listed = call('list', dict(store='user', limit=10))
+        check('public canonical listing bypasses Cognee',
             status == 200 and 'retained canonical ' + marker in json.dumps(listed)
             and Proxy.requests == before)
         for store in ('user', 'kb'):
