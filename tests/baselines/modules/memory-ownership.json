@@ -2141,7 +2141,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "f192c105e7a6a43b4d2a264cb07d883fc6cecb8b04249e2a63c5f5a78e9cea62"
+      "sha256": "1c4cba0637c22fafacd2d79f9b7919b49e7b3203e7711ea8867ba13a0fbde2b7"
     },
     "src/server/server_code_index.c": {
       "disposition": "host-transport",
@@ -2645,10 +2645,10 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "6c43890d75d064dacaf2ef9e49456c1b2b32e2bafe797ab2ad30413d10b75fc5",
+      "sha256": "3a349db886e702c63101c1e2fc399092074b5ceeb927ed397df6a0345a38e3c5",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "2756434ac4dbb1f9ae12592592f472ef5346c9ce53588623e308ef76874f3c5c"
+        "api/openapi-server-v1.yaml": "1a0e64c669a408e287d82d7da4d791d176fd07e5c18e7341d1abb0bb3148ad5f"
       }
     }
   },

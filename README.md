@@ -1,13 +1,18 @@
 # aimee
 
-Aimee is a persistent runtime for AI tools. It keeps your memory, code index, sessions and
-workflows outside any one model or coding client. Change the tool or provider and the state stays.
-The server also governs what an agent may read, execute, send and change.
+Aimee gives your AI tools a persistent working environment. Your memory, code index, sessions
+and workflows live in a runtime you operate, so changing a model or coding client preserves the
+work around it. Use it from an enrolled CLI, a coding assistant or the browser.
 
-Memory is the hard part. A stored answer can become wrong, a correction can race an old revision,
-and a retrieved record can be erased before the model uses it. Aimee carries source identity and
-revision through retrieval, review and provider dispatch. Models can propose corrections;
-authenticated users decide whether protected content changes.
+For a project, that means a new session can recover decisions you kept, inspect a published code
+index and hand bounded work to a delegate. A correction updates the stored record and its revision;
+future recall checks that revision before provider dispatch. You can carry the project's state
+forward while choosing a different model for the next task.
+
+The design puts ownership in the runtime. Aimee selects and authorizes memory, holds credentials,
+and governs what an agent may read, execute, send and change. A model consumes the selected context
+and proposes actions. Durable workflows retain their execution state across individual model
+calls. You take on a server, its backups and its upgrades in exchange for control of that state.
 
 ![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge and Cognee retrieval are optional](docs/images/architecture/overview.svg)
 
@@ -52,7 +57,7 @@ still has these two roles. See [Server and KB](docs/SERVER_AND_KB.md).
 ## Memory engines can change without changing ownership
 
 The replaceable-memory implementation in [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005)
-extracts the current memory API into a generic contract. Native Aimee memory remains the default;
+introduced a generic contract for the memory API and is merged into the integration tree. Native Aimee memory remains the default;
 Cognee 1.6.2 is the first alternative retrieval engine. Aimee retains canonical records,
 authorization, identity, audit and lifecycle. A replacement uses the existing module infrastructure.
 
@@ -65,8 +70,9 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The plugin's staged
-preview requires a server with the newer `/v1/native/primitive` route.
+a replaceable retrieval engine solve different parts of the memory path. The current 0.3.2 candidate provides separate Gemma4 12B, Gemma4 26B A4B and Qwen3.8 27B
+plugins on one shared runtime. Its server prerequisite and remaining publication gates are in the
+[release preparation record](docs/releases/native-memory-v0.3.2/README.md).
 
 ## Start with one Server
 

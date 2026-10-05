@@ -18,6 +18,15 @@ Linux client enrollment can create an mTLS certificate automatically. macOS and 
 native TLS stacks but currently need an explicitly provisioned client certificate when mTLS is
 required.
 
+## Native-memory model plugins
+
+The separate 0.3.2 candidate targets Linux x86-64, CPython 3.12, glibc 2.39+ and exactly vLLM
+0.30.0. Its measured CUDA profiles are Gemma4 12B Q4_K_M, Gemma4 26B A4B Q3_K_M and Qwen3.8
+27B FP8 with CPU matrix offload. The application platform table above does not establish plugin
+compatibility. The signed candidate and source-export repair are prepared; final image qualification
+and public installation remain pending. See
+[Native memory](NATIVE_MEMORY_PLUGIN.md) and its [release preparation](releases/native-memory-v0.3.2/README.md).
+
 ## Coding tools
 
 | Tool | Hooks | MCP | Other path |

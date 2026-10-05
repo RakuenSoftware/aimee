@@ -32,13 +32,21 @@ because another release can land while a run sits in the queue.
 
 ## Approving one
 
-1. Merge to `main`.
-2. Open the run. The summary names the version, the commit and who pushed it.
-3. Approve the `release` environment, or reject it.
+1. Review the `testing` → `main` promotion. Its `Main merge approval` workflow builds the proposed
+   version's thin clients and application images, and validates synthesis/embedder promotion sources
+   with publication disabled.
+2. Approve the `main-merge-approval` environment after those jobs pass, then merge to `main`.
+3. Open the release run. Its summary names the version, commit and actor. Approve the separate
+   `release` environment to create the tag and publish the artifacts, or reject it.
 
-**The gate is only real while the `release` environment has required reviewers.** An environment with
-none is approved automatically by GitHub, which is the old behaviour with extra steps. Check it in
-repository settings before trusting this document.
+**Both gates depend on their GitHub configuration.** The branch ruleset must require deployment to
+`main-merge-approval`; both environments need required reviewers. An environment with no reviewers
+approves automatically. Check repository settings before treating the gates as enforced.
+
+The separate [native-memory 0.3.2 candidate](releases/native-memory-v0.3.2/README.md) has its own
+reviewed wheel identities, signatures and draft prerelease. The application workflow does not build
+or publish those plugins. Publish a compatible application first, then verify a clean plugin install
+from the public release assets.
 
 ## The version is inferred, except the part that is a decision
 

@@ -40,7 +40,7 @@ versions, audit and lifecycle. Advanced native operations are separate capabilit
 
 ![Memory owner and canonical source with selectable native or Cognee retrieval](images/architecture/memory-backends.svg)
 
-This implementation is tracked in [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005),
+This implementation is merged through [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005),
 newer than published 0.4.6. Use the [contract and provider guide](modules/memory.md#memory-backend-contract)
 for engine selection, optional cleanup, authoring and required CI. The
 [native](validation/memory-native-ct-253-2026-10-04.md) and

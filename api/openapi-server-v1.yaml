@@ -335,6 +335,9 @@ paths:
         Requires the enrolled client's memory-read capability. Aimee returns
         current source records and revisions; the inference host retains its
         model weights and prepares model-specific native state locally.
+        The active view contains at most 32 unique records. Overlapping recall
+        sections do not repeat a record; conflicting source revisions or content
+        fail closed, including conflicts outside the selected 32-record window.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

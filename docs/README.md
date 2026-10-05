@@ -31,7 +31,8 @@ Start here:
 
 The application release being prepared is **1.0.0**. The previous published release verified on
 2026-10-04 is 0.4.6. The intended 0.3.0 release shipped
-on 2026-08-04. Integration work and open PRs can be newer than the release images; each guide
+on 2026-08-04. The [PR #3003 follow-up](validation/pr-3003-release-audit-2026-10-05.md)
+identifies the newer three-plugin candidate and its remaining release prerequisites. Integration work and open PRs can be newer than the release images; each guide
 must identify that boundary where it matters. The
 [documentation audit](validation/documentation-current-state-audit-2026-10-04.md) records the source
 checks, corrected drift and CI findings. Start with [What's new](WHATS_NEW.md) and

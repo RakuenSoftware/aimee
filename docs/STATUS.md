@@ -1,7 +1,7 @@
 # Feature status
 
-This page describes the **1.0.0 release target**, inspected integration code and the replaceable-memory PR, checked on
-2026-10-04. Published [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) predates
+This page describes the **1.0.0 release target**, inspected integration code, checked on
+2026-10-05. Published [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) predates
 some of these paths. PR status and release qualification are separate from implementation status. `Done` means the path is implemented and covered by
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
@@ -41,8 +41,8 @@ workspace registration alone does not start a client runner.
 | KB-free personal recall | Done | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
 | Current-memory eligibility | Done | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
 | Memory reliability baseline | Done, qualified per recorded gates | Governed revisions, correction review UI, source revalidation, rejection identity, runtime-role refusal protection and erasure replay are implemented. Qualification evidence is scoped to the cited release and Atlas reports; optional adaptive policies remain gated. |
-| Replaceable memory / Cognee | Implemented and deployed-tested in PR #3005 | Generic Store contract, native default, Cognee 1.6.2 alternative; canonical guarantees stay in Aimee. Required real-provider CI is added. Not included in 0.4.6; 256-record scope bound and restart interruption apply. |
-| Native-memory model delivery | Integrated source; plugin preview staged separately | Enrolled `/v1/native/primitive` selects personal source records. Separate vLLM plugin prepares model-native banks locally; supported profiles and publication limits are in its guide. |
+| Replaceable memory / Cognee | Merged; deployed-tested | Generic Store contract, native default, Cognee 1.6.2 alternative; canonical guarantees stay in Aimee. Required real-provider CI is added. Not included in 0.4.6; 256-record scope bound and restart interruption apply. |
+| Native-memory model delivery | Integrated source; 0.3.2 plugin candidate prepared separately | Enrolled `/v1/native/primitive` selects personal source records. Separate vLLM plugin prepares model-native banks locally. Three dedicated adapters share one runtime. The source-export repair and signed 0.3.2 candidate are prepared; final image qualification and publication remain separate. See the [plugin guide](NATIVE_MEMORY_PLUGIN.md). |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |

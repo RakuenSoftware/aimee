@@ -891,6 +891,7 @@ set(CLI_SRCS
 # it is compiled on every platform — no per-OS exclusion.
 
 set(SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c

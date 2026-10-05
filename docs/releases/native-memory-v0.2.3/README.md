@@ -1,5 +1,9 @@
 # Native-memory executable release v0.2.3
 
+The newer [0.3.2 release preparation](../native-memory-v0.3.2/README.md) covers three dedicated
+model plugins on one shared runtime. This signed stage preserves the earlier candidate and its
+validation; use the current [plugin guide](../../NATIVE_MEMORY_PLUGIN.md) when choosing a release.
+
 This change reviews the **compiled Aimee vLLM executable distribution** for
 the `native-memory-v0.2.3` GitHub Release. The implementation source and build
 pipeline remain private. The GitHub Release in `RakuenSoftware/aimee` will
@@ -44,7 +48,7 @@ payload, then creates a draft `native-memory-v0.2.3` prerelease in the Aimee
 repo using [RELEASE_NOTES.md](RELEASE_NOTES.md). It attaches the two wheels,
 their two `.sig` files, `manifest.json`, `manifest.json.sig`, `SHA256SUMS`,
 and `SHA256SUMS.sig`. Do not attach the local staging receipt.
-Keep this separate from Aimee's ordinary `v0.4.x` application releases and
+Keep this separate from Aimee's application releases and
 do not mark it “Latest.” A clean external installation of the plugin wheel
 with its `[gguf]` extra must succeed from the public URLs before announcing
 delivery.

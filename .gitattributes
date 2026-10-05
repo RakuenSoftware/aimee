@@ -1,1 +1,4 @@
 docs/releases/native-memory-v0.2.3/*.sig binary
+
+# Detached Ed25519 signatures are opaque binary bytes, including whitespace.
+docs/releases/**/*.sig binary

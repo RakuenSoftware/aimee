@@ -334,6 +334,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-manuscript \
                $(TESTPREFIX)/unit-test-persona \
                $(TESTPREFIX)/unit-test-server-http \
+               $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-openai-shape \
                $(TESTPREFIX)/unit-test-openai-chat-policed \
                $(TESTPREFIX)/unit-test-openai-responses-store \
@@ -800,6 +801,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
                $(TESTPREFIX)/unit-test-db1-conversation-client \
                $(TESTPREFIX)/unit-test-server-http \
+               $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-web-search-fuse \
                $(TESTPREFIX)/unit-test-trajectory-batch \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
@@ -7848,3 +7850,7 @@ $(TESTPREFIX)/unit-test-postgres-session-transport: $(OBJDIR)/tests/test_postgre
 .PHONY: test-postgres-session-transport
 test-postgres-session-transport: $(TESTPREFIX)/unit-test-postgres-session-transport
 	$(TESTPREFIX)/unit-test-postgres-session-transport
+
+# Model-neutral projection of already authorized source rows.
+$(TESTPREFIX)/unit-test-server-native-primitive: $(OBJDIR)/tests/test_server_native_primitive.o $(OBJDIR)/server/server_native_primitive.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
