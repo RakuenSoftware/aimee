@@ -142,12 +142,17 @@ def main():
         COGNEE_TRACING_ENABLED='false', TELEMETRY_DISABLED='true')
     checks, stacks, prefixes = [], [], []
     provider = None
+    last_result = {}
     provider_log = (private / 'provider.log').open('w')
 
     def check(name, passed):
         checks.append(dict(name=name, passed=bool(passed)))
         print(('PASS ' if passed else 'FAIL ') + name, flush=True)
         if not passed:
+            path = private / 'last-result.json'
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as diagnostic:
+                json.dump(last_result, diagnostic)
             raise RuntimeError(name)
 
     def provider_request(path, data=None, content_type='application/json'):
@@ -226,6 +231,7 @@ def main():
         server.start()
 
         def call(path, body):
+            nonlocal last_result
             status, result = gate.call(path, body)
             if result.get('object') == 'op.run':
                 run_id = result['id']
@@ -236,6 +242,7 @@ def main():
                 if result.get('status') not in ('completed', 'failed'):
                     raise RuntimeError('asynchronous fixture operation did not terminate')
                 result = result.get('result', result)
+            last_result = dict(path=path, status=status, result=result)
             return status, result
 
         records = {}
@@ -310,13 +317,13 @@ def main():
         check('real Cognee reindexes the corrected canonical revision',
               restored_search(probe_query, 'user corrected ' + marker))
         for store in ('user', 'kb'):
-            status, recalled = call('recall', dict(store=store, task_hint='needle', limit_tokens=8192))
+            status, recalled = call('recall', dict(store=store, scope='all', task_hint='needle', limit_tokens=8192))
             check(store + ' recall traverses the selected real Cognee backend', status == 200 and
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(recalled))
-            cli = gate.cli('recall', '--query', 'needle', '--store', store)
+            cli = gate.cli('recall', '--query', 'needle', '--store', store, '--scope', 'all')
             check(store + ' native CLI recall reaches real Cognee',
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(cli))
-            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store))
+            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store, scope='all'))
             check(store + ' MCP recall reaches real Cognee with canonical scope', code_mcp == 200 and
                 ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in recalled_mcp)
         status, exported = call('/v1/native/primitive', dict(task_hint='needle', session_start=True, limit_tokens=8192))
