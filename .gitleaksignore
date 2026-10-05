@@ -281,3 +281,5 @@ f837d02463a380c0d9fa2b5ed72ae1b2d814ec3f:docs/validation/memory-rule-expiry-2026
 # Reviewed public OpenAPI input checksum in the memory ownership ledger, not a credential.
 f353b487b8a629a7f04d9422ff1e553df84e5a4d:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
 c23958b53565bb2011e23a2eabf201e301f10c55:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
+# Reviewed public SHA-256 of the native-primitive OpenAPI input, not an API credential.
+53add717e77f0f80dfea610252a5814494772eba:tests/baselines/modules/memory-ownership.json:generic-api-key:2651
