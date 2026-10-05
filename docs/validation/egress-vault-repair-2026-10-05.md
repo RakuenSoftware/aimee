@@ -107,7 +107,7 @@ The promotion module-inventory failure was a stale baseline for the two reviewed
 host dispatch changes. [PR #3010](https://github.com/RakuenSoftware/aimee/pull/3010)
 refreshes those hashes. The local baseline check, eight baseline regression tests
 and module-source-ownership check pass. Its later CI T3 job received a runner
-shutdown signal and exited 143; it needs a rerun after the parent workflow finishes.
+shutdown signal and exited 143; its rerun was queued after the parent workflow completed.
 Two other failed-looking promotion runs contained cancelled jobs.
 
 Main promotion still requires its protected checks and approval. Native plugin
