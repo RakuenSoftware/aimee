@@ -1,0 +1,150 @@
+[
+  {
+    "name": "real Cognee 1.6.2 authenticates disposable account",
+    "passed": true
+  },
+  {
+    "name": "kb with Cognee reaches candidate-image readiness",
+    "passed": true
+  },
+  {
+    "name": "kb keeps credentials out of container metadata",
+    "passed": true
+  },
+  {
+    "name": "server with Cognee reaches candidate-image readiness",
+    "passed": true
+  },
+  {
+    "name": "server keeps credentials out of container metadata",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_client_bearer_token",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_service_identity_token",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_connection_string",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_mode",
+    "passed": true
+  },
+  {
+    "name": "user canonical store succeeds",
+    "passed": true
+  },
+  {
+    "name": "user real Cognee retrieval uses canonical scoped records",
+    "passed": true
+  },
+  {
+    "name": "kb canonical store succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb real Cognee retrieval uses canonical scoped records",
+    "passed": true
+  },
+  {
+    "name": "both immutable node namespaces own real derived datasets",
+    "passed": true
+  },
+  {
+    "name": "user exposes a canonical version for conditional deletion",
+    "passed": true
+  },
+  {
+    "name": "kb exposes a canonical version for conditional deletion",
+    "passed": true
+  },
+  {
+    "name": "user provider outage refuses destructive completion",
+    "passed": true
+  },
+  {
+    "name": "kb provider outage refuses destructive completion",
+    "passed": true
+  },
+  {
+    "name": "user outage preserves serving canonical record",
+    "passed": true
+  },
+  {
+    "name": "user same conditional request succeeds after provider recovery",
+    "passed": true
+  },
+  {
+    "name": "user deletion retry is idempotent",
+    "passed": true
+  },
+  {
+    "name": "user deleted record leaves current canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "kb outage preserves serving canonical record",
+    "passed": true
+  },
+  {
+    "name": "kb same conditional request succeeds after provider recovery",
+    "passed": true
+  },
+  {
+    "name": "kb deletion retry is idempotent",
+    "passed": true
+  },
+  {
+    "name": "kb deleted record leaves current canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "both nodes remove real deleted derived datasets",
+    "passed": true
+  },
+  {
+    "name": "shared user-authority deletion destroys canonical row",
+    "passed": true
+  },
+  {
+    "name": "personal retirement leaves no active canonical row",
+    "passed": true
+  },
+  {
+    "name": "unrelated canonical record survives deletion",
+    "passed": true
+  },
+  {
+    "name": "retained canonical record reindexes after deletion",
+    "passed": true
+  },
+  {
+    "name": "fixture restores derived data for a deleted record",
+    "passed": true
+  },
+  {
+    "name": "supervised memory restart removes restored derived state for deleted records",
+    "passed": true
+  },
+  {
+    "name": "restart cannot reactivate retired canonical row",
+    "passed": true
+  },
+  {
+    "name": "derived reset preserves unrelated canonical record",
+    "passed": true
+  },
+  {
+    "name": "retained canonical record reindexes after derived reset",
+    "passed": true
+  },
+  {
+    "name": "real Cognee exercised local completion and embedding models",
+    "passed": true
+  }
+]

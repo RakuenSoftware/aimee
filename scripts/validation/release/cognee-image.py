@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise published-image Cognee wiring, canonical authority and derived erasure."""
+"""Exercise image Cognee wiring, canonical authority, deletion and derived reset."""
 import argparse
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -161,7 +161,7 @@ def main():
                 '--entrypoint', '/usr/sbin/runuser', binary, '-u', 'aimee', '--', binary,
                 '--bootstrap-vault-stdin', env=stack.env, data='AIMEE_MEMORY_BACKEND_TOKEN=' + token + '\0')
             stack.start()
-            check(role + ' with Cognee reaches published-image readiness', True)
+            check(role + ' with Cognee reaches candidate-image readiness', True)
             check(role + ' keeps credentials out of container metadata', matrix.application_metadata_is_private(stack))
             node = json.loads(matrix.command('docker', 'exec', stack.application, 'cat',
                 '/var/lib/aimee/instance-identity.json'))['id']
@@ -213,36 +213,48 @@ def main():
         check('both immutable node namespaces own real derived datasets',
               all(any(row['name'].startswith(prefix) for row in catalog) for prefix in prefixes))
         old_name = next(row['name'] for row in catalog if row['name'].startswith(prefixes[1]))
-        erasure = dict(subject='unretained-disposable-subject', request_id='published-cognee-' + uuid.uuid4().hex)
-        Proxy.blocked = True
-        _, refused = call('/v1/kb/erase-subject', erasure)
-        check('provider transport outage blocks completion evidence',
-              refused.get('coverage_complete') is not True and refused.get('status') == 'error')
-        Proxy.blocked = False
-        _, completed = call('/v1/kb/erase-subject', erasure)
-        check('same erasure request retries to verified completion', completed.get('coverage_complete') is True)
-        check('completion verifies both nodes derived datasets absent', not datasets())
-        _, repeated = call('/v1/kb/erase-subject', erasure)
-        check('completion retry is idempotent', repeated.get('coverage_complete') is True)
+        deletions = {}
         for store, request in records.items():
-            status, result = call('get', request)
-            check(store + ' canonical record survives conservative derived reset', status == 200 and
-                  store + ' ' + marker in json.dumps(result))
-            status, result = call('search', dict(request, keywords=['needle'], limit=10))
-            check(store + ' retained canonical data reindexes after reset', status == 200 and
-                  store + ' ' + marker in json.dumps(result))
-        author = gate.personal_sql('SELECT author_principal FROM user_memories WHERE id=' + records['user']['id'])
-        check('private fixture has a verified canonical author', bool(author))
-        _, erased = call('/v1/kb/erase-subject', dict(subject=author, request_id='actual-author-' + uuid.uuid4().hex))
-        check('actual author erasure verifies managed-store coverage', erased.get('coverage_complete') is True)
-        check('actual private canonical row is erased', gate.personal_sql(
-            'SELECT count(*) FROM user_memories WHERE id=' + records['user']['id']) == '0')
+            status, result = call('get', dict(request, include_version=True))
+            check(store + ' exposes a canonical version for conditional deletion', status == 200)
+            deletions[store] = dict(request, expected_version=result['memory']['version'],
+                idempotency_key='published-cognee-delete-' + uuid.uuid4().hex)
+        Proxy.blocked = True
+        for store, request in deletions.items():
+            status, result = call('delete', request)
+            check(store + ' provider outage refuses destructive completion',
+                  result.get('status') == 'error' and 'mutation_receipt' not in result)
+        Proxy.blocked = False
+        for store, request in deletions.items():
+            status, result = call('get', records[store])
+            check(store + ' outage preserves serving canonical record', status == 200)
+            status, result = call('delete', request)
+            check(store + ' same conditional request succeeds after provider recovery',
+                  status == 200 and result.get('deleted') is True and 'mutation_receipt' in result)
+            status, result = call('delete', request)
+            check(store + ' deletion retry is idempotent', status == 200 and
+                  result.get('mutation_receipt', {}).get('replayed') is True)
+            status, result = call('get', records[store])
+            check(store + ' deleted record leaves current canonical retrieval', status == 404)
+        check('both nodes remove real deleted derived datasets', not datasets())
+        check('shared user-authority deletion destroys canonical row',
+              matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+              '-d', 'aimee_store', '-X', '-At', '-c', 'SELECT count(*) FROM memories WHERE id=' + records['kb']['id']) == '0')
+        check('personal retirement leaves no active canonical row', gate.personal_sql(
+            "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
+        status, retained = call('store', dict(store='user', key='retained-' + marker,
+            content='needle retained canonical ' + marker, kind='fact'))
+        retained_request = dict(store='user', id=str(retained['id']))
+        check('unrelated canonical record survives deletion', status == 200)
+        status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
+        check('retained canonical record reindexes after deletion', status == 200 and
+              'retained canonical ' + marker in json.dumps(result))
         boundary = 'disposable-provider-restore'
         body = (f'--{boundary}\r\nContent-Disposition: form-data; name="datasetName"\r\n\r\n{old_name}\r\n'
                 f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="restored.txt"\r\n'
-                f'Content-Type: text/plain\r\n\r\nneedle erased historical fixture\r\n--{boundary}--\r\n').encode()
+                f'Content-Type: text/plain\r\n\r\nneedle retired historical fixture\r\n--{boundary}--\r\n').encode()
         provider_request('/api/v1/add', body, 'multipart/form-data; boundary=' + boundary)
-        check('fixture restores an erased derived dataset', any(row['name'] == old_name for row in datasets()))
+        check('fixture restores derived data for a deleted record', any(row['name'] == old_name for row in datasets()))
         code = '''import os,signal
 from pathlib import Path
 pids=[]
@@ -259,10 +271,16 @@ os.kill(pids[0],signal.SIGTERM)
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and any(row['name'] == old_name for row in datasets()):
             time.sleep(.5)
-        check('supervised memory restart removes restored erased derived state',
+        check('supervised memory restart removes restored derived state for deleted records',
               not any(row['name'] == old_name for row in datasets()))
-        check('restart cannot restore the erased canonical row', gate.personal_sql(
-            'SELECT count(*) FROM user_memories WHERE id=' + records['user']['id']) == '0')
+        check('restart cannot reactivate retired canonical row', gate.personal_sql(
+            "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
+        status, result = call('get', retained_request)
+        check('derived reset preserves unrelated canonical record', status == 200 and
+              'retained canonical ' + marker in json.dumps(result))
+        status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
+        check('retained canonical record reindexes after derived reset', status == 200 and
+              'retained canonical ' + marker in json.dumps(result))
         check('real Cognee exercised local completion and embedding models', all(fixture.ModelFixture.calls.values()))
         (output / 'model-calls.json').write_text(json.dumps(fixture.ModelFixture.calls, indent=2) + '\n')
     except Exception as error:
