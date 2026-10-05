@@ -368,3 +368,298 @@ func TestCogneeSubjectErasureResetAndRetry(t *testing.T) {
 		t.Fatal("reset cancellation lost", err)
 	}
 }
+
+type validationSource struct {
+	*catalog
+	search func() ([]memory.Record, error)
+	get    func(memory.Record) (memory.Record, error)
+}
+
+func (s validationSource) Namespace(memory.Scope) string { return "validated-owner" }
+func (s validationSource) Search(ctx context.Context, scope memory.Scope, q, k, tier string, n int) ([]memory.Record, error) {
+	if s.search != nil {
+		return s.search()
+	}
+	return s.catalog.Search(ctx, scope, q, k, tier, n)
+}
+func (s validationSource) Get(ctx context.Context, scope memory.Scope, id int64) (memory.Record, error) {
+	r, e := s.catalog.Get(ctx, scope, id)
+	if e == nil && s.get != nil {
+		return s.get(r)
+	}
+	return r, e
+}
+func TestCogneeValidationConfigurationAndBounds(t *testing.T) {
+	source := &catalog{records: map[int64]memory.Record{}}
+	transport := func(context.Context, string, string, string, []byte) (int, []byte, error) {
+		t.Fatal("unexpected provider call")
+		return 0, nil, nil
+	}
+	for _, endpoint := range []string{"", "ftp://host", "http://user:password@host", "http://host/path", "http://host?x=1", "http://host#fragment", "://bad"} {
+		t.Run("endpoint-"+endpoint, func(t *testing.T) {
+			if _, e := New(source, transport, endpoint, "node"); !errors.Is(e, memory.ErrUnavailable) {
+				t.Fatal(e)
+			}
+		})
+	}
+	for _, namespace := range []string{"", strings.Repeat("n", 257)} {
+		if _, e := New(source, transport, "http://host", namespace); !errors.Is(e, memory.ErrUnavailable) {
+			t.Fatal(e)
+		}
+	}
+	if _, e := New(nil, transport, "http://host", "node"); !errors.Is(e, memory.ErrUnavailable) {
+		t.Fatal(e)
+	}
+	if _, e := New(source, nil, "http://host", "node"); !errors.Is(e, memory.ErrUnavailable) {
+		t.Fatal(e)
+	}
+	b, _ := New(source, transport, "https://host/", "node")
+	if c := b.Capabilities(); c.Name != "cognee" || c.Version != 1 || len(c.Operations) != 6 {
+		t.Fatal(c)
+	}
+	for _, n := range []int{-1, 0, 257} {
+		if _, e := b.Search(context.Background(), memory.Scope{}, "query", "", "", n); !errors.Is(e, memory.ErrCapacity) {
+			t.Fatal(e)
+		}
+	}
+	if _, e := b.Search(context.Background(), memory.Scope{}, strings.Repeat("q", 16385), "", "", 1); !errors.Is(e, memory.ErrCapacity) {
+		t.Fatal(e)
+	}
+	if _, e := b.Search(context.Background(), memory.Scope{}, "", "", "", 1); e != nil {
+		t.Fatal(e)
+	}
+	if e := b.Forget(context.Background(), memory.Scope{}, 0); !errors.Is(e, memory.ErrUnavailable) {
+		t.Fatal(e)
+	}
+	if e := b.remove(context.Background(), "../foreign"); !errors.Is(e, memory.ErrUnavailable) {
+		t.Fatal(e)
+	}
+}
+func TestCogneeValidationTransportAndCatalog(t *testing.T) {
+	ctx := context.Background()
+	source := &catalog{records: map[int64]memory.Record{}}
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		failure error
+		want    error
+	}{
+		{"unreachable", 0, "", errors.New("offline"), memory.ErrUnavailable},
+		{"unauthorized", 401, `{}`, nil, memory.ErrUnavailable},
+		{"redirect", 302, `[]`, nil, memory.ErrUnavailable},
+		{"server-error", 500, `[]`, nil, memory.ErrUnavailable},
+		{"malformed", 200, `{`, nil, memory.ErrUnavailable},
+		{"oversized", 200, strings.Repeat("x", MaxBody+1), nil, memory.ErrUnavailable},
+		{"bad-uuid", 200, `[{"id":"../escape","name":"foreign"}]`, nil, memory.ErrUnavailable},
+		{"upper-uuid", 200, `[{"id":"ABCDEF00-0000-0000-0000-000000000000","name":"foreign"}]`, nil, memory.ErrUnavailable},
+		{"empty-name", 200, `[{"id":"00000000-0000-0000-0000-000000000001","name":""}]`, nil, memory.ErrUnavailable},
+		{"duplicate-name", 200, `[{"id":"00000000-0000-0000-0000-000000000001","name":"same"},{"id":"00000000-0000-0000-0000-000000000002","name":"same"}]`, nil, memory.ErrUnavailable},
+	}
+	many := make([]map[string]string, 10001)
+	for i := range many {
+		many[i] = map[string]string{"id": "00000000-0000-0000-0000-000000000001", "name": "x"}
+	}
+	raw, _ := json.Marshal(many)
+	cases = append(cases, struct {
+		name    string
+		status  int
+		body    string
+		failure error
+		want    error
+	}{"catalog-capacity", 200, string(raw), nil, memory.ErrCapacity})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, _ := New(source, func(context.Context, string, string, string, []byte) (int, []byte, error) {
+				return c.status, []byte(c.body), c.failure
+			}, "http://fixture", "node")
+			if _, e := b.datasets(ctx); !errors.Is(e, c.want) {
+				t.Fatalf("%v", e)
+			}
+		})
+	}
+	b, _ := New(source, func(ctx context.Context, _ string, _ string, _ string, _ []byte) (int, []byte, error) {
+		return 0, nil, ctx.Err()
+	}, "http://fixture", "node")
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, e := b.datasets(cancelled); !errors.Is(e, context.Canceled) {
+		t.Fatal(e)
+	}
+	if e := b.call(ctx, "POST", "/api/v1/add", "", make([]byte, MaxBody+1), nil); !errors.Is(e, memory.ErrCapacity) {
+		t.Fatal(e)
+	}
+}
+func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
+	scope := memory.Scope{Type: memory.ScopeProject, Value: "paths"}
+	ctx := context.Background()
+	for _, fault := range []string{"catalog", "add", "cognify", "search", "delete-stale", "unfinished", "missing-run", "duplicate-run", "foreign-run", "duplicate-result", "too-many-results", "foreign-result", "missing-score", "multiple-chunks", "bad-score", "empty-chunks", "filters", "limit", "equal-score", "source-version", "source-deleted"} {
+		t.Run(fault, func(t *testing.T) {
+			version := memory.MemoryRecordVersion{OwnerID: "owner", RecordID: "1", RecordRevision: "1"}
+			records := validationSource{catalog: &catalog{records: map[int64]memory.Record{1: {ID: 1, Scope: scope, Content: "needle one", Kind: "fact", Tier: "L2", Version: &version}, 2: {ID: 2, Scope: scope, Content: "needle two", Kind: "preference", Tier: "L3"}}}}
+			fixture := &cogneeFixture{datasets: map[string]dataset{}, contents: map[string]string{}}
+			var b *Backend
+			transport := func(c context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
+				path := strings.TrimPrefix(target, "http://fixture")
+				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/cognify" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
+					return 503, []byte(`{}`), nil
+				}
+				req := httptest.NewRequest(method, target, strings.NewReader(string(body)))
+				req.Header.Set("Content-Type", contentType)
+				w := httptest.NewRecorder()
+				fixture.ServeHTTP(w, req)
+				result := w.Body.Bytes()
+				if path == "/api/v1/cognify" {
+					switch fault {
+					case "missing-run":
+						result = []byte(`{}`)
+					case "unfinished":
+						result = []byte(`{"a":{"dataset_name":"` + b.name(records.records[1]) + `","status":"PipelineRunStarted"}}`)
+					case "foreign-run":
+						result = []byte(`{"a":{"dataset_name":"foreign","status":"PipelineRunCompleted"}}`)
+					case "duplicate-run":
+						name := b.name(records.records[1])
+						result = []byte(`{"a":{"dataset_name":"` + name + `","status":"PipelineRunCompleted"},"b":{"dataset_name":"` + name + `","status":"PipelineRunCompleted"}}`)
+					}
+				}
+				if path == "/api/v1/search" {
+					name := b.name(records.records[1])
+					entry := `{"dataset_name":"` + name + `","search_result":[{"score":0.1}]}`
+					switch fault {
+					case "too-many-results":
+						result = []byte(`[` + entry + `,` + entry + `,` + entry + `]`)
+					case "duplicate-result":
+						result = []byte(`[` + entry + `,` + entry + `]`)
+					case "foreign-result":
+						result = []byte(`[{"dataset_name":"foreign","search_result":[]}]`)
+					case "missing-score":
+						result = []byte(`[{"dataset_name":"` + name + `","search_result":[{}]}]`)
+					case "multiple-chunks":
+						result = []byte(`[{"dataset_name":"` + name + `","search_result":[{"score":0},{"score":1}]}]`)
+					case "bad-score":
+						result = []byte(`[{"dataset_name":"` + name + `","search_result":[{"score":1e999}]}]`)
+					case "empty-chunks":
+						result = []byte(`[{"dataset_name":"` + name + `","search_result":[]}]`)
+					case "equal-score":
+						result = []byte(`[` + entry + `,{"dataset_name":"` + b.name(records.records[2]) + `","search_result":[{"score":0.1}]}]`)
+					}
+				}
+				return w.Code, result, nil
+			}
+			b, _ = New(records, transport, "http://fixture", "node")
+			if fault == "delete-stale" {
+				fixture.datasets["stale"] = dataset{ID: "00000000-0000-0000-0000-000000000001", Name: b.prefix(scope) + "1_stale"}
+			}
+			if fault == "source-version" {
+				records.get = func(r memory.Record) (memory.Record, error) {
+					v := *r.Version
+					v.RecordRevision = "2"
+					r.Version = &v
+					return r, nil
+				}
+				b.records = records
+			}
+			if fault == "source-deleted" {
+				records.get = func(memory.Record) (memory.Record, error) { return memory.Record{}, memory.ErrNotFound }
+				b.records = records
+			}
+			kind, tier, n := "", "", 2
+			if fault == "filters" {
+				kind, tier = "fact", "L2"
+			}
+			if fault == "limit" {
+				n = 1
+			}
+			found, e := b.Search(ctx, scope, "needle", kind, tier, n)
+			switch fault {
+			case "empty-chunks":
+				if e != nil || len(found) != 0 {
+					t.Fatal(found, e)
+				}
+			case "filters", "limit":
+				if e != nil || len(found) != 1 {
+					t.Fatal(found, e)
+				}
+			case "equal-score":
+				if e != nil || len(found) != 2 || found[0].ID != 1 {
+					t.Fatal(found, e)
+				}
+			case "source-deleted":
+				if !errors.Is(e, memory.ErrNotFound) {
+					t.Fatal(e)
+				}
+			default:
+				if !errors.Is(e, memory.ErrUnavailable) {
+					t.Fatal(found, e)
+				}
+			}
+		})
+	}
+	for _, fault := range []string{"source-error", "scope-mismatch", "invalid-id", "duplicate-source", "too-many", "empty-scope"} {
+		t.Run(fault, func(t *testing.T) {
+			source := validationSource{catalog: &catalog{records: map[int64]memory.Record{}}, search: func() ([]memory.Record, error) {
+				switch fault {
+				case "source-error":
+					return nil, memory.ErrUnavailable
+				case "scope-mismatch":
+					return []memory.Record{{ID: 1}}, nil
+				case "invalid-id":
+					return []memory.Record{{Scope: scope}}, nil
+				case "duplicate-source":
+					return []memory.Record{{ID: 1, Scope: scope}, {ID: 1, Scope: scope}}, nil
+				case "too-many":
+					return make([]memory.Record, 257), nil
+				default:
+					return nil, nil
+				}
+			}}
+			b, _ := New(source, func(context.Context, string, string, string, []byte) (int, []byte, error) {
+				return 200, []byte(`[]`), nil
+			}, "http://fixture", "node")
+			found, e := b.Search(ctx, scope, "needle", "", "", 1)
+			if fault == "empty-scope" {
+				if e != nil || len(found) != 0 {
+					t.Fatal(found, e)
+				}
+			} else if e == nil {
+				t.Fatal("invalid source accepted")
+			}
+		})
+	}
+}
+
+func TestCogneeValidationInterruptedTransportAndResetVerification(t *testing.T) {
+	source := &catalog{records: map[int64]memory.Record{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	b, _ := New(source, func(context.Context, string, string, string, []byte) (int, []byte, error) {
+		cancel()
+		return 0, nil, errors.New("connection lost")
+	}, "http://fixture", "node")
+	if _, e := b.datasets(ctx); !errors.Is(e, context.Canceled) {
+		t.Fatal(e)
+	}
+	for _, operation := range []string{"forget-catalog", "reset-catalog", "reset-verification"} {
+		t.Run(operation, func(t *testing.T) {
+			calls := 0
+			b, _ := New(source, func(context.Context, string, string, string, []byte) (int, []byte, error) {
+				calls++
+				if operation != "reset-verification" || calls > 1 {
+					return 503, []byte(`{}`), nil
+				}
+				return 200, []byte(`[]`), nil
+			}, "http://fixture", "node")
+			var e error
+			if operation == "forget-catalog" {
+				e = b.Forget(context.Background(), memory.Scope{}, 1)
+			} else {
+				e = b.ResetDerived(context.Background())
+			}
+			if !errors.Is(e, memory.ErrUnavailable) {
+				t.Fatal(e)
+			}
+		})
+	}
+	if validUUID("000000000000-0000-0000-000000000001") {
+		t.Fatal("misplaced UUID separator admitted")
+	}
+}
