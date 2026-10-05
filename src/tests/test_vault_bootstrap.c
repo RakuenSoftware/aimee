@@ -554,6 +554,7 @@ int main(void)
        "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));
    assert(!vault_env_egress_parent_path_ok("/tmp/aimee-module-egress"));
    assert(vault_env_egress_parent_attest() != 0);
+   assert(vault_env_egress_resource() != 0);
    assert(vault_env_postgres_resource() != 0);
    assert(vault_env_print_egress_credential("AIMEE_MCP_712_TOKEN") != 0);
 

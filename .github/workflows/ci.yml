@@ -2224,6 +2224,9 @@ jobs:
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+      - name: Installed Vault helper under hardened egress (both roles)
+        if: matrix.topology == 'T3'
+        run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
       - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
         run: |

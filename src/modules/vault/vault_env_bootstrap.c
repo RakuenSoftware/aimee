@@ -462,6 +462,55 @@ int vault_env_print_egress_credential(const char *env_name)
    return rc;
 }
 
+/* The owner authenticates this pipe before disabling dumpability. No credential
+ * is read until it sends a request after bus attachment and hardening. Each
+ * lookup reads the current encrypted Vault, preserving rotation and revocation. */
+int vault_env_egress_resource(void)
+{
+#if defined(__linux__)
+   if (vault_env_egress_parent_attest() != 0)
+      return -1;
+   if (fwrite("EVR1", 1, 4, stdout) != 4 || fflush(stdout) != 0)
+      return -1;
+   for (;;)
+   {
+      unsigned char size[4];
+      size_t got = fread(size, 1, sizeof(size), stdin);
+      if (got == 0 && feof(stdin))
+         return 0;
+      if (got != sizeof(size))
+         return -1;
+      unsigned long n = (unsigned long)size[0] | ((unsigned long)size[1] << 8) |
+                        ((unsigned long)size[2] << 16) | ((unsigned long)size[3] << 24);
+      char name[ENV_NAME_MAX + 1];
+      if (n == 0 || n > ENV_NAME_MAX || fread(name, 1, n, stdin) != n || memchr(name, 0, n))
+         return -1;
+      name[n] = 0;
+      if (!mcp_egress_credential_name_ok(name))
+         return -1;
+      char value[ENV_SECRET_VALUE_MAX + 1] = {0};
+      if (mlock(value, sizeof(value)) != 0)
+         return -1;
+      vault_status_t st = vault_service_get_server_principal(ENV_AGENT, name, value, sizeof(value));
+      size_t len = st == VAULT_OK ? strlen(value) : 0;
+      if (len > ENV_SECRET_VALUE_MAX || memchr(value, '\n', len) || memchr(value, '\r', len))
+         len = 0;
+      for (int i = 0; i < 4; i++)
+         size[i] = (unsigned char)(len >> (8 * i));
+      int rc = fwrite(size, 1, sizeof(size), stdout) == sizeof(size) &&
+                       fwrite(value, 1, len, stdout) == len && fflush(stdout) == 0
+                   ? 0
+                   : -1;
+      OPENSSL_cleanse(value, sizeof(value));
+      (void)munlock(value, sizeof(value));
+      if (rc != 0)
+         return -1;
+   }
+#else
+   return -1;
+#endif
+}
+
 static int env_flag(const char *name)
 {
    const char *value = getenv(name);
