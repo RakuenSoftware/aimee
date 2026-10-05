@@ -8,6 +8,7 @@
  * First native resource: GET /v1/rules — the active collaboration rules,
  * proxied from aimee-kb via kb_client. */
 #include "server_http.h"
+#include "server_native_primitive.h"
 #include "server_http_internal.h" /* request capability context */
 #include "server.h"               /* server_active_project_from_cwd */
 #include "kb_client.h"
@@ -302,36 +303,8 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
       {
          cJSON *envelope = cJSON_Parse(local);
          cJSON *recall = envelope ? cJSON_GetObjectItemCaseSensitive(envelope, "recall") : NULL;
-         cJSON *rows = cJSON_CreateArray();
-         const char *groups[] = {"identity", "preferences", "active_context", "open_commitments"};
-         int valid = cJSON_IsObject(recall) && rows != NULL;
-         for (size_t g = 0; valid && g < sizeof(groups) / sizeof(groups[0]); ++g)
-         {
-            cJSON *group = cJSON_GetObjectItemCaseSensitive(recall, groups[g]);
-            if (!cJSON_IsArray(group))
-            {
-               valid = 0;
-               break;
-            }
-            cJSON *row = NULL;
-            cJSON_ArrayForEach(row, group)
-            {
-               cJSON *version = cJSON_GetObjectItemCaseSensitive(row, "version");
-               cJSON *content = cJSON_GetObjectItemCaseSensitive(row, "content");
-               if (!cJSON_IsObject(version) || !cJSON_IsString(content))
-               {
-                  valid = 0;
-                  break;
-               }
-               cJSON *copy = cJSON_Duplicate(row, 1);
-               if (!copy || !cJSON_AddItemToArray(rows, copy))
-               {
-                  cJSON_Delete(copy);
-                  valid = 0;
-                  break;
-               }
-            }
-         }
+         cJSON *rows = server_native_primitive_rows(recall);
+         int valid = rows != NULL;
          cJSON *out = valid ? cJSON_CreateObject() : NULL;
          if (!out)
             valid = 0;

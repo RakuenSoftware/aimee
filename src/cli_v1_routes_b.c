@@ -720,7 +720,7 @@ static cJSON *marshal_git_cli(int argc, char **argv)
          continue;
 
       /* key=value / --key=value, typed exactly as verify types its arguments. */
-      const char *raw = arg;
+      char *raw = arg;
       if (strncmp(raw, "--", 2) == 0)
          raw += 2;
       char *eq = strchr(raw, '=');
@@ -828,7 +828,7 @@ static cJSON *marshal_git_verify(int argc, char **argv)
          continue;
       }
 
-      const char *raw = argv[i];
+      char *raw = argv[i];
       if (strncmp(raw, "--", 2) == 0)
          raw += 2;
 

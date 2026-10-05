@@ -4,7 +4,7 @@
 
 The next application release is **1.0.0**. The declared source series is `1.0`.
 The previous published release, verified on 2026-10-04, is [v0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6).
-The repository's integration branch and memory PR contain the newer 1.0.0 work.
+The integration branch contains the newer 1.0.0 work, including merged PR #3005.
 This page describes the release target without claiming its artifacts are already published.
 Version numbers for separate module repositories and the native-memory plugin are independent.
 
@@ -28,7 +28,9 @@ See [Upgrading](UPGRADING.md) before reusing an older store.
 [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds the generic memory contract and
 Cognee adapter, with required real-provider CI and deployed native/Cognee validation. Its implementation
 is not part of the published 0.4.6 image. See the [memory contract](modules/memory.md#memory-backend-contract).
-The separate native-memory plugin preview has its own [staging record](releases/native-memory-v0.2.3/README.md).
+The separate native-memory 0.3.2 candidate has three dedicated model plugins on one shared runtime.
+Its [release preparation record](releases/native-memory-v0.3.2/README.md) identifies the server
+export prerequisite and publication checks. The signed 0.2.3 stage remains historical evidence.
 
 ## 0.4.6: memory reliability
 
