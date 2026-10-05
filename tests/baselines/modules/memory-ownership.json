@@ -2601,7 +2601,7 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "d7ebe0d06e37bd01e09092150d2606831218d9b1251eaa84127b23a3eaa28c52"
+      "sha256": "cafc2cfa29d2c966c00f9eb00dc12e271f57b092873aa1919b92aa1f94c68a1f"
     },
     "src/server/server_state_vectors.c": {
       "disposition": "host-transport",

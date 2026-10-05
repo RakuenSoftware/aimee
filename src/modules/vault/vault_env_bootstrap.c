@@ -468,7 +468,8 @@ int vault_env_print_egress_credential(const char *env_name)
 int vault_env_egress_resource(void)
 {
 #if defined(__linux__)
-   if (vault_env_egress_parent_attest() != 0)
+   /* A persistent stdio buffer must not retain a flushed credential copy. */
+   if (vault_env_egress_parent_attest() != 0 || setvbuf(stdout, NULL, _IONBF, 0) != 0)
       return -1;
    if (fwrite("EVR1", 1, 4, stdout) != 4 || fflush(stdout) != 0)
       return -1;
