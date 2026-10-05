@@ -84,11 +84,13 @@ def main():
     class Proxy(BaseHTTPRequestHandler):
         blocked = False
         fault = None
+        requests = 0
 
         def log_message(self, *args):
             pass
 
         def request(self):
+            Proxy.requests += 1
             if self.blocked:
                 self.send_response(503)
                 self.end_headers()
@@ -409,6 +411,58 @@ os.kill(pids[0],signal.SIGTERM)
         status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
         check('retained canonical record reindexes after derived reset', status == 200 and
               'retained canonical ' + marker in json.dumps(result))
+        before = Proxy.requests
+        status, listed = call('search', dict(store='user', keywords=[], limit=10))
+        check('empty-query listing remains canonical and bypasses Cognee',
+            status == 200 and 'retained canonical ' + marker in json.dumps(listed)
+            and Proxy.requests == before)
+        for store in ('user', 'kb'):
+            status, eligible = call('store', dict(store=store, key='eligibility-' + store + '-' + marker,
+                content='needle lifecycle ' + store + ' ' + marker, kind='fact'))
+            check(store + ' creates a canonical eligibility fixture', status == 200)
+            mid = str(eligible['id'])
+            query = dict(store=store, keywords=['needle'], limit=10)
+            text = 'lifecycle ' + store + ' ' + marker
+            check(store + ' eligible fixture reaches real derived retrieval', restored_search(query, text))
+            table = 'user_memories' if store == 'user' else 'memories'
+            def fixture_sql(sql):
+                if store == 'user':
+                    return gate.personal_sql(sql)
+                return matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                    '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', sql)
+            cases = [('expired', "valid_until='2000-01-01T00:00:00Z'", 'valid_until=NULL' if store == 'user' else "valid_until=''"),
+                ('retired', "lifecycle_state='retired'", "lifecycle_state='active'")]
+            if store == 'kb':
+                cases += [('suppressed', 'activation_suppressed=1', 'activation_suppressed=0'),
+                    ('future', "valid_from='2999-01-01T00:00:00Z'", "valid_from=''")]
+            prefix = prefixes[1 if store == 'user' else 0]
+            for label, disable, restore in cases:
+                fixture_sql('UPDATE ' + table + ' SET ' + disable + ' WHERE id=' + mid)
+                status, absent = call('search', query)
+                check(store + ' ' + label + ' record is excluded and its derived dataset removed',
+                    status == 200 and text not in json.dumps(absent) and not any(
+                        row['name'].startswith(prefix) and '_' + mid + '_' in row['name'] for row in datasets()))
+                fixture_sql('UPDATE ' + table + ' SET ' + restore + ' WHERE id=' + mid)
+                check(store + ' restored ' + label + ' record reindexes through real Cognee', restored_search(query, text))
+            status, current = call('get', dict(store=store, id=mid, include_version=True))
+            status, removed = call('delete', dict(store=store, id=mid, expected_version=current['memory']['version'],
+                idempotency_key='eligibility-delete-' + uuid.uuid4().hex))
+            check(store + ' synthetic eligibility target cleans up through the versioned API',
+                status == 200 and removed.get('deleted') is True)
+        capacity_prefix = 'capacity-' + marker + '-'
+        gate.personal_sql("INSERT INTO user_memories(kind,key,content) SELECT 'fact','" + capacity_prefix +
+            "'||n::text,'needle capacity fixture' FROM generate_series(1,257) AS n")
+        try:
+            before = Proxy.requests
+            status, capacity = call('search', dict(store='user', keywords=['needle'], limit=10))
+            check('257 canonical records refuse Cognee capacity without provider calls or fallback',
+                capacity.get('status') == 'error' and not capacity.get('memories') and Proxy.requests == before)
+            status, current = call('get', retained_request)
+            check('Cognee capacity refusal preserves exact canonical reads', status == 200)
+        finally:
+            gate.personal_sql("DELETE FROM user_memories WHERE key LIKE '" + capacity_prefix + "%'")
+        check('retrieval recovers after synthetic capacity fixture removal',
+            restored_search(dict(store='user', keywords=['needle'], limit=10), 'retained canonical ' + marker))
         # An explicit operator-owned loopback bridge exercises the privileged
         # coordinator without widening the existing scoped service identity.
         operator_records = {}
