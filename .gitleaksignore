@@ -283,3 +283,7 @@ f353b487b8a629a7f04d9422ff1e553df84e5a4d:tests/baselines/modules/memory-ownershi
 c23958b53565bb2011e23a2eabf201e301f10c55:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
 # Reviewed public SHA-256 of the native-primitive OpenAPI input, not an API credential.
 53add717e77f0f80dfea610252a5814494772eba:tests/baselines/modules/memory-ownership.json:generic-api-key:2651
+
+# Reviewed disposable memory-placement fixture record key in historical raw evidence.
+# Current public evidence contains only named verdicts; this is not an API credential.
+2cb974d5ee6715399fac7a8ac9d3cd51bd1e56fb:docs/validation/egress-vault-repair-2026-10-05/published-native-T3.json:generic-api-key:7833
