@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--stage', type=Path, required=True)
     parser.add_argument('--attempt', default='cognee-image')
     parser.add_argument('--keep', action='store_true')
+    parser.add_argument('--phase', choices=('full', 'expanded'), default='full')
     args = parser.parse_args()
     if not args.attempt or Path(args.attempt).name != args.attempt or args.attempt in ('.', '..'):
         parser.error('attempt must be a single directory name')
@@ -270,167 +271,175 @@ def main():
                 time.sleep(1)
             return False
 
-        # Exercise every provider route through the actual admitted memory/egress pair.
-        probe_query = dict(store='user', keywords=['needle'], limit=10)
-        for label, method, route in [('catalog', 'GET', '/api/v1/datasets'),
-                ('add', 'POST', '/api/v1/add'), ('cognify', 'POST', '/api/v1/cognify'),
-                ('search', 'POST', '/api/v1/search')]:
-            if label == 'add':
-                status, added = call('store', dict(store='user', key='fault-add-' + marker,
-                    content='needle added route fixture ' + marker, kind='fact'))
-                check('new canonical record supplies the real add route', status == 200)
-            Proxy.fault = dict(method=method, path=route)
+        if args.phase == 'full':
+            # Exercise every provider route through the actual admitted memory/egress pair.
+            probe_query = dict(store='user', keywords=['needle'], limit=10)
+            for label, method, route in [('catalog', 'GET', '/api/v1/datasets'),
+                    ('add', 'POST', '/api/v1/add'), ('cognify', 'POST', '/api/v1/cognify'),
+                    ('search', 'POST', '/api/v1/search')]:
+                if label == 'add':
+                    status, added = call('store', dict(store='user', key='fault-add-' + marker,
+                        content='needle added route fixture ' + marker, kind='fact'))
+                    check('new canonical record supplies the real add route', status == 200)
+                Proxy.fault = dict(method=method, path=route)
+                status, result = call('search', probe_query)
+                check('real provider ' + label + ' failure refuses retrieval without native fallback',
+                      result.get('status') == 'error' and not result.get('memories'))
+                Proxy.fault = None
+                check('real provider ' + label + ' recovers through the same runtime',
+                      restored_search(probe_query, 'user ' + marker))
+            for label, route, response in [('malformed catalog', '/api/v1/datasets', b'{'),
+                    ('invalid dataset identity', '/api/v1/datasets', b'[{"id":"../escape","name":"foreign"}]'),
+                    ('incomplete cognification', '/api/v1/cognify', b'{}'),
+                    ('foreign retrieval result', '/api/v1/search', b'[{"dataset_name":"foreign","search_result":[]}]')]:
+                Proxy.fault = dict(method='GET' if route.endswith('datasets') else 'POST',
+                    path=route, status=200, body=response)
+                status, result = call('search', probe_query)
+                check(label + ' is refused by the real runtime', result.get('status') == 'error')
+                Proxy.fault = None
+                check(label + ' recovery preserves canonical retrieval',
+                      restored_search(probe_query, 'user ' + marker))
+            matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
+                server.application, 'aimee-server', '--bootstrap-vault-stdin',
+                data='AIMEE_MEMORY_BACKEND_TOKEN=invalid-disposable-cognee-token\0')
             status, result = call('search', probe_query)
-            check('real provider ' + label + ' failure refuses retrieval without native fallback',
-                  result.get('status') == 'error' and not result.get('memories'))
-            Proxy.fault = None
-            check('real provider ' + label + ' recovers through the same runtime',
+            check('real Cognee rejects a rotated invalid Vault bearer without native fallback',
+                  result.get('status') == 'error')
+            status, result = call('get', records['user'])
+            check('provider authentication failure preserves exact canonical reads', status == 200)
+            matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
+                server.application, 'aimee-server', '--bootstrap-vault-stdin',
+                data='AIMEE_MEMORY_BACKEND_TOKEN=' + token + '\0')
+            check('real Cognee observes restored Vault bearer on the existing pipe',
                   restored_search(probe_query, 'user ' + marker))
-        for label, route, response in [('malformed catalog', '/api/v1/datasets', b'{'),
-                ('invalid dataset identity', '/api/v1/datasets', b'[{"id":"../escape","name":"foreign"}]'),
-                ('incomplete cognification', '/api/v1/cognify', b'{}'),
-                ('foreign retrieval result', '/api/v1/search', b'[{"dataset_name":"foreign","search_result":[]}]')]:
-            Proxy.fault = dict(method='GET' if route.endswith('datasets') else 'POST',
-                path=route, status=200, body=response)
-            status, result = call('search', probe_query)
-            check(label + ' is refused by the real runtime', result.get('status') == 'error')
-            Proxy.fault = None
-            check(label + ' recovery preserves canonical retrieval',
-                  restored_search(probe_query, 'user ' + marker))
-        matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
-            server.application, 'aimee-server', '--bootstrap-vault-stdin',
-            data='AIMEE_MEMORY_BACKEND_TOKEN=invalid-disposable-cognee-token\0')
-        status, result = call('search', probe_query)
-        check('real Cognee rejects a rotated invalid Vault bearer without native fallback',
-              result.get('status') == 'error')
-        status, result = call('get', records['user'])
-        check('provider authentication failure preserves exact canonical reads', status == 200)
-        matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
-            server.application, 'aimee-server', '--bootstrap-vault-stdin',
-            data='AIMEE_MEMORY_BACKEND_TOKEN=' + token + '\0')
-        check('real Cognee observes restored Vault bearer on the existing pipe',
-              restored_search(probe_query, 'user ' + marker))
-        status, correction = call('get', dict(records['user'], include_version=True))
-        status, revised = call('supersede', dict(store='user', old_id=records['user']['id'],
-            new_content='needle user corrected ' + marker, expected_version=correction['memory']['version']))
-        check('Cognee selection retains the canonical versioned correction API', status == 200)
-        check('real Cognee reindexes the corrected canonical revision',
-              restored_search(probe_query, 'user corrected ' + marker))
-        for store in ('user', 'kb'):
-            status, recalled = call('recall', dict(store=store, scope='all', task_hint='needle', limit_tokens=8192))
-            check(store + ' recall traverses the selected real Cognee backend', status == 200 and
-                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(recalled))
-            cli = gate.cli('recall', '--query', 'needle', '--store', store, '--scope', 'all', '--limit-tokens', '8192')
-            if store == 'kb' and 'kb ' + marker not in json.dumps(cli):
-                check('shared CLI recall respects native activation cooldown',
-                    cli.get('recall', {}).get('activation_held', 0) > 0)
-                # Compare entry-point transport using a repeatable synthetic
-                # record policy. Production's default one-turn cooldown stays
-                # covered above and suppression is checked independently below.
-                matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-                    '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c',
-                    'UPDATE memories SET activation_cooldown_turns=0 WHERE id=' + records['kb']['id'])
-                cli = gate.cli('recall', '--query', 'needle', '--store', store,
-                    '--scope', 'all', '--limit-tokens', '8192')
-            last_result = dict(path='native CLI recall', result=cli)
-            check(store + ' native CLI recall reaches real Cognee',
-                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(cli))
-            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store, scope='all', limit_tokens=8192))
-            last_result = dict(path='MCP recall', status=code_mcp, result=recalled_mcp)
-            check(store + ' MCP recall reaches real Cognee with canonical scope', code_mcp == 200 and
-                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in recalled_mcp)
-        status, exported = call('/v1/native/primitive', dict(task_hint='needle', session_start=True, limit_tokens=8192))
-        check('native memory export uses Cognee selection and exact canonical versions',
-            status == 200 and any('user corrected ' + marker in row.get('content', '') and
-                isinstance(row.get('version', {}).get('record_revision'), str) for row in exported.get('records', [])))
-        user_prefix = prefixes[1]
-        corrected_name = next(row['name'] for row in datasets() if row['name'].startswith(user_prefix)
-            and '_' + records['user']['id'] + '_' in row['name'])
-        check('real Cognee removes obsolete correction datasets', sum(
-            row['name'].startswith(user_prefix) and '_' + records['user']['id'] + '_' in row['name']
-            for row in datasets()) == 1)
-        status, auxiliary = call('get', dict(store='user', id=str(added['id']), include_version=True))
-        auxiliary_delete = dict(store='user', id=str(added['id']),
-            expected_version=auxiliary['memory']['version'], idempotency_key='route-delete-' + uuid.uuid4().hex)
-        Proxy.fault = dict(method='DELETE', path='/api/v1/datasets/')
-        status, result = call('delete', auxiliary_delete)
-        check('real provider delete failure refuses a canonical retirement receipt',
-              result.get('status') == 'error' and 'mutation_receipt' not in result)
-        Proxy.fault = None
-        status, result = call('get', dict(store='user', id=str(added['id'])))
-        check('failed real dataset deletion preserves the active canonical record', status == 200)
-        status, result = call('delete', auxiliary_delete)
-        check('same deletion succeeds after real dataset route recovery',
-              status == 200 and result.get('deleted') is True)
-        old_name = corrected_name
-        deletions = {}
-        for store, request in records.items():
-            status, result = call('get', dict(request, include_version=True))
-            check(store + ' exposes a canonical version for conditional deletion', status == 200)
-            deletions[store] = dict(request, expected_version=result['memory']['version'],
-                idempotency_key='published-cognee-delete-' + uuid.uuid4().hex)
-        Proxy.blocked = True
-        for store, request in deletions.items():
-            status, result = call('delete', request)
-            check(store + ' provider outage refuses destructive completion',
+            status, correction = call('get', dict(records['user'], include_version=True))
+            status, revised = call('supersede', dict(store='user', old_id=records['user']['id'],
+                new_content='needle user corrected ' + marker, expected_version=correction['memory']['version']))
+            check('Cognee selection retains the canonical versioned correction API', status == 200)
+            check('real Cognee reindexes the corrected canonical revision',
+                  restored_search(probe_query, 'user corrected ' + marker))
+            for store in ('user', 'kb'):
+                status, recalled = call('recall', dict(store=store, scope='all', task_hint='needle', limit_tokens=8192))
+                check(store + ' recall traverses the selected real Cognee backend', status == 200 and
+                    ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(recalled))
+                cli = gate.cli('recall', '--query', 'needle', '--store', store, '--scope', 'all', '--limit-tokens', '8192')
+                if store == 'kb' and 'kb ' + marker not in json.dumps(cli):
+                    check('shared CLI recall respects native activation cooldown',
+                        cli.get('recall', {}).get('activation_held', 0) > 0)
+                    # Compare entry-point transport using a repeatable synthetic
+                    # record policy. Production's default one-turn cooldown stays
+                    # covered above and suppression is checked independently below.
+                    matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                        '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c',
+                        'UPDATE memories SET activation_cooldown_turns=0 WHERE id=' + records['kb']['id'])
+                    cli = gate.cli('recall', '--query', 'needle', '--store', store,
+                        '--scope', 'all', '--limit-tokens', '8192')
+                last_result = dict(path='native CLI recall', result=cli)
+                check(store + ' native CLI recall reaches real Cognee',
+                    ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(cli))
+                code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store, scope='all', limit_tokens=8192))
+                last_result = dict(path='MCP recall', status=code_mcp, result=recalled_mcp)
+                check(store + ' MCP recall reaches real Cognee with canonical scope', code_mcp == 200 and
+                    ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in recalled_mcp)
+            status, exported = call('/v1/native/primitive', dict(task_hint='needle', session_start=True, limit_tokens=8192))
+            check('native memory export uses Cognee selection and exact canonical versions',
+                status == 200 and any('user corrected ' + marker in row.get('content', '') and
+                    isinstance(row.get('version', {}).get('record_revision'), str) for row in exported.get('records', [])))
+            user_prefix = prefixes[1]
+            corrected_name = next(row['name'] for row in datasets() if row['name'].startswith(user_prefix)
+                and '_' + records['user']['id'] + '_' in row['name'])
+            check('real Cognee removes obsolete correction datasets', sum(
+                row['name'].startswith(user_prefix) and '_' + records['user']['id'] + '_' in row['name']
+                for row in datasets()) == 1)
+            status, auxiliary = call('get', dict(store='user', id=str(added['id']), include_version=True))
+            auxiliary_delete = dict(store='user', id=str(added['id']),
+                expected_version=auxiliary['memory']['version'], idempotency_key='route-delete-' + uuid.uuid4().hex)
+            Proxy.fault = dict(method='DELETE', path='/api/v1/datasets/')
+            status, result = call('delete', auxiliary_delete)
+            check('real provider delete failure refuses a canonical retirement receipt',
                   result.get('status') == 'error' and 'mutation_receipt' not in result)
-        Proxy.blocked = False
-        for store, request in deletions.items():
-            status, result = call('get', records[store])
-            check(store + ' outage preserves serving canonical record', status == 200)
-            status, result = call('delete', request)
-            check(store + ' same conditional request succeeds after provider recovery',
-                  status == 200 and result.get('deleted') is True and 'mutation_receipt' in result)
-            status, result = call('delete', request)
-            check(store + ' deletion retry is idempotent', status == 200 and
-                  result.get('mutation_receipt', {}).get('replayed') is True)
-            status, result = call('get', records[store])
-            check(store + ' deleted record leaves current canonical retrieval', status == 404)
-        check('both nodes remove real deleted derived datasets', not datasets())
-        check('shared user-authority deletion destroys canonical row',
-              matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-              '-d', 'aimee_store', '-X', '-At', '-c', 'SELECT count(*) FROM memories WHERE id=' + records['kb']['id']) == '0')
-        check('personal retirement leaves no active canonical row', gate.personal_sql(
-            "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
-        status, retained = call('store', dict(store='user', key='retained-' + marker,
-            content='needle retained canonical ' + marker, kind='fact'))
-        retained_request = dict(store='user', id=str(retained['id']))
-        check('unrelated canonical record survives deletion', status == 200)
-        status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
-        check('retained canonical record reindexes after deletion', status == 200 and
-              'retained canonical ' + marker in json.dumps(result))
-        boundary = 'disposable-provider-restore'
-        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="datasetName"\r\n\r\n{old_name}\r\n'
-                f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="restored.txt"\r\n'
-                f'Content-Type: text/plain\r\n\r\nneedle retired historical fixture\r\n--{boundary}--\r\n').encode()
-        provider_request('/api/v1/add', body, 'multipart/form-data; boundary=' + boundary)
-        check('fixture restores derived data for a deleted record', any(row['name'] == old_name for row in datasets()))
-        code = '''import os,signal
-from pathlib import Path
-pids=[]
-for p in Path('/proc').iterdir():
- if p.name.isdigit():
-  try:
-   argv=(p/'cmdline').read_bytes().split(b'\\0')
-   if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
-  except OSError: pass
-if len(pids)!=1: raise SystemExit('expected one supervised memory child')
-os.kill(pids[0],signal.SIGTERM)
-'''
-        matrix.command('docker', 'exec', server.application, 'python3', '-c', code)
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline and any(row['name'] == old_name for row in datasets()):
-            time.sleep(.5)
-        check('supervised memory restart removes restored derived state for deleted records',
-              not any(row['name'] == old_name for row in datasets()))
-        check('restart cannot reactivate retired canonical row', gate.personal_sql(
-            "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
-        status, result = call('get', retained_request)
-        check('derived reset preserves unrelated canonical record', status == 200 and
-              'retained canonical ' + marker in json.dumps(result))
-        status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
-        check('retained canonical record reindexes after derived reset', status == 200 and
-              'retained canonical ' + marker in json.dumps(result))
+            Proxy.fault = None
+            status, result = call('get', dict(store='user', id=str(added['id'])))
+            check('failed real dataset deletion preserves the active canonical record', status == 200)
+            status, result = call('delete', auxiliary_delete)
+            check('same deletion succeeds after real dataset route recovery',
+                  status == 200 and result.get('deleted') is True)
+            old_name = corrected_name
+            deletions = {}
+            for store, request in records.items():
+                status, result = call('get', dict(request, include_version=True))
+                check(store + ' exposes a canonical version for conditional deletion', status == 200)
+                deletions[store] = dict(request, expected_version=result['memory']['version'],
+                    idempotency_key='published-cognee-delete-' + uuid.uuid4().hex)
+            Proxy.blocked = True
+            for store, request in deletions.items():
+                status, result = call('delete', request)
+                check(store + ' provider outage refuses destructive completion',
+                      result.get('status') == 'error' and 'mutation_receipt' not in result)
+            Proxy.blocked = False
+            for store, request in deletions.items():
+                status, result = call('get', records[store])
+                check(store + ' outage preserves serving canonical record', status == 200)
+                status, result = call('delete', request)
+                check(store + ' same conditional request succeeds after provider recovery',
+                      status == 200 and result.get('deleted') is True and 'mutation_receipt' in result)
+                status, result = call('delete', request)
+                check(store + ' deletion retry is idempotent', status == 200 and
+                      result.get('mutation_receipt', {}).get('replayed') is True)
+                status, result = call('get', records[store])
+                check(store + ' deleted record leaves current canonical retrieval', status == 404)
+            check('both nodes remove real deleted derived datasets', not datasets())
+            check('shared user-authority deletion destroys canonical row',
+                  matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                  '-d', 'aimee_store', '-X', '-At', '-c', 'SELECT count(*) FROM memories WHERE id=' + records['kb']['id']) == '0')
+            check('personal retirement leaves no active canonical row', gate.personal_sql(
+                "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
+            status, retained = call('store', dict(store='user', key='retained-' + marker,
+                content='needle retained canonical ' + marker, kind='fact'))
+            retained_request = dict(store='user', id=str(retained['id']))
+            check('unrelated canonical record survives deletion', status == 200)
+            status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
+            check('retained canonical record reindexes after deletion', status == 200 and
+                  'retained canonical ' + marker in json.dumps(result))
+            boundary = 'disposable-provider-restore'
+            body = (f'--{boundary}\r\nContent-Disposition: form-data; name="datasetName"\r\n\r\n{old_name}\r\n'
+                    f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="restored.txt"\r\n'
+                    f'Content-Type: text/plain\r\n\r\nneedle retired historical fixture\r\n--{boundary}--\r\n').encode()
+            provider_request('/api/v1/add', body, 'multipart/form-data; boundary=' + boundary)
+            check('fixture restores derived data for a deleted record', any(row['name'] == old_name for row in datasets()))
+            code = '''import os,signal
+    from pathlib import Path
+    pids=[]
+    for p in Path('/proc').iterdir():
+     if p.name.isdigit():
+      try:
+       argv=(p/'cmdline').read_bytes().split(b'\\0')
+       if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
+      except OSError: pass
+    if len(pids)!=1: raise SystemExit('expected one supervised memory child')
+    os.kill(pids[0],signal.SIGTERM)
+    '''
+            matrix.command('docker', 'exec', server.application, 'python3', '-c', code)
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline and any(row['name'] == old_name for row in datasets()):
+                time.sleep(.5)
+            check('supervised memory restart removes restored derived state for deleted records',
+                  not any(row['name'] == old_name for row in datasets()))
+            check('restart cannot reactivate retired canonical row', gate.personal_sql(
+                "SELECT count(*) FROM user_memories WHERE lifecycle_state='active' AND id=" + records['user']['id']) == '0')
+            status, result = call('get', retained_request)
+            check('derived reset preserves unrelated canonical record', status == 200 and
+                  'retained canonical ' + marker in json.dumps(result))
+            status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
+            check('retained canonical record reindexes after derived reset', status == 200 and
+                  'retained canonical ' + marker in json.dumps(result))
+        else:
+            status, retained = call('store', dict(store='user', key='retained-' + marker,
+                content='needle retained canonical ' + marker, kind='fact'))
+            retained_request = dict(store='user', id=str(retained['id']))
+            check('expanded fixture prepares an unrelated retained canonical record', status == 200)
+            check('expanded retained fixture reaches real derived retrieval', restored_search(
+                dict(store='user', keywords=['needle'], limit=10), 'retained canonical ' + marker))
         before = Proxy.requests
         status, listed = call('search', dict(store='user', keywords=[], limit=10))
         check('public search refuses empty keywords without contacting Cognee',
@@ -450,7 +459,9 @@ os.kill(pids[0],signal.SIGTERM)
             table = 'user_memories' if store == 'user' else 'memories'
             def fixture_sql(sql):
                 if store == 'user':
-                    return gate.personal_sql(sql)
+                    return gate.personal_sql("BEGIN; SELECT set_config('aimee.private_authority','user',true),"
+                        "set_config('aimee.private_principal','fixture:temporal-controller',true),"
+                        "set_config('aimee.private_transport','fixture:sql',true); " + sql + '; COMMIT;')
                 return matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
                     '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', sql)
             cases = [('expired', "valid_until='2000-01-01T00:00:00Z'", 'valid_until=NULL' if store == 'user' else "valid_until=''"),
@@ -486,6 +497,18 @@ os.kill(pids[0],signal.SIGTERM)
             gate.personal_sql("DELETE FROM user_memories WHERE key LIKE '" + capacity_prefix + "%'")
         check('retrieval recovers after synthetic capacity fixture removal',
             restored_search(dict(store='user', keywords=['needle'], limit=10), 'retained canonical ' + marker))
+        code = '''import os,signal
+from pathlib import Path
+pids=[]
+for p in Path('/proc').iterdir():
+ if p.name.isdigit():
+  try:
+   argv=(p/'cmdline').read_bytes().split(b'\\0')
+   if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
+  except OSError: pass
+if len(pids)!=1: raise SystemExit('expected one supervised memory child')
+os.kill(pids[0],signal.SIGTERM)
+'''
         # An explicit operator-owned loopback bridge exercises the privileged
         # coordinator without widening the existing scoped service identity.
         operator_records = {}
