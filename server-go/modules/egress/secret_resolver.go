@@ -4,12 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const maxResolvedCredentialBytes = 4096
@@ -19,15 +15,7 @@ type credentialResolver interface {
 }
 
 type vaultCredentialResolver struct {
-	home, helper string
-	run          func(context.Context, string) ([]byte, error)
-}
-
-func newVaultCredentialResolver() credentialResolver {
-	resolver := &vaultCredentialResolver{home: os.Getenv("AIMEE_HOME"),
-		helper: os.Getenv("AIMEE_EGRESS_CREDENTIAL_HELPER")}
-	resolver.run = resolver.runHelper
-	return resolver
+	run func(context.Context, string) ([]byte, error)
 }
 
 func (r *vaultCredentialResolver) Resolve(ctx context.Context, principal uint32, handle string) ([]byte, error) {
@@ -64,27 +52,4 @@ func validMCPVaultName(name string) bool {
 	return strings.HasSuffix(name, "_TOKEN") || strings.HasSuffix(name, "_SECRET") ||
 		strings.HasSuffix(name, "_API_KEY") || strings.HasSuffix(name, "_BEARER") ||
 		strings.HasSuffix(name, "_CREDENTIAL")
-}
-
-func (r *vaultCredentialResolver) runHelper(ctx context.Context, name string) ([]byte, error) {
-	if r.helper != "/usr/local/bin/aimee-server" && r.helper != "/usr/local/bin/aimee-kb" {
-		return nil, errors.New("credential helper is unavailable")
-	}
-	timeout := 10 * time.Second
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
-		timeout = time.Until(deadline)
-	}
-	if timeout <= 0 {
-		return nil, context.DeadlineExceeded
-	}
-	helperContext, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	command := exec.CommandContext(helperContext, r.helper, "--egress-vault-secret", name)
-	command.Env = []string{"AIMEE_HOME=" + r.home, "PATH=/usr/local/bin:/usr/bin:/bin"}
-	output, err := command.Output()
-	if err != nil {
-		clear(output)
-		return nil, fmt.Errorf("credential helper failed")
-	}
-	return output, nil
 }

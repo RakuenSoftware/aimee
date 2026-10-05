@@ -68,6 +68,9 @@ int vault_env_seal_forge_credential(const char *cred_name);
  * helper refuses every parent except the root-owned installed egress binary,
  * disables dumpability before Vault hydration, and writes only a narrowly
  * named AIMEE_MCP_* secret to its stdout pipe. */
+/* Persistent, parent-attested private pipe. Readiness carries no secret;
+ * bounded requests expose only the memory backend token or admitted MCP tokens. */
+int vault_env_egress_resource(void);
 int vault_env_egress_parent_attest(void);
 int vault_env_print_egress_credential(const char *env_name);
 int vault_env_egress_parent_path_ok(const char *path);

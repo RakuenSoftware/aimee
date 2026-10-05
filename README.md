@@ -25,9 +25,9 @@ cannot grant itself permission by asking for it, and a different UI cannot bypas
 
 The shipped runtime makes specific, tested guarantees:
 
-- **Data ownership stays explicit.** The thin client has no database linkage. Server has no shared
-  KB query authority; KB has no personal Server query authority. A failed lookup cannot cross that
-  boundary.
+- **Data ownership stays explicit.** The thin client has no database linkage. Server reaches shared
+  knowledge through KB's authorized API and has no direct access to its database. KB has no direct
+  access to Server's personal database. A failed lookup cannot change the selected store.
 - **Remote authority is checked per operation.** Network routes require an authenticated principal
   and declared capability. A shared bearer is read-only; remote writes require a KB-signed identity
   and a live per-user grant. Expired grants, replayed tokens and unavailable replay storage refuse

@@ -136,6 +136,10 @@ func NewHandler() bus.ModuleHandler {
 }
 
 func newHandler(r resolver) bus.ModuleHandler {
+	return newHandlerWithCredentials(r, nil)
+}
+
+func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleHandler {
 	var once sync.Once
 	var initialized bus.ModuleHandler
 	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
@@ -144,8 +148,8 @@ func newHandler(r resolver) bus.ModuleHandler {
 			if err != nil {
 				return
 			}
-			p := policy{resolver: r, credentials: broker, backendCredentials: newVaultCredentialResolver()}
-			s := newStreamService(p, newVaultCredentialResolver())
+			p := policy{resolver: r, credentials: broker, backendCredentials: vault}
+			s := newStreamService(p, vault)
 			initialized = func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
 				if invocation.PrincipalClass != 1 {
 					return nil, bus.ModuleStatusInvalidRequest

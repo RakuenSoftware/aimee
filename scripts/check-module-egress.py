@@ -75,6 +75,8 @@ def runtime_guard_failures() -> list[str]:
     # the same ratchet so a packaging edit cannot silently put plaintext back
     # into an ordinary module environment or process dump.
     required_by_path = {
+        "server-go/cmd/aimee-module/main.go": ("egress.PrepareHandler(ownerContext)", "case <-vaultDone:"),
+        "server-go/modules/egress/vault_pipe.go": ('"--egress-vault-resource"', '"EVR1"', "pipe.request"),
         "src/egress_credential_envelope.c": (
             "EVP_PKEY_X25519",
             "EVP_aes_256_gcm",
@@ -84,10 +86,11 @@ def runtime_guard_failures() -> list[str]:
         "src/modules/vault/vault_env_bootstrap.c": (
             '"/usr/local/libexec/aimee-modules/aimee-module-egress"',
             "PR_SET_DUMPABLE",
-            "vault_env_print_egress_credential",
+            "vault_env_egress_resource",
+            '"EVR1"',
         ),
-        "src/server/server_main.c": ('"--egress-vault-secret"',),
-        "src/kb/kb_main.c": ('"--egress-vault-secret"',),
+        "src/server/server_main.c": ('"--egress-vault-resource"',),
+        "src/kb/kb_main.c": ('"--egress-vault-resource"',),
         "deploy/container/server-entrypoint.sh": (
             "AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server",
         ),

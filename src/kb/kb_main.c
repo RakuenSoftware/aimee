@@ -1309,6 +1309,9 @@ int main(int argc, char **argv)
    if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   if (argc == 2 && strcmp(argv[1], "--egress-vault-resource") == 0)
+      return vault_env_egress_resource() == 0 ? 0 : 1;
+
    if (argc == 3 && strcmp(argv[1], "--egress-vault-secret") == 0)
    {
       if (vault_env_egress_parent_attest() != 0 || vault_env_bootstrap_init() < 0)
