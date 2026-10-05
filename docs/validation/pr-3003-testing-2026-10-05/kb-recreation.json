@@ -1,0 +1,65 @@
+{
+  "source_sha256": "f96da5bebdff4263a601c58977e9a62888f9b44b485c72db2da00ada79982a72",
+  "checks": [
+    {
+      "name": "current-layout KB reaches healthy state",
+      "passed": true
+    },
+    {
+      "name": "application metadata contains no credentials",
+      "passed": true
+    },
+    {
+      "name": "KB writes global canary",
+      "passed": true
+    },
+    {
+      "name": "KB reads global canary",
+      "passed": true
+    },
+    {
+      "name": "KB writes project canary",
+      "passed": true
+    },
+    {
+      "name": "KB reads project canary",
+      "passed": true
+    },
+    {
+      "name": "recreation 1 retains global content and authority",
+      "passed": true
+    },
+    {
+      "name": "recreation 1 retains project content and authority",
+      "passed": true
+    },
+    {
+      "name": "recreation 1 accepts new writes",
+      "passed": true
+    },
+    {
+      "name": "recreation 1 reads new write",
+      "passed": true
+    },
+    {
+      "name": "recreation 2 retains global content and authority",
+      "passed": true
+    },
+    {
+      "name": "recreation 2 retains project content and authority",
+      "passed": true
+    },
+    {
+      "name": "recreation 2 retains new-0 content and authority",
+      "passed": true
+    },
+    {
+      "name": "recreation 2 accepts new writes",
+      "passed": true
+    },
+    {
+      "name": "recreation 2 reads new write",
+      "passed": true
+    }
+  ]
+}

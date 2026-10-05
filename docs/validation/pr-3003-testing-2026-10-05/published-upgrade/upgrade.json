@@ -1,0 +1,82 @@
+[
+  {
+    "name": "kb retains immutable instance identity",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "kb runs reviewed testing build",
+    "passed": true
+  },
+  {
+    "name": "kb store succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb accepts and reads new post-upgrade writes",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb restart retains new writes",
+    "passed": true
+  },
+  {
+    "name": "server retains immutable instance identity",
+    "passed": true
+  },
+  {
+    "name": "server get succeeds",
+    "passed": true
+  },
+  {
+    "name": "server preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "server runs reviewed testing build",
+    "passed": true
+  },
+  {
+    "name": "server store succeeds",
+    "passed": true
+  },
+  {
+    "name": "server get succeeds",
+    "passed": true
+  },
+  {
+    "name": "server accepts and reads new post-upgrade writes",
+    "passed": true
+  },
+  {
+    "name": "server get succeeds",
+    "passed": true
+  },
+  {
+    "name": "server restart retains new writes",
+    "passed": true
+  }
+]

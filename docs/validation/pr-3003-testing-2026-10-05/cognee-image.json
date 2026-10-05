@@ -1,0 +1,11 @@
+[
+  {
+    "name": "real Cognee 1.6.2 authenticates disposable account",
+    "passed": true
+  },
+  {
+    "name": "published Cognee gate completed",
+    "passed": false,
+    "error": "RuntimeError"
+  }
+]

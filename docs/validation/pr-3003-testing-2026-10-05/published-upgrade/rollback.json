@@ -1,0 +1,42 @@
+[
+  {
+    "name": "kb retains immutable instance identity",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "kb restored snapshot runs published 0.4.6",
+    "passed": true
+  },
+  {
+    "name": "server retains immutable instance identity",
+    "passed": true
+  },
+  {
+    "name": "server get succeeds",
+    "passed": true
+  },
+  {
+    "name": "server preserves published record and authority",
+    "passed": true
+  },
+  {
+    "name": "server restored snapshot runs published 0.4.6",
+    "passed": true
+  }
+]

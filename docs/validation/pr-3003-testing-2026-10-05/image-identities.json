@@ -1,0 +1,29 @@
+{
+  "aimee": {
+    "requested": "ghcr.io/rakuensoftware/aimee@sha256:1438e25cd7ce03a8f64a5447f414d4a2c08449f51295c7a6e1149b9da2960104",
+    "id": "sha256:b195d1da4c5d7bdc3f36e4111e52ea733692f3bd4d5613a90eeee471fe101bba",
+    "digests": [
+      "ghcr.io/rakuensoftware/aimee@sha256:1438e25cd7ce03a8f64a5447f414d4a2c08449f51295c7a6e1149b9da2960104"
+    ],
+    "created": "2026-10-05T15:06:20.555144687Z",
+    "architecture": "amd64"
+  },
+  "aimee-postgres": {
+    "requested": "ghcr.io/rakuensoftware/aimee-postgres@sha256:182070945b59ad942a8fc753b3c8066db45cc446a07576d413df2fb2dfd61e48",
+    "id": "sha256:6bf075708760151b13b8a43ec9c5825e18259108232917087bdd55fe62dd2cd8",
+    "digests": [
+      "ghcr.io/rakuensoftware/aimee-postgres@sha256:182070945b59ad942a8fc753b3c8066db45cc446a07576d413df2fb2dfd61e48"
+    ],
+    "created": "2026-10-05T15:03:55.360301785Z",
+    "architecture": "amd64"
+  },
+  "embedder": {
+    "requested": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209",
+    "id": "sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979",
+    "digests": [
+      "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209"
+    ],
+    "created": "2026-08-28T12:09:17.437419807Z",
+    "architecture": "amd64"
+  }
+}

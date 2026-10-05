@@ -1,0 +1,81 @@
+{
+  "source_sha256": "ccbecdc47ed195f088189827aec7a2ae1f070985a3ba96301adb524727a8b2e7",
+  "checks": [
+    {
+      "name": "native primitive returns its schema",
+      "passed": true
+    },
+    {
+      "name": "empty store exports an empty record bank",
+      "passed": true
+    },
+    {
+      "name": "store populated fact fixture",
+      "passed": true
+    },
+    {
+      "name": "store populated preference fixture",
+      "passed": true
+    },
+    {
+      "name": "ordinary recall succeeds",
+      "passed": true
+    },
+    {
+      "name": "fixture actually overlaps recall sections",
+      "passed": true
+    },
+    {
+      "name": "native primitive returns its schema",
+      "passed": true
+    },
+    {
+      "name": "overlapping populated records export once in selection order",
+      "passed": true
+    },
+    {
+      "name": "record identities and revisions remain exact strings",
+      "passed": true
+    },
+    {
+      "name": "native primitive returns its schema",
+      "passed": true
+    },
+    {
+      "name": "warm export retains the same current bank",
+      "passed": true
+    },
+    {
+      "name": "read current fixture version",
+      "passed": true
+    },
+    {
+      "name": "authorized correction commits",
+      "passed": true
+    },
+    {
+      "name": "native primitive returns its schema",
+      "passed": true
+    },
+    {
+      "name": "corrected export observes content and committed revision",
+      "passed": true
+    },
+    {
+      "name": "native primitive returns its schema",
+      "passed": true
+    },
+    {
+      "name": "restart retains populated current export",
+      "passed": true
+    },
+    {
+      "name": "native primitive refuses implicit shared-store substitution",
+      "passed": true
+    },
+    {
+      "name": "native primitive refuses a non-object request",
+      "passed": true
+    }
+  ]
+}
