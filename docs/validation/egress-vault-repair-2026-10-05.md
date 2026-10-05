@@ -89,8 +89,26 @@ The driver change preserves the repository working directory and bootstrap input
 Synthetic failure and success checks verify private file permissions, secret-free
 exceptions and unchanged handling of ordinary commands.
 
-On the subsequent turn the execution environment denied socket creation, so SSH
-to the owned CT on `192.168.1.253` failed with `Operation not permitted` before
-connection. This prevents diagnosing the retained CT failure and qualifying the
-published image in that environment. The live gates above remain incomplete.
-No main merge or complete subject-erasure guarantee follows from these results.
+After access was restored, private diagnostics identified exhausted Docker address
+pools caused by retained synthetic test networks. Removing only owned synthetic
+containers and unused networks resolved bootstrap. Evidence and volumes were retained.
+The published image is pinned to
+`ghcr.io/rakuensoftware/aimee@sha256:47e888daf7f2f01f985b6ed15e94d7faea29e4726e0d52db9000ec2fefa7039b`
+and reports `testing-e0ef1c5`.
+
+All [18 published helper verdicts](egress-vault-repair-2026-10-05/published-handoff.json),
+[207 native T1 verdicts](egress-vault-repair-2026-10-05/published-native-T1.json) and
+[699 native T3 verdicts](egress-vault-repair-2026-10-05/published-native-T3.json) pass.
+The expanded Cognee qualification is still running. Its fixture now uses explicit
+scope and token budgets, observes the default shared activation cooldown before
+setting a repeatable policy on one synthetic record, rejects empty public search,
+and uses the existing private temporal-test authority context. Expiry withholds
+records; it does not certify physical erasure. Scoped reconciliation is tested
+with an eligible companion in that scope. No main merge or complete subject-erasure
+guarantee follows from the incomplete live erasure run.
+
+The promotion module-inventory failure was a stale baseline for the two reviewed
+host dispatch changes. [PR #3010](https://github.com/RakuenSoftware/aimee/pull/3010)
+refreshes those hashes. The local baseline check, eight baseline regression tests
+and module-source-ownership check pass. Two other failed-looking promotion runs
+were cancelled jobs, not failed source checks.
