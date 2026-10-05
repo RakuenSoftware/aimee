@@ -45,6 +45,34 @@ def main():
         parser.error('use a fresh Cognee stage; refusing stale provider state')
     matrix = load('matrix', 'tests/e2e/deployment-matrix.py')
     placement = load('placement', 'tests/e2e/memory-placement-e2e.py')
+    # The production wrapper intentionally suppresses potentially secret-bearing
+    # Compose output. Preserve failed bootstrap diagnostics in this disposable
+    # fixture's private directory, without changing the production wrapper.
+    bootstrap = load('vault_bootstrap', 'scripts/compose-vault-init.py')
+    original_command = matrix.command
+
+    def diagnostic_command(*argv, env=None, data=None, timeout=300):
+        if len(argv) < 2 or Path(argv[1]).name != 'compose-vault-init.py':
+            return original_command(*argv, env=env, data=data, timeout=timeout)
+
+        def private_run(command, **kwargs):
+            result = subprocess.run(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=120, **kwargs)
+            if result.returncode:
+                path = private / ('bootstrap-failure-' + uuid.uuid4().hex + '.log')
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, 'wb') as log:
+                    log.write(result.stdout)
+                    log.write(b'\n')
+                    log.write(result.stderr)
+                raise RuntimeError('Compose Vault bootstrap failed; diagnostic retained in private fixture directory')
+            return result.stdout
+
+        bootstrap.run = private_run
+        bootstrap.main(list(argv[2:]))
+        return ''
+
+    matrix.command = diagnostic_command
     fixture = load('contract', 'scripts/validation/memory/run-cognee-contract.py')
     model = ThreadingHTTPServer(('127.0.0.1', 0), fixture.ModelFixture)
     threading.Thread(target=model.serve_forever, daemon=True).start()
@@ -55,6 +83,7 @@ def main():
 
     class Proxy(BaseHTTPRequestHandler):
         blocked = False
+        fault = None
 
         def log_message(self, *args):
             pass
@@ -66,6 +95,15 @@ def main():
                 self.wfile.write(b'{"detail":"injected disposable provider outage"}')
                 return
             body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+            fault = Proxy.fault
+            if fault and self.command == fault['method'] and self.path.startswith(fault['path']):
+                raw = fault.get('body', b'{}')
+                self.send_response(fault.get('status', 503))
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             headers = {key: value for key, value in self.headers.items()
                        if key.lower() not in ('host', 'connection', 'content-length')}
             request = urllib.request.Request(api_url + self.path, method=self.command,
@@ -153,7 +191,8 @@ def main():
             stacks.append(stack)
             stack.network_override.write_text('services:\n  aimee-' + role + ':\n    ports: !reset []\n'
                 '    environment:\n      AIMEE_MEMORY_BACKEND: cognee\n'
-                '      AIMEE_MEMORY_BACKEND_URL: ' + json.dumps(endpoint) + '\n')
+                '      AIMEE_MEMORY_BACKEND_URL: ' + json.dumps(endpoint) + '\n' +
+                ('      AIMEE_KB_HTTP_BIND: \'1\'\n' if role == 'kb' else ''))
             matrix.command('python3', str(ROOT / 'scripts/compose-vault-init.py'),
                 *stack.compose_args(), 'up', env=stack.env)
             binary = 'aimee-' + role
@@ -213,6 +252,95 @@ def main():
         check('both immutable node namespaces own real derived datasets',
               all(any(row['name'].startswith(prefix) for row in catalog) for prefix in prefixes))
         old_name = next(row['name'] for row in catalog if row['name'].startswith(prefixes[1]))
+        def restored_search(request, marker_text):
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                status, result = call('search', request)
+                if status == 200 and marker_text in json.dumps(result):
+                    return True
+                time.sleep(1)
+            return False
+
+        # Exercise every provider route through the actual admitted memory/egress pair.
+        probe_query = dict(store='user', keywords=['needle'], limit=10)
+        for label, method, route in [('catalog', 'GET', '/api/v1/datasets'),
+                ('add', 'POST', '/api/v1/add'), ('cognify', 'POST', '/api/v1/cognify'),
+                ('search', 'POST', '/api/v1/search')]:
+            if label == 'add':
+                status, added = call('store', dict(store='user', key='fault-add-' + marker,
+                    content='needle added route fixture ' + marker, kind='fact'))
+                check('new canonical record supplies the real add route', status == 200)
+            Proxy.fault = dict(method=method, path=route)
+            status, result = call('search', probe_query)
+            check('real provider ' + label + ' failure refuses retrieval without native fallback',
+                  result.get('status') == 'error' and not result.get('memories'))
+            Proxy.fault = None
+            check('real provider ' + label + ' recovers through the same runtime',
+                  restored_search(probe_query, 'user ' + marker))
+        for label, route, response in [('malformed catalog', '/api/v1/datasets', b'{'),
+                ('invalid dataset identity', '/api/v1/datasets', b'[{"id":"../escape","name":"foreign"}]'),
+                ('incomplete cognification', '/api/v1/cognify', b'{}'),
+                ('foreign retrieval result', '/api/v1/search', b'[{"dataset_name":"foreign","search_result":[]}]')]:
+            Proxy.fault = dict(method='GET' if route.endswith('datasets') else 'POST',
+                path=route, status=200, body=response)
+            status, result = call('search', probe_query)
+            check(label + ' is refused by the real runtime', result.get('status') == 'error')
+            Proxy.fault = None
+            check(label + ' recovery preserves canonical retrieval',
+                  restored_search(probe_query, 'user ' + marker))
+        matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
+            server.application, 'aimee-server', '--bootstrap-vault-stdin',
+            data='AIMEE_MEMORY_BACKEND_TOKEN=invalid-disposable-cognee-token\0')
+        status, result = call('search', probe_query)
+        check('real Cognee rejects a rotated invalid Vault bearer without native fallback',
+              result.get('status') == 'error')
+        status, result = call('get', records['user'])
+        check('provider authentication failure preserves exact canonical reads', status == 200)
+        matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
+            server.application, 'aimee-server', '--bootstrap-vault-stdin',
+            data='AIMEE_MEMORY_BACKEND_TOKEN=' + token + '\0')
+        check('real Cognee observes restored Vault bearer on the existing pipe',
+              restored_search(probe_query, 'user ' + marker))
+        status, correction = call('get', dict(records['user'], include_version=True))
+        status, revised = call('supersede', dict(store='user', old_id=records['user']['id'],
+            new_content='needle user corrected ' + marker, expected_version=correction['memory']['version']))
+        check('Cognee selection retains the canonical versioned correction API', status == 200)
+        check('real Cognee reindexes the corrected canonical revision',
+              restored_search(probe_query, 'user corrected ' + marker))
+        for store in ('user', 'kb'):
+            status, recalled = call('recall', dict(store=store, task_hint='needle', limit_tokens=8192))
+            check(store + ' recall traverses the selected real Cognee backend', status == 200 and
+                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(recalled))
+            cli = gate.cli('recall', '--query', 'needle', '--store', store)
+            check(store + ' native CLI recall reaches real Cognee',
+                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in json.dumps(cli))
+            code_mcp, recalled_mcp = gate.mcp('memory_recall', dict(task_hint='needle', store=store))
+            check(store + ' MCP recall reaches real Cognee with canonical scope', code_mcp == 200 and
+                ('user corrected ' + marker if store == 'user' else 'kb ' + marker) in recalled_mcp)
+        status, exported = call('/v1/native/primitive', dict(task_hint='needle', session_start=True, limit_tokens=8192))
+        check('native memory export uses Cognee selection and exact canonical versions',
+            status == 200 and any('user corrected ' + marker in row.get('content', '') and
+                isinstance(row.get('version', {}).get('record_revision'), str) for row in exported.get('records', [])))
+        user_prefix = prefixes[1]
+        corrected_name = next(row['name'] for row in datasets() if row['name'].startswith(user_prefix)
+            and '_' + records['user']['id'] + '_' in row['name'])
+        check('real Cognee removes obsolete correction datasets', sum(
+            row['name'].startswith(user_prefix) and '_' + records['user']['id'] + '_' in row['name']
+            for row in datasets()) == 1)
+        status, auxiliary = call('get', dict(store='user', id=str(added['id']), include_version=True))
+        auxiliary_delete = dict(store='user', id=str(added['id']),
+            expected_version=auxiliary['memory']['version'], idempotency_key='route-delete-' + uuid.uuid4().hex)
+        Proxy.fault = dict(method='DELETE', path='/api/v1/datasets/')
+        status, result = call('delete', auxiliary_delete)
+        check('real provider delete failure refuses a canonical retirement receipt',
+              result.get('status') == 'error' and 'mutation_receipt' not in result)
+        Proxy.fault = None
+        status, result = call('get', dict(store='user', id=str(added['id'])))
+        check('failed real dataset deletion preserves the active canonical record', status == 200)
+        status, result = call('delete', auxiliary_delete)
+        check('same deletion succeeds after real dataset route recovery',
+              status == 200 and result.get('deleted') is True)
+        old_name = corrected_name
         deletions = {}
         for store, request in records.items():
             status, result = call('get', dict(request, include_version=True))
@@ -281,6 +409,115 @@ os.kill(pids[0],signal.SIGTERM)
         status, result = call('search', dict(store='user', keywords=['needle'], limit=10))
         check('retained canonical record reindexes after derived reset', status == 200 and
               'retained canonical ' + marker in json.dumps(result))
+        # An explicit operator-owned loopback bridge exercises the privileged
+        # coordinator without widening the existing scoped service identity.
+        operator_records = {}
+        for store in ('user', 'kb'):
+            status, created = call('store', dict(store=store, key='operator-' + store + '-' + marker,
+                content='needle operator subject ' + store + ' ' + marker, kind='fact'))
+            check(store + ' creates an authored operator erasure target', status == 200)
+            operator_records[store] = str(created['id'])
+            check(store + ' operator target reaches real derived retrieval', restored_search(
+                dict(store=store, keywords=['needle'], limit=10), 'operator subject ' + store + ' ' + marker))
+        private_author = gate.personal_sql('SELECT author_principal FROM user_memories WHERE id=' + operator_records['user'])
+        # KB data-subject ownership is separate from the author of a shared fact.
+        # Bind this synthetic target to the chosen subject before observing erasure.
+        matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+            '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c',
+            "UPDATE memories SET owner_principal='" + private_author.replace("'", "''") +
+            "' WHERE id=" + operator_records['kb'])
+        shared_author = matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+            '-d', 'aimee_store', '-X', '-At', '-c', 'SELECT owner_principal FROM memories WHERE id=' + operator_records['kb'])
+        check('operator targets have verified private authorship and explicit shared subject ownership', bool(private_author) and bool(shared_author))
+        unrelated_body = dict(store='user', key='other-actor-' + marker,
+            content='needle unrelated operator canonical ' + marker, kind='fact')
+        status, unrelated = json.loads(matrix.command('docker', 'exec', '-i', '-u', '1000',
+            server.application, 'python3', '-c', placement.HTTP, data=json.dumps(dict(
+                method='POST', path='/v1/memory/store', body=unrelated_body))))
+        check('a distinct local principal authors an unrelated record', status == 200 and
+            gate.personal_sql('SELECT author_principal FROM user_memories WHERE id=' + str(unrelated['id'])) != private_author)
+        historical_name = next(row['name'] for row in datasets() if row['name'].startswith(prefixes[1])
+            and '_' + operator_records['user'] + '_' in row['name'])
+        owner_bearer = uuid.uuid4().hex + uuid.uuid4().hex
+        matrix.command('docker', 'exec', '-i', '-u', '1000', '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1',
+            kb.application, 'aimee-kb', '--bootstrap-vault-stdin',
+            data='AIMEE_KB_API_BEARER_TOKEN=' + owner_bearer + '\0')
+        kb.compose('restart', 'aimee-kb')
+        kb.start()
+        for key, value in [('kb_mode', 'none'), ('kb_connection_string', ''),
+                ('kb_service_identity_token', ''), ('kb_client_bearer_token', owner_bearer),
+                ('kb_client_url', 'http://127.0.0.1:8747'), ('kb_mode', 'remote')]:
+            status, result = gate.call('/v1/config/set', dict(key=key, value=value))
+            check('operator transport config applies ' + key, status == 200 and result.get('status') == 'ok')
+        matrix.command('docker', 'exec', '-u', '1000', server.application, 'python3', '-c',
+            'from pathlib import Path\nfor p in Path("/var/lib/aimee").rglob("kb-client-identity.json"):\n p.rename(p.with_name("validation-retired-kb-client-identity.json"))')
+        server.compose('restart', 'aimee-server')
+        # This fixture's bridge binds only Server loopback and forwards inside
+        # its disposable Docker network. No host/LAN listener is published.
+        relay = '''import http.client
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+class Relay(BaseHTTPRequestHandler):
+ def log_message(self,*args): pass
+ def request(self):
+  body=self.rfile.read(int(self.headers.get('Content-Length','0')))
+  headers={k:v for k,v in self.headers.items() if k.lower() not in ('host','connection','content-length')}
+  c=http.client.HTTPConnection('aimee-kb',8741,timeout=120)
+  c.request(self.command,self.path,body,headers)
+  r=c.getresponse();raw=r.read();self.send_response(r.status)
+  self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)))
+  self.end_headers();self.wfile.write(raw);c.close()
+ do_GET=request
+ do_POST=request
+ThreadingHTTPServer(('127.0.0.1',8747),Relay).serve_forever()
+'''
+        matrix.command('docker', 'exec', '-d', '-u', '1000', server.application,
+            'python3', '-c', relay)
+        server.start()
+        status, health = gate.call('/v1/kb/health', method='GET')
+        check('explicit operator transport authenticates to KB', status == 200)
+        erasure = dict(subject=private_author, request_id='operator-cognee-' + uuid.uuid4().hex)
+        Proxy.blocked = True
+        status, refused = call('/v1/kb/erase-subject', erasure)
+        check('managed subject erasure cannot certify a Cognee provider outage',
+            refused.get('status') == 'error' and refused.get('coverage_complete') is not True)
+        Proxy.blocked = False
+        status, completed = call('/v1/kb/erase-subject', erasure)
+        check('same managed subject request retries to verified completion',
+            status == 200 and completed.get('coverage_complete') is True)
+        status, repeated = call('/v1/kb/erase-subject', erasure)
+        check('managed subject completion retry is idempotent',
+            status == 200 and repeated.get('coverage_complete') is True)
+        if shared_author != private_author:
+            status, completed = call('/v1/kb/erase-subject', dict(subject=shared_author,
+                request_id='operator-shared-' + uuid.uuid4().hex))
+            check('shared canonical author erasure also reaches verified completion',
+                status == 200 and completed.get('coverage_complete') is True)
+        check('managed erasure physically removes the personal target and history',
+            gate.personal_sql('SELECT (SELECT count(*) FROM user_memories WHERE id=' + operator_records['user'] +
+                ')+(SELECT count(*) FROM user_memory_versions WHERE memory_id=' + operator_records['user'] + ')') == '0')
+        check('managed erasure physically removes the shared target', matrix.command(
+            'docker', 'exec', kb.postgres, 'psql', '-U', 'postgres', '-d', 'aimee_store', '-X', '-At', '-c',
+            'SELECT count(*) FROM memories WHERE id=' + operator_records['kb']) == '0')
+        check('managed completion verifies both real derived namespaces absent', not datasets())
+        status, current = call('get', dict(store='user', id=str(unrelated['id'])))
+        check('managed erasure preserves the other principal canonical record',
+            status == 200 and 'unrelated operator canonical ' + marker in json.dumps(current))
+        boundary = 'operator-restored-provider-state'
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="datasetName"\r\n\r\n{historical_name}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="data"; filename="restored.txt"\r\n'
+            f'Content-Type: text/plain\r\n\r\nneedle erased operator fixture\r\n--{boundary}--\r\n').encode()
+        provider_request('/api/v1/add', body, 'multipart/form-data; boundary=' + boundary)
+        check('fixture restores an actually erased subject dataset', any(row['name'] == historical_name for row in datasets()))
+        matrix.command('docker', 'exec', server.application, 'python3', '-c', code)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and any(row['name'] == historical_name for row in datasets()):
+            time.sleep(.5)
+        check('memory restart removes restored subject-erased derived data',
+            not any(row['name'] == historical_name for row in datasets()))
+        check('memory restart cannot resurrect physically erased personal data',
+            gate.personal_sql('SELECT count(*) FROM user_memories WHERE id=' + operator_records['user']) == '0')
+        check('other principal reindexes after managed erasure replay', restored_search(
+            dict(store='user', keywords=['needle'], limit=10), 'unrelated operator canonical ' + marker))
         check('real Cognee exercised local completion and embedding models', all(fixture.ModelFixture.calls.values()))
         (output / 'model-calls.json').write_text(json.dumps(fixture.ModelFixture.calls, indent=2) + '\n')
     except Exception as error:

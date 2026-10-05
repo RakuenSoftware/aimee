@@ -43,7 +43,54 @@ Go race tests for memory, Cognee, egress and the module launcher pass. Native Va
 bootstrap tests pass, including refusal of an unattested resource invocation.
 Source ownership, module boundaries, generated documentation and formatting pass.
 
-## Published-image validation is pending
+## Source CI and publication pass
 
-The source CI, testing merge and publisher must finish before qualifying the
-published image. The local verdicts above do not remove that release gate.
+The final repair branch `f2da8e224df289d2ea62b0c13ae0137fe336c982` passed all 56
+jobs in [CI run 37354588562](https://github.com/RakuenSoftware/aimee/actions/runs/37354588562).
+[PR #3007](https://github.com/RakuenSoftware/aimee/pull/3007) merged into testing
+as `5f61f036e51c5b2219f4c603f87ee7231ece731a`.
+[PR #3008](https://github.com/RakuenSoftware/aimee/pull/3008) supplied the release
+README's security guarantees, trust boundaries and harness compatibility.
+The [testing publisher](https://github.com/RakuenSoftware/aimee/actions/runs/37358322025)
+completed successfully for that merge.
+
+## Expanded Cognee checks and remaining qualification
+
+An expanded local-overlay run completed 63 live checks. It adds endpoint failure
+and recovery for catalog, add, cognify and search; malformed catalog, invalid
+UUID, incomplete cognify and foreign-result refusal; live Vault bearer rotation;
+canonical version correction; and failed derived deletion followed by retry.
+Those observations remain local-overlay evidence, not published-image evidence.
+
+[PR #3009](https://github.com/RakuenSoftware/aimee/pull/3009) adds regression tests
+for protocol failures, cancellation, source/version validation, limits, filters,
+namespace isolation and reset recovery. Local Go race tests pass and adapter
+statement coverage rises from 77.9% to 96.3%. All 58 remote checks passed and the
+PR merged into testing as `e0ef1c5e9a43658cb8d916dd22ae927ed348a9cb`.
+Coverage is not a claim that every
+upstream Cognee API or application entry point has been qualified.
+
+| Path | Qualification |
+| --- | --- |
+| Vault handoff, process hardening and supervised helper recovery | 18 installed-helper checks pass on the local overlay; source CI also passes |
+| Real private/shared search, namespace isolation and versioned deletion | 37 committed live checks pass on the local overlay |
+| Provider endpoint failures, malformed replies, credential rotation and retry | Expanded local-overlay run passes 63 checks in total |
+| Adapter protocol, cancellation, limits and canonical validation | Race tests pass; regression tests are in PR #3009 |
+| API, CLI and MCP recall; native primitive source versions | Expanded driver prepared; remaining run incomplete |
+| Operator-authorized subject erasure and restored-provider startup cleanup | Expanded driver prepared; remaining run incomplete |
+| Exact published testing-image qualification | Publisher passed; CT execution remains incomplete |
+
+The later expanded run failed during Server Vault bootstrap before the remaining
+checks. The production Compose wrapper intentionally suppresses output that may
+contain credentials. The validation driver now invokes the same bootstrap module
+and retains failed subprocess output in a mode-0600 file beneath its mode-0700
+private fixture directory. Public exceptions retain only a fixed failure message.
+The driver change preserves the repository working directory and bootstrap input.
+Synthetic failure and success checks verify private file permissions, secret-free
+exceptions and unchanged handling of ordinary commands.
+
+On the subsequent turn the execution environment denied socket creation, so SSH
+to the owned CT on `192.168.1.253` failed with `Operation not permitted` before
+connection. This prevents diagnosing the retained CT failure and qualifying the
+published image in that environment. The live gates above remain incomplete.
+No main merge or complete subject-erasure guarantee follows from these results.
