@@ -19,6 +19,23 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[3]
 
+RESTART_MEMORY = r'''import os,signal,time
+from pathlib import Path
+deadline=time.monotonic()+10
+while time.monotonic()<deadline:
+ pids=[]
+ for p in Path('/proc').iterdir():
+  if p.name.isdigit():
+   try:
+    argv=(p/'cmdline').read_bytes().split(b'\0')
+    if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
+   except OSError: pass
+ if len(pids)==1: break
+ time.sleep(.1)
+if len(pids)!=1: raise SystemExit('expected one supervised memory child')
+os.kill(pids[0],signal.SIGTERM)
+'''
+
 
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
@@ -407,18 +424,7 @@ def main():
                     f'Content-Type: text/plain\r\n\r\nneedle retired historical fixture\r\n--{boundary}--\r\n').encode()
             provider_request('/api/v1/add', body, 'multipart/form-data; boundary=' + boundary)
             check('fixture restores derived data for a deleted record', any(row['name'] == old_name for row in datasets()))
-            code = '''import os,signal
-    from pathlib import Path
-    pids=[]
-    for p in Path('/proc').iterdir():
-     if p.name.isdigit():
-      try:
-       argv=(p/'cmdline').read_bytes().split(b'\\0')
-       if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
-      except OSError: pass
-    if len(pids)!=1: raise SystemExit('expected one supervised memory child')
-    os.kill(pids[0],signal.SIGTERM)
-    '''
+            code = RESTART_MEMORY
             matrix.command('docker', 'exec', server.application, 'python3', '-c', code)
             deadline = time.monotonic() + 120
             while time.monotonic() < deadline and any(row['name'] == old_name for row in datasets()):
@@ -449,6 +455,10 @@ def main():
             status == 200 and 'retained canonical ' + marker in json.dumps(listed)
             and Proxy.requests == before)
         for store in ('user', 'kb'):
+            if store == 'kb':
+                status, companion = call('store', dict(store='kb', key='scope-companion-' + marker,
+                    content='needle authorized scope companion ' + marker, kind='fact'))
+                check('shared reconciliation fixture retains an eligible record in the queried scope', status == 200)
             status, eligible = call('store', dict(store=store, key='eligibility-' + store + '-' + marker,
                 content='needle lifecycle ' + store + ' ' + marker, kind='fact'))
             check(store + ' creates a canonical eligibility fixture', status == 200)
@@ -497,18 +507,7 @@ def main():
             gate.personal_sql("DELETE FROM user_memories WHERE key LIKE '" + capacity_prefix + "%'")
         check('retrieval recovers after synthetic capacity fixture removal',
             restored_search(dict(store='user', keywords=['needle'], limit=10), 'retained canonical ' + marker))
-        code = '''import os,signal
-from pathlib import Path
-pids=[]
-for p in Path('/proc').iterdir():
- if p.name.isdigit():
-  try:
-   argv=(p/'cmdline').read_bytes().split(b'\\0')
-   if Path(os.fsdecode(argv[0])).name=='aimee-module-memory': pids.append(int(p.name))
-  except OSError: pass
-if len(pids)!=1: raise SystemExit('expected one supervised memory child')
-os.kill(pids[0],signal.SIGTERM)
-'''
+        code = RESTART_MEMORY
         # An explicit operator-owned loopback bridge exercises the privileged
         # coordinator without widening the existing scoped service identity.
         operator_records = {}
