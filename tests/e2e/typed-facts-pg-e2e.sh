@@ -3,8 +3,8 @@
 # against REAL PostgreSQL and a running aimee-server + aimee-kb.
 #
 # Why this exists: every C unit test in this repo runs against the sqlite shim
-# (db2_test_shim_open), and sqlite accepts SQL that Postgres rejects. That gap
-# hid db2_entity_edge_two_hop_neighbors building an unparenthesised per-branch
+# (kb_store_test_shim_open), and sqlite accepts SQL that Postgres rejects. That gap
+# hid kb_store_entity_edge_two_hop_neighbors building an unparenthesised per-branch
 # LIMIT inside a UNION -- a hard syntax error on Postgres -- for as long as the
 # function has existed. A green `make unit-tests` is not evidence that the SQL
 # in this subsystem runs at all.
@@ -30,7 +30,7 @@ PGUSER_="${PGUSER_:-aimee}"
 PGDB_="${PGDB_:-aimee_test}"
 export PGPASSWORD="${PGPASSWORD:-aimee}"
 PGURL="${PGURL:-postgresql://$PGUSER_:$PGPASSWORD@$PGHOST_:5432/$PGDB_}"
-export AIMEE_DB2_URL="${AIMEE_DB2_URL:-$PGURL}"
+export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$PGURL}"
 export AIMEE_HOME="${AIMEE_HOME:-/root/.aimee}"
 SOCK="$AIMEE_HOME/aimee-http.sock"
 CONFIG_MODULE="$AIMEE_SRC/build/obj/aimee-module-config"
@@ -170,8 +170,7 @@ start_stack() { # start_stack [extra-yaml]
   sleep 2
   rm -f "$SOCK" "$AIMEE_HOME/kb-module-bus.sock" "$AIMEE_HOME/server-module-bus.sock"
   mkdir -p "$AIMEE_HOME"
-  { echo "db2_url: \"$AIMEE_DB2_URL\""
-    echo 'kb_mode: "local"'
+  { echo 'kb_mode: "local"'
     echo "kb_client_url: \"http://127.0.0.1:$KB_PORT\""
     echo 'embedder_dims: 768'
     echo "${1:-typed_facts_enabled: true}"; } > "$AIMEE_HOME/aimee.yaml"

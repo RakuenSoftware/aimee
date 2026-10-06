@@ -21,6 +21,7 @@ const (
 	MutationVersionConflict     = -5
 	MutationIdempotencyConflict = -6
 	MutationReplayUnavailable   = -7
+	MutationInstructionRefused  = -8
 )
 
 var validEpistemicKinds = map[string]bool{
@@ -58,6 +59,9 @@ func (s *postgresDataStore) prepareKBStore(ctx context.Context, request DataRequ
 	}
 	if strings.TrimSpace(request.Scope.Value) == missingScopeValue {
 		return plan, errors.New("memory: cannot store without active scope context")
+	}
+	if err := screenModelMemory(request.Authority, request.Key, request.Content, request.UseCases); err != nil {
+		return plan, err
 	}
 	var screenErr error
 	request.Content, screenErr = screenMemoryWrite(request.Key, request.Content)
@@ -171,6 +175,8 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 
 func mutationRefusal(err error) int {
 	switch {
+	case errors.Is(err, errInstructionMemory):
+		return MutationInstructionRefused
 	case errors.Is(err, errIdempotencyConflict):
 		return MutationIdempotencyConflict
 	case errors.Is(err, errReplayUnavailable):
@@ -199,6 +205,19 @@ func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority in
 	var query string
 	switch authority {
 	case AuthorityUser:
+		if s.backendFactory != nil {
+			var scope Scope
+			err = s.db.QueryRow(ctx, `SELECT scope_type,scope_value FROM memories WHERE id=$1 FOR UPDATE`, id).Scan(&scope.Type, &scope.Value)
+			if store.IsNoRows(err) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if err = s.forgetBackend(ctx, scope, id); err != nil {
+				return false, err
+			}
+		}
 		// The storage owner captures a payload-free intent in the same statement.
 		// Restore the request marker before audit/other mutations use this Tx.
 		err = s.db.QueryRow(ctx, `WITH previous AS MATERIALIZED (
@@ -222,6 +241,15 @@ func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority in
 		}
 		if err := admitMemoryReplacement(epistemic, origin, authority); err != nil {
 			return false, err
+		}
+		if s.backendFactory != nil {
+			var scope Scope
+			if err := s.db.QueryRow(ctx, `SELECT scope_type,scope_value FROM memories WHERE id=$1`, id).Scan(&scope.Type, &scope.Value); err != nil {
+				return false, err
+			}
+			if err := s.forgetBackend(ctx, scope, id); err != nil {
+				return false, err
+			}
 		}
 		query = `UPDATE memories SET key=key||'#v'||id::text,lifecycle_state='superseded',
 valid_until=pg_now_text(),archive_reason='retired by model',activation_suppressed=1,
@@ -316,6 +344,14 @@ func (s *postgresDataStore) prepareKBCorrection(ctx context.Context, id int64, c
 			return preparedKBCorrection{}, errors.New("memory: invalid confidence")
 		}
 	}
+	if err := screenModelMemory(authority, content); err != nil {
+		return preparedKBCorrection{}, err
+	}
+	if metadata != nil {
+		if err := screenModelMemory(authority, metadata.UseCases); err != nil {
+			return preparedKBCorrection{}, err
+		}
+	}
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
@@ -328,7 +364,7 @@ func (s *postgresDataStore) prepareKBCorrection(ctx context.Context, id int64, c
 	predicate := "id=$1 AND lifecycle_state='active'"
 	var owner, revision, lifecycle string
 	if condition != nil {
-		if !condition.validFor(id) {
+		if !condition.ValidFor(id) {
 			return preparedKBCorrection{}, errors.New("memory: invalid expected version")
 		}
 		// Lock the visible row even when already superseded, so a concurrent loser

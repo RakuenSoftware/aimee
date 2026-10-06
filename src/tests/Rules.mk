@@ -5,7 +5,7 @@
 # standing a module up beside every case.
 
 TEST_C_FLAGS = $(C_FLAGS) -I.. -Igateway
-TEST_L_FLAGS = $(L_FULL) $(DB2_TEST_BACKEND_LIB)
+TEST_L_FLAGS = $(L_FULL) $(KB_STORE_TEST_BACKEND_LIB)
 
 # Which object supplies the aimee_pg_* surface to test binaries.
 #
@@ -14,45 +14,52 @@ TEST_L_FLAGS = $(L_FULL) $(DB2_TEST_BACKEND_LIB)
 # both would not link. Every test recipe therefore names this variable rather
 # than either object directly.
 #
-# Default: the sqlite shim, which translates DB2's SQL and needs no server.
+# Default: the sqlite shim, which translates KB_STORE's SQL and needs no server.
 # AIMEE_TEST_PG=1: the real libpq layer, so the same tests exercise postgres.
 # Nothing else about a recipe changes, which is the point -- there is one set of
 # test binaries, built against one backend or the other.
-DB2_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o
-DB2_TEST_BACKEND_LIB =
+# Real PostgreSQL fixtures launch the checkout's provider, without changing the
+# fixed installed-provider path compiled into production binaries.
+TEST_POSTGRES_CLIENT_OBJS = $(OBJDIR)/tests/postgres-client/session.o $(OBJDIR)/tests/postgres-client/local_session.o
+$(OBJDIR)/tests/postgres-client/%.o: modules/postgres/client/%.c | $(OBJDIR)/aimee-module
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -DAIMEE_POSTGRES_LOCAL_PROVIDER='"$(abspath $(OBJDIR)/aimee-module)"' -c -o $@ $<
+
+KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/tests/aimee_pg_sqlite_shim.o
+KB_STORE_TEST_BACKEND_LIB =
 ifeq ($(AIMEE_TEST_PG),1)
-# entity_edges.o rides along because db2_init calls db2_entity_edge_build_unique_index
+# entity_edges.o rides along because kb_store_init calls kb_store_entity_edge_build_unique_index
 # on the not-a-shim path. Under the sqlite shim aimee_pg_is_shim() folds to a
 # constant and LTO drops that branch with its callee, so most recipes never had to
 # name the object; against real libpq the branch is live and 54 of them stop
 # linking. Carrying it with the backend keeps the choice to this one place instead
 # of editing every recipe.
-DB2_TEST_BACKEND_OBJ = $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/db2/entity_edges.o
-DB2_TEST_BACKEND_LIB = $(PQ_LIB)
-# Lets the shim tell "you forgot AIMEE_TEST_DB2_TEMPLATE_URL" apart from "you
+KB_STORE_TEST_BACKEND_OBJ = $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o
+KB_STORE_TEST_BACKEND_LIB =
+# Lets the shim tell "you forgot AIMEE_TEST_KB_STORE_TEMPLATE_URL" apart from "you
 # wanted sqlite", which are otherwise the same code path and abort identically.
 # Target-specific so only the shim sees it, rather than redefining every object.
-$(OBJDIR)/db2/db2_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
+$(OBJDIR)/kb_store/kb_store_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
 # The round-trip counter the batching tests assert on. The sqlite shim carries it
 # unconditionally (it is test-only); the libpq layer is also production code, so
 # it compiles the counter only for this test-only object.
-$(OBJDIR)/db2/db_postgres.o: C_FLAGS += -DAIMEE_PG_STMT_COUNTER=1
+$(OBJDIR)/kb_store/db_postgres.o: C_FLAGS += -DAIMEE_PG_STMT_COUNTER=1
 endif
 
 
-# db2_test_shim.o's flags depend on AIMEE_TEST_PG, and a flag change is invisible to
+# kb_store_test_shim.o's flags depend on AIMEE_TEST_PG, and a flag change is invisible to
 # make: its source and headers are untouched, so switching modes in the same OBJDIR
 # reuses the object built for the OTHER backend. Everything then links and 90-odd
 # binaries abort at startup with "built with AIMEE_TEST_PG=1 ... but
-# AIMEE_TEST_DB2_TEMPLATE_URL is unset" -- a wall of failures with nothing wrong in
+# AIMEE_TEST_KB_STORE_TEMPLATE_URL is unset" -- a wall of failures with nothing wrong in
 # the tree. Depend on a stamp named after the mode: flipping modes deletes the other
 # stamp and creates this one, which is then newer than the object and forces the
 # rebuild (and the relink that follows it). Same mode twice in a row rebuilds nothing.
-DB2_TEST_BACKEND_STAMP = \
-    $(OBJDIR)/tests/.db2-test-backend-$(if $(filter 1,$(AIMEE_TEST_PG)),pg,sqlite)
-$(DB2_TEST_BACKEND_STAMP):
-	@mkdir -p $(dir $@) && rm -f $(OBJDIR)/tests/.db2-test-backend-* && touch $@
-$(OBJDIR)/db2/db2_test_shim.o: $(DB2_TEST_BACKEND_STAMP)
+KB_STORE_TEST_BACKEND_STAMP = \
+    $(OBJDIR)/tests/.kb_store-test-backend-$(if $(filter 1,$(AIMEE_TEST_PG)),pg,sqlite)
+$(KB_STORE_TEST_BACKEND_STAMP):
+	@mkdir -p $(dir $@) && rm -f $(OBJDIR)/tests/.kb_store-test-backend-* && touch $@
+$(OBJDIR)/kb_store/kb_store_test_shim.o: $(KB_STORE_TEST_BACKEND_STAMP)
 # db_postgres.o carries a mode-dependent define too (AIMEE_PG_STMT_COUNTER above),
 # and seven recipes name it explicitly, so a sqlite run builds it WITHOUT the
 # counter. Flipping to pg then rebuilds nothing -- the source is untouched -- and
@@ -60,7 +67,7 @@ $(OBJDIR)/db2/db2_test_shim.o: $(DB2_TEST_BACKEND_STAMP)
 # aimee_pg_test_stmt_count. CI never sees this because it builds one backend in a
 # fresh tree; running both modes in one OBJDIR is what finds it. Same stamp, same
 # reason as the shim above.
-$(OBJDIR)/db2/db_postgres.o: $(DB2_TEST_BACKEND_STAMP)
+$(OBJDIR)/kb_store/db_postgres.o: $(KB_STORE_TEST_BACKEND_STAMP)
 
 # Test output prefix: defaults to $(OBJDIR)/tests so any `make unit-tests`
 # invocation with a non-default OBJDIR (sanitizers, coverage, build-integrity,
@@ -163,7 +170,7 @@ $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o 
                  $(OBJDIR)/modules/vault/runtime_secret.o $(PLATFORM_BASIC_OBJS) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
-TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
+TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
                  $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
@@ -252,25 +259,25 @@ $(TESTPREFIX)/unit-test-kb-client-search: $(OBJDIR)/modules/kb_client/kb_client_
 
 $(OBJDIR)/tests/test_mcp_directive_transport.o: agent_help_data.h
 
-TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/db2/fact_mutation.o $(OBJDIR)/db2/fact_identity.o \
-                              $(OBJDIR)/db2/fact_identity_unicode.o \
-                              $(OBJDIR)/db2/kb_audit_worm.o \
+TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/kb_store/fact_mutation.o $(OBJDIR)/kb_store/fact_identity.o \
+                              $(OBJDIR)/kb_store/fact_identity_unicode.o \
+                              $(OBJDIR)/kb_store/kb_audit_worm.o \
                               $(OBJDIR)/modules/audit/audit_worm_chain.o \
                               $(OBJDIR)/modules/workflows/wfe_canonical.o \
                               $(OBJDIR)/aimee_sha256.o
 
 TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/tests/support/memory_migration_stub.o $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
-                 $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o \
+                 $(OBJDIR)/kb_store/kb_payload.o $(OBJDIR)/kb_store/vector_index_ops.o $(OBJDIR)/kb_store/code_index_ops.o \
                  $(OBJDIR)/workflow_learn.o \
-                 $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
+                 $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/kb_store/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                  $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
-                 $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
+                 $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/agent_hints.o $(OBJDIR)/kb_store/agent_outcomes.o $(OBJDIR)/kb_store/anti_patterns.o $(OBJDIR)/kb_store/collab_rules.o $(OBJDIR)/kb_store/curiosity.o $(OBJDIR)/kb_store/decision_log.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/kb_store/entity_edges.o $(OBJDIR)/kb_store/entity_nodes.o $(OBJDIR)/kb_store/code_projection.o $(OBJDIR)/kb_store/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/kb_store/entity_profiles.o $(OBJDIR)/kb_store/failed_queries.o $(OBJDIR)/kb_store/feedback.o $(OBJDIR)/kb_store/notes.o $(OBJDIR)/kb_store/rules.o $(OBJDIR)/kb_store/tasks.o $(OBJDIR)/kb_store/tool_registry.o $(OBJDIR)/kb_store/kind_lifecycle.o $(OBJDIR)/kb_store/kb_runtime_state.o $(OBJDIR)/kb_store/kb_service_backend.o $(OBJDIR)/kb_store/kb_service_backend_ingest.o $(OBJDIR)/kb_store/learning.o $(OBJDIR)/kb_store/code_index.o $(OBJDIR)/kb_store/sketch.o $(OBJDIR)/kb_store/pgvec_transport.o $(OBJDIR)/kb_store/kb_vectors.o $(OBJDIR)/kb_store/vector_status.o $(OBJDIR)/kb_store/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
                  $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
-                 $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
-                 $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/db2/calibration.o \
-                 $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
+                 $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/kb_store/learning_synth_ops.o \
+                 $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/kb_store/demotion.o $(OBJDIR)/kb_store/calibration.o \
+                 $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
                  $(OBJDIR)/kb/kb_reasoning.o \
-                 $(OBJDIR)/db2/bandit.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o \
+                 $(OBJDIR)/kb_store/bandit.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o \
                  $(OBJDIR)/kb/kb_mdl.o \
                  $(OBJDIR)/server/computer_use.o
 
@@ -282,7 +289,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/test
 # linking both would produce duplicate-symbol errors.
 TEST_DATA_OBJS_MOCK = $(TEST_DATA_OBJS) $(OBJDIR)/tests/support/mock_agent_http.o
 
-TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
+TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-postgres-session-transport $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-kb-store $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
  $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent \
@@ -327,6 +334,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-manuscript \
                $(TESTPREFIX)/unit-test-persona \
                $(TESTPREFIX)/unit-test-server-http \
+               $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-openai-shape \
                $(TESTPREFIX)/unit-test-openai-chat-policed \
                $(TESTPREFIX)/unit-test-openai-responses-store \
@@ -348,7 +356,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
  $(TESTPREFIX)/unit-test-extractors-extra \
                $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-roundtable-chair $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
-               $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-db2-conn-bounds $(TESTPREFIX)/unit-test-db2-conn-open $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
                $(TESTPREFIX)/unit-test-cli-provider \
@@ -438,7 +445,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-routing-module \
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
-               $(TESTPREFIX)/unit-test-db2-code-audit \
+               $(TESTPREFIX)/unit-test-kb-store-code-audit \
                $(TESTPREFIX)/unit-test-bus-guardrail-durability \
                $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-agent \
@@ -721,7 +728,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-kb-identity-resolve \
                $(TESTPREFIX)/unit-test-kb-ingress \
                $(TESTPREFIX)/unit-test-kb-oidc-jwks \
-               $(TESTPREFIX)/unit-test-db2-hardening \
                $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard \
                $(TESTPREFIX)/unit-test-kb-models-validate \
                $(TESTPREFIX)/unit-test-kb-route-acl \
@@ -753,7 +759,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-learning-version \
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
-               $(TESTPREFIX)/unit-test-fidelity \
+               $(TESTPREFIX)/unit-test-fidelity-transport \
                $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-ranker-fit \
@@ -795,6 +801,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
                $(TESTPREFIX)/unit-test-db1-conversation-client \
                $(TESTPREFIX)/unit-test-server-http \
+               $(TESTPREFIX)/unit-test-server-native-primitive \
                $(TESTPREFIX)/unit-test-web-search-fuse \
                $(TESTPREFIX)/unit-test-trajectory-batch \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
@@ -894,31 +901,27 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-write-tier
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-identity-token-authority
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
-TEST_TARGETS +=
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
-TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
-                $(TESTPREFIX)/unit-test-bus-db2-module \
-                $(TESTPREFIX)/unit-test-db2-module-init \
-                $(TESTPREFIX)/unit-test-db2-cert-serial-support \
-                $(TESTPREFIX)/unit-test-db2-cjson-support \
-                $(TESTPREFIX)/unit-test-db2-cochange-support \
-                $(TESTPREFIX)/unit-test-db2-code-audit-graph-support \
-                $(TESTPREFIX)/unit-test-db2-code-import-support \
-                $(TESTPREFIX)/unit-test-db2-code-match-support \
-                $(TESTPREFIX)/unit-test-db2-dstr-support \
-                $(TESTPREFIX)/unit-test-db2-extractor-support \
-                $(TESTPREFIX)/unit-test-db2-log-support \
-                $(TESTPREFIX)/unit-test-db2-management-read-support \
-                $(TESTPREFIX)/unit-test-db2-model-validation-support \
-                $(TESTPREFIX)/unit-test-db2-random-support \
-                $(TESTPREFIX)/unit-test-db2-rel-seed-support \
-                $(TESTPREFIX)/unit-test-db2-rel-type-support \
-                $(TESTPREFIX)/unit-test-db2-runtime-config-support \
-                $(TESTPREFIX)/unit-test-db2-sketch-support \
-                $(TESTPREFIX)/unit-test-db2-text-support \
-                $(TESTPREFIX)/unit-test-db2-time-support \
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-store-cert-serial-support \
+                $(TESTPREFIX)/unit-test-kb-store-cjson-support \
+                $(TESTPREFIX)/unit-test-kb-store-cochange-support \
+                $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support \
+                $(TESTPREFIX)/unit-test-kb-store-code-import-support \
+                $(TESTPREFIX)/unit-test-kb-store-code-match-support \
+                $(TESTPREFIX)/unit-test-kb-store-dstr-support \
+                $(TESTPREFIX)/unit-test-kb-store-extractor-support \
+                $(TESTPREFIX)/unit-test-kb-store-log-support \
+                $(TESTPREFIX)/unit-test-kb-store-management-read-support \
+                $(TESTPREFIX)/unit-test-kb-store-model-validation-support \
+                $(TESTPREFIX)/unit-test-kb-store-random-support \
+                $(TESTPREFIX)/unit-test-kb-store-rel-seed-support \
+                $(TESTPREFIX)/unit-test-kb-store-rel-type-support \
+                $(TESTPREFIX)/unit-test-kb-store-runtime-config-support \
+                $(TESTPREFIX)/unit-test-kb-store-sketch-support \
+                $(TESTPREFIX)/unit-test-kb-store-text-support \
+                $(TESTPREFIX)/unit-test-kb-store-time-support \
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/learning.o \
@@ -983,24 +986,24 @@ UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
-UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-text-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-time-support-sanitize
+UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-log-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-random-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-text-support-sanitize \
+                        $(TESTPREFIX)/unit-test-kb-store-time-support-sanitize
 else
 UNIT_TEST_AUX_TARGETS =
 endif
@@ -1129,7 +1132,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module 
 	fi
 	@for t in $(UNIT_TEST_AUX_TARGETS); do \
 	  echo "  $$t"; \
-	  "./$$t"; \
+	  "./$$t" || exit $$?; \
 	done
 	@echo "All tests passed."
 
@@ -1150,12 +1153,12 @@ $(TESTPREFIX)/unit-test-harness-memory-audit: $(OBJDIR)/tests/test_harness_memor
 $(TESTPREFIX)/unit-test-harness-memory-scope: $(OBJDIR)/tests/test_harness_memory_scope.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-db2: $(OBJDIR)/tests/test_db2.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                            $(OBJDIR)/db2/entity_edges.o
+$(TESTPREFIX)/unit-test-kb-store: $(OBJDIR)/tests/test_kb_store.o $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                            $(OBJDIR)/kb_store/entity_edges.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
-# Names the sqlite shim object directly rather than $(DB2_TEST_BACKEND_OBJ): this is
-# a white-box test OF the shim, not of DB2 through it. It hands aimee_pg_prepare_ex a
+# Names the sqlite shim object directly rather than $(KB_STORE_TEST_BACKEND_OBJ): this is
+# a white-box test OF the shim, not of KB_STORE through it. It hands aimee_pg_prepare_ex a
 # raw sqlite3* and drives the RESOURCE classification with sqlite3_hard_heap_limit64,
 # neither of which means anything to libpq. Under AIMEE_TEST_PG=1 the backend swap
 # would point it at db_postgres.o and every assertion would be about the wrong
@@ -1166,7 +1169,7 @@ $(TESTPREFIX)/unit-test-pg-prepare-classification: \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lsqlite3 -lm
 
 $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
-                                      $(OBJDIR)/db2/db_schema.o
+                                      $(OBJDIR)/kb_store/db_schema.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 # P9a telemetry pure-helper tests (Prometheus render/escape, metric_name
@@ -1175,7 +1178,7 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
 # sha256 via TEST_L_FLAGS); the DB-backed paths live in the real-PG gate.
 $(OBJDIR)/tests/test_org_telemetry.o: schema_data.h
 $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
-                                       $(OBJDIR)/db2/org_telemetry_fmt.o
+                                       $(OBJDIR)/kb_store/org_telemetry_fmt.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-metrics-listener: \
@@ -1198,7 +1201,7 @@ $(TESTPREFIX)/unit-test-aws-auth: $(OBJDIR)/tests/test_aws_auth.o \
 
 $(TESTPREFIX)/unit-test-org-model-catalog-target: \
                                   $(OBJDIR)/tests/test_org_model_catalog_target.o \
-                                  $(OBJDIR)/db2/org_model_catalog.o \
+                                  $(OBJDIR)/kb_store/org_model_catalog.o \
                                   $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1214,108 +1217,98 @@ $(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o 
 
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
-                                       $(OBJDIR)/db2/code_index_ops.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/code_index_ops.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-code-project-lifecycle: \
                                        $(OBJDIR)/tests/test_code_project_lifecycle.o \
-                                       $(OBJDIR)/db2/code_index.o \
-	$(OBJDIR)/db2/code_project_lifecycle.o \
-	$(OBJDIR)/db2/cross_repo_resolver.o \
-	$(OBJDIR)/db2/kb_audit_worm.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+	$(OBJDIR)/kb_store/code_project_lifecycle.o \
+	$(OBJDIR)/kb_store/cross_repo_resolver.o \
+	$(OBJDIR)/kb_store/kb_audit_worm.o \
                                        $(OBJDIR)/modules/audit/audit_worm_chain.o \
                                        $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 # Cross-repo dependency graph S3: DB stats layer over the sqlite shim (portable
-# SQL). Links the db2 init/pool/schema + the shim core like code-index-ops.
+# SQL). Links the kb_store init/pool/schema + the shim core like code-index-ops.
 $(TESTPREFIX)/unit-test-cross-repo-stats: \
                                        $(OBJDIR)/tests/test_cross_repo_stats.o \
-                                       $(OBJDIR)/db2/cross_repo_stats.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_stats.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 # S4a orchestration over the sqlite shim (portable candidate-gen + pure core).
 $(TESTPREFIX)/unit-test-cross-repo-deps-orch: \
                                        $(OBJDIR)/tests/test_cross_repo_deps_orch.o \
-                                       $(OBJDIR)/db2/cross_repo_deps.o \
-                                       $(OBJDIR)/db2/cross_repo_stats.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/cross_repo_classify.o \
-                                       $(OBJDIR)/db2/cross_repo_review.o \
-                                       $(OBJDIR)/db2/cross_repo_identity.o \
-                                       $(OBJDIR)/db2/cross_repo_route.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_deps.o \
+                                       $(OBJDIR)/kb_store/cross_repo_stats.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/cross_repo_classify.o \
+                                       $(OBJDIR)/kb_store/cross_repo_review.o \
+                                       $(OBJDIR)/kb_store/cross_repo_identity.o \
+                                       $(OBJDIR)/kb_store/cross_repo_route.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-cross-repo-identity: \
                                        $(OBJDIR)/tests/test_cross_repo_identity.o \
-                                       $(OBJDIR)/db2/cross_repo_identity.o \
-                                       $(OBJDIR)/db2/cross_repo_deps.o \
-                                       $(OBJDIR)/db2/cross_repo_stats.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/cross_repo_classify.o \
-                                       $(OBJDIR)/db2/cross_repo_review.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_identity.o \
+                                       $(OBJDIR)/kb_store/cross_repo_deps.o \
+                                       $(OBJDIR)/kb_store/cross_repo_stats.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/cross_repo_classify.o \
+                                       $(OBJDIR)/kb_store/cross_repo_review.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-cross-repo-route: \
                                        $(OBJDIR)/tests/test_cross_repo_route.o \
-                                       $(OBJDIR)/db2/cross_repo_route.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_route.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-cross-repo-build: \
                                        $(OBJDIR)/tests/test_cross_repo_build.o \
-                                       $(OBJDIR)/db2/cross_repo_build.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_build.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-cross-repo-acceptance: \
                                        $(OBJDIR)/tests/test_cross_repo_acceptance.o \
-                                       $(OBJDIR)/db2/cross_repo_deps.o \
-                                       $(OBJDIR)/db2/cross_repo_stats.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/cross_repo_classify.o \
-                                       $(OBJDIR)/db2/cross_repo_review.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_deps.o \
+                                       $(OBJDIR)/kb_store/cross_repo_stats.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/cross_repo_classify.o \
+                                       $(OBJDIR)/kb_store/cross_repo_review.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 # S4b review queue + adjudication over the sqlite shim.
 $(TESTPREFIX)/unit-test-cross-repo-review: \
                                        $(OBJDIR)/tests/test_cross_repo_review.o \
-                                       $(OBJDIR)/db2/cross_repo_review.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
-
-# auditable-correctness P3 fidelity storage substrate over the sqlite shim.
-$(TESTPREFIX)/unit-test-fidelity: \
-                                       $(OBJDIR)/tests/test_fidelity.o \
-                                       $(OBJDIR)/db2/fidelity.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/cross_repo_review.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
@@ -1330,27 +1323,27 @@ $(TESTPREFIX)/unit-test-fidelity-check: \
 # CSS style-graph persistence (WP-B) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
-                                       $(OBJDIR)/db2/css_graph.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/css_graph.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 # CSS analysis signals (!important / specificity / unused vars / token candidates).
 $(TESTPREFIX)/unit-test-css-insights: \
                                        $(OBJDIR)/tests/test_css_insights.o \
-                                       $(OBJDIR)/db2/css_insights.o \
-                                       $(OBJDIR)/db2/css_graph.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/css_insights.o \
+                                       $(OBJDIR)/kb_store/css_graph.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
@@ -1359,35 +1352,35 @@ $(TESTPREFIX)/unit-test-css-insights: \
 # CSS migration pipeline driver (WP-F) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/tests/test_css_migration.o \
-                                       $(OBJDIR)/db2/css_migration.o \
-                                       $(OBJDIR)/db2/css_graph.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/css_migration.o \
+                                       $(OBJDIR)/kb_store/css_graph.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-# CSS rendered-oracle storage + evaluation (#4-full slice 2): db2/css_render.o
+# CSS rendered-oracle storage + evaluation (#4-full slice 2): kb_store/css_render.o
 # + the pure css_render_oracle.o, over the migration-unit + graph spine.
 $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/tests/test_css_render.o \
-                                       $(OBJDIR)/db2/css_render.o \
+                                       $(OBJDIR)/kb_store/css_render.o \
                                        $(OBJDIR)/modules/css/css_render_oracle.o \
-                                       $(OBJDIR)/db2/css_migration.o \
-                                       $(OBJDIR)/db2/css_graph.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/css_migration.o \
+                                       $(OBJDIR)/kb_store/css_graph.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/cross_repo_resolver.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -1395,25 +1388,25 @@ $(TESTPREFIX)/unit-test-css-render: \
 $(TESTPREFIX)/unit-test-curator-version: \
                                        $(OBJDIR)/tests/test_curator_version.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_version.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/kb_payload.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/kb_payload.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-curator-invalidate: \
                                        $(OBJDIR)/tests/test_curator_invalidate.o \
-                                       $(OBJDIR)/db2/kb_payload.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/kb_payload.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -1431,23 +1424,23 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/tests/test_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
-                                       $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o \
+                                       $(OBJDIR)/kb_store/kb_store_tenant.o $(OBJDIR)/kb/kb_identity.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
-                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/kb_store/entity_edges.o \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/index.o $(OBJDIR)/cochange.o \
-                                       $(OBJDIR)/db2/code_index.o \
-                                       $(OBJDIR)/db2/kb_payload.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/code_index.o \
+                                       $(OBJDIR)/kb_store/kb_payload.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -1457,24 +1450,24 @@ $(TESTPREFIX)/unit-test-curator-queue: \
 # operators like <=> do not exist in sqlite, so a shimmed test cannot tell a
 # working vector query from a broken one. This one target swaps the shim for
 # db_postgres.o so the query runs where halfvec actually lives.
-TEST_CORE_OBJS_PG = $(filter-out $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o,$(TEST_CORE_OBJS)) \
-                    $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/db2/entity_edges.o
+TEST_CORE_OBJS_PG = $(filter-out $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o,$(TEST_CORE_OBJS)) \
+                    $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) $(OBJDIR)/kb_store/entity_edges.o
 
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
-                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/kb_vectors.o \
-                    $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_kb_service.o \
-                    $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                    $(OBJDIR)/kb_store/pgvec_transport.o $(OBJDIR)/kb_store/kb_vectors.o \
+                    $(OBJDIR)/kb_store/vector_status.o $(OBJDIR)/kb_store/pgvec_kb_service.o \
+                    $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                     $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # One embedder round trip per batch: the request COUNT is the behaviour under test.
-$(TESTPREFIX)/unit-test-rules: $(OBJDIR)/tests/test_rules.o $(DB1_TEST_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+$(TESTPREFIX)/unit-test-rules: $(OBJDIR)/tests/test_rules.o $(DB1_TEST_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/rules.o $(OBJDIR)/kb_store/stopwords.o $(OBJDIR)/kb_store/tool_registry.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                        $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                        $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.o $(OBJDIR)/context_discover.o \
-$(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
+$(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                        $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/platform_random.o $(OBJDIR)/log.o \
                        $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1643,12 +1636,12 @@ $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/extractors.o \
-$(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+$(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/kb_store/css_graph.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                            $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                            $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                            $(TEST_DATA_OBJS_MOCK) \
                            $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/tasks.o \
-                           $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/db2/feature_rows.o \
+                           $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/kb_store/feature_rows.o \
                            $(OBJDIR)/render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1754,8 +1747,8 @@ $(TESTPREFIX)/unit-test-cochange: $(OBJDIR)/tests/test_cochange.o \
                      $(OBJDIR)/cochange.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-db2-code-audit: $(OBJDIR)/tests/test_db2_code_audit.o \
-                     $(OBJDIR)/db2/code_audit.o $(OBJDIR)/db2/entity_nodes.o \
+$(TESTPREFIX)/unit-test-kb-store-code-audit: $(OBJDIR)/tests/test_kb_store_code_audit.o \
+                     $(OBJDIR)/kb_store/code_audit.o $(OBJDIR)/kb_store/entity_nodes.o \
                      $(OBJDIR)/code_audit_graph.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1848,9 +1841,9 @@ $(TESTPREFIX)/unit-test-markdown: $(OBJDIR)/tests/test_markdown.o $(OBJDIR)/mark
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOCK) \
-                               $(OBJDIR)/db2/canonical_index.o \
-                               $(OBJDIR)/db2/canonical_index_query.o \
-                               $(OBJDIR)/db2/cross_repo_resolver.o $(OBJDIR)/code_match.o
+                               $(OBJDIR)/kb_store/canonical_index.o \
+                               $(OBJDIR)/kb_store/canonical_index_query.o \
+                               $(OBJDIR)/kb_store/cross_repo_resolver.o $(OBJDIR)/code_match.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
@@ -1859,11 +1852,11 @@ $(TESTPREFIX)/unit-test-graph-scoring: $(OBJDIR)/tests/test_graph_scoring.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-code-projection: $(OBJDIR)/tests/test_code_projection.o \
-    $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/entity_nodes.o $(TEST_DATA_OBJS_MOCK)
+    $(OBJDIR)/kb_store/code_projection.o $(OBJDIR)/kb_store/entity_nodes.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-entity-nodes: $(OBJDIR)/tests/test_entity_nodes.o \
-    $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_postgres.o
+    $(OBJDIR)/kb_store/entity_nodes.o $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
@@ -1871,7 +1864,7 @@ $(TESTPREFIX)/unit-test-memory-lanes: $(OBJDIR)/tests/test_memory_lanes.o $(TEST
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Links the real fusion TU, not a mirror: memory_candidate_fusion.c was split out
-# of memory_core_search_c.c (db2 + libpq) precisely so this policy is reachable
+# of memory_core_search_c.c (kb_store + libpq) precisely so this policy is reachable
 # from a unit test without standing up a store.
 $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
                           $(OBJDIR)/worktree_gc.o \
@@ -1890,30 +1883,6 @@ $(TESTPREFIX)/unit-test-extractors-extra: $(OBJDIR)/tests/test_extractors_extra.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compute-pool: $(OBJDIR)/tests/test_compute_pool.o $(OBJDIR)/server/compute_pool.o $(OBJDIR)/log.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-# The bounds every pooled connection carries. Built with postgres disabled so the
-# policy is exercised without a backend.
-$(OBJDIR)/tests/test_db2_conn_bounds.o: C_FLAGS += -Idb2
-# libpq is linked so the suite can assert against PQconninfoParse — the real
-# parser is the only thing that distinguishes "the bounds appear in the string"
-# from "the bounds are real options", which is exactly the distinction the URI bug
-# slipped through. The tests still need no running backend.
-$(TESTPREFIX)/unit-test-db2-conn-bounds: $(OBJDIR)/tests/test_db2_conn_bounds.o $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/log.o
-	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread $(EXTRA_L_FLAGS)
-
-# aimee_pg_open's own contract. The test defines the libpq entry points that
-# function calls; a definition in an object file wins over the same symbol in a
-# shared library, so these land on the fakes while the rest of libpq stays real.
-# That is what makes "SET statement_timeout fails" reachable — a live backend
-# cannot be asked to reject it on demand. LTO is left on (the rest of the build
-# uses it, and libpq is a shared library with no IR, so nothing can be inlined
-# across the seam regardless).
-$(OBJDIR)/tests/test_db2_conn_open.o: C_FLAGS += -Idb2
-$(TESTPREFIX)/unit-test-db2-conn-open: $(OBJDIR)/tests/test_db2_conn_open.o $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/log.o
-	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread $(EXTRA_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-db2-pool: $(OBJDIR)/tests/test_db2_pool.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-session-pools: $(OBJDIR)/tests/test_server_session_pools.o \
@@ -1948,9 +1917,9 @@ $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJD
 $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
                           $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o \
                           $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_f.o \
-                          $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o \
+                          $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/decision_log.o $(OBJDIR)/kb_store/kb_audit_worm.o \
                           $(CONFIG_CLIENT_TEST_OBJS) \
-$(OBJDIR)/yaml.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+$(OBJDIR)/yaml.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                           $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o \
                           $(OBJDIR)/modules/vault/runtime_secret.o \
                           $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -2157,7 +2126,7 @@ $(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o 
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
                                     $(OBJDIR)/server/web_search_breaker.o
@@ -2313,7 +2282,7 @@ $(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o 
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
                               $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                               $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) | $(KB_RESOLVER)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -2346,7 +2315,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
                                            $(OBJDIR)/shared/auth_token_verify.o \
@@ -2390,7 +2359,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/kb/kb_mgmt_token.o \
@@ -2448,7 +2417,7 @@ $(TESTPREFIX)/unit-test-server-write-tier-db1: \
                            $(OBJDIR)/module_json_call.o $(TEST_CORE_OBJS) $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/jti_replay_consume.o \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 
 
@@ -2500,7 +2469,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-custody: \
 
 $(TESTPREFIX)/unit-test-management-status-key-ctx: \
     $(OBJDIR)/tests/test_management_status_key_ctx.o \
-    $(OBJDIR)/db2/management_status_key.o
+    $(OBJDIR)/kb_store/management_status_key.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status-provision: \
@@ -2518,8 +2487,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision: \
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_token_authority.o \
-    $(OBJDIR)/modules/db2/c/management_token_authority.o \
-    $(OBJDIR)/modules/db2/c/db_postgres.o \
+    $(OBJDIR)/modules/kb/c/management_token_authority.o \
+    $(OBJDIR)/modules/kb/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
@@ -2527,8 +2496,8 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
 
 $(TESTPREFIX)/unit-test-kb-identity-token-authority: \
     $(OBJDIR)/tests/test_kb_identity_token_authority.o \
-    $(OBJDIR)/modules/db2/c/management_token_authority.o \
-    $(OBJDIR)/modules/db2/c/db_postgres.o \
+    $(OBJDIR)/modules/kb/c/management_token_authority.o \
+    $(OBJDIR)/modules/kb/c/db_postgres.o \
     $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
     $(OBJDIR)/kb/kb_identity_token.o $(OBJDIR)/kb/kb_mgmt_token_public.o \
     $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/server/oauth_pkce.o \
@@ -2556,25 +2525,25 @@ $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening: \
 
 $(TESTPREFIX)/unit-test-management-status-runtime: \
     $(OBJDIR)/tests/test_management_status_runtime.o \
-    $(OBJDIR)/db2/management_status_runtime.o
+    $(OBJDIR)/kb_store/management_status_runtime.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-management-client-instance: \
     $(OBJDIR)/tests/test_management_client_instance.o \
-    $(OBJDIR)/db2/management_client_instance.o
+    $(OBJDIR)/kb_store/management_client_instance.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-management-action-journal: \
     $(OBJDIR)/tests/test_management_action_journal.o \
-    $(OBJDIR)/db2/management_action_journal.o
+    $(OBJDIR)/kb_store/management_action_journal.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # The identity journal links management_action_journal.o only for the shared
 # SQLSTATE classifier; the pg layer and tenant scope are mocked in the test.
 $(TESTPREFIX)/unit-test-management-identity-journal: \
     $(OBJDIR)/tests/test_management_identity_journal.o \
-    $(OBJDIR)/db2/management_identity_journal.o \
-    $(OBJDIR)/db2/management_action_journal.o
+    $(OBJDIR)/kb_store/management_identity_journal.o \
+    $(OBJDIR)/kb_store/management_action_journal.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle: \
@@ -2829,7 +2798,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_re
                         \
                         \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 # Restored. Deleted with the C store as "store-coupled": its only matches for
 # /db1/ were an <sqlite3.h> include it never used, a db_schema.h include it never
@@ -2880,7 +2849,7 @@ $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
                            $(CORE_EVENT_BUS_LIB) | $(OBJDIR)/aimee-memory-fixture
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-platform-process: $(OBJDIR)/tests/test_platform_process.o \
                                   $(OBJDIR)/posix/platform_process.o \
@@ -3006,6 +2975,7 @@ $(TESTPREFIX)/unit-test-bus-route: $(OBJDIR)/tests/test_bus_route.o \
 # Event-bus flow control (feature tree slice 7).
 $(OBJDIR)/tests/test_bus_flow.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
+                                  $(OBJDIR)/config_client_contract.o $(PLATFORM_BASIC_OBJS) \
                                   $(OBS_BUS_LINK_OBJS) \
                                   $(OBJDIR)/modules/audit/audit_ledger.o \
                                   $(TEST_WORM_OBJS) \
@@ -3145,93 +3115,18 @@ $(TESTPREFIX)/unit-test-routing-module: $(OBJDIR)/tests/test_routing_module.o \
 unit-test-routing-module: $(TESTPREFIX)/unit-test-routing-module
 	$<
 
-$(OBJDIR)/tests/test_db2_module_contract.o: C_FLAGS += -Icore/event_bus/include \
-                                                        -Imodules/db2 \
-                                                        -Imodules/db2/include
-$(OBJDIR)/modules/db2/module_adapter.o: C_FLAGS += -Icore/event_bus/include \
-                                                   -Imodules/db2/include
-$(TESTPREFIX)/unit-test-db2-module-contract: \
-                                        $(OBJDIR)/tests/test_db2_module_contract.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
-                                        $(OBJDIR)/modules/db2/module_adapter.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-.PHONY: unit-test-db2-module-contract
-unit-test-db2-module-contract: $(TESTPREFIX)/unit-test-db2-module-contract
-	$<
-
-$(OBJDIR)/tests/test_db2_module_init.o: C_FLAGS += -Imodules/db2
-$(OBJDIR)/modules/db2/module_init.o: C_FLAGS += -Imodules/db2 -Imodules/db2/c -Iheaders
-$(TESTPREFIX)/unit-test-db2-module-init: $(OBJDIR)/tests/test_db2_module_init.o \
-                                        $(OBJDIR)/modules/db2/module_init.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
-
-.PHONY: unit-test-db2-module-init
-unit-test-db2-module-init: $(TESTPREFIX)/unit-test-db2-module-init
-	$<
-
-$(OBJDIR)/tests/test_bus_db2_module.o: C_FLAGS += -Icore/event_bus/include \
-                                                   -Imodules/db2 \
-                                                   -Imodules/db2/include
-$(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += -Icore/event_bus/include \
-                                                        -Imodules/db2/include
-$(TESTPREFIX)/unit-test-bus-db2-module: \
-                                        $(OBJDIR)/tests/test_bus_db2_module.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
-                                        $(OBJDIR)/modules/db2/module_adapter.o \
-                                        $(OBJDIR)/core/event_bus/module_client.o \
-                                        $(OBJDIR)/core/event_bus/module_runtime.o \
-                                        $(OBJDIR)/core/event_bus/module_protocol.o \
-                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
-                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                                        $(OBJDIR)/core/event_bus/bus_client.o \
-                                        $(OBJDIR)/core/event_bus/bus_attach.o \
-                                        $(OBJDIR)/core/event_bus/bus_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_route.o \
-                                        $(OBJDIR)/core/event_bus/bus_region.o \
-                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_ring.o \
-                                        $(OBJDIR)/core/event_bus/bus_arena.o \
-                                        $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: unit-test-bus-db2-module
-unit-test-bus-db2-module: $(TESTPREFIX)/unit-test-bus-db2-module
-	$<
-
-$(OBJDIR)/tests/test_bus_db2_process.o: C_FLAGS += -Icore/event_bus/include \
-                                                    -Imodules/db2/include
-$(TESTPREFIX)/unit-test-bus-db2-process: \
-                                        $(OBJDIR)/tests/test_bus_db2_process.o \
-                                        $(OBJDIR)/modules/db2/client/generated.o \
-                                        $(OBJDIR)/core/event_bus/module_client.o \
-                                        $(OBJDIR)/core/event_bus/module_protocol.o \
-                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
-                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                                        $(OBJDIR)/core/event_bus/bus_client.o \
-                                        $(OBJDIR)/core/event_bus/bus_attach.o \
-                                        $(OBJDIR)/core/event_bus/bus_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_route.o \
-                                        $(OBJDIR)/core/event_bus/bus_region.o \
-                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                        $(OBJDIR)/core/event_bus/bus_ring.o \
-                                        $(OBJDIR)/core/event_bus/bus_arena.o \
-                                        $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: db2-replay
+.PHONY: postgres-knowledge-replay
 $(TESTPREFIX)/unit-test-server-prospective: $(OBJDIR)/tests/test_server_prospective.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/server_memory_review.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
-	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
-	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
-	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/db2 -run '^TestMemoryPostgresReplay$$'
-	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/memory -run '^TestMemoryRuntimeRoleReplay$$'
-	cd ../server-go && AIMEE_DB_TEST_URL="$$AIMEE_DB2_URL" AIMEE_DB_TEST_REQUIRED=1 go test -count=1 -v ./modules/postgres -run '^TestSharedDatabase'
+postgres-knowledge-replay: tests/test_postgres_local_session.c
+	@test -n "$$AIMEE_KB_STORE_REPLAY_URL" || { echo "postgres-knowledge-replay requires an isolated replay database" >&2; exit 1; }
+	cd ../server-go && AIMEE_MEMORY_REPLAY_REQUIRED=1 go test -race -count=1 ./modules/memory -run '^TestMemoryRuntimeRoleReplay$$'
+	cd ../server-go && AIMEE_DB_TEST_URL="$$AIMEE_KB_STORE_REPLAY_URL" AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 ./modules/postgres
+
 
 # Live workflow tests must not silently skip because a binary or database is
 # absent. Each fixture owns an isolated schema and restricted runtime role.
@@ -3242,24 +3137,24 @@ workflow-db-e2e: server $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config
 
 # --- Postgres-backed unit tests -------------------------------------------
 #
-# The sqlite shim translates DB2's SQL rather than executing it, so engine-level
+# The sqlite shim translates KB_STORE's SQL rather than executing it, so engine-level
 # behaviour (affected-row counts, scope-macro expansion, postgres-only syntax) is
-# unverified by a normal `make unit-tests`. Point AIMEE_TEST_DB2_TEMPLATE_URL at a
-# postgres database and db2_test_shim_open* clones it per test binary instead of
+# unverified by a normal `make unit-tests`. Point AIMEE_TEST_KB_STORE_TEMPLATE_URL at a
+# postgres database and kb_store_test_shim_open* clones it per test binary instead of
 # opening sqlite -- the same tests, the real engine.
 #
-#   make db2-test-template AIMEE_TEST_DB2_TEMPLATE_URL=postgresql://.../aimee_test_tpl
-#   make unit-tests-pg     AIMEE_TEST_DB2_TEMPLATE_URL=postgresql://.../aimee_test_tpl
-$(TESTPREFIX)/db2-test-template: $(OBJDIR)/tests/db2_test_template.o \
-                            $(DB2_OBJS) $(OBJDIR)/db2/db_postgres.o \
+#   make kb-store-test-template AIMEE_TEST_KB_STORE_TEMPLATE_URL=postgresql://.../aimee_test_tpl
+#   make unit-tests-pg     AIMEE_TEST_KB_STORE_TEMPLATE_URL=postgresql://.../aimee_test_tpl
+$(TESTPREFIX)/kb-store-test-template: $(OBJDIR)/tests/kb_store_test_template.o \
+                            $(KB_STORE_OBJS) $(OBJDIR)/kb_store/db_postgres.o $(TEST_POSTGRES_CLIENT_OBJS) \
                             $(OBJDIR)/log.o $(OBJDIR)/util.o
-	$(TESTLINK_MIN) -o $@ $^ $(PQ_LIB) -lpthread -lm $(EXTRA_L_FLAGS)
+	$(TESTLINK_MIN) -o $@ $^ -lpthread -lm $(EXTRA_L_FLAGS)
 
-.PHONY: db2-test-template
-db2-test-template: $(TESTPREFIX)/db2-test-template
-	@test -n "$$AIMEE_TEST_DB2_TEMPLATE_URL" || \
-	  { echo "db2-test-template requires AIMEE_TEST_DB2_TEMPLATE_URL" >&2; exit 1; }
-	$< "$$AIMEE_TEST_DB2_TEMPLATE_URL" tests/db2_test_reset.sql
+.PHONY: kb-store-test-template
+kb-store-test-template: $(TESTPREFIX)/kb-store-test-template
+	@test -n "$$AIMEE_TEST_KB_STORE_TEMPLATE_URL" || \
+	  { echo "kb-store-test-template requires AIMEE_TEST_KB_STORE_TEMPLATE_URL" >&2; exit 1; }
+	$< "$$AIMEE_TEST_KB_STORE_TEMPLATE_URL" tests/kb_store_test_reset.sql
 
 # Rebuild the template, then run the suite against it. The template is rebuilt
 # every time on purpose: a schema change that never reached the template would
@@ -3274,9 +3169,9 @@ db2-test-template: $(TESTPREFIX)/db2-test-template
 # Shard variables reach the inner unit-tests through MAKEFLAGS as usual.
 .PHONY: unit-tests-pg
 unit-tests-pg:
-	@test -n "$$AIMEE_TEST_DB2_TEMPLATE_URL" || \
-	  { echo "unit-tests-pg requires AIMEE_TEST_DB2_TEMPLATE_URL" >&2; exit 1; }
-	$(MAKE) AIMEE_TEST_PG=1 db2-test-template
+	@test -n "$$AIMEE_TEST_KB_STORE_TEMPLATE_URL" || \
+	  { echo "unit-tests-pg requires AIMEE_TEST_KB_STORE_TEMPLATE_URL" >&2; exit 1; }
+	$(MAKE) AIMEE_TEST_PG=1 kb-store-test-template
 	$(MAKE) AIMEE_TEST_PG=1 unit-tests
 
 
@@ -3389,8 +3284,8 @@ $(OBJDIR)/tests/test_bus_config_autonomy.o: C_FLAGS += -Icore/event_bus/include
 # store now brings the module up over the bus (tests/support/store_module_fixture.c)
 # rather than linking its innards. What remains is what those objects always
 # needed AROUND them, which is what the dependent targets were actually short of.
-BUS_MEM_OBJS = $(OBJDIR)/db2/db_schema.o $(OBJDIR)/model_catalog_release.o \
-               $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+BUS_MEM_OBJS = $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/model_catalog_release.o \
+               $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                  $(CONFIG_CLIENT_TEST_OBJS) \
                  $(CONFIG_CLIENT_TEST_OBJS) \
                  $(CONFIG_CLIENT_TEST_OBJS) \
@@ -3714,7 +3609,7 @@ $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_rac
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            \
                            $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread $(PQ_LIB)
 
 .PHONY: unit-test-bus-shutdown-race
 unit-test-bus-shutdown-race: $(TESTPREFIX)/unit-test-bus-shutdown-race
@@ -3842,8 +3737,8 @@ endif
 # declared in the initial := block above (before the unit-tests rule) so the
 # binary is built, not just run.
 $(TESTPREFIX)/unit-test-cross-repo-deps: $(OBJDIR)/tests/test_cross_repo_deps.o \
-                                         $(OBJDIR)/db2/cross_repo_resolver.o \
-                                         $(OBJDIR)/db2/cross_repo_classify.o
+                                         $(OBJDIR)/kb_store/cross_repo_resolver.o \
+                                         $(OBJDIR)/kb_store/cross_repo_classify.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-aimee-client: $(OBJDIR)/tests/test_aimee_client.o $(OBJDIR)/aimee_client.o \
@@ -4045,7 +3940,7 @@ $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                             $(OBJDIR)/cmd_onboard.o $(OBJDIR)/cmd_core.o $(OBJDIR)/cmd_init.o \
                             $(OBJDIR)/cmd_doctor.o $(OBJDIR)/agent_tier_lint.o $(OBJDIR)/hardware_probe.o $(OBJDIR)/cmd_util.o \
-                            $(DB2_OBJS) \
+                            $(KB_STORE_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o \
                             $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o $(OBJDIR)/modules/git/mcp_git_integrate.o \
@@ -4205,10 +4100,10 @@ $(OBJDIR)/tests/test_trigger.o: tests/test_trigger.c server/trigger_scheduler.c
 
 
 $(TESTPREFIX)/unit-test-kb-maintenance: $(OBJDIR)/tests/test_kb_maintenance.o \
-                             $(OBJDIR)/db2/kb_maintenance.o \
-                             $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
-                             $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                             $(OBJDIR)/kb_store/kb_maintenance.o \
+                             $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                             $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
+                             $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                              $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -4216,12 +4111,12 @@ $(TESTPREFIX)/unit-test-kb-mining: $(OBJDIR)/tests/test_kb_mining.o \
                              $(OBJDIR)/kb/kb_mining.o $(OBJDIR)/kb/kb_background.o \
                              $(OBJDIR)/kb/kb_mdl.o \
                              $(OBJDIR)/kb/kb_reasoning.o \
-                             $(OBJDIR)/db2/mining.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                             $(OBJDIR)/db2/feature_rows.o \
-                             $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
-                             $(OBJDIR)/db2/learning.o \
-                             $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
-                             $(OBJDIR)/db2/feedback.o \
+                             $(OBJDIR)/kb_store/mining.o $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                             $(OBJDIR)/kb_store/feature_rows.o \
+                             $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/kb_store/learning_synth_ops.o \
+                             $(OBJDIR)/kb_store/learning.o \
+                             $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
+                             $(OBJDIR)/kb_store/feedback.o \
                              $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -4312,7 +4207,7 @@ $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o: modules/kb_client/k
 
 $(TESTPREFIX)/unit-test-history: $(OBJDIR)/tests/test_history.o $(OBJDIR)/history.o $(OBJDIR)/cJSON.o \
                          $(OBJDIR)/util.o $(OBJDIR)/text.o \
-$(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) \
+$(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) \
                          $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/platform_random.o \
                          $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4381,7 +4276,7 @@ $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit: \
                             $(OBJDIR)/server/obs_bus_adapter.o \
                             $(DB1_CLIENT_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-bus-guardrail-durability: tests/test_bus_guardrail_durability.sh \
                             $(TESTPREFIX)/unit-test-bus-guardrail-durability-emit
@@ -4466,8 +4361,8 @@ $(TESTPREFIX)/unit-test-rel-types: $(OBJDIR)/tests/test_rel_types.o \
 # Normalized assertion identity: pure text, no DB, so a minimal link like
 # rel_types (whose normalizer it composes with).
 $(TESTPREFIX)/unit-test-fact-identity: $(OBJDIR)/tests/test_fact_identity.o \
-                               $(OBJDIR)/modules/db2/c/fact_identity.o \
-                               $(OBJDIR)/modules/db2/c/fact_identity_unicode.o $(OBJDIR)/rel_types.o
+                               $(OBJDIR)/modules/kb/c/fact_identity.o \
+                               $(OBJDIR)/modules/kb/c/fact_identity_unicode.o $(OBJDIR)/rel_types.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # typed-fact P2a: entity registry / alias resolution, against the sqlite shim.
@@ -4488,7 +4383,7 @@ $(TESTPREFIX)/unit-test-fact-lifecycle: $(OBJDIR)/tests/test_fact_lifecycle.o \
 
 # embedder-runtime-fetch-autodim §2: kb_meta dim record + refuse-on-mismatch, shim.
 $(TESTPREFIX)/unit-test-embedding-dim: $(OBJDIR)/tests/test_embedding_dim.o \
-                               $(OBJDIR)/db2/db_schema.o $(TEST_DATA_OBJS_MOCK)
+                               $(OBJDIR)/kb_store/db_schema.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Which probes embedder_probe_register installs for which embed command. Guards a
@@ -4507,7 +4402,7 @@ $(TESTPREFIX)/unit-test-kb-audit-worm: $(OBJDIR)/tests/test_kb_audit_worm.o \
 
 $(OBJDIR)/tests/test_kb_audit_worm.o \
 $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
-$(OBJDIR)/tests/test_code_project_lifecycle.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/tests/test_code_project_lifecycle.o: C_FLAGS += -Imodules/kb/include
 
 $(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
                                $(TEST_DATA_OBJS_MOCK)
@@ -4546,7 +4441,7 @@ $(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/tests/test_token_audit_load.
                               $(OBJDIR)/tests/support/store_module_fixture.o \
                               $(OBJDIR)/tests/support/db1_init_mock.o \
                               $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 unit-test-token-audit-load: $(TESTPREFIX)/unit-test-token-audit-load
 
@@ -4588,16 +4483,16 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract_code.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
-                                       $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o \
+                                       $(OBJDIR)/kb_store/kb_store_tenant.o $(OBJDIR)/kb/kb_identity.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o \
                                        $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4606,11 +4501,11 @@ $(TESTPREFIX)/unit-test-curator-resolve-entities: \
                                        $(OBJDIR)/tests/test_curator_resolve_entities.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_resolve_entities.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4618,11 +4513,11 @@ $(TESTPREFIX)/unit-test-curator-resolve-entities: \
 $(TESTPREFIX)/unit-test-curator-index-narrative: \
                                        $(OBJDIR)/tests/test_curator_index_narrative.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_narrative.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4630,11 +4525,11 @@ $(TESTPREFIX)/unit-test-curator-index-narrative: \
 $(TESTPREFIX)/unit-test-curator-index-claims: \
                                        $(OBJDIR)/tests/test_curator_index_claims.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_claims.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4642,11 +4537,11 @@ $(TESTPREFIX)/unit-test-curator-index-claims: \
 $(TESTPREFIX)/unit-test-curator-contradictions: \
                                        $(OBJDIR)/tests/test_curator_contradictions.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_contradictions.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4654,13 +4549,13 @@ $(TESTPREFIX)/unit-test-curator-contradictions: \
 $(TESTPREFIX)/unit-test-curator-index-code-unit: \
                                        $(OBJDIR)/tests/test_curator_index_code_unit.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_code_unit.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4671,15 +4566,15 @@ $(TESTPREFIX)/unit-test-curator-pipeline: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_promote.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_code_unit.o \
-                                       $(OBJDIR)/db2/kb_runtime_state.o \
+                                       $(OBJDIR)/kb_store/kb_runtime_state.o \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_link_artifacts.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_serve.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4687,8 +4582,8 @@ $(TESTPREFIX)/unit-test-curator-pipeline: \
 $(TESTPREFIX)/unit-test-curator-serve: \
                                        $(OBJDIR)/tests/test_curator_serve.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_serve.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4696,11 +4591,11 @@ $(TESTPREFIX)/unit-test-curator-serve: \
 $(TESTPREFIX)/unit-test-curator-link-artifacts: \
                                        $(OBJDIR)/tests/test_curator_link_artifacts.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_link_artifacts.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4742,11 +4637,11 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4762,11 +4657,11 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4775,11 +4670,11 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
 $(TESTPREFIX)/unit-test-curator-promote: \
                                        $(OBJDIR)/tests/test_curator_promote.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_promote.o \
-                                       $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                                       $(OBJDIR)/db2/feature_rows.o \
+                                       $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/kb_store/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
+                                       $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
@@ -4883,41 +4778,6 @@ $(OBJDIR)/aimee-module-aimee:
 	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/module-bundle >/dev/null
 	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/module-bundle --output $(abspath $(OBJDIR)) --placement server >/dev/null
 
-# DB2 is granted but not started by default in the KB image. This target proves
-# that its complete descriptor-owned source set still produces the executable
-# the grant names. The descriptor generates schema_data.h in the bundle build
-# directory, so this proof does not depend on a prior monolithic build.
-$(OBJDIR)/aimee-module-db2:
-	@rm -rf $(OBJDIR)/db2-module-bundle
-	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-module-bundle >/dev/null
-	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-module-bundle --output $(abspath $(OBJDIR)) --placement kb >/dev/null
-
-# Replay cataloged inactive-family operations against the exact exported DB2
-# source closure without adding their grants to the production process contract.
-$(OBJDIR)/aimee-module-db2-replay: tests/support/db2_module_replay_main.c
-	@rm -rf $(OBJDIR)/db2-replay-bundle $(OBJDIR)/db2-replay-output
-	@python3 ../scripts/export_c_repositories.py --runtime-bundle $(abspath $(OBJDIR))/db2-replay-bundle >/dev/null
-	@cp $< $(OBJDIR)/db2-replay-bundle/src/aimee-module-db2.c
-	@python3 ../scripts/build_c_module_runtime_bundle.py --bundle $(abspath $(OBJDIR))/db2-replay-bundle --output $(abspath $(OBJDIR))/db2-replay-output --placement kb >/dev/null
-	@cp $(OBJDIR)/db2-replay-output/aimee-module-db2 $@
-
-.PHONY: check-db2-module-runtime
-check-db2-module-runtime: $(OBJDIR)/aimee-module-db2
-	@log="$$(mktemp)"; trap 'rm -f "$$log"' EXIT; \
-	if env -u AIMEE_DB2_URL $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
-	  echo "DB2 module attached without AIMEE_DB2_URL" >&2; exit 1; \
-	fi; \
-	grep -q '^db2: AIMEE_DB2_URL is unset; refusing to serve$$' "$$log"; \
-	if AIMEE_DB2_URL='postgresql://db2:sentinel-secret@127.0.0.1:1/aimee?connect_timeout=1' \
-	     $(abspath $<) /tmp/aimee-db2-no-bus.sock > /dev/null 2>"$$log"; then \
-	  echo "DB2 module attached after failed initialization" >&2; exit 1; \
-	fi; \
-	grep -q '^db2: database initialization failed; refusing to serve$$' "$$log"; \
-	if grep -q 'sentinel-secret' "$$log"; then \
-	  echo "DB2 module leaked its DSN" >&2; exit 1; \
-	fi; \
-	echo "DB2 module runtime: complete link and fail-closed initialization ok"
-
 $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \
                                        $(OBJDIR)/db1_client/conversation.o \
@@ -5015,7 +4875,7 @@ $(TESTPREFIX)/unit-test-lsp: $(OBJDIR)/tests/test_lsp.o \
                               $(OBJDIR)/modules/lsp/lsp_manager.o \
                               $(OBJDIR)/modules/lsp/lsp_context.o \
                               $(OBJDIR)/aimee_sha256.o \
-$(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+$(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                               $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                               $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/util.o $(OBJDIR)/text.o \
@@ -5134,7 +4994,7 @@ $(TESTPREFIX)/unit-test-vault-reseal-orchestrator: \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-org-vault-rewrap: $(OBJDIR)/tests/test_org_vault_rewrap.o \
-                              $(OBJDIR)/db2/org_vault_rewrap.o \
+                              $(OBJDIR)/kb_store/org_vault_rewrap.o \
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
 
@@ -5195,8 +5055,8 @@ $(TESTPREFIX)/unit-test-vault-local-status: $(OBJDIR)/tests/test_vault_local_sta
 
 $(TESTPREFIX)/unit-test-vault-operator-status-runtime: \
                               $(OBJDIR)/tests/test_vault_operator_status_runtime.o \
-                              $(OBJDIR)/db2/vault_operator_status_runtime.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpq -lpthread
+                              $(OBJDIR)/kb_store/vault_operator_status_runtime.o $(TEST_POSTGRES_CLIENT_OBJS)
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-kb-vault-operator-status: \
                               $(OBJDIR)/tests/test_kb_vault_operator_status.o \
@@ -5272,7 +5132,7 @@ $(TESTPREFIX)/unit-test-kb-vault-key-use: $(OBJDIR)/tests/test_kb_vault_key_use.
 $(TESTPREFIX)/unit-test-kb-vault-key-use-live: $(OBJDIR)/tests/test_kb_vault_key_use_live.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -5282,7 +5142,7 @@ $(TESTPREFIX)/unit-test-kb-p2b-egress-live: $(OBJDIR)/tests/test_kb_p2b_egress_l
                               $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                               $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                               $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -5294,37 +5154,37 @@ $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: \
                               $(OBJDIR)/tests/test_kb_vault_rotation_ops_live.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 # P10 kb vault Postgres backend. REAL-PG test: links the KB object closure (real libpq
-# via db_postgres.o, the vault core + db2/vault_pg.o) so that on a box with
+# via db_postgres.o, the vault core + kb_store/vault_pg.o) so that on a box with
 # AIMEE_TEST_PG_URL it actually connects to Postgres; without it the test SKIPs (exit 0).
 # Modeled on the negation-eval binary (full KB minus kb_main + a test main), which is
 # the established pattern for a real-libpq test target.
 # The kb/kb_pdf embedding write path, against real Postgres. It links the same
-# KB closure as the other *-pg fixtures because the upsert reaches db2_conn()
-# through the ordinary DB2 runtime rather than a shim.
-$(OBJDIR)/tests/test_pgvec_generation_pg.o: C_FLAGS += -Imodules/db2/include
+# KB closure as the other *-pg fixtures because the upsert reaches kb_store_conn()
+# through the ordinary KB_STORE runtime rather than a shim.
+$(OBJDIR)/tests/test_pgvec_generation_pg.o: C_FLAGS += -Imodules/kb/include
 $(TESTPREFIX)/unit-test-pgvec-generation-pg: $(OBJDIR)/tests/test_pgvec_generation_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-vault-pg: $(OBJDIR)/tests/test_vault_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-kb-vault-rotation-live: $(OBJDIR)/tests/test_kb_vault_rotation_live.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -5333,7 +5193,7 @@ $(TESTPREFIX)/unit-test-kb-vault-rotation-live: $(OBJDIR)/tests/test_kb_vault_ro
 $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -5345,63 +5205,63 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
 $(TESTPREFIX)/unit-test-content-scope-pg: $(OBJDIR)/tests/test_content_scope_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-witness-checkpoint-produce-pg: $(OBJDIR)/tests/test_witness_checkpoint_produce_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-witness-emit-pg: $(OBJDIR)/tests/test_witness_emit_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/aimee-witness-boot-tpm-harness: $(OBJDIR)/tools/witness_boot_tpm_harness.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
 
 $(TESTPREFIX)/aimee-witness-cadence-harness: $(OBJDIR)/tools/witness_cadence_harness.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-witness-canary-pg: $(OBJDIR)/tests/test_witness_canary_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-witness-recovery-pg: $(OBJDIR)/tests/test_witness_recovery_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
 $(TESTPREFIX)/unit-test-witness-tamper-pg: $(OBJDIR)/tests/test_witness_tamper_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
@@ -5584,7 +5444,7 @@ $(TESTPREFIX)/p7-reseal-d2b-live: \
                               $(OBJDIR)/tests/test_vault_reseal_orchestrator_live.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
-                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) \
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
 
@@ -5924,7 +5784,7 @@ $(TESTPREFIX)/unit-test-collab-rules: $(OBJDIR)/tests/test_collab_rules.o $(TEST
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-json-fluent: $(OBJDIR)/tests/test_json_fluent.o $(OBJDIR)/json_fluent.o \
-                                           $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/cJSON.o
+                                           $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/cmd_data.o \
@@ -6101,7 +5961,7 @@ $(TESTPREFIX)/unit-test-kb-oidc-login-flow: $(OBJDIR)/tests/test_kb_oidc_login_f
                      $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-# The db2 seam is stubbed IN THE TEST TU: it needs Postgres, and its own behaviour is
+# The kb_store seam is stubbed IN THE TEST TU: it needs Postgres, and its own behaviour is
 # covered by the P1 RLS gate. What this pins is the routing and validation layer — which
 # requests reach the seam at all, and with what arguments.
 $(TESTPREFIX)/unit-test-kb-http-grants: $(OBJDIR)/tests/test_kb_http_grants.o \
@@ -6129,7 +5989,7 @@ $(TESTPREFIX)/unit-test-kb-http-identity-login: \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # Both C copies of the subject grammar, against tests/subject_corpus.h. Links the
-# server's token unit for its predicate; the db2 one is header-only inline.
+# server's token unit for its predicate; the kb_store one is header-only inline.
 $(TESTPREFIX)/unit-test-subject-grammar: $(OBJDIR)/tests/test_subject_grammar.o \
                      $(OBJDIR)/shared/auth_token_verify.o \
                      $(OBJDIR)/kb/kb_mgmt_token_authority.o \
@@ -6252,7 +6112,7 @@ $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
 # real daemon ledger. The former C hook fixture has been retired.
 .PHONY: unit-test-memory-audit-hook
 unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-bus-memory-audit
-	@test -n "$(AIMEE_DB2_REPLAY_URL)" || { echo "AIMEE_DB2_REPLAY_URL is required for the memory audit replay" >&2; exit 1; }
+	@test -n "$(AIMEE_KB_STORE_REPLAY_URL)" || { echo "AIMEE_KB_STORE_REPLAY_URL is required for the memory audit replay" >&2; exit 1; }
 	cd ../server-go && AIMEE_AUDIT_LEDGER_FIXTURE="$(abspath $<)" go test -count=1 ./modules/audit ./modules/memory -run '^(TestAction|TestMutationAudit|TestMemoryRuntimeRoleReplay)'
 
 
@@ -6273,7 +6133,7 @@ $(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolv
                      $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
                                           $(OBJDIR)/curiosity_resolve.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
                      $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
@@ -6285,7 +6145,7 @@ $(TESTPREFIX)/unit-test-policy-arms: $(OBJDIR)/tests/test_policy_arms.o \
                      $(OBJDIR)/modules/learning/learning_endogeneity.o \
                      $(OBJDIR)/approach_store.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-learning-attribution: $(OBJDIR)/tests/test_learning_attribution.o \
                      $(OBJDIR)/modules/learning/learning_attribution.o
@@ -6298,7 +6158,7 @@ $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o 
                      $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
                                           $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-learning-eval-synthesis: $(OBJDIR)/tests/test_learning_eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_eval_synthesis.o \
@@ -6318,7 +6178,7 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
                      $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(OBJDIR)/approach_store.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
 
 $(TESTPREFIX)/unit-test-wiki-render: $(OBJDIR)/tests/test_wiki_render.o \
                      $(OBJDIR)/wiki_render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
@@ -6363,15 +6223,11 @@ $(TESTPREFIX)/unit-test-kb-oidc-jwks: $(OBJDIR)/tests/test_kb_oidc_jwks.o \
                      $(OBJDIR)/kb/kb_oidc_jwks_fleet.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-db2-hardening: $(OBJDIR)/tests/test_db2_hardening.o \
-                     $(OBJDIR)/db2/db2_hardening.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-kb-tenancy-shim-guard: $(OBJDIR)/tests/test_kb_tenancy_shim_guard.o \
-                     $(OBJDIR)/db2/team.o $(OBJDIR)/db2/project.o $(OBJDIR)/db2/membership.o \
-                     $(OBJDIR)/db2/admin_grant.o $(OBJDIR)/db2/write_tier_grant.o \
-                     $(OBJDIR)/db2/oidc_jwks.o \
-                     $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o $(PLATFORM_BASIC_OBJS)
+                     $(OBJDIR)/kb_store/team.o $(OBJDIR)/kb_store/project.o $(OBJDIR)/kb_store/membership.o \
+                     $(OBJDIR)/kb_store/admin_grant.o $(OBJDIR)/kb_store/write_tier_grant.o \
+                     $(OBJDIR)/kb_store/oidc_jwks.o \
+                     $(OBJDIR)/kb_store/kb_store_tenant.o $(OBJDIR)/kb/kb_identity.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-route-acl: $(OBJDIR)/tests/test_kb_route_acl.o \
@@ -6449,7 +6305,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/json_fluent.o $(OBJDIR)/tests/
                      $(OBJDIR)/kb/http/kb_tls_serve.o \
                      $(OBJDIR)/shared/auth_token_verify.o \
                      $(OBJDIR)/kb/kb_caller_token.o \
-                     $(OBJDIR)/db2/management_jwks_runtime.o \
+                     $(OBJDIR)/kb_store/management_jwks_runtime.o \
                      $(OBJDIR)/modules/kb_client/kb_client_mtls.o \
                      $(OBJDIR)/modules/vault/runtime_secret.o \
                      $(OBJDIR)/server/oauth_pkce.o \
@@ -6473,8 +6329,8 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/json_fluent.o $(OBJDIR)/tests/
                      $(OBJDIR)/kb/kb_reqctx.o $(OBJDIR)/kb/kb_identity.o \
                      $(OBJDIR)/kb/kb_identity_resolve.o \
                      $(OBJDIR)/kb/auth_oidc.o \
-                     $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/db2/team.o \
-                     $(OBJDIR)/db2/project.o $(OBJDIR)/db2/membership.o \
+                     $(OBJDIR)/kb_store/kb_store_tenant.o $(OBJDIR)/kb_store/team.o \
+                     $(OBJDIR)/kb_store/project.o $(OBJDIR)/kb_store/membership.o \
                      $(OBJDIR)/cJSON.o \
                      $(OBJDIR)/kb/modules/vault/vault_crypto.o \
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \
@@ -6503,932 +6359,935 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
-DB2_CJSON_TEST_FLAGS = -Imodules/db2/support
+KB_STORE_CJSON_TEST_FLAGS = -Imodules/kb/support
 
-$(OBJDIR)/tests/test_db2_cjson_support.o: tests/test_db2_cjson_support.c \
-                                           modules/db2/support/cJSON.h
+$(OBJDIR)/tests/test_kb_store_cjson_support.o: tests/test_kb_store_cjson_support.c \
+                                           modules/kb/support/cJSON.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_cjson_support_impl.o: modules/db2/support/cjson.c \
-                                          modules/db2/support/cJSON.h
+$(OBJDIR)/tests/kb_store_cjson_support_impl.o: modules/kb/support/cjson.c \
+                                          modules/kb/support/cJSON.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cjson-support: \
-                     $(OBJDIR)/tests/test_db2_cjson_support.o \
-                     $(OBJDIR)/tests/db2_cjson_support_impl.o
+$(TESTPREFIX)/unit-test-kb-store-cjson-support: \
+                     $(OBJDIR)/tests/test_kb_store_cjson_support.o \
+                     $(OBJDIR)/tests/kb_store_cjson_support_impl.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
 
-DB2_CJSON_SANITIZE_DIR = $(OBJDIR)/tests/db2-cjson-support-sanitize
+KB_STORE_CJSON_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cjson-support-sanitize
 
-$(DB2_CJSON_SANITIZE_DIR)/test.o: tests/test_db2_cjson_support.c \
-                                        modules/db2/support/cJSON.h
+$(KB_STORE_CJSON_SANITIZE_DIR)/test.o: tests/test_kb_store_cjson_support.c \
+                                        modules/kb/support/cJSON.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_CJSON_SANITIZE_DIR)/support.o: modules/db2/support/cjson.c \
-                                           modules/db2/support/cJSON.h
+$(KB_STORE_CJSON_SANITIZE_DIR)/support.o: modules/kb/support/cjson.c \
+                                           modules/kb/support/cJSON.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CJSON_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cjson-support-sanitize: \
-                     $(DB2_CJSON_SANITIZE_DIR)/test.o \
-                     $(DB2_CJSON_SANITIZE_DIR)/support.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -lm
+$(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize: \
+                     $(KB_STORE_CJSON_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_CJSON_SANITIZE_DIR)/support.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -lm
 
-.PHONY: unit-test-db2-cjson-support unit-test-db2-cjson-support-sanitize
-unit-test-db2-cjson-support: $(TESTPREFIX)/unit-test-db2-cjson-support
+.PHONY: unit-test-kb-store-cjson-support unit-test-kb-store-cjson-support-sanitize
+unit-test-kb-store-cjson-support: $(TESTPREFIX)/unit-test-kb-store-cjson-support
 	$<
 
-unit-test-db2-cjson-support-sanitize: $(TESTPREFIX)/unit-test-db2-cjson-support-sanitize
+unit-test-kb-store-cjson-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize
 	$<
 
-DB2_RANDOM_TEST_FLAGS = -Imodules/db2/support -Iheaders -pthread
-DB2_RANDOM_SUPPORT_RENAMES = \
-   -Dplatform_random_bytes=db2_support_platform_random_bytes \
-   -Dplatform_random_hex=db2_support_platform_random_hex
-DB2_RANDOM_LEGACY_RENAMES = \
+KB_STORE_RANDOM_TEST_FLAGS = -Imodules/kb/support -Iheaders -pthread
+KB_STORE_RANDOM_SUPPORT_RENAMES = \
+   -Dplatform_random_bytes=kb_store_support_platform_random_bytes \
+   -Dplatform_random_hex=kb_store_support_platform_random_hex
+KB_STORE_RANDOM_LEGACY_RENAMES = \
    -Dplatform_random_bytes=legacy_platform_random_bytes \
    -Dplatform_random_hex=legacy_platform_random_hex
-DB2_RANDOM_IO_SEAMS = -include tests/support/db2_random_io_seam.h
+KB_STORE_RANDOM_IO_SEAMS = -include tests/support/kb_store_random_io_seam.h
 
-$(OBJDIR)/tests/test_db2_random_support.o: tests/test_db2_random_support.c \
-                                             modules/db2/support/db2_random.h
+$(OBJDIR)/tests/test_kb_store_random_support.o: tests/test_kb_store_random_support.c \
+                                             modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_random_support_real.o: modules/db2/support/random_primitives.c \
-                                               modules/db2/support/db2_random.h
+$(OBJDIR)/tests/kb_store_random_support_real.o: modules/kb/support/random_primitives.c \
+                                               modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_random_support_impl.o: modules/db2/support/random_primitives.c \
-                                               modules/db2/support/db2_random.h
+$(OBJDIR)/tests/kb_store_random_support_impl.o: modules/kb/support/random_primitives.c \
+                                               modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_SUPPORT_RENAMES) \
-	      $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_SUPPORT_RENAMES) \
+	      $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_random_legacy_common.o: platform_random.c headers/platform_random.h
+$(OBJDIR)/tests/kb_store_random_legacy_common.o: platform_random.c headers/platform_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_LEGACY_RENAMES) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_LEGACY_RENAMES) \
 	      -c -o $@ $<
 
-$(OBJDIR)/tests/db2_random_legacy_platform.o: posix/platform_random.c headers/platform_random.h
+$(OBJDIR)/tests/kb_store_random_legacy_platform.o: posix/platform_random.c headers/platform_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_RANDOM_LEGACY_RENAMES) \
-	      $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_LEGACY_RENAMES) \
+	      $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-random-support: \
-                     $(OBJDIR)/tests/test_db2_random_support.o \
-                     $(OBJDIR)/tests/db2_random_support_real.o \
-                     $(OBJDIR)/tests/db2_random_support_impl.o \
-                     $(OBJDIR)/tests/db2_random_legacy_common.o \
-                     $(OBJDIR)/tests/db2_random_legacy_platform.o
+$(TESTPREFIX)/unit-test-kb-store-random-support: \
+                     $(OBJDIR)/tests/test_kb_store_random_support.o \
+                     $(OBJDIR)/tests/kb_store_random_support_real.o \
+                     $(OBJDIR)/tests/kb_store_random_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_random_legacy_common.o \
+                     $(OBJDIR)/tests/kb_store_random_legacy_platform.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -pthread
 
-DB2_RANDOM_SANITIZE_DIR = $(OBJDIR)/tests/db2-random-support-sanitize
+KB_STORE_RANDOM_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-random-support-sanitize
 
-$(DB2_RANDOM_SANITIZE_DIR)/test.o: tests/test_db2_random_support.c \
-                                          modules/db2/support/db2_random.h
+$(KB_STORE_RANDOM_SANITIZE_DIR)/test.o: tests/test_kb_store_random_support.c \
+                                          modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_RANDOM_SANITIZE_DIR)/real.o: modules/db2/support/random_primitives.c \
-                                          modules/db2/support/db2_random.h
+$(KB_STORE_RANDOM_SANITIZE_DIR)/real.o: modules/kb/support/random_primitives.c \
+                                          modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_RANDOM_SANITIZE_DIR)/support.o: modules/db2/support/random_primitives.c \
-                                             modules/db2/support/db2_random.h
+$(KB_STORE_RANDOM_SANITIZE_DIR)/support.o: modules/kb/support/random_primitives.c \
+                                             modules/kb/support/kb_store_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
-	      $(DB2_RANDOM_SUPPORT_RENAMES) $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
+	      $(KB_STORE_RANDOM_SUPPORT_RENAMES) $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
 
-$(DB2_RANDOM_SANITIZE_DIR)/legacy-common.o: platform_random.c headers/platform_random.h
+$(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-common.o: platform_random.c headers/platform_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
-	      $(DB2_RANDOM_LEGACY_RENAMES) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
+	      $(KB_STORE_RANDOM_LEGACY_RENAMES) -c -o $@ $<
 
-$(DB2_RANDOM_SANITIZE_DIR)/legacy-platform.o: posix/platform_random.c \
+$(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-platform.o: posix/platform_random.c \
                                                  headers/platform_random.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_RANDOM_TEST_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
-	      $(DB2_RANDOM_LEGACY_RENAMES) $(DB2_RANDOM_IO_SEAMS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
+	      $(KB_STORE_RANDOM_LEGACY_RENAMES) $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-random-support-sanitize: \
-                     $(DB2_RANDOM_SANITIZE_DIR)/test.o \
-                     $(DB2_RANDOM_SANITIZE_DIR)/real.o \
-                     $(DB2_RANDOM_SANITIZE_DIR)/support.o \
-                     $(DB2_RANDOM_SANITIZE_DIR)/legacy-common.o \
-                     $(DB2_RANDOM_SANITIZE_DIR)/legacy-platform.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -pthread
+$(TESTPREFIX)/unit-test-kb-store-random-support-sanitize: \
+                     $(KB_STORE_RANDOM_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_RANDOM_SANITIZE_DIR)/real.o \
+                     $(KB_STORE_RANDOM_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-common.o \
+                     $(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-platform.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -pthread
 
-.PHONY: unit-test-db2-random-support unit-test-db2-random-support-sanitize
-unit-test-db2-random-support: $(TESTPREFIX)/unit-test-db2-random-support
+.PHONY: unit-test-kb-store-random-support unit-test-kb-store-random-support-sanitize
+unit-test-kb-store-random-support: $(TESTPREFIX)/unit-test-kb-store-random-support
 	$<
 
-unit-test-db2-random-support-sanitize: $(TESTPREFIX)/unit-test-db2-random-support-sanitize
+unit-test-kb-store-random-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-random-support-sanitize
 	$<
 
-DB2_CERT_SERIAL_SUPPORT_RENAMES = -DAIMEE_DB2_CERT_SERIAL_PREFIX
-DB2_CERT_SERIAL_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_CERT_SERIAL_SUPPORT_RENAMES = -DAIMEE_KB_STORE_CERT_SERIAL_PREFIX
+KB_STORE_CERT_SERIAL_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_cert_serial_support_impl.o: \
-                     modules/db2/support/cert_serial_primitives.c \
-                     modules/db2/support/db2_cert_serial.h
+$(OBJDIR)/tests/kb_store_cert_serial_support_impl.o: \
+                     modules/kb/support/cert_serial_primitives.c \
+                     modules/kb/support/kb_store_cert_serial.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
-	      $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_cert_serial_monolith.o: kb/kb_identity.c
+$(OBJDIR)/tests/kb_store_cert_serial_monolith.o: kb/kb_identity.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cert-serial-support: \
-                     $(OBJDIR)/tests/test_db2_cert_serial_support.o \
-                     $(OBJDIR)/tests/db2_cert_serial_support_impl.o \
-                     $(OBJDIR)/tests/db2_cert_serial_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-cert-serial-support: \
+                     $(OBJDIR)/tests/test_kb_store_cert_serial_support.o \
+                     $(OBJDIR)/tests/kb_store_cert_serial_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_cert_serial_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_CERT_SERIAL_SANITIZE_DIR = $(OBJDIR)/tests/db2-cert-serial-support-sanitize
+KB_STORE_CERT_SERIAL_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cert-serial-support-sanitize
 
-$(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o: tests/test_db2_cert_serial_support.c
+$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/test.o: tests/test_kb_store_cert_serial_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/cert_serial_primitives.c \
-                     modules/db2/support/db2_cert_serial.h
+$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/cert_serial_primitives.c \
+                     modules/kb/support/kb_store_cert_serial.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SUPPORT_RENAMES) \
-	      $(DB2_CERT_SERIAL_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SUPPORT_RENAMES) \
+	      $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o: kb/kb_identity.c
+$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/monolith.o: kb/kb_identity.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CERT_SERIAL_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize: \
-                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/test.o \
-                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/support.o \
-                     $(DB2_CERT_SERIAL_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize: \
+                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-cert-serial-support unit-test-db2-cert-serial-support-sanitize
-unit-test-db2-cert-serial-support: $(TESTPREFIX)/unit-test-db2-cert-serial-support
+.PHONY: unit-test-kb-store-cert-serial-support unit-test-kb-store-cert-serial-support-sanitize
+unit-test-kb-store-cert-serial-support: $(TESTPREFIX)/unit-test-kb-store-cert-serial-support
 	$<
 
-unit-test-db2-cert-serial-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-cert-serial-support-sanitize
+unit-test-kb-store-cert-serial-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize
 	$<
 
-DB2_COCHANGE_SUPPORT_RENAMES = -DAIMEE_DB2_COCHANGE_PREFIX
-DB2_COCHANGE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_COCHANGE_SUPPORT_RENAMES = -DAIMEE_KB_STORE_COCHANGE_PREFIX
+KB_STORE_COCHANGE_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_cochange_support_impl.o: \
-                     modules/db2/support/cochange_primitives.c \
-                     modules/db2/support/db2_cochange.h
+$(OBJDIR)/tests/kb_store_cochange_support_impl.o: \
+                     modules/kb/support/cochange_primitives.c \
+                     modules/kb/support/kb_store_cochange.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SUPPORT_RENAMES) \
-	      $(DB2_COCHANGE_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SUPPORT_RENAMES) \
+	      $(KB_STORE_COCHANGE_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_cochange_monolith.o: cochange.c
+$(OBJDIR)/tests/kb_store_cochange_monolith.o: cochange.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cochange-support: \
-                     $(OBJDIR)/tests/test_db2_cochange_support.o \
-                     $(OBJDIR)/tests/db2_cochange_support_impl.o \
-                     $(OBJDIR)/tests/db2_cochange_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-cochange-support: \
+                     $(OBJDIR)/tests/test_kb_store_cochange_support.o \
+                     $(OBJDIR)/tests/kb_store_cochange_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_cochange_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_COCHANGE_SANITIZE_DIR = $(OBJDIR)/tests/db2-cochange-support-sanitize
+KB_STORE_COCHANGE_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cochange-support-sanitize
 
-$(DB2_COCHANGE_SANITIZE_DIR)/test.o: tests/test_db2_cochange_support.c
+$(KB_STORE_COCHANGE_SANITIZE_DIR)/test.o: tests/test_kb_store_cochange_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_COCHANGE_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/cochange_primitives.c \
-                     modules/db2/support/db2_cochange.h
+$(KB_STORE_COCHANGE_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/cochange_primitives.c \
+                     modules/kb/support/kb_store_cochange.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SUPPORT_RENAMES) \
-	      $(DB2_COCHANGE_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SUPPORT_RENAMES) \
+	      $(KB_STORE_COCHANGE_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_COCHANGE_SANITIZE_DIR)/monolith.o: cochange.c
+$(KB_STORE_COCHANGE_SANITIZE_DIR)/monolith.o: cochange.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_COCHANGE_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-cochange-support-sanitize: \
-                     $(DB2_COCHANGE_SANITIZE_DIR)/test.o \
-                     $(DB2_COCHANGE_SANITIZE_DIR)/support.o \
-                     $(DB2_COCHANGE_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize: \
+                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-cochange-support unit-test-db2-cochange-support-sanitize
-unit-test-db2-cochange-support: $(TESTPREFIX)/unit-test-db2-cochange-support
+.PHONY: unit-test-kb-store-cochange-support unit-test-kb-store-cochange-support-sanitize
+unit-test-kb-store-cochange-support: $(TESTPREFIX)/unit-test-kb-store-cochange-support
 	$<
 
-unit-test-db2-cochange-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-cochange-support-sanitize
+unit-test-kb-store-cochange-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize
 	$<
 
-DB2_CODE_MATCH_SUPPORT_RENAMES = -DAIMEE_DB2_CODE_MATCH_PREFIX
-DB2_CODE_MATCH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_CODE_MATCH_SUPPORT_RENAMES = -DAIMEE_KB_STORE_CODE_MATCH_PREFIX
+KB_STORE_CODE_MATCH_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_code_match_support_impl.o: \
-                     modules/db2/support/code_match_primitives.c \
-                     modules/db2/support/db2_code_match.h
+$(OBJDIR)/tests/kb_store_code_match_support_impl.o: \
+                     modules/kb/support/code_match_primitives.c \
+                     modules/kb/support/kb_store_code_match.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
-	      $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_code_match_monolith.o: code_match.c
+$(OBJDIR)/tests/kb_store_code_match_monolith.o: code_match.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-match-support: \
-                     $(OBJDIR)/tests/test_db2_code_match_support.o \
-                     $(OBJDIR)/tests/db2_code_match_support_impl.o \
-                     $(OBJDIR)/tests/db2_code_match_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-code-match-support: \
+                     $(OBJDIR)/tests/test_kb_store_code_match_support.o \
+                     $(OBJDIR)/tests/kb_store_code_match_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_code_match_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_CODE_MATCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-match-support-sanitize
+KB_STORE_CODE_MATCH_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-code-match-support-sanitize
 
-$(DB2_CODE_MATCH_SANITIZE_DIR)/test.o: tests/test_db2_code_match_support.c
+$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/test.o: tests/test_kb_store_code_match_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_MATCH_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/code_match_primitives.c \
-                     modules/db2/support/db2_code_match.h
+$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/code_match_primitives.c \
+                     modules/kb/support/kb_store_code_match.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SUPPORT_RENAMES) \
-	      $(DB2_CODE_MATCH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_MATCH_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o: code_match.c
+$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/monolith.o: code_match.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_MATCH_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-match-support-sanitize: \
-                     $(DB2_CODE_MATCH_SANITIZE_DIR)/test.o \
-                     $(DB2_CODE_MATCH_SANITIZE_DIR)/support.o \
-                     $(DB2_CODE_MATCH_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize: \
+                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-code-match-support unit-test-db2-code-match-support-sanitize
-unit-test-db2-code-match-support: $(TESTPREFIX)/unit-test-db2-code-match-support
+.PHONY: unit-test-kb-store-code-match-support unit-test-kb-store-code-match-support-sanitize
+unit-test-kb-store-code-match-support: $(TESTPREFIX)/unit-test-kb-store-code-match-support
 	$<
 
-unit-test-db2-code-match-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-code-match-support-sanitize
+unit-test-kb-store-code-match-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize
 	$<
 
-DB2_DSTR_SUPPORT_RENAMES = \
-   -Ddstr_appendf=db2_support_dstr_appendf \
-   -Ddstr_init=db2_support_dstr_init \
-   -Ddstr_steal=db2_support_dstr_steal
-DB2_DSTR_TEST_ALLOCATOR = -Drealloc=db2_test_realloc
+KB_STORE_DSTR_SUPPORT_RENAMES = \
+   -Ddstr_appendf=kb_store_support_dstr_appendf \
+   -Ddstr_init=kb_store_support_dstr_init \
+   -Ddstr_steal=kb_store_support_dstr_steal
+KB_STORE_DSTR_TEST_ALLOCATOR = -Drealloc=kb_store_test_realloc
 
-$(OBJDIR)/tests/db2_dstr_support_impl.o: modules/db2/support/dstr_primitives.c
+$(OBJDIR)/tests/kb_store_dstr_support_impl.o: modules/kb/support/dstr_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_SUPPORT_RENAMES) \
-	      $(DB2_DSTR_TEST_ALLOCATOR) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_SUPPORT_RENAMES) \
+	      $(KB_STORE_DSTR_TEST_ALLOCATOR) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_dstr_monolith.o: dstr.c
+$(OBJDIR)/tests/kb_store_dstr_monolith.o: dstr.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_TEST_ALLOCATOR) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_TEST_ALLOCATOR) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-dstr-support: \
-                     $(OBJDIR)/tests/test_db2_dstr_support.o \
-                     $(OBJDIR)/tests/db2_dstr_support_impl.o \
-                     $(OBJDIR)/tests/db2_dstr_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-dstr-support: \
+                     $(OBJDIR)/tests/test_kb_store_dstr_support.o \
+                     $(OBJDIR)/tests/kb_store_dstr_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_dstr_monolith.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_DSTR_SANITIZE_DIR = $(OBJDIR)/tests/db2-dstr-support-sanitize
+KB_STORE_DSTR_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-dstr-support-sanitize
 
-$(DB2_DSTR_SANITIZE_DIR)/test.o: tests/test_db2_dstr_support.c
+$(KB_STORE_DSTR_SANITIZE_DIR)/test.o: tests/test_kb_store_dstr_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_DSTR_SANITIZE_DIR)/support.o: modules/db2/support/dstr_primitives.c
+$(KB_STORE_DSTR_SANITIZE_DIR)/support.o: modules/kb/support/dstr_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_SUPPORT_RENAMES) \
-	      $(DB2_DSTR_TEST_ALLOCATOR) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_SUPPORT_RENAMES) \
+	      $(KB_STORE_DSTR_TEST_ALLOCATOR) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_DSTR_SANITIZE_DIR)/monolith.o: dstr.c
+$(KB_STORE_DSTR_SANITIZE_DIR)/monolith.o: dstr.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_DSTR_TEST_ALLOCATOR) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_TEST_ALLOCATOR) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-dstr-support-sanitize: \
-                     $(DB2_DSTR_SANITIZE_DIR)/test.o \
-                     $(DB2_DSTR_SANITIZE_DIR)/support.o \
-                     $(DB2_DSTR_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize: \
+                     $(KB_STORE_DSTR_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_DSTR_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_DSTR_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
 
-.PHONY: unit-test-db2-dstr-support unit-test-db2-dstr-support-sanitize
-unit-test-db2-dstr-support: $(TESTPREFIX)/unit-test-db2-dstr-support
+.PHONY: unit-test-kb-store-dstr-support unit-test-kb-store-dstr-support-sanitize
+unit-test-kb-store-dstr-support: $(TESTPREFIX)/unit-test-kb-store-dstr-support
 	$<
 
-unit-test-db2-dstr-support-sanitize: $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize
+unit-test-kb-store-dstr-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize
 	$<
 
-DB2_MGMT_READ_SUPPORT_RENAMES = \
-   -Dserver_mgmt_read_selector_name=db2_support_server_mgmt_read_selector_name
-DB2_MGMT_READ_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_MGMT_READ_SUPPORT_RENAMES = \
+   -Dserver_mgmt_read_selector_name=kb_store_support_server_mgmt_read_selector_name
+KB_STORE_MGMT_READ_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_management_read_support_impl.o: \
-                     modules/db2/support/management_read_primitives.c
+$(OBJDIR)/tests/kb_store_management_read_support_impl.o: \
+                     modules/kb/support/management_read_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SUPPORT_RENAMES) \
-	      $(DB2_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SUPPORT_RENAMES) \
+	      $(KB_STORE_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_management_read_monolith.o: shared/management_read.c
+$(OBJDIR)/tests/kb_store_management_read_monolith.o: shared/management_read.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-management-read-support: \
-                     $(OBJDIR)/tests/test_db2_management_read_support.o \
-                     $(OBJDIR)/tests/db2_management_read_support_impl.o \
-                     $(OBJDIR)/tests/db2_management_read_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-management-read-support: \
+                     $(OBJDIR)/tests/test_kb_store_management_read_support.o \
+                     $(OBJDIR)/tests/kb_store_management_read_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_management_read_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_MGMT_READ_SANITIZE_DIR = $(OBJDIR)/tests/db2-management-read-support-sanitize
+KB_STORE_MGMT_READ_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-management-read-support-sanitize
 
-$(DB2_MGMT_READ_SANITIZE_DIR)/test.o: tests/test_db2_management_read_support.c
+$(KB_STORE_MGMT_READ_SANITIZE_DIR)/test.o: tests/test_kb_store_management_read_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_MGMT_READ_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/management_read_primitives.c
+$(KB_STORE_MGMT_READ_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/management_read_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SUPPORT_RENAMES) \
-	      $(DB2_MGMT_READ_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SUPPORT_RENAMES) \
+	      $(KB_STORE_MGMT_READ_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_MGMT_READ_SANITIZE_DIR)/monolith.o: shared/management_read.c
+$(KB_STORE_MGMT_READ_SANITIZE_DIR)/monolith.o: shared/management_read.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MGMT_READ_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-management-read-support-sanitize: \
-                     $(DB2_MGMT_READ_SANITIZE_DIR)/test.o \
-                     $(DB2_MGMT_READ_SANITIZE_DIR)/support.o \
-                     $(DB2_MGMT_READ_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize: \
+                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-management-read-support \
-        unit-test-db2-management-read-support-sanitize
-unit-test-db2-management-read-support: $(TESTPREFIX)/unit-test-db2-management-read-support
+.PHONY: unit-test-kb-store-management-read-support \
+        unit-test-kb-store-management-read-support-sanitize
+unit-test-kb-store-management-read-support: $(TESTPREFIX)/unit-test-kb-store-management-read-support
 	$<
 
-unit-test-db2-management-read-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize
+unit-test-kb-store-management-read-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize
 	$<
 
-DB2_MODEL_VALIDATION_SUPPORT_RENAMES = -DAIMEE_DB2_MODEL_VALIDATION_PREFIX
-DB2_MODEL_VALIDATION_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES = -DAIMEE_KB_STORE_MODEL_VALIDATION_PREFIX
+KB_STORE_MODEL_VALIDATION_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_model_validation_support_impl.o: \
-                     modules/db2/support/model_validation_primitives.c \
-                     modules/db2/support/db2_model_validation.h
+$(OBJDIR)/tests/kb_store_model_validation_support_impl.o: \
+                     modules/kb/support/model_validation_primitives.c \
+                     modules/kb/support/kb_store_model_validation.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
-	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_model_validation_monolith.o: kb/http/kb_models_validate.c
+$(OBJDIR)/tests/kb_store_model_validation_monolith.o: kb/http/kb_models_validate.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-model-validation-support: \
-                     $(OBJDIR)/tests/test_db2_model_validation_support.o \
-                     $(OBJDIR)/tests/db2_model_validation_support_impl.o \
-                     $(OBJDIR)/tests/db2_model_validation_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-model-validation-support: \
+                     $(OBJDIR)/tests/test_kb_store_model_validation_support.o \
+                     $(OBJDIR)/tests/kb_store_model_validation_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_model_validation_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_MODEL_VALIDATION_SANITIZE_DIR = $(OBJDIR)/tests/db2-model-validation-support-sanitize
+KB_STORE_MODEL_VALIDATION_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-model-validation-support-sanitize
 
-$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o: tests/test_db2_model_validation_support.c
+$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/test.o: tests/test_kb_store_model_validation_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/model_validation_primitives.c \
-                     modules/db2/support/db2_model_validation.h
+$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/model_validation_primitives.c \
+                     modules/kb/support/kb_store_model_validation.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SUPPORT_RENAMES) \
-	      $(DB2_MODEL_VALIDATION_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES) \
+	      $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o: kb/http/kb_models_validate.c
+$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o: kb/http/kb_models_validate.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_MODEL_VALIDATION_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize: \
-                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/test.o \
-                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/support.o \
-                     $(DB2_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize: \
+                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-model-validation-support \
-        unit-test-db2-model-validation-support-sanitize
-unit-test-db2-model-validation-support: \
-                     $(TESTPREFIX)/unit-test-db2-model-validation-support
+.PHONY: unit-test-kb-store-model-validation-support \
+        unit-test-kb-store-model-validation-support-sanitize
+unit-test-kb-store-model-validation-support: \
+                     $(TESTPREFIX)/unit-test-kb-store-model-validation-support
 	$<
 
-unit-test-db2-model-validation-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize
+unit-test-kb-store-model-validation-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize
 	$<
 
-DB2_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=db2_support_text_sanitize_utf8
-DB2_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=kb_store_support_text_sanitize_utf8
+KB_STORE_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_text_support_impl.o: modules/db2/support/text_primitives.c
+$(OBJDIR)/tests/kb_store_text_support_impl.o: modules/kb/support/text_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) \
-	      $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SUPPORT_RENAMES) \
+	      $(KB_STORE_TEXT_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_text_monolith.o: text.c
+$(OBJDIR)/tests/kb_store_text_monolith.o: text.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-text-support: \
-                     $(OBJDIR)/tests/test_db2_text_support.o \
-                     $(OBJDIR)/tests/db2_text_support_impl.o \
-                     $(OBJDIR)/tests/db2_text_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-text-support: \
+                     $(OBJDIR)/tests/test_kb_store_text_support.o \
+                     $(OBJDIR)/tests/kb_store_text_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_text_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-text-support-sanitize
+KB_STORE_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-text-support-sanitize
 
-$(DB2_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_text_support.c
+$(KB_STORE_TEXT_SANITIZE_DIR)/test.o: tests/test_kb_store_text_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_TEXT_SANITIZE_DIR)/support.o: modules/db2/support/text_primitives.c
+$(KB_STORE_TEXT_SANITIZE_DIR)/support.o: modules/kb/support/text_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SUPPORT_RENAMES) $(DB2_TEXT_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SUPPORT_RENAMES) $(KB_STORE_TEXT_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_TEXT_SANITIZE_DIR)/monolith.o: text.c
+$(KB_STORE_TEXT_SANITIZE_DIR)/monolith.o: text.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TEXT_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-text-support-sanitize: \
-                     $(DB2_TEXT_SANITIZE_DIR)/test.o \
-                     $(DB2_TEXT_SANITIZE_DIR)/support.o \
-                     $(DB2_TEXT_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-text-support-sanitize: \
+                     $(KB_STORE_TEXT_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_TEXT_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_TEXT_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-text-support unit-test-db2-text-support-sanitize
-unit-test-db2-text-support: $(TESTPREFIX)/unit-test-db2-text-support
+.PHONY: unit-test-kb-store-text-support unit-test-kb-store-text-support-sanitize
+unit-test-kb-store-text-support: $(TESTPREFIX)/unit-test-kb-store-text-support
 	$<
 
-unit-test-db2-text-support-sanitize: $(TESTPREFIX)/unit-test-db2-text-support-sanitize
+unit-test-kb-store-text-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-text-support-sanitize
 	$<
 
-DB2_EXTRACTOR_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_EXTRACTOR_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_extractor_support_impl.o: modules/db2/support/extractor_primitives.c \
-                                            modules/db2/support/db2_extractors.h
+$(OBJDIR)/tests/kb_store_extractor_support_impl.o: modules/kb/support/extractor_primitives.c \
+                                            modules/kb/support/kb_store_extractors.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_KB_STORE_EXTRACTOR_PREFIX $(KB_STORE_EXTRACTOR_SECTION_FLAGS) \
 	      -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-extractor-support: \
-                     $(OBJDIR)/tests/test_db2_extractor_support.o \
-                     $(OBJDIR)/tests/db2_extractor_support_impl.o \
+$(TESTPREFIX)/unit-test-kb-store-extractor-support: \
+                     $(OBJDIR)/tests/test_kb_store_extractor_support.o \
+                     $(OBJDIR)/tests/kb_store_extractor_support_impl.o \
                      $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o \
                      $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_EXTRACTOR_SANITIZE_DIR = $(OBJDIR)/tests/db2-extractor-support-sanitize
+KB_STORE_EXTRACTOR_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-extractor-support-sanitize
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/test.o: tests/test_db2_extractor_support.c
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/test.o: tests/test_kb_store_extractor_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/support.o: modules/db2/support/extractor_primitives.c \
-                                               modules/db2/support/db2_extractors.h
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/support.o: modules/kb/support/extractor_primitives.c \
+                                               modules/kb/support/kb_store_extractors.h
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -DAIMEE_DB2_EXTRACTOR_PREFIX $(DB2_EXTRACTOR_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) -DAIMEE_KB_STORE_EXTRACTOR_PREFIX $(KB_STORE_EXTRACTOR_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o: extractors.c
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extractors.o: extractors.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o: extractors_extra.c
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extra.o: extractors_extra.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o: extractors_new_langs.c
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/new-langs.o: extractors_new_langs.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o: code_treesitter.c
+$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o: code_treesitter.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_EXTRACTOR_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
 	      -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-extractor-support-sanitize: \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/test.o \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/support.o \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extractors.o \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/extra.o \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/new-langs.o \
-                     $(DB2_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize: \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extractors.o \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extra.o \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/new-langs.o \
+                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-extractor-support unit-test-db2-extractor-support-sanitize
-unit-test-db2-extractor-support: $(TESTPREFIX)/unit-test-db2-extractor-support
+.PHONY: unit-test-kb-store-extractor-support unit-test-kb-store-extractor-support-sanitize
+unit-test-kb-store-extractor-support: $(TESTPREFIX)/unit-test-kb-store-extractor-support
 	$<
 
-unit-test-db2-extractor-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-extractor-support-sanitize
+unit-test-kb-store-extractor-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize
 	$<
 
-DB2_CODE_IMPORT_SUPPORT_RENAMES = \
-   -Dcode_path_import_identity=db2_support_code_path_import_identity \
-   -Dcode_import_identity=db2_support_code_import_identity \
-   -Dcode_import_resolves_path=db2_support_code_import_resolves_path
-DB2_CODE_IMPORT_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_CODE_IMPORT_SUPPORT_RENAMES = \
+   -Dcode_path_import_identity=kb_store_support_code_path_import_identity \
+   -Dcode_import_identity=kb_store_support_code_import_identity \
+   -Dcode_import_resolves_path=kb_store_support_code_import_resolves_path
+KB_STORE_CODE_IMPORT_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_code_import_support_impl.o: \
-                     modules/db2/support/code_import_primitives.c
+$(OBJDIR)/tests/kb_store_code_import_support_impl.o: \
+                     modules/kb/support/code_import_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
-	      $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_code_import_monolith.o: extractors.c
+$(OBJDIR)/tests/kb_store_code_import_monolith.o: extractors.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-import-support: \
-                     $(OBJDIR)/tests/test_db2_code_import_support.o \
-                     $(OBJDIR)/tests/db2_code_import_support_impl.o \
-                     $(OBJDIR)/tests/db2_code_import_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-code-import-support: \
+                     $(OBJDIR)/tests/test_kb_store_code_import_support.o \
+                     $(OBJDIR)/tests/kb_store_code_import_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_code_import_monolith.o
 	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
-DB2_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/db2-code-import-support-sanitize
+KB_STORE_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-code-import-support-sanitize
 
-$(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o: tests/test_db2_code_import_support.c
+$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/test.o: tests/test_kb_store_code_import_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/code_import_primitives.c
+$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/code_import_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SUPPORT_RENAMES) \
-	      $(DB2_CODE_IMPORT_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o: extractors.c
+$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/monolith.o: extractors.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_IMPORT_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-import-support-sanitize: \
-                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/test.o \
-                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/support.o \
-                     $(DB2_CODE_IMPORT_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize: \
+                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-code-import-support unit-test-db2-code-import-support-sanitize
-unit-test-db2-code-import-support: $(TESTPREFIX)/unit-test-db2-code-import-support
+.PHONY: unit-test-kb-store-code-import-support unit-test-kb-store-code-import-support-sanitize
+unit-test-kb-store-code-import-support: $(TESTPREFIX)/unit-test-kb-store-code-import-support
 	$<
 
-unit-test-db2-code-import-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-code-import-support-sanitize
+unit-test-kb-store-code-import-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize
 	$<
 
-DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES = \
-   -Dcode_audit_dead_exports=db2_support_code_audit_dead_exports \
-   -Dcode_audit_find_cycles=db2_support_code_audit_find_cycles
-DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES = \
+   -Dcode_audit_dead_exports=kb_store_support_code_audit_dead_exports \
+   -Dcode_audit_find_cycles=kb_store_support_code_audit_find_cycles
+KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_code_audit_graph_support_impl.o: \
-                     modules/db2/support/code_audit_graph_primitives.c
+$(OBJDIR)/tests/kb_store_code_audit_graph_support_impl.o: \
+                     modules/kb/support/code_audit_graph_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
-	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_code_audit_graph_monolith.o: code_audit_graph.c
+$(OBJDIR)/tests/kb_store_code_audit_graph_monolith.o: code_audit_graph.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-audit-graph-support: \
-                     $(OBJDIR)/tests/test_db2_code_audit_graph_support.o \
-                     $(OBJDIR)/tests/db2_code_audit_graph_support_impl.o \
-                     $(OBJDIR)/tests/db2_code_audit_graph_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support: \
+                     $(OBJDIR)/tests/test_kb_store_code_audit_graph_support.o \
+                     $(OBJDIR)/tests/kb_store_code_audit_graph_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_code_audit_graph_monolith.o
 	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
 
-DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
-                     $(OBJDIR)/tests/db2-code-audit-graph-support-sanitize
+KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
+                     $(OBJDIR)/tests/kb_store-code-audit-graph-support-sanitize
 
-$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o: \
-                     tests/test_db2_code_audit_graph_support.c
+$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o: \
+                     tests/test_kb_store_code_audit_graph_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/code_audit_graph_primitives.c
+$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/code_audit_graph_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
-	      $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
+	      $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o: code_audit_graph.c
+$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o: code_audit_graph.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_CODE_AUDIT_GRAPH_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize: \
-                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o \
-                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o \
-                     $(DB2_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize: \
+                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-code-audit-graph-support \
-        unit-test-db2-code-audit-graph-support-sanitize
-unit-test-db2-code-audit-graph-support: \
-                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support
+.PHONY: unit-test-kb-store-code-audit-graph-support \
+        unit-test-kb-store-code-audit-graph-support-sanitize
+unit-test-kb-store-code-audit-graph-support: \
+                     $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support
 	$<
 
-unit-test-db2-code-audit-graph-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-code-audit-graph-support-sanitize
+unit-test-kb-store-code-audit-graph-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize
 	$<
 
-DB2_TIME_SUPPORT_RENAMES = \
-   -Dnow_utc=db2_support_now_utc \
-   -Dparse_utc_ts=db2_support_parse_utc_ts
-DB2_TIME_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_TIME_SUPPORT_RENAMES = \
+   -Dnow_utc=kb_store_support_now_utc \
+   -Dparse_utc_ts=kb_store_support_parse_utc_ts
+KB_STORE_TIME_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_time_support_impl.o: modules/db2/support/time_primitives.c
+$(OBJDIR)/tests/kb_store_time_support_impl.o: modules/kb/support/time_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TIME_SUPPORT_RENAMES) \
-	      $(DB2_TIME_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SUPPORT_RENAMES) \
+	      $(KB_STORE_TIME_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_time_monolith.o: util.c
+$(OBJDIR)/tests/kb_store_time_monolith.o: util.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TIME_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-time-support: \
-                     $(OBJDIR)/tests/test_db2_time_support.o \
-                     $(OBJDIR)/tests/db2_time_support_impl.o \
-                     $(OBJDIR)/tests/db2_time_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-time-support: \
+                     $(OBJDIR)/tests/test_kb_store_time_support.o \
+                     $(OBJDIR)/tests/kb_store_time_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_time_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_TIME_SANITIZE_DIR = $(OBJDIR)/tests/db2-time-support-sanitize
+KB_STORE_TIME_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-time-support-sanitize
 
-$(DB2_TIME_SANITIZE_DIR)/test.o: tests/test_db2_time_support.c
+$(KB_STORE_TIME_SANITIZE_DIR)/test.o: tests/test_kb_store_time_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_TIME_SANITIZE_DIR)/support.o: modules/db2/support/time_primitives.c
+$(KB_STORE_TIME_SANITIZE_DIR)/support.o: modules/kb/support/time_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TIME_SUPPORT_RENAMES) $(DB2_TIME_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SUPPORT_RENAMES) $(KB_STORE_TIME_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_TIME_SANITIZE_DIR)/monolith.o: util.c
+$(KB_STORE_TIME_SANITIZE_DIR)/monolith.o: util.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_TIME_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-time-support-sanitize: \
-                     $(DB2_TIME_SANITIZE_DIR)/test.o \
-                     $(DB2_TIME_SANITIZE_DIR)/support.o \
-                     $(DB2_TIME_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-time-support-sanitize: \
+                     $(KB_STORE_TIME_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_TIME_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_TIME_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-time-support unit-test-db2-time-support-sanitize
-unit-test-db2-time-support: $(TESTPREFIX)/unit-test-db2-time-support
+.PHONY: unit-test-kb-store-time-support unit-test-kb-store-time-support-sanitize
+unit-test-kb-store-time-support: $(TESTPREFIX)/unit-test-kb-store-time-support
 	$<
 
-unit-test-db2-time-support-sanitize: $(TESTPREFIX)/unit-test-db2-time-support-sanitize
+unit-test-kb-store-time-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-time-support-sanitize
 	$<
 
 
-unit-test-db2-rel-enum-text-support-sanitize: \
-      $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
+unit-test-kb-store-rel-enum-text-support-sanitize: \
+      $(TESTPREFIX)/unit-test-kb-store-rel-enum-text-support-sanitize
 	$<
 
-$(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
-                     modules/db2/support/runtime_config_primitives.c
+$(OBJDIR)/tests/kb_store_runtime_config_support_impl.o: \
+                     modules/kb/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-runtime-config-support: \
-                     $(OBJDIR)/tests/test_db2_runtime_config_support.o \
-                     $(OBJDIR)/tests/db2_runtime_config_support_impl.o
+$(TESTPREFIX)/unit-test-kb-store-runtime-config-support: \
+                     $(OBJDIR)/tests/test_kb_store_runtime_config_support.o \
+                     $(OBJDIR)/tests/kb_store_runtime_config_support_impl.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_RUNTIME_CONFIG_SANITIZE_DIR = $(OBJDIR)/tests/db2-runtime-config-support-sanitize
+KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-runtime-config-support-sanitize
 
-$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o: tests/test_db2_runtime_config_support.c
+$(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/test.o: tests/test_kb_store_runtime_config_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/runtime_config_primitives.c
+$(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/support.o: \
+                     modules/kb/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize: \
-                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/test.o \
-                     $(DB2_RUNTIME_CONFIG_SANITIZE_DIR)/support.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize: \
+                     $(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/support.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
 
-.PHONY: unit-test-db2-runtime-config-support \
-        unit-test-db2-runtime-config-support-sanitize
-unit-test-db2-runtime-config-support: $(TESTPREFIX)/unit-test-db2-runtime-config-support
+.PHONY: unit-test-kb-store-runtime-config-support \
+        unit-test-kb-store-runtime-config-support-sanitize
+unit-test-kb-store-runtime-config-support: $(TESTPREFIX)/unit-test-kb-store-runtime-config-support
 	$<
 
-unit-test-db2-runtime-config-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize
+unit-test-kb-store-runtime-config-support-sanitize: \
+                     $(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize
 	$<
 
-$(OBJDIR)/tests/db2_log_support_impl.o: modules/db2/support/log_primitives.c
+$(OBJDIR)/tests/kb_store_log_support_impl.o: modules/kb/support/log_primitives.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-log-support: \
-                     $(OBJDIR)/tests/test_db2_log_support.o \
-                     $(OBJDIR)/tests/db2_log_support_impl.o
+$(TESTPREFIX)/unit-test-kb-store-log-support: \
+                     $(OBJDIR)/tests/test_kb_store_log_support.o \
+                     $(OBJDIR)/tests/kb_store_log_support_impl.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_LOG_SANITIZE_DIR = $(OBJDIR)/tests/db2-log-support-sanitize
+KB_STORE_LOG_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-log-support-sanitize
 
-$(DB2_LOG_SANITIZE_DIR)/test.o: tests/test_db2_log_support.c
+$(KB_STORE_LOG_SANITIZE_DIR)/test.o: tests/test_kb_store_log_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_LOG_SANITIZE_DIR)/support.o: modules/db2/support/log_primitives.c
+$(KB_STORE_LOG_SANITIZE_DIR)/support.o: modules/kb/support/log_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-log-support-sanitize: \
-                     $(DB2_LOG_SANITIZE_DIR)/test.o \
-                     $(DB2_LOG_SANITIZE_DIR)/support.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-log-support-sanitize: \
+                     $(KB_STORE_LOG_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_LOG_SANITIZE_DIR)/support.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
 
-.PHONY: unit-test-db2-log-support unit-test-db2-log-support-sanitize
-unit-test-db2-log-support: $(TESTPREFIX)/unit-test-db2-log-support
+.PHONY: unit-test-kb-store-log-support unit-test-kb-store-log-support-sanitize
+unit-test-kb-store-log-support: $(TESTPREFIX)/unit-test-kb-store-log-support
 	$<
 
-unit-test-db2-log-support-sanitize: $(TESTPREFIX)/unit-test-db2-log-support-sanitize
+unit-test-kb-store-log-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-log-support-sanitize
 	$<
 
-DB2_REL_TYPE_SUPPORT_RENAMES = \
-   -Drel_type_is_functional=db2_support_rel_type_is_functional \
-   -Drel_type_kind_allowed=db2_support_rel_type_kind_allowed \
-   -Drel_type_normalize=db2_support_rel_type_normalize
-DB2_REL_TYPE_SECTION_FLAGS = -ffunction-sections -fdata-sections
+KB_STORE_REL_TYPE_SUPPORT_RENAMES = \
+   -Drel_type_is_functional=kb_store_support_rel_type_is_functional \
+   -Drel_type_kind_allowed=kb_store_support_rel_type_kind_allowed \
+   -Drel_type_normalize=kb_store_support_rel_type_normalize
+KB_STORE_REL_TYPE_SECTION_FLAGS = -ffunction-sections -fdata-sections
 
-$(OBJDIR)/tests/db2_rel_type_support_impl.o: modules/db2/support/rel_type_primitives.c
+$(OBJDIR)/tests/kb_store_rel_type_support_impl.o: modules/kb/support/rel_type_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SUPPORT_RENAMES) \
-	      $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SUPPORT_RENAMES) \
+	      $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
 
-$(OBJDIR)/tests/db2_rel_type_monolith.o: rel_types.c
+$(OBJDIR)/tests/kb_store_rel_type_monolith.o: rel_types.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-rel-type-support: \
-                     $(OBJDIR)/tests/test_db2_rel_type_support.o \
-                     $(OBJDIR)/tests/db2_rel_type_support_impl.o \
-                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-rel-type-support: \
+                     $(OBJDIR)/tests/test_kb_store_rel_type_support.o \
+                     $(OBJDIR)/tests/kb_store_rel_type_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_rel_type_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_REL_TYPE_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-type-support-sanitize
+KB_STORE_REL_TYPE_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-rel-type-support-sanitize
 
-$(DB2_REL_TYPE_SANITIZE_DIR)/test.o: tests/test_db2_rel_type_support.c
+$(KB_STORE_REL_TYPE_SANITIZE_DIR)/test.o: tests/test_kb_store_rel_type_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_REL_TYPE_SANITIZE_DIR)/support.o: modules/db2/support/rel_type_primitives.c
+$(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o: modules/kb/support/rel_type_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SUPPORT_RENAMES) $(DB2_REL_TYPE_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SUPPORT_RENAMES) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o: rel_types.c
+$(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o: rel_types.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_TYPE_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize: \
-                     $(DB2_REL_TYPE_SANITIZE_DIR)/test.o \
-                     $(DB2_REL_TYPE_SANITIZE_DIR)/support.o \
-                     $(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize: \
+                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-rel-type-support unit-test-db2-rel-type-support-sanitize
-unit-test-db2-rel-type-support: $(TESTPREFIX)/unit-test-db2-rel-type-support
+.PHONY: unit-test-kb-store-rel-type-support unit-test-kb-store-rel-type-support-sanitize
+unit-test-kb-store-rel-type-support: $(TESTPREFIX)/unit-test-kb-store-rel-type-support
 	$<
 
-unit-test-db2-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize
+unit-test-kb-store-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize
 	$<
 
-DB2_REL_SEED_SUPPORT_RENAMES = \
-   -Drel_type_normalize=db2_support_rel_type_normalize \
-   -Drel_types_seed_at=db2_support_rel_types_seed_at \
-   -Drel_types_seed_count=db2_support_rel_types_seed_count \
-   -Drel_types_seed_lookup=db2_support_rel_types_seed_lookup
+KB_STORE_REL_SEED_SUPPORT_RENAMES = \
+   -Drel_type_normalize=kb_store_support_rel_type_normalize \
+   -Drel_types_seed_at=kb_store_support_rel_types_seed_at \
+   -Drel_types_seed_count=kb_store_support_rel_types_seed_count \
+   -Drel_types_seed_lookup=kb_store_support_rel_types_seed_lookup
 
-$(OBJDIR)/tests/db2_rel_seed_support_impl.o: modules/db2/support/rel_seed_primitives.c
+$(OBJDIR)/tests/kb_store_rel_seed_support_impl.o: modules/kb/support/rel_seed_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) \
-	      $(DB2_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_SEED_SUPPORT_RENAMES) \
+	      $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-rel-seed-support: \
-                     $(OBJDIR)/tests/test_db2_rel_seed_support.o \
-                     $(OBJDIR)/tests/db2_rel_seed_support_impl.o \
-                     $(OBJDIR)/tests/db2_rel_type_support_impl.o \
-                     $(OBJDIR)/tests/db2_rel_type_monolith.o
+$(TESTPREFIX)/unit-test-kb-store-rel-seed-support: \
+                     $(OBJDIR)/tests/test_kb_store_rel_seed_support.o \
+                     $(OBJDIR)/tests/kb_store_rel_seed_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_rel_type_support_impl.o \
+                     $(OBJDIR)/tests/kb_store_rel_type_monolith.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
 
-DB2_REL_SEED_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-seed-support-sanitize
+KB_STORE_REL_SEED_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-rel-seed-support-sanitize
 
-$(DB2_REL_SEED_SANITIZE_DIR)/test.o: tests/test_db2_rel_seed_support.c
+$(KB_STORE_REL_SEED_SANITIZE_DIR)/test.o: tests/test_kb_store_rel_seed_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_REL_SEED_SANITIZE_DIR)/support.o: modules/db2/support/rel_seed_primitives.c
+$(KB_STORE_REL_SEED_SANITIZE_DIR)/support.o: modules/kb/support/rel_seed_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_SEED_SUPPORT_RENAMES) $(DB2_REL_TYPE_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_SEED_SUPPORT_RENAMES) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize: \
-                     $(DB2_REL_SEED_SANITIZE_DIR)/test.o \
-                     $(DB2_REL_SEED_SANITIZE_DIR)/support.o \
-                     $(DB2_REL_TYPE_SANITIZE_DIR)/support.o \
-                     $(DB2_REL_TYPE_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
+$(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize: \
+                     $(KB_STORE_REL_SEED_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_REL_SEED_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
 
-.PHONY: unit-test-db2-rel-seed-support unit-test-db2-rel-seed-support-sanitize
-unit-test-db2-rel-seed-support: $(TESTPREFIX)/unit-test-db2-rel-seed-support
+.PHONY: unit-test-kb-store-rel-seed-support unit-test-kb-store-rel-seed-support-sanitize
+unit-test-kb-store-rel-seed-support: $(TESTPREFIX)/unit-test-kb-store-rel-seed-support
 	$<
 
-unit-test-db2-rel-seed-support-sanitize: $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize
+unit-test-kb-store-rel-seed-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize
 	$<
 
-DB2_SKETCH_SUPPORT_RENAMES = \
-   -Dsketch_bloom_init=db2_support_sketch_bloom_init \
-   -Dsketch_count_min_init=db2_support_sketch_count_min_init \
-   -Dsketch_fnv1a=db2_support_sketch_fnv1a \
-   -Dsketch_hll_add_hash=db2_support_sketch_hll_add_hash \
-   -Dsketch_hll_init=db2_support_sketch_hll_init \
-   -Dsketch_lsh_band_hash=db2_support_sketch_lsh_band_hash \
-   -Dsketch_minhash_init=db2_support_sketch_minhash_init
+KB_STORE_SKETCH_SUPPORT_RENAMES = \
+   -Dsketch_bloom_init=kb_store_support_sketch_bloom_init \
+   -Dsketch_count_min_init=kb_store_support_sketch_count_min_init \
+   -Dsketch_fnv1a=kb_store_support_sketch_fnv1a \
+   -Dsketch_hll_add_hash=kb_store_support_sketch_hll_add_hash \
+   -Dsketch_hll_init=kb_store_support_sketch_hll_init \
+   -Dsketch_lsh_band_hash=kb_store_support_sketch_lsh_band_hash \
+   -Dsketch_minhash_init=kb_store_support_sketch_minhash_init
 
-$(OBJDIR)/tests/db2_sketch_support_impl.o: modules/db2/support/sketch_primitives.c
+$(OBJDIR)/tests/kb_store_sketch_support_impl.o: modules/kb/support/sketch_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SUPPORT_RENAMES) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SKETCH_SUPPORT_RENAMES) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-sketch-support: \
-                     $(OBJDIR)/tests/test_db2_sketch_support.o \
-                     $(OBJDIR)/tests/db2_sketch_support_impl.o \
+$(TESTPREFIX)/unit-test-kb-store-sketch-support: \
+                     $(OBJDIR)/tests/test_kb_store_sketch_support.o \
+                     $(OBJDIR)/tests/kb_store_sketch_support_impl.o \
                      $(OBJDIR)/sketch.o
 	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
 
-DB2_SKETCH_SANITIZE_DIR = $(OBJDIR)/tests/db2-sketch-support-sanitize
-DB2_SUPPORT_SANITIZE_FLAGS = -O1 -g -fno-lto -fsanitize=address,undefined \
+KB_STORE_SKETCH_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-sketch-support-sanitize
+# Keep standalone sanitizer executables at a stable address: PIE ASan startup
+# can collide with shadow mappings on the disposable Linux validation host.
+# Production executables retain their PIE hardening.
+KB_STORE_SUPPORT_SANITIZE_FLAGS = -O1 -g -fno-lto -fno-pie -fsanitize=address,undefined \
                              -fno-omit-frame-pointer -U_FORTIFY_SOURCE \
                              -D_FORTIFY_SOURCE=3
 
-$(DB2_SKETCH_SANITIZE_DIR)/test.o: tests/test_db2_sketch_support.c
+$(KB_STORE_SKETCH_SANITIZE_DIR)/test.o: tests/test_kb_store_sketch_support.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_SKETCH_SANITIZE_DIR)/support.o: modules/db2/support/sketch_primitives.c
+$(KB_STORE_SKETCH_SANITIZE_DIR)/support.o: modules/kb/support/sketch_primitives.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SKETCH_SUPPORT_RENAMES) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SKETCH_SUPPORT_RENAMES) \
+	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(DB2_SKETCH_SANITIZE_DIR)/monolith.o: sketch.c
+$(KB_STORE_SKETCH_SANITIZE_DIR)/monolith.o: sketch.c
 	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
+	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
 
-$(TESTPREFIX)/unit-test-db2-sketch-support-sanitize: \
-                     $(DB2_SKETCH_SANITIZE_DIR)/test.o \
-                     $(DB2_SKETCH_SANITIZE_DIR)/support.o \
-                     $(DB2_SKETCH_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -o $@ $^ -lm
+$(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize: \
+                     $(KB_STORE_SKETCH_SANITIZE_DIR)/test.o \
+                     $(KB_STORE_SKETCH_SANITIZE_DIR)/support.o \
+                     $(KB_STORE_SKETCH_SANITIZE_DIR)/monolith.o
+	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -lm
 
-.PHONY: unit-test-db2-sketch-support
-unit-test-db2-sketch-support: $(TESTPREFIX)/unit-test-db2-sketch-support
+.PHONY: unit-test-kb-store-sketch-support
+unit-test-kb-store-sketch-support: $(TESTPREFIX)/unit-test-kb-store-sketch-support
 	$<
 
-.PHONY: unit-test-db2-sketch-support-sanitize
-unit-test-db2-sketch-support-sanitize: $(TESTPREFIX)/unit-test-db2-sketch-support-sanitize
+.PHONY: unit-test-kb-store-sketch-support-sanitize
+unit-test-kb-store-sketch-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize
 	$<
 
 $(TESTPREFIX)/unit-test-kb-lab: $(OBJDIR)/tests/test_kb_lab.o \
@@ -7442,53 +7301,53 @@ $(TESTPREFIX)/unit-test-kb-fusion: $(OBJDIR)/tests/test_kb_fusion.o \
 
 $(TESTPREFIX)/unit-test-kb-export: $(OBJDIR)/tests/test_kb_export.o \
                      $(OBJDIR)/kb_export_obsidian.o $(OBJDIR)/kb_export_json.o \
-                     $(OBJDIR)/db2/kb_service_backend_export.o \
+                     $(OBJDIR)/kb_store/kb_service_backend_export.o \
                      $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-artifacts: $(OBJDIR)/tests/test_artifacts.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/feedback.o \
-                     $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/approach_store.o \
-                     $(OBJDIR)/db2/workflow_patterns.o \
-                     $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o \
-                     $(OBJDIR)/db2/entity_nodes.o \
-                     $(OBJDIR)/db2/evidence_vectors.o \
+                     $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/kb_store/learning_synth_ops.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o $(OBJDIR)/kb_store/feedback.o \
+                     $(OBJDIR)/kb_store/anti_patterns.o $(OBJDIR)/approach_store.o \
+                     $(OBJDIR)/kb_store/workflow_patterns.o \
+                     $(OBJDIR)/kb_store/rules.o $(OBJDIR)/kb_store/stopwords.o \
+                     $(OBJDIR)/kb_store/entity_nodes.o \
+                     $(OBJDIR)/kb_store/evidence_vectors.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-evidence-embed: $(OBJDIR)/tests/test_evidence_embed.o \
                      $(OBJDIR)/kb/kb_evidence_embed.o \
-                     $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/evidence_vectors.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-learning-bundle: $(OBJDIR)/tests/test_learning_bundle.o \
                      $(OBJDIR)/modules/learning/learning_bundle.o \
-                     $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/evidence_vectors.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
 $(TESTPREFIX)/unit-test-learning-synth: $(OBJDIR)/tests/test_learning_synth.o \
                      $(OBJDIR)/kb/kb_learning_synth.o \
                      $(OBJDIR)/modules/learning/learning_bundle.o \
-                     $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/learning_synth_ops.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/evidence_vectors.o \
+                     $(OBJDIR)/kb_store/learning_synth_ops.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(OBJDIR)/posix/platform_process.o \
                      $(OBJDIR)/linux/platform_process.o \
                      $(TEST_CORE_OBJS)
@@ -7496,69 +7355,69 @@ $(TESTPREFIX)/unit-test-learning-synth: $(OBJDIR)/tests/test_learning_synth.o \
 
 $(TESTPREFIX)/unit-test-learning-version: $(OBJDIR)/tests/test_learning_version.o \
                      $(OBJDIR)/kb/kb_learning_version.o \
-                     $(OBJDIR)/db2/evidence_vectors.o \
-                     $(OBJDIR)/db2/learning_synth_ops.o \
-                     $(OBJDIR)/db2/kb_runtime_state.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/evidence_vectors.o \
+                     $(OBJDIR)/kb_store/learning_synth_ops.o \
+                     $(OBJDIR)/kb_store/kb_runtime_state.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
 $(TESTPREFIX)/unit-test-corpus-structural: $(OBJDIR)/tests/test_corpus_structural.o \
-                     $(OBJDIR)/db2/corpus_structural.o \
-                     $(OBJDIR)/db2/corpus_jobs.o \
-                     $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/corpus_structural.o \
+                     $(OBJDIR)/kb_store/corpus_jobs.o \
+                     $(OBJDIR)/kb_store/kb_docs.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-corpus-jobs: $(OBJDIR)/tests/test_corpus_jobs.o \
-                     $(OBJDIR)/db2/corpus_jobs.o \
-                     $(OBJDIR)/db2/curator_terms.o \
-                     $(OBJDIR)/db2/curator_gaps.o \
-                     $(OBJDIR)/db2/corpus_structural.o \
-                     $(OBJDIR)/db2/curiosity.o \
-                     $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/corpus_jobs.o \
+                     $(OBJDIR)/kb_store/curator_terms.o \
+                     $(OBJDIR)/kb_store/curator_gaps.o \
+                     $(OBJDIR)/kb_store/corpus_structural.o \
+                     $(OBJDIR)/kb_store/curiosity.o \
+                     $(OBJDIR)/kb_store/kb_docs.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-corpus-terms-gaps: $(OBJDIR)/tests/test_corpus_terms_gaps.o \
-                     $(OBJDIR)/db2/curator_terms.o \
-                     $(OBJDIR)/db2/curator_gaps.o \
-                     $(OBJDIR)/db2/corpus_structural.o \
-                     $(OBJDIR)/db2/corpus_jobs.o \
-                     $(OBJDIR)/db2/curiosity.o \
-                     $(OBJDIR)/db2/kb_docs.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/curator_terms.o \
+                     $(OBJDIR)/kb_store/curator_gaps.o \
+                     $(OBJDIR)/kb_store/corpus_structural.o \
+                     $(OBJDIR)/kb_store/corpus_jobs.o \
+                     $(OBJDIR)/kb_store/curiosity.o \
+                     $(OBJDIR)/kb_store/kb_docs.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o $(OBJDIR)/kb/kb_mdl.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-calibration: $(OBJDIR)/tests/test_calibration.o \
                      $(OBJDIR)/kb/kb_calibrate.o \
-                     $(OBJDIR)/db2/calibration.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/calibration.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-demotion: $(OBJDIR)/tests/test_demotion.o \
-                     $(OBJDIR)/db2/demotion.o \
+                     $(OBJDIR)/kb_store/demotion.o \
                      $(OBJDIR)/tests/support/memory_migration_stub.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -7566,13 +7425,13 @@ $(TESTPREFIX)/unit-test-features: $(OBJDIR)/tests/test_features.o \
                      $(OBJDIR)/kb/kb_features.o \
                      $(OBJDIR)/kb/kb_ranker.o \
                      $(OBJDIR)/kb/kb_detect.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/sketch.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/sketch.o \
                      $(OBJDIR)/sketch.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/calibration.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/calibration.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -7581,12 +7440,12 @@ $(TESTPREFIX)/unit-test-ranker-fit: $(OBJDIR)/tests/test_ranker_fit.o \
                      $(OBJDIR)/kb/kb_ranker.o \
                      $(OBJDIR)/kb/kb_features.o \
                      $(OBJDIR)/kb/kb_detect.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/sketch.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/sketch.o \
                      $(OBJDIR)/sketch.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -7596,7 +7455,7 @@ $(TESTPREFIX)/unit-test-retrieval-outcome-bridge: $(OBJDIR)/tests/test_retrieval
                      $(OBJDIR)/server/retrieval_outcome_bridge.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(OBJDIR)/tests/test_artifacts.o: C_FLAGS += -Imodules/db2/include
+$(OBJDIR)/tests/test_artifacts.o: C_FLAGS += -Imodules/kb/include
 
 # Pure render/extract helpers behind the kb_search tool — cJSON + dstr only.
 $(TESTPREFIX)/unit-test-td-search-render: $(OBJDIR)/tests/test_td_search_render.o \
@@ -7605,70 +7464,70 @@ $(TESTPREFIX)/unit-test-td-search-render: $(OBJDIR)/tests/test_td_search_render.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-report-enrichments: $(OBJDIR)/tests/test_report_enrichments.o \
-                     $(OBJDIR)/db2/report_enrichments.o \
+                     $(OBJDIR)/kb_store/report_enrichments.o \
                      $(OBJDIR)/report_enrichment.o $(OBJDIR)/util_url.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-reasoning: $(OBJDIR)/tests/test_reasoning.o \
                      $(OBJDIR)/kb/kb_reasoning.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-bandit: $(OBJDIR)/tests/test_bandit.o \
                      $(OBJDIR)/kb/kb_bandit.o \
                      $(OBJDIR)/kb/kb_bandit_registry.o \
-                     $(OBJDIR)/db2/bandit.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
+                     $(OBJDIR)/kb_store/bandit.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-planner: $(OBJDIR)/tests/test_planner.o \
                      $(OBJDIR)/kb/kb_planner.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-roadmap: $(OBJDIR)/tests/test_roadmap.o \
                      $(OBJDIR)/kb/roadmap.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-kb-releases-db: $(OBJDIR)/tests/test_kb_releases_db.o \
-                     $(OBJDIR)/db2/kb_releases.o \
-                     $(OBJDIR)/db2/kb_runtime_state.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/kb_releases.o \
+                     $(OBJDIR)/kb_store/kb_runtime_state.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-roadmap-decompose: $(OBJDIR)/tests/test_roadmap_decompose.o \
                      $(OBJDIR)/modules/roadmap/roadmap_decompose.o \
                      $(OBJDIR)/kb/roadmap.o \
-                     $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
+                     $(OBJDIR)/kb_store/artifacts.o $(OBJDIR)/kb_store/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
                      $(OBJDIR)/kb/kb_mdl.o \
-                     $(OBJDIR)/db2/feature_rows.o \
-                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                     $(OBJDIR)/kb_store/feature_rows.o \
+                     $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
@@ -7696,7 +7555,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
                      $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/platform_random.o \
                      $(OBJDIR)/yaml.o \
                      \
-                     $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
+                     $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o \
                      $(OBJDIR)/log.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/server/osv_check.o \
@@ -7706,7 +7565,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
                      $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
                      $(TEST_MCP_CLIENT_OBJS) \
                      $(TESTPREFIX)/mock-mcp-server
-	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/platform_random.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/artifact_trust.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/platform_random.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/modules/vault/runtime_secret.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/artifact_trust.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_build.o \
                                        $(OBJDIR)/server/agent_request_build.o \
@@ -7948,7 +7807,7 @@ $(TESTPREFIX)/unit-test-trace-transport: $(OBJDIR)/tests/test_trace_transport.o 
 $(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
-$(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-agent-generate-transport: $(OBJDIR)/tests/test_agent_generate_transport.o $(OBJDIR)/vendor/cJSON.o
@@ -7980,4 +7839,18 @@ $(TESTPREFIX)/unit-test-server-clean-retry: $(OBJDIR)/tests/test_server_clean_re
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lcrypto
 
 $(TESTPREFIX)/unit-test-workspace-hook-scope: $(OBJDIR)/tests/test_workspace_hook_scope.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-fidelity-transport: $(OBJDIR)/tests/test_fidelity_transport.o $(OBJDIR)/kb/kb_service_memory.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-postgres-session-transport: $(OBJDIR)/tests/test_postgres_session_transport.o $(OBJDIR)/modules/postgres/client/session.o $(OBJDIR)/modules/postgres/client/local_session.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: test-postgres-session-transport
+test-postgres-session-transport: $(TESTPREFIX)/unit-test-postgres-session-transport
+	$(TESTPREFIX)/unit-test-postgres-session-transport
+
+# Model-neutral projection of already authorized source rows.
+$(TESTPREFIX)/unit-test-server-native-primitive: $(OBJDIR)/tests/test_server_native_primitive.o $(OBJDIR)/server/server_native_primitive.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

@@ -1,0 +1,44 @@
+{
+  "status": "passed",
+  "model": "gemma4-12b",
+  "checks_scope": "short native-memory cold and warm smoke; NAS GGUFs and NAS-backed data",
+  "checks": [
+    {
+      "name": "initial source admission withdrawn",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference denied",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference cannot select source",
+      "passed": true
+    },
+    {
+      "name": "authorized canary stored",
+      "passed": true
+    },
+    {
+      "name": "cold actual native recall",
+      "passed": true
+    },
+    {
+      "name": "warm actual native recall",
+      "passed": true
+    },
+    {
+      "name": "warm bank reused",
+      "passed": true
+    }
+  ],
+  "fixture_connect_attempts": 2,
+  "artifact_source": "Installed model adapter 0.3.3; shared runtime 0.3.3 build 5; one 7900 XTX; no CPU weight offload",
+  "gguf_path": "/opt/aimee-nas-models/hf/hub/models--unsloth--gemma-4-12b-it-GGUF/snapshots/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-UD-Q4_K_XL.gguf",
+  "model_wheel_version": "0.3.3",
+  "runtime_wheel_sha256": "a6ddd22b908b8195e51e7a65953fd66f8987c9eb7944ed67bc5f6fcb14ed4511",
+  "shared_runtime_build": 5,
+  "cpu_offload_gb": 0,
+  "cold_http_status": 200,
+  "warm_http_status": 200
+}

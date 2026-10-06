@@ -81,7 +81,7 @@ ok "docs/manifest pre-check"
 req POST /docs -F "file=@$DOC;type=text/markdown" -F "scope=global"
 case "$STATUS" in
    200|201) ;;  # 201 = ingested, 200 = idempotent re-upload
-   503) rm -f "$DOC"; skip "/docs returned 503 (DB2 not provisioned on this host)";;
+   503) rm -f "$DOC"; skip "/docs returned 503 (KB_STORE not provisioned on this host)";;
    *) rm -f "$DOC"; fail "/docs upload: status=$STATUS body=$BODY";;
 esac
 DOC_ID="$(echo "$BODY" | jq -r '.doc_id // empty')"

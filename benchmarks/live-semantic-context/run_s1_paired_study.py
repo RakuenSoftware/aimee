@@ -32,7 +32,7 @@ ARMS = ("production", "location_only", "batched_context")
 
 LINK_OBJECTS = [
     "modules/lsp/lsp_client.o", "modules/lsp/lsp_manager.o", "modules/lsp/lsp_context.o",
-    "aimee_sha256.o", "tests/aimee_pg_sqlite_shim.o", "db2/db2_test_shim.o",
+    "aimee_sha256.o", "tests/aimee_pg_sqlite_shim.o", "kb_store/kb_store_test_shim.o",
     "config_client.o", "config_client_contract.o",
     *[f"config_client_accessors_{index}.o" for index in range(8)],
     "tests/support/config_module_stub.o", "session_id.o", "yaml.o", "dstr.o",

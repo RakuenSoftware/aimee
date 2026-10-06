@@ -8,7 +8,7 @@
  * the nodes that fired happen OUTSIDE the lock so DB I/O never serializes callers. */
 #include "lessons_session_capture.h"
 
-#include "modules/db2/c/lessons.h"
+#include "modules/kb/c/lessons.h"
 #include "lessons_cite_tracker.h" /* tracker + LESSONS_AUTO_USEFUL_TURNS + LESSONS_NODE_MAX */
 
 #include <pthread.h>
@@ -89,9 +89,9 @@ int lessons_session_observe(const char *project, long long generation_id, const 
    int recorded = 0;
    for (int i = 0; i < n_fired; i++)
    {
-      int64_t oid = db2_lessons_record_outcome(session_id, "", project, generation_id, "useful", "",
-                                               "", "", "agent", 0);
-      if (oid > 0 && db2_lessons_record_citation(oid, fired[i], "useful") == 0)
+      int64_t oid = kb_store_lessons_record_outcome(session_id, "", project, generation_id,
+                                                    "useful", "", "", "", "agent", 0);
+      if (oid > 0 && kb_store_lessons_record_citation(oid, fired[i], "useful") == 0)
          recorded++;
    }
    return recorded;

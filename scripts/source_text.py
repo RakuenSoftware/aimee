@@ -6,7 +6,7 @@ quotable of the two. Both directions are real, and both were found in this
 tree on the same day:
 
   FALSE CLEAN   check-memory-store-degradation decided a file "degrades
-                gracefully" if AIMEE_DB2_DISABLED appeared anywhere in it. A
+                gracefully" if AIMEE_KB_STORE_DISABLED appeared anywhere in it. A
                 file that reached the store silently, carrying a TODO comment
                 promising to branch on that macro and to LOG_WARN, was
                 classified as already doing both. The guard read the intent as

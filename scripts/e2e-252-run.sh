@@ -10,7 +10,7 @@
 set -u
 
 HOME_DIR=${AIMEE_HOME:-/var/lib/aimee-e2e}
-KB_URL=${AIMEE_DB2_URL:-postgresql:///aimee_e2e_kb?host=/var/run/postgresql}
+KB_URL=${AIMEE_STORE_URL:-postgresql:///aimee_e2e_kb?host=/var/run/postgresql}
 STORE_URL=${AIMEE_STORE_URL:-postgresql:///aimee_e2e_store?host=/var/run/postgresql}
 
 PASS=0
@@ -42,7 +42,6 @@ echo "== environment =="
 rm -rf "$HOME_DIR"
 mkdir -p "$HOME_DIR"
 export AIMEE_HOME="$HOME_DIR"
-export AIMEE_DB2_URL="$KB_URL"
 export AIMEE_STORE_URL="$STORE_URL"
 echo "AIMEE_HOME=$AIMEE_HOME"
 /usr/local/bin/aimee --version
@@ -69,7 +68,7 @@ echo "        grants: $(ls "$HOME_DIR/modules.d/server" 2>/dev/null | wc -l)"
 ck "the store module has a grant" test -f "$HOME_DIR/modules.d/server/aimee.grant"
 
 echo
-echo "== aimee-kb starts against DB2 =="
+echo "== aimee-kb starts against KB_STORE =="
 # HTTP is the KB's only transport, so it needs a port or it exits saying so.
 /usr/local/bin/aimee-kb --http-port=8799 >"$HOME_DIR/kb.log" 2>&1 &
 KB_PID=$!

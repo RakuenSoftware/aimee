@@ -4,7 +4,7 @@
  */
 
 #include "kb_features.h"
-#include "modules/db2/c/feature_rows.h"
+#include "modules/kb/c/feature_rows.h"
 
 #include <stdio.h>
 
@@ -27,8 +27,8 @@ int kb_features_upsert_with_sketch(int64_t doc_id, double lex_score, double dens
             lex_score, dense_score, age_days > 0.0 ? age_days : 0.0, recency, sketch_frequency,
             sketch_distinct);
 
-   return db2_feature_row_upsert(subject_id, "kb_document", "", "", KB_FEATURE_SET_VERSION,
-                                 features, NULL);
+   return kb_store_feature_row_upsert(subject_id, "kb_document", "", "", KB_FEATURE_SET_VERSION,
+                                      features, NULL);
 }
 
 int kb_features_upsert(int64_t doc_id, double lex_score, double dense_score, double age_days)
@@ -40,7 +40,7 @@ int kb_features_read(int64_t doc_id, char *buf, size_t len)
 {
    char subject_id[32];
    snprintf(subject_id, sizeof(subject_id), "%lld", (long long)doc_id);
-   return db2_feature_row_read(subject_id, "kb_document", KB_FEATURE_SET_VERSION, buf, len);
+   return kb_store_feature_row_read(subject_id, "kb_document", KB_FEATURE_SET_VERSION, buf, len);
 }
 
 int kb_features_upsert_synthesis_mdl(const char *artifact_id, const kb_mdl_score_t *score)
@@ -54,6 +54,6 @@ int kb_features_upsert_synthesis_mdl(const char *artifact_id, const kb_mdl_score
             "\"mdl.total\":%.2f,\"mdl.rank_in_cluster\":%d}",
             score->l_candidate, score->l_residual, score->total, score->rank_in_cluster);
 
-   return db2_feature_row_upsert(artifact_id, "synthesis_candidate", "", "", KB_FEATURE_SET_VERSION,
-                                 features, NULL);
+   return kb_store_feature_row_upsert(artifact_id, "synthesis_candidate", "", "",
+                                      KB_FEATURE_SET_VERSION, features, NULL);
 }

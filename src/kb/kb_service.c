@@ -13,9 +13,9 @@
 #include "kb.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
-#include "modules/db2/c/kb_service_backend.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/kb/c/kb_service_backend.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/pgvec_kb_service.h"
 #include <aimee/learning/learning.h>
 #include "curiosity_resolve.h"
 #include "kb_bandit.h"
@@ -217,7 +217,7 @@ static int kb_handle_curiosity_list(int fd, cJSON *req)
    if (limit > 128)
       limit = 128;
 
-   cJSON *resp = db2_kb_service_curiosity_list_json(state, limit);
+   cJSON *resp = kb_store_kb_service_curiosity_list_json(state, limit);
    return kb_reply_or_error(fd, resp, "failed to list curiosity items");
 }
 
@@ -240,22 +240,22 @@ static int kb_handle_curiosity_create(int fd, cJSON *req)
    double importance = cJSON_IsNumber(imp_j) ? imp_j->valuedouble : 0.0;
    double novelty = cJSON_IsNumber(nov_j) ? nov_j->valuedouble : 0.0;
 
-   cJSON *resp = db2_kb_service_curiosity_create_json(gap_j->valuestring, entity, topic, evidence,
-                                                      importance, novelty, sess);
+   cJSON *resp = kb_store_kb_service_curiosity_create_json(gap_j->valuestring, entity, topic,
+                                                           evidence, importance, novelty, sess);
    return kb_reply_or_error(fd, resp, "failed to create curiosity item");
 }
 
 static int kb_handle_curiosity_sweep(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_curiosity_sweep_json();
+   cJSON *resp = kb_store_kb_service_curiosity_sweep_json();
    return kb_reply_or_error(fd, resp, "failed to sweep curiosity");
 }
 
 static int kb_handle_curiosity_rescore(int fd, cJSON *req)
 {
    (void)req;
-   cJSON *resp = db2_kb_service_curiosity_rescore_json();
+   cJSON *resp = kb_store_kb_service_curiosity_rescore_json();
    return kb_reply_or_error(fd, resp, "failed to rescore curiosity");
 }
 
@@ -264,7 +264,7 @@ static int kb_handle_curiosity_get(int fd, cJSON *req)
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "curiosity.get requires id");
-   cJSON *resp = db2_kb_service_curiosity_get_json((int64_t)id_j->valuedouble);
+   cJSON *resp = kb_store_kb_service_curiosity_get_json((int64_t)id_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to get curiosity item");
 }
 
@@ -274,8 +274,8 @@ static int kb_handle_curiosity_update_state(int fd, cJSON *req)
    cJSON *state_j = cJSON_GetObjectItemCaseSensitive(req, "state");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(state_j))
       return kb_send_error(fd, "curiosity.update_state requires id and state");
-   cJSON *resp =
-       db2_kb_service_curiosity_update_state_json((int64_t)id_j->valuedouble, state_j->valuestring);
+   cJSON *resp = kb_store_kb_service_curiosity_update_state_json((int64_t)id_j->valuedouble,
+                                                                 state_j->valuestring);
    return kb_reply_or_error(fd, resp, "failed to update curiosity state");
 }
 
@@ -285,7 +285,7 @@ static int kb_handle_curiosity_route_top(int fd, cJSON *req)
    cJSON *sess_j = cJSON_GetObjectItemCaseSensitive(req, "source_session");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 5;
    const char *sess = cJSON_IsString(sess_j) ? sess_j->valuestring : NULL;
-   cJSON *resp = db2_kb_service_curiosity_route_top_json(limit, sess);
+   cJSON *resp = kb_store_kb_service_curiosity_route_top_json(limit, sess);
    return kb_reply_or_error(fd, resp, "failed to route curiosity items");
 }
 
@@ -300,8 +300,8 @@ static int kb_handle_note_create(int fd, cJSON *req)
    const char *tags = cJSON_IsString(tags_j) ? tags_j->valuestring : NULL;
    const char *author = cJSON_IsString(author_j) ? author_j->valuestring : NULL;
 
-   cJSON *resp =
-       db2_kb_service_note_create_json(title_j->valuestring, content_j->valuestring, tags, author);
+   cJSON *resp = kb_store_kb_service_note_create_json(title_j->valuestring, content_j->valuestring,
+                                                      tags, author);
    return kb_reply_or_error(fd, resp, "failed to create note");
 }
 
@@ -316,7 +316,7 @@ static int kb_handle_note_list(int fd, cJSON *req)
    if (limit > 100)
       limit = 100;
 
-   cJSON *resp = db2_kb_service_note_list_json(tag, limit);
+   cJSON *resp = kb_store_kb_service_note_list_json(tag, limit);
    return kb_reply_or_error(fd, resp, "failed to list notes");
 }
 
@@ -332,7 +332,7 @@ static int kb_handle_note_search(int fd, cJSON *req)
    if (limit > 100)
       limit = 100;
 
-   cJSON *resp = db2_kb_service_note_search_json(query_j->valuestring, limit);
+   cJSON *resp = kb_store_kb_service_note_search_json(query_j->valuestring, limit);
    return kb_reply_or_error(fd, resp, "failed to search notes");
 }
 
@@ -365,14 +365,14 @@ static int kb_handle_learning_list(int fd, cJSON *req)
    if (limit > 64)
       limit = 64;
 
-   cJSON *resp = db2_kb_service_learning_list_json(state, sink, limit);
+   cJSON *resp = kb_store_kb_service_learning_list_json(state, sink, limit);
    return kb_reply_or_error(fd, resp, "failed to list learning proposals");
 }
 
 /* The endogeneity gate (recursive-self-improvement S0).
  *
  * It has to be answered HERE. The gate reads the learning ledger, which is
- * DB2, and the daemon builds with DB2 compiled out — so a daemon computing it
+ * KB_STORE, and the daemon builds with KB_STORE compiled out — so a daemon computing it
  * locally always answered "nothing observed" no matter how self-referential
  * the ledger had become. A live run with both services up is what showed that:
  * four committed proposals in Postgres, and the daemon reporting none. */
@@ -583,10 +583,10 @@ static int kb_handle_learning_mutate(int fd, cJSON *req, const char *verb)
    cJSON *proposal = NULL;
    int rc = 0;
    if (strcmp(verb, "get") == 0)
-      proposal = db2_kb_service_learning_get_json(id);
+      proposal = kb_store_kb_service_learning_get_json(id);
    else if (strcmp(verb, "accept") == 0)
    {
-      if (!db2_is_initialized())
+      if (!kb_store_is_initialized())
          return kb_send_error(fd, "failed to open knowledge service store");
       learning_proposal_t row;
       rc = learning_accept_proposal(id, &row);
@@ -594,7 +594,7 @@ static int kb_handle_learning_mutate(int fd, cJSON *req, const char *verb)
          proposal = learning_proposal_to_json(&row);
    }
    else if (strcmp(verb, "reject") == 0)
-      proposal = db2_kb_service_learning_reject_json(id);
+      proposal = kb_store_kb_service_learning_reject_json(id);
    else
       rc = -1;
 
@@ -631,11 +631,11 @@ static int kb_handle_curator_stages(int fd, cJSON *req)
  * which take an extra arg).
  *
  * Deliberately NOT served by aimee-kb (they need DB1 context the kb process
- * lacks) and are ported through aimee-server with DB2 writes routed back via
+ * lacks) and are ported through aimee-server with KB_STORE writes routed back via
  * typed kb RPCs:
  *   - maintenance.eval_feedback_loop  (DB1 eval tasks)
  *   - maintenance.run, maintenance.trace_mine  (DB1 context)
- *   - memory.cognify_drain  (spans DB1 cognify_jobs + DB2 memories) */
+ *   - memory.cognify_drain  (spans DB1 cognify_jobs + KB_STORE memories) */
 typedef int (*kb_rpc_fn)(int fd, cJSON *req);
 static const struct
 {

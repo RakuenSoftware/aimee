@@ -119,7 +119,7 @@ SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object(
 	items := make([]Record, 0, len(selected))
 	reasons := make(map[int64]string)
 	for _, record := range selected {
-		if !record.Version.validFor(record.ID) {
+		if !record.Version.ValidFor(record.ID) {
 			return nil, nil, 0, fmt.Errorf("invalid activated memory version")
 		}
 		items = append(items, record.Record)

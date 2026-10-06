@@ -1,5 +1,5 @@
 [Unit]
-Description=Aimee KB service (DB2 + pgvector, embeddings, memory search)
+Description=Aimee KB service (KB_STORE + pgvector, embeddings, memory search)
 After=network.target
 PartOf=aimee.slice
 

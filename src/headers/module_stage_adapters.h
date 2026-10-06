@@ -33,4 +33,7 @@ int server_module_benchmark_latency(const double *latencies, uint32_t count,
  * Returns a newly allocated JSON reply, or NULL when the module did not answer. */
 cJSON *server_module_memory_data(const cJSON *request);
 
+/* Complete configured derived-memory cleanup before acknowledging erasure. */
+int server_module_memory_reset_derived(void);
+
 #endif

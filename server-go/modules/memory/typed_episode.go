@@ -39,7 +39,7 @@ func (s *postgresDataStore) typedEpisodes(ctx context.Context, query string, lim
 		source.Version.SchemaVersion = 1
 		source.Version.RecordID = strconv.FormatInt(item.ID, 10)
 		parent.OwnerID, parent.RecordID = source.Version.OwnerID, strconv.FormatInt(item.MemoryID, 10)
-		if !source.Version.validFor(item.ID) || !parent.validFor(item.MemoryID) {
+		if !source.Version.ValidFor(item.ID) || !parent.ValidFor(item.MemoryID) {
 			return nil, errors.New("memory: episode or parent version unavailable")
 		}
 		source.MemoryParents = []MemoryRecordVersion{parent}

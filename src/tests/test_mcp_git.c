@@ -16,8 +16,8 @@
 #include "cJSON.h"
 #include "db1_client/db1.h"
 #include "db1_client/git_ownership.h" /* ownership_get_owner -- the per-repo claim assertion */
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db2_internal.h"
+#include "../modules/kb/c/kb_store.h"
+#include "../modules/kb/c/kb_store_internal.h"
 #include "support/git_module_fixture.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 

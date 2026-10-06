@@ -10,7 +10,7 @@ It does not authorize users, invent schemas, expose arbitrary SQL to HTTP client
 ## Public contracts
 
 Principal `28` serves health at event `11265` stage `1` and bounded SQL/store operations at event
-`11266` stage `2`. Requests name registered owners and operations with typed parameters; replies carry
+`11266` stage `2`. Host-only native sessions use event `11267` stage `3`. Requests name registered owners and operations with typed parameters; replies carry
 typed status and bounded rows. Raw connection strings and credentials never cross the event bus.
 
 ## Dependencies and consumers
@@ -37,8 +37,9 @@ least-privilege roles and secret injection; filesystem DB paths and SQLite compa
 
 ## Surfaces
 
-The only supported surface is the authenticated module bus contract in `module_api.h` plus the Go
-caller interface. Operators observe readiness through server health. There is no public REST SQL route,
+Normal service access uses the authenticated `postgres` module bus contracts and the Go/native
+transport clients. Offline migration and restricted operator tools launch this same
+provider through an inherited private pipe; they do not open PostgreSQL themselves. Operators observe readiness through server health. There is no public REST SQL route,
 interactive query console, or client flag that widens the registered operation catalog.
 
 ## Data and migrations
@@ -110,3 +111,43 @@ contract, `AIMEE_DB1_PATH`, and direct domain SQL access have no 0.4.0 compatibi
 Extend `postgres` by adding a versioned generic operation and cross-language fixtures, then register a
 domain-owned catalog and tests. Do not add domain conditions to this module. Removal requires migrating
 every declared consumer and preserving recorded owner/version/checksum history for audit and restore.
+
+### Native host sessions
+
+Stage 3 is restricted to the embedding host (principal reference zero). Other
+module principals cannot acquire or use a session. A session is an opaque random
+handle; callers never send connection strings or credentials. Its connection is
+leased from the same PostgreSQL-owned runtime pool as the Go SQL stage. Admission
+reserves capacity for ordinary SQL traffic and refuses overflow connections.
+
+Sessions retain PostgreSQL transaction state and session-local tenant settings
+between requests. Release rolls back an unfinished transaction, resets session
+authorization, clears the prepared statement cache, and discards session state
+before returning the connection. Cleanup failure discards the connection instead.
+An idle-session reaper closes abandoned connections; expired handles fail closed.
+SQLSTATE, column OIDs, and exact PostgreSQL text representations cross the wire;
+SQL NULL remains distinct from an empty value.
+
+### Native knowledge sessions and upgrades
+
+KB owns its knowledge schema and SQL algorithms under `src/modules/kb/c`. The
+retired KbStore module, wire contract, standalone process and native connection pool
+have been removed. Its former principal 29 remains reserved; KB startup archives
+persisted grants for that identity without transferring their permissions.
+
+Native runtime sessions use the PostgreSQL module's runtime role. If an older
+installation needs a KB schema upgrade, startup applies the unchanged schema
+through a separate migration session and closes that authority before serving.
+The private migration profile accepts no caller-supplied DSN and verifies that
+runtime and migration credentials name the same database and namespace.
+
+Session capabilities have bounded admission and idle expiry. Release rolls back
+unfinished transactions and clears session state; an abandoned streamed result
+or failed reset discards the connection. Replies are paged within 16 MiB frames,
+with 1 MiB cell limits. Native schema batches have a separate 8 MiB statement
+limit. Runtime SQL's existing limits remain unchanged.
+
+The WORM worker uses its separate `AIMEE_WORM_POSTGRES_URL` authority through the
+same provider. Its append-only audit sink remains owned by the audit module.
+Vault custody and the immutable audit sink are not alternative knowledge-store
+providers. Historical SQL identifiers and migration checksums remain intact.

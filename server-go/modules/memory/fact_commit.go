@@ -75,6 +75,11 @@ func (s *postgresDataStore) commitFactCandidate(ctx context.Context, candidate F
 	if _, ok := s.db.(store.Tx); !ok {
 		return empty, decision.Verdict, errors.New("memory: fact commit requires transaction")
 	}
+	if candidate.Actor.Rank == 10 {
+		if err := screenModelMemory(AuthorityModel, candidate.Subject, candidate.Object); err != nil {
+			return empty, decision.Verdict, err
+		}
+	}
 	var err error
 	// Gate both endpoints before they can become registry aliases or graph text.
 	candidate.Subject, err = screenMemoryText(candidate.Subject)

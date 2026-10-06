@@ -65,20 +65,18 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-Twenty-three process identities now run in the Go multicall executable:
-`config`, `memory`, `learning`, `routing`, `delegates`, `tools`, `workspace`,
-`git`, `skills`, `response-composition`, `execution-policy`, `governance`,
-`workflows`, `roundtable`, `kb-synthesis`, `runtime-web`, `control-web`,
-`benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, and `egress`.
-Each keeps its existing event kind and AMOD body contract, but the supervisor now
-starts an authenticated Go process for that identity. C adapters serve as parity
-fixtures. DB2 remains the separately supervised C process in the current catalog;
-it uses the same admitted bus contract rather than an in-process exception.
+The current process catalog contains 26 Go identities: `config`, `memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, `response-composition`,
+`execution-policy`, `governance`, `workflows`, `roundtable`, `kb-synthesis`, `runtime-web`,
+`control-web`, `benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, `egress`,
+`providers`, `server` and `kb`. Placement and activation select the running set; the Server and
+KB role identities never run together. The catalog contains no supervised C KB_STORE process.
+The Go PostgreSQL module serves both placements. Transitional module-owned C resource/domain
+code remains, and C adapters used as parity fixtures do not establish a second policy owner.
 
-A moved stage is a bounded decision, and the storage-heavy or daemon
-orchestration code around it stays where it was. The memory rerank, the
-response-composition key, the roundtable verification rubric, and benchmark
-IR scoring are all decisions of that shape.
+The depth of each Go owner differs. Memory owns retrieval, mutations and lifecycle orchestration;
+providers owns request preparation; role modules own composition. Some other migrated stages
+remain bounded decisions with surrounding resource mechanics in C.
 
 - **Governance** moves the bounded response tool-policy decision. Parsed-response
   mutation and its broader identity/OIDC plane remain in their current C owners.

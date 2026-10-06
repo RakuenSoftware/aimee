@@ -9,10 +9,10 @@ configuration, memories, skills, rules, or workflows without the applicable evid
 
 ## Public contracts
 
-`src/modules/learning/learning.h` defines signal inputs, dispatch results, proposals, actions, metrics,
+`src/modules/learning/include/aimee/learning/learning.h` defines signal inputs, dispatch results, proposals, actions, metrics,
 and the router API. `learning_implicit.h`, `learning_bundle.h`, and `learning_evidence.h` cover detection,
-evidence assembly, and candidate generation, while DB2 persistence currently remains in
-`src/modules/db2/c/db2_learning.h` and related source files as explicit physical-ownership debt.
+evidence assembly, and candidate generation, while KB_STORE persistence currently remains in
+`src/modules/kb/c/kb_store_learning.h` and related source files as explicit physical-ownership debt.
 
 The pointer-free learning-observation stage is now implemented by
 `server-go/modules/learning` and shipped as the supervised Go
@@ -67,8 +67,8 @@ references.
 
 ## Data and migrations
 
-`DB2` tables store learning signals, proposals, evidence references, state transitions, and synthesis
-work; schema and queries currently live under `src/modules/db2/c`. Migrations must preserve proposal IDs, sink,
+`KB_STORE` tables store learning signals, proposals, evidence references, state transitions, and synthesis
+work; schema and queries currently live under `src/modules/kb/c`. Migrations must preserve proposal IDs, sink,
 target, corroboration, expiry, and audit history so an old unresolved action cannot be replayed as an
 unreviewed committed change after an upgrade.
 
@@ -110,7 +110,7 @@ ingestion or synthesis path.
 ## Compatibility
 
 The `learning_signal_input_t`, proposal JSON, CLI verbs, route envelopes, sink names, and persisted state
-machine are compatibility contracts. Relocating DB2 and root command code into the module must retain
+machine are compatibility contracts. Relocating KB_STORE and root command code into the module must retain
 those meanings; renaming a sink or reinterpreting `high_confidence` requires migration, tests, and a
 surface-baseline decision.
 

@@ -65,7 +65,7 @@ int kb_client_task_list(const char *state, const char *session, int limit, aimee
    strcpy(out->state, TASK_IN_PROGRESS);
    return 1;
 }
-int kb_client_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out,
+int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max)
 {
    assert(!outcome && limit == 8 && max == 8);

@@ -140,7 +140,7 @@ func defaultSchema() string {
 			return path
 		}
 	}
-	return "src/modules/db2/c/schema.sql"
+	return "src/modules/kb/c/schema.sql"
 }
 
 func main() {

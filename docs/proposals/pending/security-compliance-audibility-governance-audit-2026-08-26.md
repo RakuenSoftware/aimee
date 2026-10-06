@@ -306,8 +306,8 @@ still requires the ACG-019/020 organizational records and operating cadence.
 - **Evidence:** `src/modules/audit/audit_worm_chain.c:24-48` hashes exactly eight fields plus the
   predecessor and excludes `ts`. The verifier query at `src/modules/audit/audit_worm.c:348-393`
   likewise omits it. DB2's independent producer documents and hashes the same eight fields at
-  `src/modules/db2/c/schema.sql:7681-7727`. Five attribution fields were later added to
-  `kb_audit_event` at `src/modules/db2/c/schema.sql:2833-2839` (`actor_issuer`, `actor_subject`,
+  `src/modules/kb/c/schema.sql:7681-7727`. Five attribution fields were later added to
+  `kb_audit_event` at `src/modules/kb/c/schema.sql:2833-2839` (`actor_issuer`, `actor_subject`,
   `transport_cn`, `team_id`, and `selected_default_from`) without being included in that canonical
   hash or the C/SQL verification path.
 - **Failure condition and impact:** an attacker or administrator able to bypass append triggers,
@@ -435,10 +435,10 @@ still requires the ACG-019/020 organizational records and operating cadence.
 - **Evidence:** the repository's live corrective proposal,
   `docs/proposals/pending/per-user-content-scope-visibility.md`, explicitly records that a non-member
   can still reach another project's content and that the cross-tenant read hole is not fully fixed.
-  `src/modules/db2/c/schema.sql:3000-3015` says the document/file policies remain inert until an
+  `src/modules/kb/c/schema.sql:3000-3015` says the document/file policies remain inert until an
   operator attributes rows and enables RLS; the policies are defined but not enabled at
-  `schema.sql:3074-3085`. `src/modules/db2/c/db2_tenant.c:135-164,287-306` treats absent enforcement
-  as a normal unscoped maintenance path. `src/modules/db2/c/memory_scope_query.c:128-134` allows a
+  `schema.sql:3074-3085`. `src/modules/kb/c/db2_tenant.c:135-164,287-306` treats absent enforcement
+  as a normal unscoped maintenance path. `src/modules/kb/c/memory_scope_query.c:128-134` allows a
   memory whenever no scope is active or `include_all` is true. `src/server/server_api.c:242-269` and
   `src/server/server_mcp.c:290-320` derive `include_all` directly from caller JSON
   (`"scope":"all"`) without a separate audit/migration capability.
@@ -875,7 +875,7 @@ still requires the ACG-019/020 organizational records and operating cadence.
   | --- | --- | --- |
   | `src/modules/git/mcp_git_query.c` | 356, plus the `rev-parse` / `--git-common-dir` helpers | `git -C %s …` |
   | `src/index.c` | 287, 295, 301, 488, 498, 506, 658, 703, 722 | `git -C %s …`, `find %s …` |
-  | `src/modules/db2/c/canonical_index.c` | 711, 719, 725, 892, 900, 906, 1033, 1072, 1087 | `git -C %s …`, `find %s …` |
+  | `src/modules/kb/c/canonical_index.c` | 711, 719, 725, 892, 900, 906, 1033, 1072, 1087 | `git -C %s …`, `find %s …` |
   | `src/util.c` | 715, 739 | `cd %s && %s` |
   | `src/server/cli_session_pty.c` | 209 | `tmux attach -t %s` |
 

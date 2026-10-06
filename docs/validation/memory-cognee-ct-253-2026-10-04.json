@@ -1,0 +1,58 @@
+{
+  "host": "192.168.1.253",
+  "ctid": 9203,
+  "hostname": "aimee-cognee-validation-20261004",
+  "versions": {
+    "postgres": "postgres (PostgreSQL) 18.0",
+    "go": "go version go1.26.7 linux/amd64",
+    "python": "Python 3.13.5",
+    "cognee": "1.6.2"
+  },
+  "binary_sha256": {
+    "aimee": "5a0f913cc6f1c363e92fef042982b112f7922608d30e84c2296dc8af5ca57148",
+    "aimee-server": "4d949989a1911ecf71b8dfe5b32fb6b358ea016a7f9705fa440ad36ad0255aa7",
+    "aimee-kb": "21c51af05622eb3bf14a88af55244d12b4eaaa89031aa8901c373d01ae4207e3",
+    "aimee-delegate-egress": "9d319a520e51d5d623b690547ef57883150742b0f367cf9e127997b5b33ab355",
+    "src/build/obj/aimee-module": "5fe7c122439b41ba9ad31bc79475fb3a9ea57b43373f80c85ba8e2c4c7a52ac8",
+    "src/build/obj/aimee-module-config": "ea8fa259cbb3c40a6455d097db57d8c72a4d28e487f7b4b0dfda89e541d0ccfe"
+  },
+  "inference": "deterministic guest-local fixtures",
+  "shared_model_services_used": false,
+  "source_head": "bfd0b9b378e2e6a3990ebdeaf86a8d73a0599164",
+  "source_bundle_sha256": "e85f50a94133798f89db746151c1bd06e4fb591c5f276a5a9d1bfaa2c8d92e20",
+  "deployment_checks": {
+    "status": "passed",
+    "private_id": 1,
+    "shared_id": 3,
+    "erasure_request_id": "ct-erasure-1791122704669715417",
+    "checks": [
+      "private/shared deployed CRUD and retrieval",
+      "placement isolation",
+      "Vault authenticated egress",
+      "failed provider blocks completion",
+      "same request retry",
+      "verified cross-scope derived absence",
+      "idempotent completion",
+      "retained canonical records reindex",
+      "actual author canonical subject erasure",
+      "memory restart removes restored derived subject state"
+    ]
+  },
+  "real_cognee_ci": {
+    "status": "passed",
+    "cognee": "1.6.2",
+    "models": "deterministic local fixtures",
+    "fixture_calls": {
+      "embeddings": 16,
+      "completions": 7
+    }
+  },
+  "adapter_race_tests": "passed in CT: memory, Cognee, egress; contract exercised through native bridge tests",
+  "required_postgres_replay": "passed; required memory owner, evaluator and process suites",
+  "cleanup": {
+    "ct_configuration_absent": true,
+    "vm_configuration_absent": true,
+    "storage_volumes_absent": true,
+    "remote_payloads_removed": true
+  }
+}

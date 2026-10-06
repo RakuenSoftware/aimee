@@ -350,7 +350,7 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
    /* Remote aimee-server: POST mcp.call to its first-class /v1 route. The local
     * cli_v1_dispatch_local path only speaks the co-located UDS, so a thin client
     * configured with a remote endpoint must route here. Memory/kb/search tools
-    * resolve on the server (which proxies DB2 to aimee-kb). File/exec tools whose
+    * resolve on the server (which proxies KB_STORE to aimee-kb). File/exec tools whose
     * cwd is a registered detached workspace marshal back to this client over the
     * workspace reverse-channel (Phase 2b); on a non-served cwd they fail safe
     * server-side (the path does not exist there). */

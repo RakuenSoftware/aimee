@@ -1,63 +1,31 @@
 # Architecture
 
 aimee is a local-first runtime between AI tools, model providers, code, and durable knowledge. It
-keeps the fast client separate from stateful services, gives storage one owner, and sends internal
-module events through one bounded bus.
+keeps the thin client separate from stateful services and sends module events through each
+instance's bounded bus. Server assists one human and owns durable personal memory; an optional KB
+owns a shared corpus. [Server and KB](SERVER_AND_KB.md) is the canonical ownership guide.
 
 ## Processes
 
-```mermaid
-flowchart LR
-    T[AI tool] -->|hooks / MCP / ACP| C[aimee thin client]
-    B[Browser] --> W[aimee-runtime-web]
+![Current Server and KB compositions: C resource hosts and bus, supervised Go modules, separate PostgreSQL and evidence stores](images/architecture/processes.svg)
 
-    subgraph RUNTIME[Server container]
-        S[aimee-server resource plane]
-        F[aimee-wfe workflow harness]
-        SB[server event-bus host]
-        SM[supervised process modules]
-        M[aimee store module]
-        PG[postgres module]
-
-        S <--> SB
-        F -->|typed DB1 calls| SB
-        SB <--> SM
-        SB <--> M
-        M --> PG
-    end
-
-    subgraph KNOWLEDGE[KB container]
-        K[aimee-kb resource plane]
-        KB[kb event-bus host]
-        KM[supervised process modules]
-        K <--> KB
-        KB <--> KM
-    end
-
-    C -->|local UDS or authenticated /v1| S
-    W -->|authenticated /v1| S
-    W -->|workflow API| F
-    F -->|typed resource calls| S
-    S -.->|optional typed /v1| K
-    S -->|provider API| P[model providers]
-    K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
-    PG --> D1[(PostgreSQL + personal vectors)]
-    KM --> KPG[postgres module]
-    KPG --> D2[(PostgreSQL + vectors)]
-```
+The diagram is a process/ownership view. SQL between modules crosses the local event bus; the
+PostgreSQL provider alone owns the database connection. Optional modules depend on placement and
+activation. A Go process identity is not a claim that every adjacent C resource handler has migrated.
 
 Both containers use the same application image. A Go `server` or `kb` composition module
 establishes the immutable first-boot identity and supervises the standard module processes.
-Core's event bus rejects duplicate or conflicting roles. Both compositions have the same
-PostgreSQL and memory modules, a local Vault, and independent model identities. The existing
-C resource hosts remain during the transition of their domain handlers into Go modules.
+Core's event bus rejects duplicate or conflicting roles. Both compositions deploy the same
+PostgreSQL and memory implementations with independent databases, local Vaults, and model
+identities. The existing C resource hosts remain during the transition of their domain handlers
+into Go modules.
 
 | Process | Owns | Does not own |
 | --- | --- | --- |
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
-| `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | DB2, workflow lifecycle |
+| Server composition | personal memory and code, sessions, agents, tools, policy, Vault, provider calls, `/v1` resource plane | shared KB corpus; `aimee-wfe` owns workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| `aimee-kb` | shared DB2 knowledge, documents, code graph, retrieval, curation, and local or external model services | Server personal memory, workflow state, another KB's corpus |
+| KB composition | shared memory, documents, code graph, retrieval, curation, and its model services | Server personal memory, workflow state, another KB's corpus |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
@@ -116,11 +84,11 @@ the event bus, so that governance and auditing see all of it.
 External communication is banned from every module, with two structural doors: communication
 initiated from outside arrives over the event bus through C, and communication a module
 initiates leaves through the `egress` module. Direction selects the door; it never grants a
-module the right to open a connection itself. Until `egress` exists, a module may make
-internally-initiated outbound calls (the delegate module reaching an LLM and the git module
-reaching its forge are both valid and load-bearing), but every such call must be logged to
-the event bus. There is no unmonitored external communication. See [One egress
-module](proposals/pending/module-egress-single-point.md).
+module the right to open a connection itself. The required `egress` module now owns governed outbound HTTP/SSE for Go process modules,
+including providers, embeddings, forge, roundtable, MCP and the Cognee adapter. PostgreSQL and
+sandbox transports retain their declared resource-owner boundaries. Transitional C resource paths
+remain explicit owners; their existence is not permission for a Go module to dial directly.
+See [egress](modules/egress.md).
 
 ```mermaid
 flowchart LR
@@ -167,34 +135,38 @@ See [Event bus](EVENT_BUS.md).
 
 ## Storage
 
-There are two product data tiers and separate WORM evidence stores.
+Server and KB retain independent PostgreSQL stores. Within Server, the `aimee` domain module owns
+runtime state and the Server placement of `memory` owns personal memory and private code. Within
+KB, the KB placement of `memory` and other knowledge domains own the shared corpus.
 
-| Store | Owner | Contents |
-| --- | --- | --- |
-| DB1, PostgreSQL | `aimee` domain module through `postgres` | sessions, working memory, local state, agent jobs, policy and audit state, caches, workflow definitions and lifecycle rows |
-| DB2, PostgreSQL + pgvector | `aimee-kb` | shared memories, documents, facts, evidence, code graph, embeddings, curation state |
-| Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
-| KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
+The Go `postgres` module owns connections, transactions, and migration transport for both roles.
+Go memory calls it over the local bus; native KB algorithms use session capabilities. Neither
+native resource host links libpq. Thin clients and browser clients open no database. Cross-instance
+knowledge operations use authenticated `/v1`, not SQL.
 
-The DB1/DB2 boundary is compile-enforced:
+The DB2 process and native storage provider are retired. `DB1` survives in Server interfaces and
+migration history; older reports use DB2 for the knowledge store. These names do not classify
+personal memory as temporary or require shared physical storage. The common
+[database contract](DB.md) does not merge deployment identities or existing stores.
 
-- the server links no database driver at all: it reaches DB1 through the store module
-  over the bus, and DB2 through typed `/v1` calls;
-- KB builds never open DB1;
-- thin clients link neither;
-- calls across the boundary use public typed APIs.
+Server and the separately credentialed KB WORM worker keep independent SQLite evidence chains.
+KB PostgreSQL holds transactional outbox intents and delivery receipts; the worker constructs the
+chain asynchronously. Bus observations, committed mutation intent, and chain delivery are separate
+milestones. See [Storage ownership](STORAGE_TIERS.md) and [WORM worker](WORM_WORKER.md).
 
-The server and KB worker share the complete SQLite WORM implementation, not two
-engine-specific approximations. Their files, keys, and process compartments are
-separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
-ledger needed for atomic KB mutation intent and idempotent delivery.
+Standard compositions each deploy a separate PostgreSQL container with ordinary storage by default
+and opt-in LUKS2. Local embedding is a separate service; synthesis is optional. Personal rows and
+vectors stay on Server even when a shared KB is connected.
 
-Both compositions use a separate standard PostgreSQL 18 container with ordinary storage by
-default and opt-in LUKS2 encryption. When LUKS is enabled, the local Vault unlocks the store
-before SQL initialization; the encryption passphrase persists only in Vault. Personal memory and
-its vectors stay in Server storage, even when a shared KB is connected.
+## Memory engine boundary
 
-See [Storage tiers](STORAGE_TIERS.md).
+![Memory owner retains authorization and canonical records while native and Cognee implement the generic contract](images/architecture/memory-backends.svg)
+
+The native engine is the default. The replaceable-memory implementation in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds Cognee as an alternative retrieval
+engine; published 0.4.6 does not include it. Factories plug into the existing memory owner rather
+than adding a provider supervisor or authority process. Extended native operations retain their
+own contracts. See the [memory contract](modules/memory.md#memory-backend-contract).
 
 ## Request paths
 
@@ -213,19 +185,33 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 1. `remote.conf` resolves the server URL, certificate pin, bearer, and client identity.
 2. Native TLS verifies the endpoint.
 3. The server maps the principal to route capabilities and a write tier.
-4. Read operations dispatch normally. A write also needs a KB-signed identity token, matching
-   server/team trust, and the user's grant.
+4. Read operations dispatch normally. A write needs an admitted write identity: the first owner's verified certificate-bound grant,
+   or a KB-signed identity token with matching server/team trust and the user's exact grant.
 5. Workspace and document commands upload bytes from the client; the server never resolves a path
    on the client's machine.
 
-### Memory write and recall
+### Personal memory write and recall
 
-1. A client calls the server `/v1` surface.
-2. The server authorizes the principal and calls the KB's typed endpoint.
-3. The KB owns the transaction, lexical/dense indexes, and evidence.
-4. Mutations publish a PII-safe audit identity on the KB bus.
-5. Recall returns bounded evidence; optional synthesis runs in that KB's model-specific sidecar or
-   at its configured remote endpoint.
+1. A client calls Server's ordinary memory API with omitted `store` or `store=user`.
+2. The host authenticates the caller and dispatches to the local Go memory owner.
+3. The Server placement validates user scope and uses its local PostgreSQL provider.
+4. Personal rows, revisions, proposals, and vectors stay in Server storage.
+5. Go returns the complete record or budgeted recall envelope. A missing record or owner outage
+   never causes a shared-store fallback.
+
+### Shared memory write and recall
+
+1. A client explicitly selects `store=kb` and supplies the intended project/workspace context.
+2. Server authorizes the request and calls the configured KB's typed endpoint.
+3. The KB host establishes verified caller context; the Go memory owner applies shared scope,
+   authority, lifecycle, and retrieval policy through its local PostgreSQL provider.
+4. A KB memory mutation and its required audit outbox intent commit together. The WORM worker
+   delivers the intent to the chain separately.
+5. Recall returns scoped evidence. Explicit shared-only recall skips personal composition; Server
+   owns any separate context path that combines shared evidence with private identity/preferences.
+
+Correction listing/review retains a KB default and needs explicit `store=user` for personal
+proposals. Store selection is operation-specific; neither a numeric ID nor a failed lookup changes it.
 
 ### Delegate turn
 
@@ -288,8 +274,8 @@ PostgreSQL and models remain separate service containers.
 - `src/core/event_bus/`: event transport, arena, host, client, capture.
 - `src/modules/`: owned C modules and public headers.
 - `src/server/`: C resource plane and `/v1` handlers.
-- `src/kb/`: KB daemon and DB2-facing routes.
-- `server-go/`: workflow control plane and pure-Go bus client.
+- `src/kb/`: KB resource host, knowledge adapters, and public routes.
+- `server-go/`: role composition, memory and PostgreSQL owners, domain modules, workflow engine, and Go bus client.
 - `runtime-web/`: browser-facing Go service.
 - `frontend/`: browser application.
 - `api/`: OpenAPI sources and generated SDKs.

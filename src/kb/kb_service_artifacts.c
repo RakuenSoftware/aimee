@@ -6,7 +6,7 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
-#include "modules/db2/c/artifacts.h"
+#include "modules/kb/c/artifacts.h"
 #include "kb_reasoning.h"
 #include "kb_service_artifacts.h"
 #include "log.h"
@@ -25,8 +25,8 @@ static void reasoning_enforce_contradiction_check(const char *id)
       return;
 
 #define ENFORCE_LINK_MAX 8
-   db2_artifact_link_row_t links[ENFORCE_LINK_MAX];
-   int n = db2_artifact_links_read(id, links, ENFORCE_LINK_MAX);
+   kb_store_artifact_link_row_t links[ENFORCE_LINK_MAX];
+   int n = kb_store_artifact_links_read(id, links, ENFORCE_LINK_MAX);
    for (int i = 0; i < n; i++)
    {
       if (strcmp(links[i].link_kind, "contradicts") != 0)
@@ -34,7 +34,7 @@ static void reasoning_enforce_contradiction_check(const char *id)
       int result = kb_reasoning_contradiction_check(id, links[i].to_id);
       if (result == 0)
       {
-         db2_artifact_flag_review(id, "datalog_structural_check_failed");
+         kb_store_artifact_flag_review(id, "datalog_structural_check_failed");
          aimee_log(LOG_WARN, "reasoning.enforce",
                    "contradiction_check_failed: artifact=%s contradicts=%s"
                    " — demoted to proposed+flagged_for_review",
@@ -58,8 +58,8 @@ int kb_handle_artifacts_list_proposed(int fd, cJSON *req)
       limit = 20;
 
 #define ALP_MAX 64
-   db2_artifact_proposed_t rows[ALP_MAX];
-   int n = db2_artifact_list_proposed(surf, limit, rows, ALP_MAX);
+   kb_store_artifact_proposed_t rows[ALP_MAX];
+   int n = kb_store_artifact_list_proposed(surf, limit, rows, ALP_MAX);
    if (n < 0)
       return kb_send_error(fd, "failed to query proposed artifacts");
 
@@ -106,27 +106,27 @@ int kb_handle_artifacts_set_state(int fd, cJSON *req)
       cJSON *vs_j = cJSON_GetObjectItemCaseSensitive(req, "verdict_scope");
       cJSON *ce_j = cJSON_GetObjectItemCaseSensitive(req, "counter_example");
       cJSON *bj_j = cJSON_GetObjectItemCaseSensitive(req, "before_json");
-      rc = db2_artifact_reject(id, cJSON_IsString(vt_j) ? vt_j->valuestring : NULL,
-                               cJSON_IsString(vs_j) ? vs_j->valuestring : NULL,
-                               cJSON_IsString(ce_j) ? ce_j->valuestring : NULL,
-                               cJSON_IsString(bj_j) ? bj_j->valuestring : NULL);
+      rc = kb_store_artifact_reject(id, cJSON_IsString(vt_j) ? vt_j->valuestring : NULL,
+                                    cJSON_IsString(vs_j) ? vs_j->valuestring : NULL,
+                                    cJSON_IsString(ce_j) ? ce_j->valuestring : NULL,
+                                    cJSON_IsString(bj_j) ? bj_j->valuestring : NULL);
    }
    else if (strcmp(new_state, "committed") == 0)
    {
-      rc = db2_artifact_set_state(id, "committed");
+      rc = kb_store_artifact_set_state(id, "committed");
       if (rc == 0)
       {
          char audit_id[37];
-         db2_artifact_gen_id(audit_id, sizeof(audit_id));
+         kb_store_artifact_gen_id(audit_id, sizeof(audit_id));
          char after_buf[64];
          snprintf(after_buf, sizeof(after_buf), "{\"state\":\"committed\"}");
-         db2_audit_event_write(audit_id, id, "", "", "", "user", "", 1.0, 0, "{}", after_buf);
+         kb_store_audit_event_write(audit_id, id, "", "", "", "user", "", 1.0, 0, "{}", after_buf);
          reasoning_enforce_contradiction_check(id);
       }
    }
    else
    {
-      rc = db2_artifact_set_state(id, new_state);
+      rc = kb_store_artifact_set_state(id, new_state);
    }
 
    if (rc != 0)

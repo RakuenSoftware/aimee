@@ -24,7 +24,7 @@ int kb_tenancy_cli_project_attribute(const char *code_project, const char *kb_pr
        project_id > INT64_MAX)
       return project_attribute_failed();
 
-   if (db2_project_attribute_code(code_project, (int64_t)project_id) != 0)
+   if (kb_store_project_attribute_code(code_project, (int64_t)project_id) != 0)
       return project_attribute_failed();
 
    cJSON *encoded = cJSON_CreateString(code_project);

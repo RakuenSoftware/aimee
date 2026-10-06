@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="590" viewBox="0 0 1160 590" role="img" aria-labelledby="title desc"><title id="title">Deploy and recover each role independently</title><desc id="desc">The standard Server project has application, PostgreSQL and embedding services; synthesis is optional. KB uses a distinct project and matched backups. Cognee is an optional independent derived store reached by governed egress.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<text class="title" x="580.0" y="32" text-anchor="middle">Deploy and recover each role independently</text>
+<rect x="25" y="65" width="530" height="390" rx="14" fill="#f8fafc" stroke="#c8d3df" stroke-width="2"/>
+<text class="label" x="43" y="93" text-anchor="start">Server Compose project</text>
+<rect x="50" y="120" width="480" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="290.0" y="148" text-anchor="middle">Application image · immutable role</text>
+<text class="body" x="290.0" y="174" text-anchor="middle">Local home / identity / Vault / audit</text>
+<text class="body" x="290.0" y="197" text-anchor="middle">Role supervisor + native host + Go module fleet</text>
+<rect x="50" y="285" width="225" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="162.5" y="313" text-anchor="middle">PostgreSQL service</text>
+<text class="body" x="162.5" y="339" text-anchor="middle">Persistent volume</text>
+<text class="body" x="162.5" y="362" text-anchor="middle">Plain default; LUKS opt-in</text>
+<rect x="305" y="285" width="225" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="417.5" y="313" text-anchor="middle">Model sidecars</text>
+<text class="body" x="417.5" y="339" text-anchor="middle">Embedding</text>
+<text class="body" x="417.5" y="362" text-anchor="middle">Synthesis optional</text>
+<polyline points="162,220 162,285" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="417,220 417,285" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="290" y="431" text-anchor="middle">Back up home, Vault, store and audit as a matched set.</text>
+<rect x="605" y="65" width="530" height="390" rx="14" fill="#f8fafc" stroke="#c8d3df" stroke-width="2"/>
+<text class="label" x="623" y="93" text-anchor="start">Optional separate KB project</text>
+<rect x="630" y="120" width="480" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="870.0" y="148" text-anchor="middle">Application image · immutable role</text>
+<text class="body" x="870.0" y="174" text-anchor="middle">Local home / identity / Vault / audit</text>
+<text class="body" x="870.0" y="197" text-anchor="middle">Role supervisor + native host + Go module fleet</text>
+<rect x="630" y="285" width="225" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="742.5" y="313" text-anchor="middle">PostgreSQL service</text>
+<text class="body" x="742.5" y="339" text-anchor="middle">Persistent volume</text>
+<text class="body" x="742.5" y="362" text-anchor="middle">Plain default; LUKS opt-in</text>
+<rect x="885" y="285" width="225" height="100" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="997.5" y="313" text-anchor="middle">Model sidecars</text>
+<text class="body" x="997.5" y="339" text-anchor="middle">Embedding</text>
+<text class="body" x="997.5" y="362" text-anchor="middle">Synthesis optional</text>
+<polyline points="742,220 742,285" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="997,220 997,285" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="870" y="431" text-anchor="middle">Back up home, Vault, store and audit as a matched set.</text>
+<polyline points="555,171 605,171" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<text class="edge" x="580" y="150" text-anchor="middle">/v1</text>
+<rect x="160" y="490" width="840" height="70" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="580.0" y="518" text-anchor="middle">Optional Cognee service / alternative retrieval engine</text>
+<text class="body" x="580.0" y="544" text-anchor="middle">Separate durable provider state and credentials; source ownership stays in Aimee</text>
+</svg>

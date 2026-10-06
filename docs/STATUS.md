@@ -1,13 +1,18 @@
 # Feature status
 
-This page describes the current testing tree. `Done` means the path is implemented and covered by
+This page describes the **1.0.0 release target**, inspected integration code, checked on
+2026-10-05. Published [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) predates
+some of these paths. PR status and release qualification are separate from implementation status. `Done` means the path is implemented and covered by
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
-The 0.4.6 candidate adds governed memory revisions, source checks at provider dispatch,
+Use [Server and KB](SERVER_AND_KB.md) for placement and deployment boundaries. The
+[Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records remaining source-confirmed gaps.
+
+The published 0.4.6 release adds governed memory revisions, source checks at provider dispatch,
 reviewed corrections, erasure protection, and durable async run ownership. See the
 [release preparation](validation/release-0.4.6-preparation-2026-09-27.md) for completed checks
-and remaining publication gates. Optional adaptive policies are not promoted by this release;
+and its point-in-time preparation gates. Optional adaptive policies are not promoted by this release;
 MR-07 remains observe-only, selection and utility-horizon policies remain disabled, and clean
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
@@ -19,11 +24,11 @@ workspace registration alone does not start a client runner.
 | Shared-memory event bus | Done | One host per daemon; typed routing, private queue pairs, backpressure, arena leases, capture. Linux v0. |
 | C and pure-Go bus clients | Done | Shared golden vectors and cross-language conformance; no cgo. |
 | Audit and observability on the bus | Done | Actions, memory writes, guardrails, vault, sandbox, MCP, and tool outcomes. |
-| External bus clients | Next | Inline cross-process attachment exists on a follow-on branch; not the integrated runtime path. |
-| Workflow triggers on the bus | Next | Trigger event contracts and routing exist on a follow-on branch. |
+| External bus clients | Next | Executable-bound module clients attach cross-process today. A general external/untrusted client API is not the supported public runtime path. |
+| Workflow triggers on the bus | Next | Go trigger scanning and HTTP fire exist; general bus trigger delivery is not integrated. |
 | Module replay | Next | Capture replay is observational; it does not re-execute modules. |
-| Source-module boundaries | In progress | Owned headers, descriptors, dependency gates, and attested docs are landing by module. |
-| Go workflow control plane | Done | Go owns workflow scheduling; C owns runtime, storage, tools, and policy seams. |
+| Source-module boundaries | Done for the canonical catalog | 34 module descriptors and 26 Go process identities are checked for ownership, placement and exported builds. Deeper C resource/domain migration remains work. |
+| Go workflow control plane | Done | Go WFE owns workflow lifecycle; Go domain/memory/PostgreSQL modules own their state and decisions. C remains the resource host and mechanical enforcement boundary. |
 | Versioned `/v1` operations | Done | Named routes replace the generic RPC endpoint. |
 
 ## Memory and code
@@ -31,8 +36,13 @@ workspace registration alone does not start a client runner.
 | Feature | State | Boundary |
 | --- | --- | --- |
 | Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
-| DB1/DB2 ownership | Done | The store module owns DB1's PostgreSQL; KB owns DB2's PostgreSQL and pgvector; the server and thin clients own neither. |
-| Embedded KB PostgreSQL | Done | Default container path; external PostgreSQL remains supported. |
+| Server/KB placement | Done | Independent stores and immutable roles. Server owns personal memory and private code; KB owns the shared corpus. Both use Go memory and PostgreSQL modules. |
+| PostgreSQL deployment | Done | Separate PostgreSQL service per standard composition; ordinary persistent storage by default, LUKS opt-in. Both roles use the Go PostgreSQL provider; native KB algorithms use session transport. |
+| KB-free personal recall | Done | Ordinary recall defaults to Server; local semantic retrieval needs its embedding service. Missing personal records never fall back to KB. |
+| Current-memory eligibility | Done | Active, unsuppressed, currently valid rows; legacy lifecycle flags do not enable this filter. Historical inspection uses a separate contract. |
+| Memory reliability baseline | Done, qualified per recorded gates | Governed revisions, correction review UI, source revalidation, rejection identity, runtime-role refusal protection and erasure replay are implemented. Qualification evidence is scoped to the cited release and Atlas reports; optional adaptive policies remain gated. |
+| Replaceable memory / Cognee | Merged; deployed-tested | Generic Store contract, native default, Cognee 1.6.2 alternative; canonical guarantees stay in Aimee. Required real-provider CI is added. Not included in 0.4.6; 256-record scope bound and restart interruption apply. |
+| Native-memory model delivery | Integrated source; five-model 0.3.3 candidate prepared separately | Enrolled `/v1/native/primitive` selects personal source records. Separate vLLM plugin prepares model-native banks locally. Five dedicated adapters share one runtime and passed 7900 XTX native-memory smokes. The final candidate is unsigned; current testing passed 2,314 installed-runtime checks; signing and publication remain separate. See the [plugin guide](NATIVE_MEMORY_PLUGIN.md). |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
@@ -82,7 +92,7 @@ workspace registration alone does not start a client runner.
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Managed container deploy | Done | Browser can launch the current one-KB profile through the mounted Docker socket. |
+| Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |
 
@@ -94,9 +104,9 @@ workspace registration alone does not start a client runner.
 | `aimee work` queue | Workflows, triggers, coordinated jobs, and durable delegate jobs. |
 | `aimee migrate v2` | Normal schema migration at daemon startup. |
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
-| Combined appliance image | Managed or split container stack. |
+| Combined Server-plus-KB appliance | One application image selects one immutable role per instance; PostgreSQL and models are separate services. |
 | Client-held agent keys | Server-sealed vault. |
-| Generic `aimee-llm` inference gateway | Embedding stays with the KB; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
+| Generic `aimee-llm` inference gateway | Each instance owns embedding; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

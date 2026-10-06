@@ -17,15 +17,16 @@ typedef struct
    int response_status;
    uint64_t wall, mono;
    unsigned char sk[32], pk[32];
-   db2_management_action_outcome_operation_t outcome;
+   kb_store_management_action_outcome_operation_t outcome;
 } fixture_t;
 
-static db2_management_action_result_t
-operation_init(int64_t team, const char *server, db2_management_action_capability_t cap,
+static kb_store_management_action_result_t
+operation_init(int64_t team, const char *server, kb_store_management_action_capability_t cap,
                const uint8_t digest[32], const char *issuer, const char *kid, int ttl,
-               const char *installation, db2_management_action_operation_t *out)
+               const char *installation, kb_store_management_action_operation_t *out)
 {
-   assert(team == 7 && !strcmp(server, "srv-1") && cap == DB2_MANAGEMENT_ACTION_CAP_REMOTE_WRITES);
+   assert(team == 7 && !strcmp(server, "srv-1") &&
+          cap == KB_STORE_MANAGEMENT_ACTION_CAP_REMOTE_WRITES);
    memset(out, 0, sizeof(*out));
    memset(out->correlation_id, '1', 64);
    memset(out->jti, '2', 64);
@@ -42,19 +43,19 @@ operation_init(int64_t team, const char *server, db2_management_action_capabilit
    snprintf(out->kid, sizeof(out->kid), "%s", kid);
    out->ttl_seconds = ttl;
    snprintf(out->installation_id, sizeof(out->installation_id), "%s", installation);
-   return DB2_MANAGEMENT_ACTION_OK;
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
 static fixture_t *g;
 
-static db2_management_action_result_t intent(const kb_principal_t *actor,
-                                             const db2_management_action_operation_t *op,
-                                             db2_management_action_intent_t *out)
+static kb_store_management_action_result_t intent(const kb_principal_t *actor,
+                                                  const kb_store_management_action_operation_t *op,
+                                                  kb_store_management_action_intent_t *out)
 {
    assert(actor && actor->authenticated && g->stage == 0);
    g->intents++;
    if (g->ambiguous_intent && g->intents == 1)
-      return DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS;
+      return KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS;
    g->stage = 1;
    memset(out, 0, sizeof(*out));
    out->replayed = g->replay;
@@ -79,24 +80,24 @@ static db2_management_action_result_t intent(const kb_principal_t *actor,
    snprintf(out->local_cert_issuer, sizeof(out->local_cert_issuer), "CN=client-ca");
    snprintf(out->local_cert_serial_norm, sizeof(out->local_cert_serial_norm), "2b");
    memset(out->local_cert_fingerprint, 'a', 64);
-   return DB2_MANAGEMENT_ACTION_OK;
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
-static db2_management_action_result_t outcome(const kb_principal_t *actor,
-                                              const db2_management_action_outcome_operation_t *op,
-                                              db2_management_action_outcome_t *out)
+static kb_store_management_action_result_t
+outcome(const kb_principal_t *actor, const kb_store_management_action_outcome_operation_t *op,
+        kb_store_management_action_outcome_t *out)
 {
    assert(actor && op && out && g->stage >= 1);
    g->outcomes++;
    g->outcome = *op;
    if (g->ambiguous_outcome && g->outcomes == 1)
-      return DB2_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS;
+      return KB_STORE_MANAGEMENT_ACTION_COMMIT_AMBIGUOUS;
    memset(out, 0, sizeof(*out));
-   return DB2_MANAGEMENT_ACTION_OK;
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
 static kb_management_health_result_t snapshot(void *ctx, const kb_principal_t *actor, int64_t team,
-                                              const char *server, db2_server_snapshot_t *out)
+                                              const char *server, kb_store_server_snapshot_t *out)
 {
    fixture_t *f = ctx;
    assert(actor && team == 7 && !strcmp(server, "srv-1") && f->stage >= 1 && f->stage < 5);
@@ -143,7 +144,7 @@ static void clear(void *ctx, kb_management_cert_bundle_t *b)
    memset(b, 0, sizeof(*b));
 }
 
-static kb_management_health_result_t open_server(void *ctx, const db2_server_snapshot_t *s,
+static kb_management_health_result_t open_server(void *ctx, const kb_store_server_snapshot_t *s,
                                                  const kb_management_cert_bundle_t *b,
                                                  uint64_t deadline, void **out)
 {
@@ -281,18 +282,18 @@ static kb_management_action_result_t run(fixture_t *f)
 }
 
 /* Link-only production adapter dependencies. */
-int db2_tenant_scope_begin(const kb_principal_t *p, int64_t t)
+int kb_store_tenant_scope_begin(const kb_principal_t *p, int64_t t)
 {
    return -1;
 }
-int db2_tenant_scope_commit(void)
+int kb_store_tenant_scope_commit(void)
 {
    return -1;
 }
-void db2_tenant_scope_rollback(void)
+void kb_store_tenant_scope_rollback(void)
 {
 }
-int db2_server_registry_snapshot(int64_t t, const char *s, db2_server_snapshot_t *o)
+int kb_store_server_registry_snapshot(int64_t t, const char *s, kb_store_server_snapshot_t *o)
 {
    return -1;
 }
@@ -351,7 +352,7 @@ int main(void)
    assert(json_wire_has_nul_escape(nul_action, strlen(nul_action)));
    assert(json_wire_has_nul_escape(nul_agent, strlen(nul_agent)));
    assert(kb_management_action_body_parse(literal_escape, strlen(literal_escape), &a));
-   db2_management_action_outcome_operation_t decoded = {0};
+   kb_store_management_action_outcome_operation_t decoded = {0};
    const char *reversed = "{\"effect\":\"applied\",\"result\":\"succeeded\"}";
    assert(kb_management_action_response_parse(reversed, strlen(reversed), 200, &decoded));
 
@@ -363,9 +364,9 @@ int main(void)
    EVP_PKEY_free(key);
    reset(&f);
    assert(run(&f) == KB_MANAGEMENT_ACTION_OK && f.intents == 1 && f.snapshots == 2 &&
-          f.tokens == 1 && f.outcomes == 1 && f.outcome.result == DB2_MANAGEMENT_ACTION_SUCCEEDED &&
-          f.outcome.has_status_code && f.outcome.has_response_sha256 && f.closes == 1 &&
-          f.clears == 1);
+          f.tokens == 1 && f.outcomes == 1 &&
+          f.outcome.result == KB_STORE_MANAGEMENT_ACTION_SUCCEEDED && f.outcome.has_status_code &&
+          f.outcome.has_response_sha256 && f.closes == 1 && f.clears == 1);
 
    reset(&f);
    f.ambiguous_intent = 1;
@@ -386,33 +387,33 @@ int main(void)
       reset(&f);
       f.token_result = (kb_mgmt_token_authority_ipc_result_t)denied;
       assert(run(&f) == KB_MANAGEMENT_ACTION_UNAVAILABLE && f.requests == 1 && f.outcomes == 1 &&
-             f.outcome.result_class == DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE);
+             f.outcome.result_class == KB_STORE_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE);
    }
    reset(&f);
    f.action_transport = KB_MANAGEMENT_ACTION_NOT_SENT;
    assert(run(&f) == KB_MANAGEMENT_ACTION_UNAVAILABLE &&
-          f.outcome.result_class == DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE);
+          f.outcome.result_class == KB_STORE_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE);
    reset(&f);
    f.action_transport = KB_MANAGEMENT_ACTION_SENT_AMBIGUOUS;
    assert(run(&f) == KB_MANAGEMENT_ACTION_INDETERMINATE &&
-          f.outcome.result_class == DB2_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS);
+          f.outcome.result_class == KB_STORE_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS);
    reset(&f);
    f.response = "{\"result\":\"succeeded\",\"effect\":\"none\"}";
    assert(run(&f) == KB_MANAGEMENT_ACTION_INDETERMINATE &&
-          f.outcome.result_class == DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE);
+          f.outcome.result_class == KB_STORE_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE);
    static const struct
    {
       const char *body;
       int status;
       kb_management_action_result_t result;
-      db2_management_action_outcome_class_t result_class;
+      kb_store_management_action_outcome_class_t result_class;
    } responses[] = {
        {"{\"result\":\"denied\",\"effect\":\"none\"}", 403, KB_MANAGEMENT_ACTION_DENIED,
-        DB2_MANAGEMENT_ACTION_CLASS_REMOTE_DENIED},
+        KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_DENIED},
        {"{\"result\":\"failed\",\"effect\":\"none\"}", 500, KB_MANAGEMENT_ACTION_UNAVAILABLE,
-        DB2_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE},
+        KB_STORE_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE},
        {"{\"result\":\"indeterminate\",\"effect\":\"unknown\"}", 502,
-        KB_MANAGEMENT_ACTION_INDETERMINATE, DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE},
+        KB_MANAGEMENT_ACTION_INDETERMINATE, KB_STORE_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE},
    };
    for (size_t i = 0; i < sizeof(responses) / sizeof(responses[0]); i++)
    {

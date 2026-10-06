@@ -1,6 +1,6 @@
 #include "kb_vault_key_use.h"
 
-#include "modules/db2/c/db2_tenant.h"
+#include "modules/kb/c/kb_store_tenant.h"
 #include "kb_vault_policy.h"
 #include "kb_vault_protected_use.h"
 #include "org_vault_key_use.h"
@@ -29,7 +29,7 @@ static int digest_valid(const char *s)
 static int scope_begin(const kb_principal_t *caller, int64_t team_id, char actor[576])
 {
    return caller && kb_identity_key(caller, actor, 576) == 0 &&
-                  db2_tenant_scope_begin(caller, team_id) == 0
+                  kb_store_tenant_scope_begin(caller, team_id) == 0
               ? 0
               : -1;
 }
@@ -38,10 +38,10 @@ static int scope_finish(int rc)
 {
    if (rc < 0)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       return -1;
    }
-   return db2_tenant_scope_commit() == 0 ? rc : -1;
+   return kb_store_tenant_scope_commit() == 0 ? rc : -1;
 }
 
 kb_vault_key_use_status_t
@@ -62,10 +62,10 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
    if (!kb_vault_live_keys_allowed())
       return KB_VAULT_KEY_USE_SEALED;
 
-   db2_vault_key_use_envelope_t candidate, admitted;
+   kb_store_vault_key_use_envelope_t candidate, admitted;
    memset(&candidate, 0, sizeof(candidate));
    memset(&admitted, 0, sizeof(admitted));
-   uint8_t fresh_att[DB2_VAULT_KEY_USE_ATTEST_MAX] = {0};
+   uint8_t fresh_att[KB_STORE_VAULT_KEY_USE_ATTEST_MAX] = {0};
    size_t fresh_att_len = 0;
    uint64_t anchor_version = 0;
    kb_vault_key_use_status_t result = KB_VAULT_KEY_USE_RETRY;
@@ -83,17 +83,17 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
 
    if (scope_begin(caller, team_id, actor) != 0)
       goto done;
-   int rc = db2_vault_key_use_candidate(actor, team_id, key_id, principal, agent, cred,
-                                        (int64_t)anchor_version, &candidate);
-   if (rc == DB2_VAULT_KEY_USE_MISSING)
+   int rc = kb_store_vault_key_use_candidate(actor, team_id, key_id, principal, agent, cred,
+                                             (int64_t)anchor_version, &candidate);
+   if (rc == KB_STORE_VAULT_KEY_USE_MISSING)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_UNATTESTED;
       goto done;
    }
-   if (rc == DB2_VAULT_KEY_USE_INTEGRITY)
+   if (rc == KB_STORE_VAULT_KEY_USE_INTEGRITY)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_INTEGRITY;
       goto done;
    }
@@ -114,19 +114,19 @@ kb_vault_key_use(const kb_principal_t *caller, int64_t team_id,
 
    if (scope_begin(caller, team_id, actor) != 0)
       goto done;
-   rc =
-       db2_vault_key_use_admit(actor, team_id, origin, use_id, key_id, principal, agent, cred,
-                               (int64_t)anchor_version, request_digest, provider, model, operation,
-                               candidate.hwm_attestation, candidate.hwm_attestation_len, &admitted);
-   if (rc == DB2_VAULT_KEY_USE_INTEGRITY)
+   rc = kb_store_vault_key_use_admit(actor, team_id, origin, use_id, key_id, principal, agent, cred,
+                                     (int64_t)anchor_version, request_digest, provider, model,
+                                     operation, candidate.hwm_attestation,
+                                     candidate.hwm_attestation_len, &admitted);
+   if (rc == KB_STORE_VAULT_KEY_USE_INTEGRITY)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_INTEGRITY;
       goto done;
    }
-   if (rc == DB2_VAULT_KEY_USE_SEALED)
+   if (rc == KB_STORE_VAULT_KEY_USE_SEALED)
    {
-      db2_tenant_scope_rollback();
+      kb_store_tenant_scope_rollback();
       result = KB_VAULT_KEY_USE_SEALED;
       goto done;
    }

@@ -88,7 +88,7 @@ func exerciseLifecycleRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 
 		// Migration/reapplication must accept persisted lifecycle receipts and
 		// preserve earlier correction, creation and deletion receipts.
-		schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+		schema, err := os.ReadFile("../../../src/modules/kb/c/schema.sql")
 		if err != nil {
 			t.Fatal(err)
 		}

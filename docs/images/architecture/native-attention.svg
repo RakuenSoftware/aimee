@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="490" viewBox="0 0 1160 490" role="img" aria-labelledby="title desc"><title id="title">Selected records become attention memory on the inference host</title><desc id="desc">An enrolled vLLM plugin requests the Aimee native primitive. Aimee authorizes and selects canonical records through its memory owner. The inference host prepares model-specific banks and uses them in native attention. Storage engine selection is independent.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<text class="title" x="580.0" y="32" text-anchor="middle">Selected records become attention memory on the inference host</text>
+<rect x="30" y="105" width="300" height="130" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="180.0" y="133" text-anchor="middle">Aimee instance</text>
+<text class="body" x="180.0" y="159" text-anchor="middle">Canonical source records</text>
+<text class="body" x="180.0" y="182" text-anchor="middle">Authorization + memory selection</text>
+<text class="body" x="180.0" y="205" text-anchor="middle">Native primitive endpoint</text>
+<rect x="435" y="105" width="300" height="130" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="585.0" y="133" text-anchor="middle">Enrolled plugin client</text>
+<text class="body" x="585.0" y="159" text-anchor="middle">Existing thin-client identity</text>
+<text class="body" x="585.0" y="182" text-anchor="middle">TLS trust + current bearer</text>
+<text class="body" x="585.0" y="205" text-anchor="middle">No separate credential copy</text>
+<polyline points="435,170 330,170" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="381" y="83" text-anchor="middle">authenticated request</text>
+<rect x="830" y="105" width="300" height="130" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="980.0" y="133" text-anchor="middle">Inference host</text>
+<text class="body" x="980.0" y="159" text-anchor="middle">Model weights + tokenizer</text>
+<text class="body" x="980.0" y="182" text-anchor="middle">Local preparation and bank cache</text>
+<text class="body" x="980.0" y="205" text-anchor="middle">Model-specific native attention</text>
+<polyline points="735,170 830,170" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<text class="edge" x="783" y="83" text-anchor="middle">selected records</text>
+<rect x="235" y="330" width="690" height="90" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="580.0" y="358" text-anchor="middle">Independent choices</text>
+<text class="body" x="580.0" y="384" text-anchor="middle">Memory backend: native or Cognee retrieval contract</text>
+<text class="body" x="580.0" y="407" text-anchor="middle">Model plugin: separately staged vLLM attention integration</text>
+<text class="body" x="580" y="470" text-anchor="middle">Aimee does not download the inference model. Selected records are not added as chat messages.</text>
+</svg>

@@ -61,7 +61,7 @@ func TestExpectedVersionValidation(t *testing.T) {
 		}
 	}
 	var version MemoryRecordVersion
-	if json.Unmarshal([]byte(valid), &version) != nil || !version.validFor(9007199254740993) {
+	if json.Unmarshal([]byte(valid), &version) != nil || !version.ValidFor(9007199254740993) {
 		t.Fatal(version)
 	}
 	projected, err := json.Marshal(consoleMemoryRecord(publicMemoryRecord{ID: 9007199254740993, Version: &version}))
@@ -141,9 +141,9 @@ func exerciseExpectedVersionReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 }
 
 func TestExpectedVersionConcurrentCorrections(t *testing.T) {
-	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if dsn == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

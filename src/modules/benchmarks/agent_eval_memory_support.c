@@ -17,7 +17,6 @@
 #include "memory.h"
 #include <math.h>
 #include "lifecycle.h"
-#include "eval_support.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>

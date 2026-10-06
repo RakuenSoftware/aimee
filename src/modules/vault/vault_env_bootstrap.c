@@ -428,6 +428,8 @@ int vault_env_egress_parent_attest(void)
 
 static int mcp_egress_credential_name_ok(const char *name)
 {
+   if (name && strcmp(name, "AIMEE_MEMORY_BACKEND_TOKEN") == 0)
+      return 1;
    static const char prefix[] = "AIMEE_MCP_";
    static const char suffix[] = "_TOKEN";
    if (!name || strncmp(name, prefix, sizeof(prefix) - 1) != 0)
@@ -458,6 +460,56 @@ int vault_env_print_egress_credential(const char *env_name)
                 : -1;
    OPENSSL_cleanse(value, sizeof(value));
    return rc;
+}
+
+/* The owner authenticates this pipe before disabling dumpability. No credential
+ * is read until it sends a request after bus attachment and hardening. Each
+ * lookup reads the current encrypted Vault, preserving rotation and revocation. */
+int vault_env_egress_resource(void)
+{
+#if defined(__linux__)
+   /* A persistent stdio buffer must not retain a flushed credential copy. */
+   if (vault_env_egress_parent_attest() != 0 || setvbuf(stdout, NULL, _IONBF, 0) != 0)
+      return -1;
+   if (fwrite("EVR1", 1, 4, stdout) != 4 || fflush(stdout) != 0)
+      return -1;
+   for (;;)
+   {
+      unsigned char size[4];
+      size_t got = fread(size, 1, sizeof(size), stdin);
+      if (got == 0 && feof(stdin))
+         return 0;
+      if (got != sizeof(size))
+         return -1;
+      unsigned long n = (unsigned long)size[0] | ((unsigned long)size[1] << 8) |
+                        ((unsigned long)size[2] << 16) | ((unsigned long)size[3] << 24);
+      char name[ENV_NAME_MAX + 1];
+      if (n == 0 || n > ENV_NAME_MAX || fread(name, 1, n, stdin) != n || memchr(name, 0, n))
+         return -1;
+      name[n] = 0;
+      if (!mcp_egress_credential_name_ok(name))
+         return -1;
+      char value[ENV_SECRET_VALUE_MAX + 1] = {0};
+      if (mlock(value, sizeof(value)) != 0)
+         return -1;
+      vault_status_t st = vault_service_get_server_principal(ENV_AGENT, name, value, sizeof(value));
+      size_t len = st == VAULT_OK ? strlen(value) : 0;
+      if (len > ENV_SECRET_VALUE_MAX || memchr(value, '\n', len) || memchr(value, '\r', len))
+         len = 0;
+      for (int i = 0; i < 4; i++)
+         size[i] = (unsigned char)(len >> (8 * i));
+      int rc = fwrite(size, 1, sizeof(size), stdout) == sizeof(size) &&
+                       fwrite(value, 1, len, stdout) == len && fflush(stdout) == 0
+                   ? 0
+                   : -1;
+      OPENSSL_cleanse(value, sizeof(value));
+      (void)munlock(value, sizeof(value));
+      if (rc != 0)
+         return -1;
+   }
+#else
+   return -1;
+#endif
 }
 
 static int env_flag(const char *name)
@@ -588,11 +640,10 @@ static int vault_env_bootstrap_init_mode(int include_delegate)
       const char *agent = NULL;
       const char *cred = NULL;
       slot_for_env(name, &agent, &cred);
-      if (value && value[0] &&
+      if (strcmp(name, "AIMEE_DB2_URL") != 0 && value && value[0] &&
           (overwrite ||
            (migrate_store && (strcmp(name, "AIMEE_STORE_URL") == 0 ||
-                              strcmp(name, "AIMEE_STORE_MIGRATION_URL") == 0 ||
-                              strcmp(name, "AIMEE_DB2_URL") == 0)) ||
+                              strcmp(name, "AIMEE_STORE_MIGRATION_URL") == 0)) ||
            !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred)))
       {
          if (vault_service_set_server(agent, cred, value) == VAULT_OK)

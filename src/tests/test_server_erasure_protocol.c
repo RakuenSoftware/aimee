@@ -84,9 +84,14 @@ void kb_cache_invalidate_all(void)
 {
    assert(step++ == 5);
 }
+int server_module_memory_reset_derived(void)
+{
+   assert(step++ == 6);
+   return mode == 4 ? -1 : 0;
+}
 char *kb_client_subject_erasure_complete(const char *id, int64_t count, int *status)
 {
-   assert(step++ == 6 && strcmp(id, request_id) == 0 && count == 1);
+   assert(step++ == 7 && strcmp(id, request_id) == 0 && count == 1);
    *status = 200;
    return strdup(mode == 3
                      ? "{\"coverage_complete\":false,\"pending_owners\":1,\"event_created\":false}"
@@ -97,18 +102,18 @@ int main(void)
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "subject", "person@example.test");
    cJSON_AddStringToObject(request, "request_id", request_id);
-   for (mode = 0; mode < 4; mode++)
+   for (mode = 0; mode < 5; mode++)
    {
       step = 0;
       int result = handle_kb_erase_subject(NULL, NULL, request);
-      if (mode == 1 || mode == 2)
+      if (mode == 1 || mode == 2 || mode == 4)
       {
-         assert(result == -1 && step == (mode == 1 ? 4 : 5));
+         assert(result == -1 && step == (mode == 1 ? 4 : mode == 2 ? 5 : 7));
          assert(!cJSON_GetObjectItemCaseSensitive(response, "coverage_complete"));
       }
       else
       {
-         assert(result == 0 && step == 7);
+         assert(result == 0 && step == 8);
          assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "coverage_complete")) ==
                 (mode == 0));
          assert(cJSON_GetObjectItemCaseSensitive(response, "memory_count")->valueint == 3);
@@ -116,6 +121,11 @@ int main(void)
                        mode == 0 ? "completed" : "pending_owners") == 0);
       }
    }
+   /* Retry the failed cleanup with the same durable erasure request ID. */
+   mode = 0;
+   step = 0;
+   assert(handle_kb_erase_subject(NULL, NULL, request) == 0 && step == 8);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "coverage_complete")));
    cJSON_Delete(response);
    cJSON_Delete(request);
    return 0;

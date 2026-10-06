@@ -87,7 +87,6 @@ INFRASTRUCTURE = {
     # running it alone would emit events and assert nothing about the store.
     "unit-test-bus-guardrail-durability-emit":
         "the emitter half; unit-test-bus-guardrail-durability runs it and verifies in SQL",
-    "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
     "unit-test-pgvec-generation-pg": "needs Postgres and pgvector",
     "unit-test-kb-audit-worm-pg": "needs Postgres",
@@ -105,7 +104,7 @@ INFRASTRUCTURE = {
     # be checked instead of assumed.
     "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
     "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
-    "db2-test-template": "builds the Postgres test template; unit-tests-pg drives it",
+    "kb-store-test-template": "builds the Postgres test template; unit-tests-pg drives it",
     "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",
     "aimee-witness-cadence-harness": "needs a live daemon; scripts/run-p7-witness-*.sh drive it",
     "p7-tpm2-harness": "needs swtpm; scripts/p7_tpm2*_test.sh drive it",
@@ -130,7 +129,7 @@ INFRASTRUCTURE = {
 }
 
 # Built only under a sanitizer configuration, where the suite adds them itself.
-SANITIZE = re.compile(r"^unit-test-db2-[a-z-]+-support-sanitize$")
+SANITIZE = re.compile(r"^unit-test-kb-store-[a-z-]+-support-sanitize$")
 
 
 def fail(message: str) -> int:

@@ -4,11 +4,11 @@
 #
 # This is the only way to exercise gap 2's guard on the engine that runs in
 # production: the guard is SQL (a CASE-rank comparison inside the UPDATE and its
-# probe), and the shim translates DB2's SQL rather than executing it as Postgres
+# probe), and the shim translates KB_STORE's SQL rather than executing it as Postgres
 # would. A guard that is correct under the shim and wrong under libpq would look
 # green all the way to deployment.
 #
-# The template is built by the repo's own db2-test-template tool against its own
+# The template is built by the repo's own kb-store-test-template tool against its own
 # database, NOT cloned from the running kb's — a clone needs the source idle, and
 # the kb holds pooled connections. Run AS ROOT in the container.
 #
@@ -17,7 +17,7 @@
 # `make unit-tests` exports AIMEE_CONFIG_TEST_DEFAULTS and AIMEE_CONFIG_TEST_MODULE
 # so the binaries can resolve config through the real config module. This script
 # ran them with only the template URL set, so every config accessor fell back to
-# the zero-initialised DB2_RUNTIME_CONFIG struct and read 0.
+# the zero-initialised KB_STORE_RUNTIME_CONFIG struct and read 0.
 #
 # That produced a FALSE FAILURE I then misdiagnosed as a sqlite-vs-Postgres
 # divergence in the retraction path. There was no divergence: the sqlite binary
@@ -33,7 +33,7 @@ set -u
 export LC_ALL=C LANG=C
 export PGPASSWORD=aimee-e2e
 TPL="postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_test_tpl"
-export AIMEE_TEST_DB2_TEMPLATE_URL="$TPL"
+export AIMEE_TEST_KB_STORE_TEMPLATE_URL="$TPL"
 
 # Config module + its shipped defaults, the same two the Makefile exports.
 CFG_MODULE="${AIMEE_CONFIG_TEST_MODULE:-/usr/local/libexec/aimee-modules/aimee-module-config}"
@@ -60,10 +60,10 @@ echo "== building the template schema =="
 # A FAILED TEMPLATE BUILD MUST STOP THE RUN.
 #
 # This piped the builder's output through `tail -3` and carried on regardless.
-# When db2_test_reset.sql had not been staged, the builder printed "cannot read
+# When kb_store_test_reset.sql had not been staged, the builder printed "cannot read
 # ..." -- and then every test ran against an unmigrated template and reported
 #
-#   db2_init: hardened schema verification failed: schema is not migrated
+#   kb_store_init: hardened schema verification failed: schema is not migrated
 #
 # as seven separate FAILs. They look exactly like product failures; they were a
 # missing file. One test (entity-nodes) even PASSED against the broken template,
@@ -71,13 +71,13 @@ echo "== building the template schema =="
 #
 # The exit status is what decides now, and the reason is printed rather than
 # tailed away.
-if [ ! -s /root/pgtests/db2_test_reset.sql ]; then
-  echo "FAIL: /root/pgtests/db2_test_reset.sql is missing or empty."
+if [ ! -s /root/pgtests/kb_store_test_reset.sql ]; then
+  echo "FAIL: /root/pgtests/kb_store_test_reset.sql is missing or empty."
   echo "      The template cannot be built, so nothing below would be a result"
-  echo "      about the product. Stage it from src/tests/db2_test_reset.sql."
+  echo "      about the product. Stage it from src/tests/kb_store_test_reset.sql."
   exit 1
 fi
-if ! tpl_out="$(/root/pgtests/db2-test-template "$TPL" /root/pgtests/db2_test_reset.sql 2>&1)"; then
+if ! tpl_out="$(/root/pgtests/kb-store-test-template "$TPL" /root/pgtests/kb_store_test_reset.sql 2>&1)"; then
   echo "FAIL: the template build failed, so the tests below would all fail"
   echo "      against an unmigrated schema for that reason and no other:"
   printf '%s\n' "$tpl_out" | tail -6 | sed 's/^/      /'
@@ -89,13 +89,13 @@ echo
 echo "== typed-fact tests, real postgres =="
 rc=0
 # Native compatibility layer. Shared Go typed-fact coverage is required via
-# scripts/test_temporal_assertion_retrieval.sh against the packaged DB2 schema.
+# scripts/test_temporal_assertion_retrieval.sh against the packaged KB_STORE schema.
 #
 # This ran only fact-lifecycle and fact-ingest, which is a thin slice of the
 # thing this branch changes. unit-test-typed-facts was not run at all, and
 # neither were the recall, entity and ontology tests -- and those are exactly
 # where a shim/libpq difference would hide, because they are the ones whose
-# assertions rest on DB2's SQL rather than on C logic.
+# assertions rest on KB_STORE's SQL rather than on C logic.
 #
 # A missing binary is reported, not skipped: "the file was not staged" and "the
 # test passed" must not look the same in this output.
@@ -124,8 +124,8 @@ done
 # Typed-fact policy is now Go; require its PostgreSQL replay rather than silently
 # dropping the migrated coverage from this validation entrypoint.
 go_driver="${AIMEE_GO_FACT_REPLAY_DRIVER:-$(dirname "$0")/../../test_temporal_assertion_retrieval.sh}"
-if [ ! -x "$go_driver" ] || [ -z "${AIMEE_DB2_REPLAY_URL:-}" ]; then
-  echo "MISSING Go fact replay driver or AIMEE_DB2_REPLAY_URL (nothing claimed)"
+if [ ! -x "$go_driver" ] || [ -z "${AIMEE_KB_STORE_REPLAY_URL:-}" ]; then
+  echo "MISSING Go fact replay driver or AIMEE_KB_STORE_REPLAY_URL (nothing claimed)"
   rc=1
 elif ! "$go_driver"; then
   rc=1

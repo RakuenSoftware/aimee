@@ -118,120 +118,16 @@ static int str_list_contains(const str_list_t *list, const char *item)
    return 0;
 }
 
-static int path_prefix_src_db(const char *path, char tier)
-{
-   return path && path[0] == 's' && path[1] == 'r' && path[2] == 'c' && path[3] == '/' &&
-          path[4] == 'd' && path[5] == 'b' && path[6] == tier && path[7] == '/';
-}
-
-static int tail_is_legacy_schema(const char *tail, char tier, int compact_variant)
-{
-   if (!tail || tail[0] != 'd' || tail[1] != 'b' || tail[2] != tier || tail[3] != '_')
-      return 0;
-   tail += 4;
-   const char *schema = "schema";
-   for (int i = 0; schema[i]; i++)
-   {
-      if (tail[i] != schema[i])
-         return 0;
-   }
-   tail += 6;
-   if (compact_variant)
-   {
-      if (tail[0] != '_' || tail[1] != 's' || tail[2] != 'q' || tail[3] != 'l' || tail[4] != 'i' ||
-          tail[5] != 't' || tail[6] != 'e')
-         return 0;
-      tail += 7;
-   }
-   return tail[0] == '.' && tail[1] == 's' && tail[2] == 'q' && tail[3] == 'l' && tail[4] == '\0';
-}
-
-/* Builds db2's canonical schema path. This took a tier once, when db1 had a
-   schema file of its own to point at; the Go store replaced that single file
-   with one per family, so there is nothing left to build for tier 1.
-
-   The bytes are read through a volatile pointer, one at a time. That is not
-   decoration: build-integrity refuses a thin client that carries storage-tier
-   strings, and gcc at -Os -flto will happily merge a run of constant character
-   stores back into movabs immediates -- which reassembles the very literal the
-   spelling was avoiding. Reading through volatile removes the compiler's
-   licence to do that, so the property holds by construction instead of by the
-   optimiser declining to look. */
-static void build_schema_path(char *buf, size_t buf_len, int compact_variant)
-{
-   if (!buf || buf_len == 0)
-      return;
-
-   /* Split INSIDE the words the gate looks for, not merely between path
-      segments: "db2/c/" and "_sqlite" are themselves storage-tier strings, and
-      leaving either whole in .rodata trips the same check the joined literal
-      did. Each piece is NUL-terminated, so `strings` reports them apart.
-
-      The INPUT still matches the legacy src/dbN/ spelling, because that is what
-      proposals written before the moves say and canonicalizing them is the
-      whole point of this function. DB2's preserved C tree has one extra c/
-      segment. */
-   static const char part_root[] = {'s', 'r', 'c', '/', 'm', 'o', 'd',
-                                    'u', 'l', 'e', 's', '/', '\0'};
-   static const char part_tier_a[] = {'d', 'b', '\0'};
-   static const char part_tier_b[] = {'2', '/', 'c', '/', '\0'};
-   static const char part_stem[] = {'s', 'c', 'h', 'e', 'm', 'a', '\0'};
-   static const char part_lite_a[] = {'_', 's', 'q', 'l', '\0'};
-   static const char part_lite_b[] = {'i', 't', 'e', '\0'};
-   static const char part_ext[] = {'.', 's', 'q', 'l', '\0'};
-
-   size_t n = 0;
-   const char *const parts[] = {part_root,
-                                part_tier_a,
-                                part_tier_b,
-                                part_stem,
-                                compact_variant ? part_lite_a : "",
-                                compact_variant ? part_lite_b : "",
-                                part_ext};
-   for (size_t p = 0; p < sizeof(parts) / sizeof(parts[0]); p++)
-   {
-      const volatile char *src = (const volatile char *)parts[p];
-      for (size_t i = 0; src[i] != '\0'; i++)
-         if (n + 1 < buf_len)
-            buf[n++] = (char)src[i];
-   }
-   buf[n] = '\0';
-}
-
-static const char *canonical_owned_path(const char *path, char *buf, size_t buf_len)
-{
-   if (!path || !buf || buf_len == 0)
-      return path;
-   /* No db1 rewrite. Its target, src/modules/db1/schema.sql, went with the C
-      store; the schema is per-family under server-go now, so a legacy db1
-      spelling has no single file to name. Rewriting it to the deleted path made
-      the planner drop the packet silently -- leaving it alone reports it as
-      missing, which is both true and something the author can act on. */
-   if (path_prefix_src_db(path, '2') && tail_is_legacy_schema(path + 8, '2', 0))
-   {
-      build_schema_path(buf, buf_len, 0);
-      return buf;
-   }
-   if (path_prefix_src_db(path, '2') && tail_is_legacy_schema(path + 8, '2', 1))
-   {
-      build_schema_path(buf, buf_len, 1);
-      return buf;
-   }
-   return path;
-}
-
 static void str_list_add_unique(str_list_t *list, const char *item)
 {
-   char canon_buf[1024];
-   const char *canon = canonical_owned_path(item, canon_buf, sizeof(canon_buf));
+   const char *canon = item;
    if (!str_list_contains(list, canon))
       str_list_add(list, canon);
 }
 
 static void str_list_add_path(str_list_t *list, const char *item)
 {
-   char canon_buf[1024];
-   str_list_add(list, canonical_owned_path(item, canon_buf, sizeof(canon_buf)));
+   str_list_add(list, item);
 }
 
 static void extract_paths_from_backticks(const char *line, str_list_t *paths);

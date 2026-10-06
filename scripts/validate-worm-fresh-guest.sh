@@ -216,10 +216,10 @@ su postgres -c "psql -q -d '$TEST_DB' -c 'CREATE EXTENSION vector; CREATE EXTENS
 # new schema must leave it untouched while all new delivery goes to SQLite.
 su postgres -c "psql -q -d '$TEST_DB' -c \
   \"CREATE TABLE kb_audit_event(legacy_marker text); INSERT INTO kb_audit_event VALUES ('retain-me');\""
-su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/db2/c/schema_roles.sql'"
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
+su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/kb/c/schema_roles.sql'"
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/kb/c/schema.sql" |
   su postgres -c "psql -q -v ON_ERROR_STOP=1 -d '$TEST_DB'"
-su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/db2/c/schema_grants.sql'"
+su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/kb/c/schema_grants.sql'"
 [[ "$(su postgres -c "psql -Atq -d '$TEST_DB' -c 'SELECT count(*) FROM kb_audit_event'")" = 1 ]] ||
   fail 'upgrade changed the legacy PostgreSQL evidence table'
 
@@ -228,7 +228,7 @@ su postgres -c "psql -q -d '$TEST_DB' -c \
 run_worker() {
   su postgres -c "PGOPTIONS='-c role=aimee_kb_worm_worker' \
     AIMEE_HOME='$KB_HOME' AIMEE_WORM_PATH='$KB_HOME/audit/kb-worm-live.db' \
-    AIMEE_WORM_DB2_URL='$DB_URL' /usr/local/bin/aimee-kb-worm --once --batch=100"
+    AIMEE_WORM_POSTGRES_URL='$DB_URL' /usr/local/bin/aimee-kb-worm --once --batch=100"
 }
 run_worker
 [[ "$(sqlite3 "$KB_HOME/audit/kb-worm-live.db" "SELECT count(*) FROM audit_event WHERE event_id<>'';")" = 1 ]] ||
@@ -238,9 +238,9 @@ run_worker
 
 # Reapply the install schema as an upgrade and prove the legacy evidence and
 # SQLite delivery are both unchanged.
-sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
+sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/kb/c/schema.sql" |
   su postgres -c "psql -q -v ON_ERROR_STOP=1 -d '$TEST_DB'"
-su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/db2/c/schema_grants.sql'"
+su postgres -c "psql -q -d '$TEST_DB' -f '$ROOT/src/modules/kb/c/schema_grants.sql'"
 run_worker
 [[ "$(su postgres -c "psql -Atq -d '$TEST_DB' -c 'SELECT count(*) FROM kb_audit_event'")" = 1 ]] ||
   fail 'schema reapply changed legacy PostgreSQL evidence'
@@ -251,7 +251,7 @@ ok 'KB upgrade preserves legacy PG evidence and SQLite delivery'
 # A second logical worker must be refused by the PostgreSQL advisory lock.
 su postgres -c "PGOPTIONS='-c role=aimee_kb_worm_worker' \
   AIMEE_HOME='$KB_HOME' AIMEE_WORM_PATH='$KB_HOME/audit/kb-worm-live.db' \
-  AIMEE_WORM_DB2_URL='$DB_URL' /usr/local/bin/aimee-kb-worm --poll-ms=100" \
+  AIMEE_WORM_POSTGRES_URL='$DB_URL' /usr/local/bin/aimee-kb-worm --poll-ms=100" \
   >"$KB_HOME/singleton.log" 2>&1 &
 SINGLETON_PID=$!
 sleep 1

@@ -16,7 +16,7 @@ hmem_content_hash) is still used by the replacement write path (memory_redirect)
 and is intentionally NOT forbidden here.
 
 Enforced as part of `make lint`. See docs/proposals/done/
-memory-db1-db2-architecture.md §2.
+memory-db1-kb_store-architecture.md §2.
 """
 import os
 import re

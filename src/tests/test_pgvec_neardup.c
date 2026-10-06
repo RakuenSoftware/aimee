@@ -15,10 +15,10 @@
  * re-typing the SQL into psql, because the binding layer is exactly where a
  * hand-checked query would still have hidden a bug.
  *
- * Skips (exit 0) when AIMEE_TEST_DB2_URL is unset, so CI without a database
+ * Skips (exit 0) when AIMEE_TEST_KB_STORE_URL is unset, so CI without a database
  * stays green; the point of the variable is that this can never quietly
  * "pass" by connecting to a deployment an operator did not name. */
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "lifecycle.h"
 #include "memory_vectors.h"
 #include <assert.h>
@@ -54,17 +54,17 @@ int main(void)
     * the pair dump that says WHY it aborted -- exactly the context needed. */
    setvbuf(stdout, NULL, _IOLBF, 0);
 
-   const char *url = getenv("AIMEE_TEST_DB2_URL");
+   const char *url = getenv("AIMEE_TEST_KB_STORE_URL");
    if (!url || !*url)
    {
-      printf("pgvec_neardup: SKIP (AIMEE_TEST_DB2_URL unset)\n");
+      printf("pgvec_neardup: SKIP (AIMEE_TEST_KB_STORE_URL unset)\n");
       return 0;
    }
 
-   db2_set_embedding_dim(DIM);
-   if (db2_init(url) != 0)
+   kb_store_set_embedding_dim(DIM);
+   if (kb_store_init(url) != 0)
    {
-      fprintf(stderr, "pgvec_neardup: db2_init failed\n");
+      fprintf(stderr, "pgvec_neardup: kb_store_init failed\n");
       return 1;
    }
 
@@ -160,7 +160,7 @@ int main(void)
    for (int i = 0; i < 4; i++)
       (void)pgvec_memory_vector_delete_point(BASE_ID + i);
 
-   db2_shutdown();
+   kb_store_shutdown();
    printf("pgvec_neardup: all tests passed\n");
    return 0;
 }

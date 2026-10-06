@@ -1,5 +1,5 @@
 /* kb_curator_extract.c: curator drain handler — claim one extract_doc job,
- * invoke the sidecar, write artifacts to DB2, mark job done/failed.
+ * invoke the sidecar, write artifacts to KB_STORE, mark job done/failed.
  * No DB1 access from this file. */
 
 #ifndef _GNU_SOURCE
@@ -13,11 +13,11 @@
 #include "config.h" /* config_current_mode, aimee_mode_t, legacy_config_read */
 #include "cJSON.h"
 #include "log.h"
-#include "modules/db2/c/artifacts.h"
-#include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db2_tenant.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/feature_rows.h"
+#include "modules/kb/c/artifacts.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/kb_store_tenant.h"
+#include "modules/kb/c/db_postgres.h"
+#include "modules/kb/c/feature_rows.h"
 #include "kb_mdl.h"
 
 #include <pthread.h> /* reclaim throttle is shared across the doc workers */
@@ -118,7 +118,7 @@ typedef struct
 
 static int ce_claim_job(ce_job_t *out)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -165,7 +165,7 @@ static int ce_claim_job(ce_job_t *out)
 
 static int ce_fetch_document(ce_job_t *job)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -211,7 +211,7 @@ static int ce_fetch_document(ce_job_t *job)
 
 static void ce_mark_done(int64_t job_id)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
    char err[CE_ERRBUF] = "";
@@ -246,7 +246,7 @@ void kb_curator_mark_retry_provider_unavailable(int64_t job_id, int attempts, co
     * same open circuit immediately. The still-running row is reclaimed by the
     * existing stale-lease path after restart/recovery. */
    kb_curator_provider_backoff_note();
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return;
 
@@ -282,7 +282,7 @@ static int ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
       kb_curator_mark_retry_provider_unavailable(job_id, attempts, error_msg);
       return 1;
    }
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return 0;
 
@@ -314,7 +314,7 @@ static int ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts,
 /* Reclaim extract_doc jobs orphaned in 'running'. ce_claim_job only ever selects
  * status='pending', so a job whose worker crashed/restarted or whose sidecar
  * wedged stays 'running' forever: the document is never extracted, and the row
- * pins a db2 pool member well past its 300s ceiling ("missed lease_end?"). The
+ * pins a kb_store pool member well past its 300s ceiling ("missed lease_end?"). The
  * code-unit stage has had this guard since it shipped; kb_async_jobs never got
  * one, which stranded a job for 15h in production. Reset rows older than the
  * lease to 'pending' so they retry, or to 'failed' once attempts are exhausted
@@ -346,7 +346,7 @@ static void ce_reclaim_stale_running(int max_attempts)
       return;
    }
 
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
    {
       /* Deliberately do NOT arm the throttle here, nor on the failures below: a
@@ -454,7 +454,7 @@ void kb_curator_resolve_sidecar_command(const kb_curator_extract_opts_t *opts, c
 
 static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    if (!conn)
       return -1;
 
@@ -491,11 +491,11 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
       char *payload_str = payload_j ? cJSON_PrintUnformatted(payload_j) : NULL;
 
       char id_buf[64];
-      db2_artifact_gen_id(id_buf, sizeof(id_buf));
+      kb_store_artifact_gen_id(id_buf, sizeof(id_buf));
 
-      int wrc =
-          db2_artifact_write(id_buf, kind_j->valuestring, "proposed", "project", job->project,
-                             "kb.curator.extract", confidence, payload_str ? payload_str : "{}");
+      int wrc = kb_store_artifact_write(id_buf, kind_j->valuestring, "proposed", "project",
+                                        job->project, "kb.curator.extract", confidence,
+                                        payload_str ? payload_str : "{}");
 
       if (wrc != 0)
       {
@@ -504,7 +504,7 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
          return -1;
       }
 
-      db2_artifact_cite(id_buf, "kb_document", doc_id_str);
+      kb_store_artifact_cite(id_buf, "kb_document", doc_id_str);
 
       /* Emit mdl.* features for this synthesis candidate. Evidence = document
        * content.  Prefer payload["text"] then payload["body"] as synthesis text
@@ -532,7 +532,7 @@ static int ce_write_artifacts(const ce_job_t *job, cJSON *artifacts_arr)
                         "{\"mdl.l_candidate\":%.2f,\"mdl.l_residual\":%.2f,"
                         "\"mdl.total\":%.2f,\"mdl.rank_in_cluster\":%d}",
                         mdl.l_candidate, mdl.l_residual, mdl.total, mdl.rank_in_cluster);
-               db2_feature_row_upsert(id_buf, "kb_artifact", "", "", "v1", feat, NULL);
+               kb_store_feature_row_upsert(id_buf, "kb_artifact", "", "", "v1", feat, NULL);
             }
          }
       }
@@ -572,13 +572,13 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
              "claimed extract_doc job %lld for doc %lld project '%s'", (long long)job.job_id,
              (long long)job.document_id, job.project);
 
-   int scope_rc = db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, job.project);
-   int read_scope = scope_rc == 0 ? db2_maintenance_scope_begin_current() : scope_rc;
+   int scope_rc = kb_store_maintenance_job_enter(KB_STORE_MAINTENANCE_CURATOR, job.project);
+   int read_scope = scope_rc == 0 ? kb_store_maintenance_scope_begin_current() : scope_rc;
    int fetch_rc = read_scope < 0 ? -1 : ce_fetch_document(&job);
-   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   if (read_scope == 1 && kb_store_maintenance_scope_commit() != 0)
       fetch_rc = -1;
    if (scope_rc == 0)
-      db2_maintenance_job_leave();
+      kb_store_maintenance_job_leave();
    if (fetch_rc != 0)
    {
       aimee_log(LOG_WARN, "kb.curator.extract", "doc %lld not found for job %lld; marking failed",
@@ -635,7 +635,7 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    /* The model can legitimately take minutes on the bundled CPU backend. The
     * durable job is already claimed, and every remaining DB operation can
     * re-acquire lazily, so do not pin a pool member across the network call. */
-   db2_lease_release_idle();
+   kb_store_lease_release_idle();
 
    char sidecar_err[512] = "";
    const char *sys_prompt = novel_mode ? CE_SYSTEM_PROMPT : CE_EXTRACT_DOC_PROMPT;

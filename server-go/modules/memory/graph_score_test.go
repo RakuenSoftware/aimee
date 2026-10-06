@@ -116,7 +116,7 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	}
 	for _, r := range records {
 		if r.ID == bridge.ID || r.ID == second.ID {
-			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != bridge.Content {
+			if !r.Version.ValidFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != bridge.Content {
 				t.Fatalf("graph payload/version missing: %+v", r)
 			}
 		}
@@ -134,7 +134,7 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	for _, r := range revised {
 		if r.ID == bridge.ID {
 			found = true
-			if r.Content != "revised graph payload" || !r.Version.validFor(r.ID) || r.Version.RecordRevision != "2" {
+			if r.Content != "revised graph payload" || !r.Version.ValidFor(r.ID) || r.Version.RecordRevision != "2" {
 				t.Fatalf("graph correction snapshot: %+v", r)
 			}
 		}

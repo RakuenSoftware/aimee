@@ -4,7 +4,7 @@
  * is produced ONLY by verifier / mTLS-parse code (kb_principal_from_verify,
  * kb_principal_from_cert) — never constructed from a caller-supplied string. The
  * `authenticated` flag is the type-level guarantee behind the tenancy trust
- * model: db2_tenant_scope_begin() refuses a principal whose authenticated flag is
+ * model: kb_store_tenant_scope_begin() refuses a principal whose authenticated flag is
  * unset, so no raw request string can ever drive the tenant GUCs (B2/N2).
  *
  * The canonical, immutable identity_key derived here is what binds to teams,
@@ -65,7 +65,7 @@ extern "C"
 
    /* Build a principal for a local host account whose password PAM has just
     * accepted. `username` must match the bare-username form of the subject
-    * grammar (db2_intent_bare_username) and must not be the reserved name `owner`;
+    * grammar (kb_store_intent_bare_username) and must not be the reserved name `owner`;
     * both are refused here as well as at the route, because a principal that
     * cannot be a legal subject must never reach a tenant scope. Sets
     * authenticated = 1. Returns 0 on success, -1 on invalid args. */
@@ -80,8 +80,8 @@ extern "C"
     * success, -1 if the principal is unauthenticated or args invalid. */
    int kb_identity_key(const kb_principal_t *p, char *out, size_t cap);
 
-   /* DB2 host-contract adapter for the same canonical identity derivation. CLI
-    * subcommands initialize DB2 without the daemon's module-stage setup, so this
+   /* KB_STORE host-contract adapter for the same canonical identity derivation. CLI
+    * subcommands initialize KB_STORE without the daemon's module-stage setup, so this
     * adapter must be registered by both startup paths before tenant entry. */
    int kb_identity_key_from_fields(int kind, const char *issuer, const char *subject,
                                    int authenticated, char *out, size_t cap);

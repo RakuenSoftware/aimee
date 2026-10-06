@@ -64,6 +64,11 @@ func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string
 	if actor.principal == "" {
 		actor = personalCaller(nil, AuthorityModel)
 	}
+	if operation == "store" || operation == "supersede" {
+		if err := screenModelMemory(actor.authority, wanted.Key, wanted.Content); err != nil {
+			return Record{}, err
+		}
+	}
 	authority, category := "model", "agent_message"
 	if actor.authority == AuthorityUser {
 		authority, category = "user", "user_stated"
@@ -127,6 +132,9 @@ func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string
 			if err := admitMemoryReplacement(old.Kind, old.Authorship.Category, actor.authority); err != nil {
 				return Record{}, err
 			}
+		}
+		if err := s.forgetBackend(ctx, wanted.Scope, old.ID); err != nil {
+			return Record{}, err
 		}
 		if expected == nil {
 			_, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state='retired',updated_at=now() WHERE id=$1`, old.ID)

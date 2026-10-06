@@ -15,19 +15,26 @@ operations. Exact command and config tables are generated from source:
 
 - `aimee` is a DB-free thin client. It runs hooks and stdio integrations, reads client files, and
   sends typed requests.
-- `aimee-server` owns sessions, DB1, agents, tools, policy, credentials, provider calls, and the
-  public resource API.
+- `aimee-server` owns the human's sessions, personal memory and vectors, private code, agents,
+  tools, policy, credentials, provider calls, and the public resource API.
 - `aimee-wfe` owns workflow definitions and lifecycle state.
-- `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
-  pgvector.
-- Each KB owns its embedding and synthesis placements. Embedding runs in the KB image or selected
-  embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar, and remote
-  synthesis uses the configured endpoint.
+- The optional `aimee-kb` owns a shared corpus: memory, documents, typed facts, the shared code
+  graph, retrieval, and curation.
+- Each instance owns its PostgreSQL store and model configuration. Standard Compose deploys
+  embedding as a separate sidecar; synthesis is optional. Remote model endpoints are configurable.
 - `aimee-runtime-web` serves the browser workspace.
+
+Server works without KB. The [Server/KB guide](docs/SERVER_AND_KB.md) explains store selection,
+independent deployment, and the distinction between shared code and shared data.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
 guardrail decisions, vault access, sandbox degradation, MCP activity, and tool outcomes pass through
 one ordered audit tap. See [Event bus](docs/EVENT_BUS.md).
+
+This manual follows the 1.0.0 release work. Published 0.4.6 predates the new memory backend
+contract and native primitive. Use [What's new](docs/WHATS_NEW.md) to distinguish current source
+behavior from released images. The [architecture](docs/ARCHITECTURE.md) shows the native hosts,
+Go module owners and storage boundaries.
 
 ## First use
 
@@ -37,8 +44,9 @@ After the services are running, enroll the client and check every boundary:
 aimee remote set https://host:8743 <wizard-bearer>
 aimee remote status
 aimee status
-aimee kb status
 aimee audit verify
+# If a shared KB is configured:
+aimee kb status
 ```
 
 Copy the command from the setup summary, then confirm the server certificate fingerprint out of
@@ -83,9 +91,13 @@ The HTTP API uses `store: "user"` (default) or `store: "kb"`. The MCP tools `mut
 and lets you select the KB separately.
 
 After upgrading from 0.4.1, existing KB records stay in the KB. Use `--store kb` to
-address them. Historical `--as-of` reads and KB review/reinforcement operations require
-the KB store. Personal replacement updates the local record; retirement removes it
-from active lookup. Advanced KB recall and `memory read` continue to read shared knowledge.
+address them. Legacy `--as-of` inspection and KB-specific review/reinforcement operations require
+the KB store. Personal replacement retains revisions; exact-version reads use `at_version`
+through the API, and retirement removes the record from active lookup. Memory correction
+proposals and verified user review exist in both placements; these review operations retain
+a KB default and need explicit `store=user` for personal review.
+
+`memory recall` defaults to personal memory; add `--store kb` for shared recall. Advanced KB-only operations, including `memory read`, still require shared knowledge.
 
 The KB stores typed records with source, scope, confidence, freshness, and links to artifacts.
 Curation joins duplicates, records contradictions, and lets stale evidence decay. Recall mixes
@@ -109,6 +121,20 @@ aimee wm list
 Do not use working memory for team facts. It is local, session-scoped DB1 state.
 
 See [Knowledge](docs/KNOWLEDGE.md) and [Retrieval](docs/retrieval-stack.md).
+
+### Select a memory engine
+
+Native Aimee memory is the default. The 1.0.0 work adds Cognee 1.6.2 through the
+[generic memory contract](docs/modules/memory.md#memory-backend-contract). Selecting an engine
+does not change the personal/shared selector, record identity, authorization or correction review.
+Aimee retains canonical records and validates provider results against their current revisions.
+
+Configure the selected backend on each instance that will use it, using the documented URL and
+Vault credential transport. Restart the memory owner after changing the selection. Cognee's first
+adapter refuses scopes above 256 eligible records; its derived cleanup must succeed before
+subject-erasure completion. Test a scoped read, search, mutation and erasure before reopening traffic.
+The [native attention plugin](docs/NATIVE_MEMORY_PLUGIN.md) separately consumes selected records
+on a supported inference host; it does not choose the storage engine.
 
 ## Code intelligence
 
@@ -414,7 +440,7 @@ Read [What's new](docs/WHATS_NEW.md) before changing deployment manifests.
 | local socket missing | service manager, `aimee server start`, server log, config-dir permissions |
 | reads work but writes fail | server id/team/JWKS trust, exact subject grant, identity-token refusal reason |
 | KB unavailable | `aimee kb status`, KB bearer, `AIMEE_KB_API_URL`, PostgreSQL readiness |
-| memory search is empty | KB scope, ingest status, embedding readiness, query filters |
+| memory search is empty | Selected personal/KB store, scope, lifecycle and validity, then that owner's embedding readiness |
 | delegate cannot write | assigned worktree, write role, sandbox backend, source authority |
 | delegate has no network | expected default; configure mediated egress or packages explicitly |
 | workflow parked | inspect the named reason, latest artifact, gate, agent limit, or merge conflict |
@@ -441,7 +467,7 @@ deployments. Preserve the first error and the operation ID; later failures are o
 <workspace>/aimee.workspace.yaml
 ```
 
-DB1 and DB2 data lives outside the config directory in PostgreSQL. DB1 is served through the
+DB1 and KB_STORE data lives outside the config directory in PostgreSQL. DB1 is served through the
 `aimee` and `postgres` modules; workflow lifecycle rows use that same store contract even though the
 Go control plane owns their behavior.
 
@@ -453,7 +479,7 @@ Go control plane owns their behavior.
 | delegate | a policy-controlled agent doing a bounded task |
 | persona | a named perspective and instruction set |
 | DB1 | local server PostgreSQL state served by the store modules |
-| DB2 | KB PostgreSQL and pgvector state |
+| KB_STORE | KB PostgreSQL and pgvector state |
 | event bus | intra-daemon typed shared-memory transport |
 | capture | ordered observational bus record; never automatic execution replay |
 | worktree | isolated git checkout assigned to a session or work item |

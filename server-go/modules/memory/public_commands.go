@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -14,33 +13,6 @@ const (
 	EventCommand uint32 = 5896
 	StageCommand uint32 = 8
 )
-
-// Command invokes the public command contract. Its result is the complete
-// surface response, including degraded evidence, typed argument and not-found errors. Transport
-// failures remain errors and are never retried here.
-func (c *Client) Command(ctx context.Context, trace uint64, verb string, args json.RawMessage) (json.RawMessage, error) {
-	frame, err := bus.EncodeCommand(verb, args)
-	if err != nil {
-		return nil, ErrClientRequest
-	}
-	reply, err := c.call(ctx, EventCommand, StageCommand, trace, frame)
-	if err != nil {
-		return nil, err
-	}
-	body, err := bus.DecodeCommandResult(reply)
-	if err != nil {
-		return nil, ErrClientResponse
-	}
-	var object map[string]json.RawMessage
-	if json.Unmarshal(body, &object) != nil || object == nil {
-		return nil, ErrClientResponse
-	}
-	var status string
-	if json.Unmarshal(object["status"], &status) != nil || (status != "ok" && status != "error" && status != "degraded" && !(verb == "benchmark" && status == "async-only")) {
-		return nil, ErrClientResponse
-	}
-	return body, nil
-}
 
 type commandArgs map[string]json.RawMessage
 

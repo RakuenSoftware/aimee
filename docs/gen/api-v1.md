@@ -516,7 +516,7 @@ Responses:
 Set one KB-owned config option (console)
 
 Sets a single KB-owned option and persists it to aimee.yaml. The key must
-be one the KB owns. Anything else (aimee-server's keys, db2_url, the
+be one the KB owns. Anything else (aimee-server's keys, provider settings, the
 agent roster) is 403, so this route cannot reach arbitrary config. Options
 flagged `restart` take effect when aimee-kb next starts. Requires a
 console-admin credential.
@@ -656,7 +656,7 @@ Responses:
 Upload a document for ingest
 
 Accepts multipart/form-data with a required `file` part and an optional
-`scope` field (default: global). Normalizes to markdown, stores in DB2,
+`scope` field (default: global). Normalizes to markdown, stores in KB_STORE,
 and queues an extract_doc job. Returns existing doc_id on idempotent re-upload.
 
 Request body (`multipart/form-data`).

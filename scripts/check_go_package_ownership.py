@@ -101,9 +101,10 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Caller-side contract for the aimee domain module (principal 30). "
         "The existing db1-fields-v2 protocol identity is unchanged.",
     ),
-    "server-go/db2": (
+    "server-go/memory": (
         "contract",
-        "Caller-side mirror of the db2 module's serving wire.",
+        "Implementation-independent memory caller framing, wire types and pure "
+        "embedding identity commitments. No storage, ranking, policy or admission.",
     ),
     "server-go/delegate": (
         "contract",

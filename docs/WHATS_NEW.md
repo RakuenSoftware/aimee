@@ -1,8 +1,38 @@
 # What's new
 
-## Unreleased
+## 1.0.0 release in preparation
 
-### 0.4.6 release candidate: memory reliability
+The next application release is **1.0.0**. The declared source series is `1.0`.
+The previous published release, verified on 2026-10-04, is [v0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6).
+The integration branch contains the newer 1.0.0 work, including merged PR #3005.
+This page describes the release target without claiming its artifacts are already published.
+Version numbers for separate module repositories and the native-memory plugin are independent.
+
+| Application release | Published | Boundary |
+| --- | --- | --- |
+| [0.3.0](https://github.com/RakuenSoftware/aimee/releases/tag/v0.3.0) | 2026-08-04 | Intended public release, including the reviewed startup, identity and ingest fixes. |
+| [0.4.0](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.0) | 2026-09-01 | Later runtime/deployment transition; historical notes below compare against 0.2.192. |
+| [0.4.2](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.2) | 2026-09-07 | One application image, immutable role, separate PostgreSQL service, ordinary storage default. |
+| [0.4.4](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.4) | 2026-09-09 | Setup, private indexing and worktree repairs. |
+| [0.4.5](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.5) | 2026-09-22 | Shared Go memory owner and bus client; provider probes and webchat repairs. |
+| [0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6) | 2026-09-27 | Memory reliability, authenticated async ownership and validated upgrade paths. |
+
+## What 1.0.0 adds
+
+The integration tree retires the DB2/native libpq provider in favor of the Go PostgreSQL module
+for both roles, adds enrolled model-neutral native-memory source delivery, and hardens correction
+review, rejection identity and database privileges. Current database startup retains fresh
+provisioning and credential refresh; automatic legacy database/role reconciliation is removed.
+See [Upgrading](UPGRADING.md) before reusing an older store.
+
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds the generic memory contract and
+Cognee adapter, with required real-provider CI and deployed native/Cognee validation. Its implementation
+is not part of the published 0.4.6 image. See the [memory contract](modules/memory.md#memory-backend-contract).
+The separate native-memory 0.3.3 candidate has five dedicated model plugins on one shared runtime.
+Its [release preparation record](releases/native-memory-v0.3.3/README.md) identifies the server
+export prerequisite and publication checks. The signed 0.2.3 stage remains historical evidence.
+
+## 0.4.6: memory reliability
 
 - Retrieved memory carries its owner and source revisions through context assembly and final
   provider dispatch. Changed, hidden, expired, or erased sources cannot reuse an old binding.
@@ -12,12 +42,12 @@
   review decision before they replace authoritative content.
 - Native asynchronous runs persist their authenticated session ownership before tool execution.
   Assertion indexing yields to concurrent source edits without losing pending work.
-- The release includes frozen invariant checks, provider-boundary regressions, and deployment,
+- The release preparation includes frozen invariant checks, provider-boundary regressions, and deployment,
   encrypted-storage, upgrade, and rollback gates. These checks do not establish a model-quality
   improvement. Adaptive policy promotion remains deferred, and clean retry remains opt-in.
 
 See the [0.4.6 preparation record](validation/release-0.4.6-preparation-2026-09-27.md)
-for artifact status and upgrade validation.
+for the point-in-time artifact and upgrade validation; publication is recorded in the release above.
 
 - Webchat opens conversations from the top session tabs; Chat no longer appears in the left panel.
   Final answer polling updates the existing reply instead of adding a duplicate. Refreshes preserve
@@ -59,18 +89,13 @@ client identities, and memories when upgrading. Release validation is recorded i
 the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.
 Read [Upgrading](UPGRADING.md) before you start, not after.
 
-Everything below is measured against **v0.2.192**, the last public release.
+The detailed transition notes below use **v0.2.192** as a historical comparison baseline.
+They span work delivered through 0.3.0 and later 0.4 releases; they are not a claim that 0.2.192
+remained the latest release until 0.4.0. **0.3.0 was intended and published on 2026-08-04.**
 
-This work was prepared inside the 0.3 series and ships as 0.4.0. A cycle that put a shared-memory
-event bus under every daemon, moved the workflow control plane to Go, and retired five surfaces was
-the wrong shape for a 0.3 patch, so `AIMEE_VERSION_SERIES` moved to `0.4` and the first release in
-the series is `0.4.0`. Nothing was released as 0.3.0, and the baseline below is unchanged.
-
-Two tags, `v0.2.196` dated 2026-07-27 and `v0.3.0`, appeared on the repository part-way through this
-cycle. Neither is a release. Both were promoted mid-cycle in error, neither was announced, and the
-work below continued for thousands of commits after them. If you installed from either, you have an
-untested mid-cycle build rather than 0.4.0, and you are missing the fixes under
-[If you installed from a mid-cycle tag](#if-you-installed-from-a-mid-cycle-tag).
+The 0.2.196 publication on 2026-07-27 remains marked prerelease. Its mid-cycle status is separate
+from the intended 0.3.0 release. Use current setup and upgrade guides for deployment commands;
+the transition notes retain earlier embedded-KB topology for historical context.
 
 ## The event bus is the change everything else rests on
 
@@ -273,17 +298,17 @@ The master assembler and each channel keep a request-level opt-out. See
 
 ## If you installed from a mid-cycle tag
 
-The `v0.2.196` and `v0.3.0` tags were promoted in error part-way through this cycle and are not
-releases. The cycle continued for more than 3,500 commits after the earlier one, so an installation
-taken from either is missing the following. Each is a case where the deployment came up healthy and
-did nothing useful, which is why they are listed here rather than folded into the sections above.
+This section records fixes made during the earlier deployment transition. The `v0.2.196`
+prerelease predates the intended 0.3.0 release; it must not be treated as equivalent to it.
+Use the release comparisons to establish which fixes an installed build contains. The embedded
+models and database commands below describe their historical deployment, not the current Compose stack.
 
 - **The generic `aimee-llm` gateway is retired.** Embedding is owned by the selected KB and can run
   inside it or at its configured endpoint. Local synthesis uses a model-specific sidecar; remote
   synthesis uses the KB's configured endpoint. After the wizard selects the
   bundled embedder, a fresh install embeds with no download and no second service. Set the embedder
   before you ingest. A later change is a data migration: the guarded reset handles a dimension
-  change, while a same-dimension vector-space change needs a fresh DB2 and source re-ingestion.
+  change, while a same-dimension vector-space change needs a fresh KB_STORE and source re-ingestion.
 - **A clean install could enrol no identity and store zero vectors.** The published config snapshot
   did not match what `legacy_config_read` returned on the cached path, so first-user enrolment failed
   silently and env-var deployments indexed nothing. Both are fixed, and the write and guarded

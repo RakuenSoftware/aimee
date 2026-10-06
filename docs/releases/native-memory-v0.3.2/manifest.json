@@ -1,0 +1,69 @@
+{
+  "release": "native-memory-v0.3.2",
+  "version": "0.3.2",
+  "build": 2,
+  "scope": "Three dedicated model plugins with one shared native-memory runtime; signed preview candidate",
+  "assets": {
+    "aimee_gemma4_12b-0.3.2-2-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "33e4c156d4d3e8e6639f87be72444a65bb41dac37bba2763c27020dab2e485a7",
+      "bytes": 577401,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.2/aimee_gemma4_12b-0.3.2-2-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_gemma4_26b-0.3.2-2-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "baf623cbd7f8270aafaae4956c106f7de672ef7ca46b2044eab391e50323f308",
+      "bytes": 577520,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.2/aimee_gemma4_26b-0.3.2-2-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_native_runtime-0.3.2-2-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "a3c42174676713cc8b60b8da1fd0c2f13b983a169dd03b3bdaf2241384c490f4",
+      "bytes": 2977049,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.2/aimee_native_runtime-0.3.2-2-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_qwen3_8_27b-0.3.2-2-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "924ee4eed36db17c54b070b2b90a301f28094e6b593e2cae0c688ba868acdb3f",
+      "bytes": 585575,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.2/aimee_qwen3_8_27b-0.3.2-2-cp312-cp312-linux_x86_64.whl"
+    },
+    "vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl": {
+      "sha256": "616360d726fbaf88c96ebbe9ec4a62fc69ba86cba591f1a8b609199ad5339246",
+      "bytes": 230630,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.2/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl"
+    }
+  },
+  "public_key_ed25519_hex": "5d14ca247841adcc1130a4d95b82ead12ba699c03f2ba45f2f47524abde0c6c2",
+  "compatibility": {
+    "platform": "Linux x86-64",
+    "python": "CPython 3.12",
+    "glibc": ">=2.39",
+    "vllm": "==0.30.0",
+    "validated_backend": "CUDA",
+    "execution": "Single-GPU text-only eager synchronous V1; prefix caching disabled"
+  },
+  "server_prerequisite": {
+    "route": "POST /v1/native/primitive",
+    "unique_records": true,
+    "max_records": 32,
+    "conflicting_rows": "refuse export",
+    "status": "Source-export repair supplied with this application change; compatible application publication required"
+  },
+  "validated_profiles": [
+    {
+      "package": "aimee-gemma4-12b",
+      "checkpoint": "Gemma4 12B Q4_K_M",
+      "enrolled_lifecycle_checks": 21
+    },
+    {
+      "package": "aimee-gemma4-26b",
+      "checkpoint": "Gemma4 26B A4B Q3_K_M",
+      "enrolled_lifecycle_checks": 21
+    },
+    {
+      "package": "aimee-qwen3-8-27b",
+      "checkpoint": "Qwen3.8 27B FP8; 18 GiB CPU matrix offload",
+      "enrolled_lifecycle_checks": 21
+    }
+  ],
+  "source_included": false,
+  "model_weights_included": false,
+  "vllm_runtime_included": false
+}

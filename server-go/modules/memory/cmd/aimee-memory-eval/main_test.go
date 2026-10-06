@@ -58,8 +58,8 @@ func TestEvaluationSharedOwnerReplay(t *testing.T) {
 		}
 		t.Skip("set AIMEE_DB_TEST_URL to an explicit disposable PostgreSQL admin DSN")
 	}
-	t.Setenv("AIMEE_DB2_EVAL_URL", url)
-	const schema = "../../../../../src/modules/db2/c/schema.sql"
+	t.Setenv("AIMEE_KB_STORE_EVAL_URL", url)
+	const schema = "../../../../../src/modules/kb/c/schema.sql"
 	const insert = `{"stage":"data","body":{"operation":"insert-epistemic","tier":"L2","kind":"fact","key":"isolated-eval-fixture","content":"isolated-eval-fixture shared Go owner","confidence":0.9,"session_id":"corpus","epistemic_kind":"world_fact","project":"evaluation"}}` + "\n"
 	const search = `{"stage":"data","body":{"operation":"search","query":"isolated-eval-fixture","project":"evaluation","limit":10}}` + "\n"
 	const score = `{"stage":"command","command":"runtime","body":{"operation":"benchmark-score","query":"isolated-eval-fixture","project":"evaluation","expected_ids":["1"]}}` + "\n"

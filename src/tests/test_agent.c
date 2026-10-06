@@ -3943,7 +3943,7 @@ int main(void)
 
    /* Kill any aimee-kb daemon these tests autostarted under tmp_home and remove
     * the scratch home, so the daemon is not orphaned. Leaked aimee-kb daemons
-    * retry DB2 provisioning and were the source of the stuck-`createdb` runaway
+    * retry KB_STORE provisioning and were the source of the stuck-`createdb` runaway
     * (#2569); tmp_home is a unique mkdtemp path, so this targets only this
     * test's own daemon. */
    {

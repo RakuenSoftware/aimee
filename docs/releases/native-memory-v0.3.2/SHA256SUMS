@@ -1,0 +1,6 @@
+33e4c156d4d3e8e6639f87be72444a65bb41dac37bba2763c27020dab2e485a7  aimee_gemma4_12b-0.3.2-2-cp312-cp312-linux_x86_64.whl
+baf623cbd7f8270aafaae4956c106f7de672ef7ca46b2044eab391e50323f308  aimee_gemma4_26b-0.3.2-2-cp312-cp312-linux_x86_64.whl
+a3c42174676713cc8b60b8da1fd0c2f13b983a169dd03b3bdaf2241384c490f4  aimee_native_runtime-0.3.2-2-cp312-cp312-linux_x86_64.whl
+924ee4eed36db17c54b070b2b90a301f28094e6b593e2cae0c688ba868acdb3f  aimee_qwen3_8_27b-0.3.2-2-cp312-cp312-linux_x86_64.whl
+616360d726fbaf88c96ebbe9ec4a62fc69ba86cba591f1a8b609199ad5339246  vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl
+90af7a08ec15d2490ca3574a73b016dd5677beff2f0a690b9183b292dbe159f4  manifest.json

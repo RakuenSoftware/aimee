@@ -7,22 +7,39 @@ Start here:
 | install aimee | [Quickstart](QUICKSTART.md) |
 | deploy or upgrade services | [Deployment](DEPLOYMENT.md) and [upgrading](UPGRADING.md) |
 | use the CLI and browser | [Manual](../MANUAL.md) |
+| understand Server versus KB | [Server and KB](SERVER_AND_KB.md) |
 | understand the system | [Architecture](ARCHITECTURE.md) |
 | understand the new runtime spine | [Event bus](EVENT_BUS.md) |
 | configure a deployment | [Settings](SETTINGS.md) and [generated configuration](gen/configuration.md) |
 | call the API | [Public API](PUBLIC_API.md) and [generated routes](gen/api-v1.md) |
 | find a command | [Generated command reference](gen/cli-commands.md) |
 | operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), [role permissions](DELEGATE_ROLE_PERMISSIONS.md), and [workflows](WORKFLOWS.md) |
-| understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
+| understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [memory behavior](MEMORY.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
+| replace the memory engine | [Generic memory contract and Cognee](modules/memory.md#memory-backend-contract) |
+| deliver memory to a supported local model | [Native memory plugin](NATIVE_MEMORY_PLUGIN.md) |
 | understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |
-| upgrade from the last release | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
+| compare released and integration behavior | [What's new](WHATS_NEW.md) and [upgrading](UPGRADING.md) |
 | cut a release | [Releasing](RELEASING.md) |
 | write or review documentation | [Documentation voice and maintenance](WRITING.md) |
 | set budgets, rate limits, or a model catalog | [Teams, budgets, and rate limits](ORG_GOVERNANCE.md) |
 | work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
 | see where the project is going | [Roadmap](ROADMAP.md) and [proposals](PROPOSALS.md) |
+
+## Current baseline
+
+The application release being prepared is **1.0.0**. The previous published release verified on
+2026-10-04 is 0.4.6. The intended 0.3.0 release shipped
+on 2026-08-04. The [PR #3003 follow-up](validation/pr-3003-release-audit-2026-10-05.md)
+identifies the newer three-plugin candidate and its remaining release prerequisites. Integration work and open PRs can be newer than the release images; each guide
+must identify that boundary where it matters. The
+[documentation audit](validation/documentation-current-state-audit-2026-10-04.md) records the source
+checks, corrected drift and CI findings. Start with [What's new](WHATS_NEW.md) and
+[Feature status](STATUS.md), rather than reading a pending proposal as a deployment promise.
+
+Architecture figures live in `docs/images/architecture/`. Regenerate their SVGs with
+`python3 docs/images/architecture/render.py` after changing the authoring source.
 
 ## Product guides
 
@@ -64,6 +81,7 @@ Start here:
 
 ## Engineering
 
+- [Agent Memory Atlas review and improvement priorities](reviews/agent-memory-atlas-2026-09-29.md)
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
 - [Observability module](modules/observability.md)

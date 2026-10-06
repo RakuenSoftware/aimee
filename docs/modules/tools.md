@@ -28,7 +28,7 @@ claimed as ported by this first classification-stage conversion.
 `agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
 `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c`:
 server-side tool-execution session orchestration that is not module-local, the same arrangement by
-which `memory` owns its contract while DB1/DB2 implement storage. `toolset.c`, DB2 `tool_registry`,
+which `memory` owns its contract while DB1/KB_STORE implement storage. `toolset.c`, KB_STORE `tool_registry`,
 argument/schema helpers, and MCP native dispatch remain owned elsewhere and consume this module.
 
 ## Dependencies and consumers
@@ -74,7 +74,7 @@ native result envelopes, output retrieval, and diagnostics. Git operations expos
 ## Data and migrations
 
 `tool_registry` definitions, prompts, schemas, availability, provider identity, side-effect/idempotence metadata,
-toolset membership, and bounded output references span code, configuration, DB1/DB2, and runtime state.
+toolset membership, and bounded output references span code, configuration, DB1/KB_STORE, and runtime state.
 Migration must preserve canonical names, schema bytes, visibility, dispatch target, result correlation,
 and cancellation while treating raw outputs, environments, and credential values as transient.
 

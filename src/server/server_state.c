@@ -11,7 +11,7 @@
 #include "headers/module_commands.h"
 #include "module_stage_adapters.h"
 #include "dashboard.h"
-#include "render.h"                   /* decision_to_json + db2_decision_log_list */
+#include "render.h"                   /* decision_to_json + kb_store_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
 #include <aimee/audit/audit_worm.h>   /* audit_worm_verify/checkpoint — WORM audit store */
 #include "server_http_identity.h"     /* server_http_identity_query — audit pagination params */
@@ -79,7 +79,7 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* --- Graph code-projection handlers --- */
 
-/* graph.sync_code runs the code-graph projection (DB2-heavy). Synchronous, for the
+/* graph.sync_code runs the code-graph projection (KB_STORE-heavy). Synchronous, for the
  * reason spelled out on handle_index_scan: a detached-thread reply is written after
  * the op-run's loopback_rpc has already read and shut its socketpair, so it never
  * reaches the caller. Over /v1 this body runs in the async op-run worker (HTTP has
@@ -503,7 +503,7 @@ int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 
 /* optimize.promote: persist the production-default arm for a decision point via
- * the kb DB2 bandit. Request: { decision_point, arm }. */
+ * the kb KB_STORE bandit. Request: { decision_point, arm }. */
 int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1673,7 +1673,7 @@ static cJSON *parse_or_object(char *json)
 /* Recent governance decision records (decision_log via KB client), newest first. */
 static char *dashboard_decisions_json(void)
 {
-   db2_decision_log_row_t rows[50];
+   kb_store_decision_log_row_t rows[50];
    int n = kb_client_decision_log_list(NULL, 50, rows, 50);
    if (n < 0)
       n = 0;

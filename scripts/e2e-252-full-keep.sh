@@ -54,7 +54,6 @@ su postgres -c "psql -q -c 'DROP DATABASE IF EXISTS aimee_e2e_store'" 2>/dev/nul
 su postgres -c "psql -q -c \"CREATE DATABASE aimee_e2e_store ENCODING 'UTF8' TEMPLATE template0\"" 2>/dev/null
 
 export AIMEE_HOME="$HOME_DIR"
-export AIMEE_DB2_URL="$KB_URL"
 export AIMEE_STORE_URL="$STORE_URL"
 # NOT exported globally. Both daemons read it, and aimee-kb starts first: with
 # one value in the environment the KB binds the SERVER's module socket, and the
@@ -70,8 +69,8 @@ echo "== aimee-kb =="
 KB=$!
 sleep 10
 ck "aimee-kb is running" kill -0 "$KB"
-ck_gt "aimee-kb tables in DB2" "$(sqlv aimee_e2e_kb "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")" 100
-ck "pgvector is installed in DB2" sh -c "[ \"$(sqlv aimee_e2e_kb "SELECT count(*) FROM pg_extension WHERE extname='vector'")\" = 1 ]"
+ck_gt "aimee-kb tables in KB_STORE" "$(sqlv aimee_e2e_kb "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")" 100
+ck "pgvector is installed in KB_STORE" sh -c "[ \"$(sqlv aimee_e2e_kb "SELECT count(*) FROM pg_extension WHERE extname='vector'")\" = 1 ]"
 
 echo
 echo "== aimee-server =="

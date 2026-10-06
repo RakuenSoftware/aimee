@@ -24,7 +24,7 @@ pseudonymous subject digest, store/count summary, policy revision, actor, time, 
 not copy deleted content. Existing WORM rows are not altered. Legal hold suspends mutable deletion
 only for the documented scope and expiry and requires Security plus Legal approval.
 
-DB1, DB2, audit files, and backups require encryption at the volume/database layer; Vault custody
+DB1, KB_STORE, audit files, and backups require encryption at the volume/database layer; Vault custody
 does not encrypt those stores. Keys must be separate from the protected volume. Restore tests must
 prove an RPO of 24 hours and RTO of 8 hours at least quarterly; evidence records start/end time,
 snapshot identity, integrity checks, data loss, reviewer, and remediation.

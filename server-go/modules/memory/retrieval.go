@@ -129,7 +129,7 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 			return nil, err
 		}
 		item.Version.RecordID = strconv.FormatInt(item.ID, 10)
-		if !item.Version.validFor(item.ID) {
+		if !item.Version.ValidFor(item.ID) {
 			return nil, fmt.Errorf("invalid recalled memory version")
 		}
 		items = append(items, item)

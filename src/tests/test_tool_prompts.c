@@ -5,29 +5,29 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/db2.h"
+#include "modules/kb/c/kb_store.h"
 #include "db_postgres.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/db2_internal.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/kb_store_internal.h"
 
 static void setup(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
    /* Schema apply seeds the default tool_registry (bash, read_file, ...).
     * Clear it so each case sees only the rows it explicitly inserts. */
-   (void)aimee_pg_exec(db2_conn(), "DELETE FROM tool_registry", NULL, 0);
+   (void)aimee_pg_exec(kb_store_conn(), "DELETE FROM tool_registry", NULL, 0);
 }
 
 static void teardown(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* Insert a tool into tool_registry (postgres) for testing. */
 static void insert_tool(const char *name, const char *tool_prompt, int enabled)
 {
-   void *conn = db2_conn();
+   void *conn = kb_store_conn();
    assert(conn);
    const char *sql =
        tool_prompt

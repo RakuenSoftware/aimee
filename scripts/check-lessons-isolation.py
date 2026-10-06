@@ -19,16 +19,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # these means the ledger has leaked into normal recall or the prune schedule.
 GUARDED = [
     "server-go/modules/memory/data.go",            # shared scoped memory CRUD + recall
-    "server-go/modules/db2/memory_pg.go",
-    "server-go/modules/db2/memory_lifecycle.go",
-    "server-go/modules/db2/memory_sweeps.go",
-    "server-go/modules/db2/memory_aggregates.go",
     "server-go/modules/memory/fact_recall.go",
     "server-go/modules/memory/assertion_search.go",
     "server-go/modules/memory/typed_context.go",
-    "src/modules/db2/c/kb_maintenance.c",          # decay / prune sweep
+    "src/modules/kb/c/kb_maintenance.c",          # decay / prune sweep
     "server-go/modules/memory/fact_maintenance.go",
-    "src/modules/db2/c/demotion.c",
+    "src/modules/kb/c/demotion.c",
 ]
 
 # A `lessons_` token that denotes a table reference (SQL identifier), not an
@@ -52,10 +48,10 @@ def fail(msg):
 
 def main():
     # Plant-test: the guard must catch a lessons_ reference in a recall context.
-    planted = 'rc = db2_query("SELECT * FROM lessons_outcome_ledger JOIN memory_facts ...");'
+    planted = 'rc = kb_store_query("SELECT * FROM lessons_outcome_ledger JOIN memory_facts ...");'
     if not scan_text(planted):
         fail("plant-test FAILED — guard did not detect a planted lessons_ reference")
-    clean = 'rc = db2_query("SELECT * FROM memory_facts WHERE ...");'
+    clean = 'rc = kb_store_query("SELECT * FROM memory_facts WHERE ...");'
     if scan_text(clean):
         fail("plant-test FAILED — guard flagged a clean memory-fact query")
     print("check-lessons-isolation: plant-test ok")

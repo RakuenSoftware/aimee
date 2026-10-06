@@ -76,7 +76,7 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 // A correctionProposedError is a committed proposal outcome, not a failed write.
 // Only keyed corrections pay for the additional lock and receipt queries.
 func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (record Record, receipt *MemoryMutationReceipt, err error) {
-	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.ValidFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
 		return Record{}, nil, errors.New("memory: invalid idempotent correction")
 	}
 	digest, err := correctionDigest(r, authority)

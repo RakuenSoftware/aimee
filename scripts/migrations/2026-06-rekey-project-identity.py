@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Re-key the shared db2/aimee-kb index from checkout-path basenames to canonical
+"""Re-key the shared kb_store/aimee-kb index from checkout-path basenames to canonical
 repository identity.
 
-Companion migration to the code change that routes every db2 scope/index key
+Companion migration to the code change that routes every kb_store scope/index key
 through workspace_repo_identity() (canonical remote URL, e.g.
 https://github.com/owner/repo, or local:<root> for remote-less repos) instead of
 the local checkout's directory basename. Existing rows were written under the old
 basename keys and stay orphaned until re-keyed here.
 
-Tables re-keyed (all in db2 / Postgres):
+Tables re-keyed (all in kb_store / Postgres):
   - projects(name, workspace)            name basename -> identity, workspace -> org parent
   - kb_documents(project)                project basename -> identity
   - memory_scopes(scope_value)           scope_type='project'  : basename -> identity
@@ -17,7 +17,7 @@ Tables re-keyed (all in db2 / Postgres):
 
 Identity is derived from each project's stored `root` via `git -C <root> remote
 get-url origin`, normalized identically to src/util_url.c. The migration must run
-ON THE KB HOST, where the project roots exist on disk and db2 creds are present.
+ON THE KB HOST, where the project roots exist on disk and kb_store creds are present.
 
 Safety:
   * DRY-RUN BY DEFAULT — prints the planned UPDATEs and a per-project mapping.
@@ -25,13 +25,13 @@ Safety:
   * --apply runs everything in a SINGLE TRANSACTION (all-or-nothing).
   * Idempotent: a row already keyed by an identity (https://... or local:...) is
     left untouched, so re-running is safe.
-  * Take a db2 snapshot/backup and run a dry-run first. Review the mapping —
+  * Take a kb_store snapshot/backup and run a dry-run first. Review the mapping —
     especially any project whose root has no git remote (becomes local:<root>)
     or could not be resolved (skipped, reported).
 
 Usage:
-  AIMEE_DB2_URL=postgres://... python3 2026-06-rekey-project-identity.py            # dry run
-  AIMEE_DB2_URL=postgres://... python3 2026-06-rekey-project-identity.py --apply    # commit
+  AIMEE_STORE_MIGRATION_URL=postgres://... python3 2026-06-rekey-project-identity.py            # dry run
+  AIMEE_STORE_MIGRATION_URL=postgres://... python3 2026-06-rekey-project-identity.py --apply    # commit
   python3 2026-06-rekey-project-identity.py --dsn "postgres://..." [--apply]
 
 Requires psycopg2 (or psycopg). If neither is installed, falls back to emitting a
@@ -195,14 +195,14 @@ def connect(dsn):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dsn", default=os.environ.get("AIMEE_DB2_URL", ""),
-                    help="Postgres conninfo (default: $AIMEE_DB2_URL)")
+    ap.add_argument("--dsn", default=os.environ.get("AIMEE_STORE_MIGRATION_URL", ""),
+                    help="Postgres conninfo (default: $AIMEE_STORE_MIGRATION_URL)")
     ap.add_argument("--apply", action="store_true", help="commit changes (default: dry run)")
     ap.add_argument("--sql-out", default="", help="write the plan as a .sql file and exit")
     args = ap.parse_args()
 
     if not args.dsn:
-        sys.exit("error: no DSN — set AIMEE_DB2_URL or pass --dsn")
+        sys.exit("error: no DSN — set AIMEE_STORE_MIGRATION_URL or pass --dsn")
 
     driver, conn = connect(args.dsn)
     if conn is None:

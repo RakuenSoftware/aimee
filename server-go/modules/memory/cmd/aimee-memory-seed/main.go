@@ -15,7 +15,7 @@ import (
 func main() {
 	root := flag.String("root", "..", "repository root")
 	check := flag.Bool("check", false, "check generated files without writing")
-	db2 := flag.String("db2-output", "", "write only the DB2 compatibility file")
+	kbStore := flag.String("kb-store-output", "", "write only the KB_STORE compatibility file")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
@@ -25,20 +25,20 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	if *db2 != "" {
-		if err = os.WriteFile(*db2, []byte(artifacts["db2"]), 0644); err != nil {
+	if *kbStore != "" {
+		if err = os.WriteFile(*kbStore, []byte(artifacts["kb_store"]), 0644); err != nil {
 			fail(err)
 		}
 		return
 	}
 	outputs := map[string]string{
 		"server-go/modules/memory/testdata/ontology_seed.tsv": artifacts["tsv"],
-		"src/modules/db2/support/rel_seed_primitives.c":       artifacts["db2"],
+		"src/modules/kb/support/rel_seed_primitives.c":        artifacts["kb_store"],
 	}
 	for _, item := range []struct{ path, start, end, key string }{
 		{"src/rel_types.c", "/* BEGIN GO MEMORY ONTOLOGY SEED */", "/* END GO MEMORY ONTOLOGY SEED */", "native"},
-		{"src/modules/db2/c/schema.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
-		{"src/modules/db2/c/schema_sqlite.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
+		{"src/modules/kb/c/schema.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
+		{"src/modules/kb/c/schema_sqlite.sql", "-- BEGIN GO MEMORY ONTOLOGY SEED", "-- END GO MEMORY ONTOLOGY SEED", "sql"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(*root, item.path))
 		if err != nil {

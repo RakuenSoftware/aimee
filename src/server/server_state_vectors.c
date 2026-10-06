@@ -1,3 +1,4 @@
+#include "module_stage_adapters.h"
 /* server_state_vectors.c: the two vector-maintenance relays.
  *
  * Its own translation unit because server_state.c sits at the 2500-line ceiling
@@ -172,7 +173,7 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_Delete(begin);
       char msg[192];
-      snprintf(msg, sizeof(msg), "DB2 erasure failed; retry request_id=%s", request_id);
+      snprintf(msg, sizeof(msg), "KB_STORE erasure failed; retry request_id=%s", request_id);
       return server_send_error(conn, msg, NULL);
    }
 
@@ -215,6 +216,14 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_Delete(begin);
    begin = replayed;
    kb_cache_invalidate_all();
+   if (server_module_memory_reset_derived() != 0)
+   {
+      cJSON_Delete(begin);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "private derived memory cleanup failed; retry request_id=%s",
+               request_id);
+      return server_send_error(conn, msg, NULL);
+   }
    char *complete_json = kb_client_subject_erasure_complete(request_id, db1_count, &status);
    cJSON *complete = complete_json ? cJSON_Parse(complete_json) : NULL;
    free(complete_json);

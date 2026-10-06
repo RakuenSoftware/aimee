@@ -50,7 +50,7 @@ class Stack:
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
-        # Direct users, including the legacy upgrade gate, need the same cap
+        # Direct users, including the KB recreation gate, need the same cap
         # as topology runs. Preserve an explicit operator ceiling.
         if not self.env.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
             self.env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=65536))
@@ -1269,7 +1269,7 @@ def main():
             command('docker', 'restart', kb.application)
             kb.start()
             code, body = kb.kb_request('/v1/health')
-            check('KB boots with standardized PostgreSQL and local embedding', code == 200 and body.get('db2_ok') is True)
+            check('KB boots with standardized PostgreSQL and local embedding', code == 200 and body.get('postgres_ok') is True)
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')

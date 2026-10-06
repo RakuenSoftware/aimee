@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 #include "../kb_reasoning.h"
 #include "config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -37,13 +37,13 @@ static void isolate_home(void)
 
 static void open_db(void)
 {
-   db2_test_shim_close();
-   db2_test_shim_open();
+   kb_store_test_shim_close();
+   kb_store_test_shim_open();
 }
 
 static void close_db(void)
 {
-   db2_test_shim_close();
+   kb_store_test_shim_close();
 }
 
 /* ---- 1. reasoning_case_write ---- */

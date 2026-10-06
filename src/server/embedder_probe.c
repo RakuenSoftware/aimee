@@ -1,8 +1,8 @@
 #include "module_commands.h"
 #include "json_fluent.h"
 /* embedder_probe.c -- §2b kb-side embedder /health dim probe. Registered with the
- * db2 layer so db2_init can derive a fresh DB's embedding dim from the running
- * embedder without db2 learning the embed transport (db2 stays config-free). */
+ * kb_store layer so kb_store_init can derive a fresh DB's embedding dim from the running
+ * embedder without kb_store learning the embed transport (kb_store stays config-free). */
 #include "embedder_probe.h"
 
 #include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
@@ -41,7 +41,7 @@ static int probe_once(void)
    return dim > 0 ? dim : -1;
 }
 
-/* db2_embedder_probe_fn: poll the embedder until two CONSECUTIVE reads agree on a
+/* kb_store_embedder_probe_fn: poll the embedder until two CONSECUTIVE reads agree on a
  * positive dim (guards a flapping load), or budget_ms elapses. ~2s between reads;
  * a mismatch or not-ready resets the streak and keeps polling within budget. */
 static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t errlen)
@@ -77,7 +77,7 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
    }
 }
 
-/* db2_embedder_serving_probe_fn: ask the endpoint which VECTOR SPACE it serves.
+/* kb_store_embedder_serving_probe_fn: ask the endpoint which VECTOR SPACE it serves.
  *
  * POLLS, because the in-container embedder is a sibling process the entrypoint starts
  * beside the kb: it is reliably not serving yet when the kb boots, and a one-shot probe
@@ -86,7 +86,7 @@ static int embedder_probe_run(int *out_dim, int budget_ms, char *err, size_t err
  * identity returns empty immediately (a legacy embedder, guard stays inactive by design,
  * and retrying that would just delay every such boot).
  *
- * The budget is modest on purpose. db2_init calls this after the dim probe has already
+ * The budget is modest on purpose. kb_store_init calls this after the dim probe has already
  * waited for readiness, so in practice the first read succeeds; the window only covers a
  * restart where no dim probe runs because the dim is already recorded. Exhausting it
  * leaves the guard inactive for this start rather than holding the kb down. */
@@ -114,9 +114,10 @@ static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_
       if (ready)
       {
          if (out[0])
-            LOG_INFO("db2", "embedder serving identity: %s", out);
+            LOG_INFO("kb_store", "embedder serving identity: %s", out);
          else
-            LOG_INFO("db2", "embedder reports no serving identity; vector-space guard inactive");
+            LOG_INFO("kb_store",
+                     "embedder reports no serving identity; vector-space guard inactive");
          return 0;
       }
       if ((int)(probe_mono_ms() - start) >= SERVING_PROBE_BUDGET_MS)
@@ -135,12 +136,12 @@ void embedder_probe_register(const char *embed_command)
 {
    if (!embed_command || !embed_command[0])
    {
-      LOG_WARN("db2", "embedder dim probe: no embed command configured; §2b probe disabled");
+      LOG_WARN("kb_store", "embedder dim probe: no embed command configured; §2b probe disabled");
       return;
    }
    snprintf(g_embed_cmd, sizeof(g_embed_cmd), "%s", embed_command);
 
-   /* Registered, not called: the identity is fetched inside db2_init, once the embedder
+   /* Registered, not called: the identity is fetched inside kb_store_init, once the embedder
     * has had the dim probe's patience applied to it. Both probes register for whatever
     * embedder is configured — the module that knows what each probe requires owns the
     * decision, not its caller.
@@ -149,24 +150,24 @@ void embedder_probe_register(const char *embed_command)
     * was configured. It is gone: an unconfigured kb now refuses to start rather than
     * answering searches with keyword matching and claiming the corpus's vector space
     * while it does so. */
-   db2_set_embedder_serving_probe(embedder_probe_serving_id);
+   kb_store_set_embedder_serving_probe(embedder_probe_serving_id);
 
    const char *env = getenv("AIMEE_DIM_PROBE_BUDGET_MS");
    if (env && env[0])
    {
       int ms = (int)strtol(env, NULL, 10);
       if (ms > 0)
-         db2_set_dim_probe_budget_ms(ms);
+         kb_store_set_dim_probe_budget_ms(ms);
    }
-   db2_set_embedder_probe(embedder_probe_run);
+   kb_store_set_embedder_probe(embedder_probe_run);
 }
 
 void embedder_probe_unregister(void)
 {
-   db2_set_embedder_probe(NULL);
+   kb_store_set_embedder_probe(NULL);
    /* Both seams point at this translation unit's statics, so both have to go before
-    * db2_shutdown — leaving one registered would hand db2 a callback over a cleared
+    * kb_store_shutdown — leaving one registered would hand kb_store a callback over a cleared
     * g_embed_cmd. */
-   db2_set_embedder_serving_probe(NULL);
+   kb_store_set_embedder_serving_probe(NULL);
    g_embed_cmd[0] = '\0';
 }

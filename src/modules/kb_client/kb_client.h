@@ -2,10 +2,10 @@
 #define DEC_KB_CLIENT_H 1
 
 #include "anti_patterns.h" /* anti_pattern_t */
-#include "decision_log.h"  /* db2_decision_log_row_t */
+#include "decision_log.h"  /* kb_store_decision_log_row_t */
 #include "index.h"         /* project_info_t, term_hit_t, blast_radius_t */
 #include "memory.h"        /* memory_t, edge_t */
-#include "memory_query.h"  /* db2_memory_low_eff_row_t etc. */
+#include "memory_query.h"  /* kb_store_memory_low_eff_row_t etc. */
 #include "rules.h"         /* rule_t */
 #include "tasks.h"         /* aimee_task_t */
 #include "kb_paths.h"      /* kb_client_default_*_path */
@@ -18,9 +18,9 @@ typedef struct
 {
    int process_ok;          /* aimee-kb is running and responsive */
    char version[128];       /* /v1/version, empty when an older kb omits it */
-   int db2_ok;              /* DB2 schema present */
-   int db2_kb_tables_ok;    /* kb_documents + kb_async_jobs present */
-   int pgvec_ok;            /* pgvector extension loaded in DB2 */
+   int postgres_ok;         /* KB_STORE schema present */
+   int knowledge_tables_ok; /* kb_documents + kb_async_jobs present */
+   int pgvec_ok;            /* pgvector extension loaded in KB_STORE */
    int pgvec_collection_ok; /* kb_chunks vector table present */
    int pgvec_vectors;       /* vector row count */
    int pgvec_indexed;       /* indexed vector count */
@@ -261,7 +261,7 @@ char *kb_client_job_status_json(int64_t job_id);
 char *kb_client_queue_drain_json(const char *embedding_command, int timeout_secs);
 char *kb_client_corpus_pipeline_drain_json(int limit);
 
-/* Reconcile vector points against the DB2 source of truth: prune
+/* Reconcile vector points against the KB_STORE source of truth: prune
  * points whose memory/kb_document rows no longer exist. Calls the public
  * /v1/maintenance/reconcile endpoint with {dry_run} and returns the
  * heap-allocated JSON
@@ -322,10 +322,10 @@ char *kb_client_note_create_json(const char *title, const char *content, const c
 char *kb_client_note_list_json(const char *tag, int limit);
 char *kb_client_note_search_json(const char *query, int limit);
 
-/* Spec-driven roadmap RPCs via the aimee-kb sidecar (DB2 artifacts). Each
+/* Spec-driven roadmap RPCs via the aimee-kb sidecar (KB_STORE artifacts). Each
  * returns the heap-allocated JSON response string (caller frees), or NULL on a
- * transport failure. Roadmap data lives in DB2, owned by aimee-kb; the CLI and
- * server route every roadmap op through these wrappers and never touch DB2
+ * transport failure. Roadmap data lives in KB_STORE, owned by aimee-kb; the CLI and
+ * server route every roadmap op through these wrappers and never touch KB_STORE
  * directly. Defined in src/modules/kb_client/kb_client_roadmap.c. */
 /* Sends `roadmap.create_from_decomposition` with {decomposition} (the JSON
  * decomposition document). Response: {"status":"ok","roadmap_id":"..."}. */
@@ -355,35 +355,35 @@ char *kb_client_rules_generate_json(void);
 /* Convenience: extract the markdown body from rules.generate's
  * envelope.  Returns a heap-allocated string (caller frees) or NULL
  * if kb is unreachable / no rules configured.  Mirrors
- * db2_rules_generate(). */
+ * kb_store_rules_generate(). */
 char *kb_client_rules_generate(void);
 
 /* List rules via aimee-kb into a rule_t buffer.  Mirrors
- * db2_rules_list() in shape so daemon-side / CLI-fork callers can
+ * kb_store_rules_list() in shape so daemon-side / CLI-fork callers can
  * swap the direct call for this RPC without changing downstream
  * code.  Returns the number of rows written into |out| (0 if kb is
  * unreachable). */
 int kb_client_rules_list(rule_t *out, int max_rules);
 
-/* Propose a collaborative rule via aimee-kb (the DB2 owner).  Returns
+/* Propose a collaborative rule via aimee-kb (the KB_STORE owner).  Returns
  * the new rule id (>=0) or -1 if kb is unreachable / proposal
- * rejected.  Mirrors db2_collab_rules_propose(). */
+ * rejected.  Mirrors kb_store_collab_rules_propose(). */
 int kb_client_collab_rules_propose(const char *text, const char *reason, const char *proposed_by);
 
 /* List collaborative-rule proposals via aimee-kb.  Returns a heap-
  * allocated JSON array string (caller frees) or NULL if kb is
- * unreachable.  Same shape as db2_collab_rules_json_all(). */
+ * unreachable.  Same shape as kb_store_collab_rules_json_all(). */
 char *kb_client_collab_rules_list_json(void);
 
 /* List active collab rules + epoch via aimee-kb.  Returns a heap-
  * allocated JSON object string (caller frees) of shape
  * {"epoch":N,"rules":[...]} or NULL if kb is unreachable.  Mirrors
- * db2_collab_rules_json_active(). */
+ * kb_store_collab_rules_json_active(). */
 char *kb_client_collab_rules_list_active_json(void);
 
 /* Approve / reject / retire a collab rule by id via aimee-kb.  Return 0
  * on success, -1 if kb is unreachable or the action failed.  Mirror
- * db2_collab_rules_approve / _reject / _retire. */
+ * kb_store_collab_rules_approve / _reject / _retire. */
 int kb_client_collab_rules_approve(int rule_id);
 int kb_client_collab_rules_reject(int rule_id);
 int kb_client_collab_rules_retire(int rule_id);
@@ -391,7 +391,7 @@ int kb_client_collab_rules_retire(int rule_id);
 /* Render the collab-rules system-prompt section via aimee-kb.  Returns
  * a heap-allocated string (caller frees) or NULL when the agent epoch
  * matches and nothing needs reinjecting, or kb is unreachable.
- * Mirrors db2_collab_rules_inject(). */
+ * Mirrors kb_store_collab_rules_inject(). */
 
 struct cJSON;
 
@@ -402,7 +402,7 @@ struct cJSON;
 char *kb_client_learning_propose_signal_json(const struct cJSON *args);
 
 /* Record a per-agent run outcome via aimee-kb.  Mirrors
- * db2_agent_outcome_record().  Returns 0 on success, -1 if kb is
+ * kb_store_agent_outcome_record().  Returns 0 on success, -1 if kb is
  * unreachable. */
 int kb_client_agent_outcome_record(const char *agent_name, const char *role,
                                    const char *outcome_kind, const char *reason, int turns_used,
@@ -412,35 +412,35 @@ int kb_client_agent_outcome_record(const char *agent_name, const char *role,
 /* Find-and-consume the highest-priority queued hint for (role, prompt)
  * via aimee-kb.  Returns a heap-allocated string (caller frees) or
  * NULL if no hint matches / kb is unreachable.  Mirrors
- * db2_agent_hint_find_and_consume(). */
+ * kb_store_agent_hint_find_and_consume(). */
 char *kb_client_agent_hint_consume(const char *role, const char *prompt);
 
 /* Run the anti-pattern maintenance routines from memory_advanced.c
- * inside aimee-kb (the DB2 owner).  Each returns the count of
+ * inside aimee-kb (the KB_STORE owner).  Each returns the count of
  * entries acted on, or -1 if kb is unreachable. */
 int kb_client_anti_pattern_extract_from_feedback(void);
 int kb_client_anti_pattern_extract_from_failures(void);
 int kb_client_anti_pattern_escalate(int hit_threshold);
 
-/* Session-wrapup maintenance routines that touch DB2 — wrapped on
+/* Session-wrapup maintenance routines that touch KB_STORE — wrapped on
  * the kb side so daemon and CLI-fork callers actually execute them.
  * Each returns the count of rows adjusted/generated/decayed, or -1
  * if kb is unreachable.
  *
  * eval_feedback_loop is intentionally NOT in this set: it combines DB1
- * eval-task inputs with DB2 rule-weight writes and must be split across
+ * eval-task inputs with KB_STORE rule-weight writes and must be split across
  * the server/kb boundary before it can become a pure kb RPC. */
 int kb_client_rules_decay(void);
 int kb_client_memory_learn_style(void);
 
-/* Decision-log + anti-pattern CRUD via aimee-kb (the DB2 owner).
- * Each mirrors the local db2_* signature; row-out variants populate
+/* Decision-log + anti-pattern CRUD via aimee-kb (the KB_STORE owner).
+ * Each mirrors the local kb_store_* signature; row-out variants populate
  * |out| if non-NULL.  Reads return number of rows written; writes
  * return 0 on success, -1 on failure / kb-unreachable. */
 int kb_client_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
                                   const char *rationale, const char *assumptions,
-                                  db2_decision_log_row_t *out);
-int kb_client_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t *out,
+                                  kb_store_decision_log_row_t *out);
+int kb_client_decision_log_list(const char *outcome, int limit, kb_store_decision_log_row_t *out,
                                 int max);
 int kb_client_anti_pattern_list(anti_pattern_t *out, int max);
 int kb_client_anti_pattern_insert(const char *pattern, const char *description, const char *source,
@@ -449,17 +449,17 @@ int kb_client_anti_pattern_delete(int64_t id);
 
 /* Match (file_path, command) against stored anti-patterns via
  * aimee-kb.  Returns the number of rows written into |out| (0 if
- * kb is unreachable / no match).  Mirrors db2_anti_pattern_check(). */
+ * kb is unreachable / no match).  Mirrors kb_store_anti_pattern_check(). */
 int kb_client_anti_pattern_check(const char *file_path, const char *command, anti_pattern_t *out,
                                  int max);
 
 /* Increment the lifetime hit_count for an anti-pattern via
  * aimee-kb.  Returns 0 on success, -1 if kb is unreachable.  Mirrors
- * db2_anti_pattern_bump(). */
+ * kb_store_anti_pattern_bump(). */
 int kb_client_anti_pattern_bump(int64_t id);
 
-/* Rules + feedback CRUD via aimee-kb (the DB2 owner).  Mirrors the
- * local db2_* signatures.  rules.delete / update_directive_type
+/* Rules + feedback CRUD via aimee-kb (the KB_STORE owner).  Mirrors the
+ * local kb_store_* signatures.  rules.delete / update_directive_type
  * return 0 on success, -1 on failure; feedback.record returns the
  * new row id (>=0) or -1.  reinforced_out (optional) is set to 1
  * iff the row was an existing reinforcement rather than a fresh
@@ -469,7 +469,7 @@ int kb_client_rules_update_directive_type(int id, const char *directive_type);
 int kb_client_feedback_record(const char *polarity, const char *title, const char *description,
                               int weight, int *reinforced_out);
 
-/* Session-wrapup maintenance routines that also touch DB2 — wrapped
+/* Session-wrapup maintenance routines that also touch KB_STORE — wrapped
  * on the kb side.  expire_session_directives returns 0 on success
  * / -1 on kb-unreachable; scan_conversations returns the # of items
  * processed (-1 on failure). */
@@ -477,12 +477,12 @@ int kb_client_directive_expire_session(void);
 int kb_client_memory_scan_conversations(char dirs[][4096], int dir_count);
 
 /* Cross-tier maintenance is not a kb-only RPC. Server-side ports must
- * perform DB1 reads inside aimee-server and send only DB2 writes or
+ * perform DB1 reads inside aimee-server and send only KB_STORE writes or
  * lookups through kb_client/aimee-kb. Do not add an external process between
  * the two DB-owning daemons. */
 
 /* Dashboard endpoints whose body is composed inside aimee-kb (which
- * has DB2 open).  Each returns the raw JSON body that the equivalent
+ * has KB_STORE open).  Each returns the raw JSON body that the equivalent
  * api_* function would have produced (caller frees), or NULL if kb
  * is unreachable. */
 char *kb_client_dashboard_memory_stats_json(void);
@@ -568,13 +568,13 @@ char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
 int kb_client_rules_export_jsonl(const char *path);
 
 /* Insert a rule via aimee-kb.  Returns 0 on success, -1 on failure /
- * kb unreachable.  Mirrors db2_rules_insert(). */
+ * kb unreachable.  Mirrors kb_store_rules_insert(). */
 int kb_client_rules_insert(const char *polarity, const char *title, const char *description,
                            int weight);
 
 /* Look up a single tool registry entry via aimee-kb.  Returns 0 on
  * success (out_found set to 0/1), -1 on failure / kb unreachable.
- * Mirrors db2_tool_registry_lookup(). */
+ * Mirrors kb_store_tool_registry_lookup(). */
 int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, size_t schema_cap,
                                    char *out_side_effect, size_t se_cap, int *out_enabled,
                                    int *out_found);
@@ -629,7 +629,7 @@ int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
 int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
                                kb_valid_at_t *verdict);
 
-/* Insert a memory row via aimee-kb (the DB2 owner).  The full
+/* Insert a memory row via aimee-kb (the KB_STORE owner).  The full
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on
  * success (|out| filled if non-NULL) or -1 if kb is unreachable or
  * the gate rejected the write.  Mirrors memory_insert(). */
@@ -668,18 +668,18 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
 
 /* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
  * row matches or kb is unreachable; the row id otherwise.  Mirrors
- * db2_memory_find_id_by_key_kind(). */
+ * kb_store_memory_find_id_by_key_kind(). */
 int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
 
 /* Supersede an existing memory with a new content via aimee-kb (the
- * DB2 owner).  The kb side runs the full version-bump + provenance +
+ * KB_STORE owner).  The kb side runs the full version-bump + provenance +
  * link pipeline.  Returns 0 on success (out filled if non-NULL) or
  * -1 if kb is unreachable / supersede failed.  Mirrors
  * the shared Go replacement command. */
 
 /* Set the artifact_type / artifact_ref / artifact_hash columns on a
  * memory row via aimee-kb.  Returns 0 on success, -1 on failure /
- * missing row.  Mirrors db2_memory_set_artifact(). */
+ * missing row.  Mirrors kb_store_memory_set_artifact(). */
 
 /* Session-scope priority memory listings via aimee-kb.  Used by the
  * session-start prompt builder to populate # Project / # Workspace /
@@ -696,10 +696,10 @@ int kb_client_memory_check_drift(int64_t task_id, const char *file_path, const c
 
 /* Search facts/patterns by free-text keyword via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
- * Mirrors db2_memory_search_facts_patterns_by_keyword(). */
+ * Mirrors kb_store_memory_search_facts_patterns_by_keyword(). */
 
-/* Task CRUD via aimee-kb (the DB2 owner).  Each mirrors the local
- * db2_task_* signature.  See db2/tasks.h for aimee_task_t /
+/* Task CRUD via aimee-kb (the KB_STORE owner).  Each mirrors the local
+ * kb_store_task_* signature.  See kb_store/tasks.h for aimee_task_t /
  * task_edge_t. */
 int kb_client_task_list(const char *state, const char *session_id, int limit, aimee_task_t *out,
                         int max);
@@ -715,7 +715,7 @@ int kb_client_task_get_edges(int64_t task_id, task_edge_t *out, int max);
  * surfaced into the turn. `role` is the recall op (e.g. "Recall"),
  * `query_fingerprint` identifies the turn query. Returns 0 on success (event
  * written), -1 on bad args or kb error. The KB write uses the already-merged
- * db2_demotion_retrieval_event_write_turn (first-wins on duplicate turn_id). */
+ * kb_store_demotion_retrieval_event_write_turn (first-wins on duplicate turn_id). */
 int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
                                             const char *query_fingerprint, const int64_t *ids,
                                             int n_ids);
@@ -777,7 +777,7 @@ char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int time
 char *kb_client_learning_list_proposals_json(const char *state, const char *sink, int limit);
 
 /* The endogeneity gate, answered by the knowledge service because the ledger it
- * reads is DB2 and the daemon builds without it. Returns the response JSON (the
+ * reads is KB_STORE and the daemon builds without it. Returns the response JSON (the
  * caller frees), or NULL when the service is unreachable — which is NOT the same
  * as a closed gate, and callers must not conflate them. */
 char *kb_client_learning_endogeneity_json(int window_days);
@@ -788,7 +788,7 @@ char *kb_client_learning_endogeneity_json(int window_days);
 char *kb_client_learning_fate_json(int id, const char *fate, const char *reason);
 
 /* Drain the curiosity backlog (S4). Served by the knowledge service: the
- * backlog is DB2 and the evidence probe needs the corpus, neither of which
+ * backlog is KB_STORE and the evidence probe needs the corpus, neither of which
  * the daemon has. */
 char *kb_client_learning_resolve_json(int budget);
 
@@ -826,7 +826,7 @@ char *kb_client_bandit_export_json(void);
  * `result_json` must be a JSON object string (the replay-tool result). */
 char *kb_client_bandit_replay_record_json(const char *decision_point, const char *result_json);
 
-/* Server-side decision points reach the kb DB2 bandit through these. sample
+/* Server-side decision points reach the kb KB_STORE bandit through these. sample
  * selects+logs an arm (returns 0 + fills arm_out/decision_id_out, or -1 when
  * disabled/transport-failed); close records the reward [0,1] (best-effort). */
 int kb_client_bandit_sample(const char *decision_point, const char *const *arms, int n_arms,
@@ -853,9 +853,9 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
  * `memory.verify` with {detail, timings, embedding_command} and returns the
  * heap-allocated JSON response (caller frees).  The response shape contains:
  *   server_version, active_embedder_version, embedder{dim},
- *   memory{collection, collection_exists, db2_memories, db2_units, vector_points,
+ *   memory{collection, collection_exists, kb_store_memories, kb_store_units, vector_points,
  *          indexed_fields},
- *   kb{collection, collection_exists, db2_chunks, vector_points, indexed_fields},
+ *   kb{collection, collection_exists, kb_store_chunks, vector_points, indexed_fields},
  *   index_ops{ok, pending, failed, stuck},
  *   failed_ops[] (when detail=1), timings{trials,total_us,max_us} (when
  *   timings=1).  On any failure {"status":"error","message":"..."}. */

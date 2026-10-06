@@ -8,7 +8,7 @@ describe('single-user readiness', () => {
     expect(r.ready).toBe(true);
     expect(stepsRemaining(r)).toBe(0);
     expect(r.steps).not.toHaveProperty('knowledge_base');
-    expect(r.steps).not.toHaveProperty('db2');
+    expect(r.steps).not.toHaveProperty('kb_store');
   });
   it('connecting to a KB never supplies local embedding', () => {
     const cfg = { provider: 'claude', kb_mode: 'remote', kb_client_url: 'https://kb.example' };

@@ -1,6 +1,10 @@
 package memory
 
-import "strings"
+import (
+	"strings"
+
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
+)
 
 // Pattern-first fact extraction and the retraction scan, ported from
 // src/modules/memory/memory_extract_patterns.c.
@@ -27,7 +31,7 @@ const (
 	ValueDate  ValueKind = 5
 )
 
-// The bounds the production caller (db2_fact_ingest_text / db2_typed_fact_ingress)
+// The bounds the production caller (kb_store_fact_ingest_text / kb_store_typed_fact_ingress)
 // gives the C, reproduced because they are visible in the output: an attribute or
 // value longer than its buffer comes back truncated, and a truncated attribute
 // normalizes to a different relation name. Whatever a module returns has to match
@@ -37,15 +41,7 @@ const (
 	valueMax = 128
 )
 
-// Triple is a candidate fact found before the model. RelType is a normalized
-// guess; the gate still decides whether it is written and how.
-type Triple struct {
-	Subject     string
-	RelType     string
-	Object      string
-	SubjectKind NodeKind
-	ObjectKind  NodeKind
-}
+type Triple = memorycontract.Triple
 
 func isSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'

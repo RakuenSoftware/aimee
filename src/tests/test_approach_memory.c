@@ -13,12 +13,12 @@
 #include <string.h>
 
 #include "db1.h"
-#include "modules/db2/c/anti_patterns.h"
+#include "modules/kb/c/anti_patterns.h"
 #include "approach_failures.h"
 #include "approach_store.h"
 #include "support/store_module_fixture.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 
 #include <aimee/learning/approach_memory.h>
 
@@ -235,16 +235,16 @@ static void test_never_touches_the_blocking_path(void)
     * table's hot rows drive a path that REFUSES work, and a fuzzy goal match
     * has no business there. */
    anti_pattern_t rows[8];
-   assert(db2_anti_pattern_list(rows, 8) == 0);
-   assert(db2_anti_pattern_check("docs/index.md", "drop and re-ingest every document", rows, 8) ==
-          0);
+   assert(kb_store_anti_pattern_list(rows, 8) == 0);
+   assert(kb_store_anti_pattern_check("docs/index.md", "drop and re-ingest every document", rows,
+                                      8) == 0);
 }
 
 /* An installation with no knowledge service has never recorded a dead end. The
  * honest answer to "what have we already tried?" is "nothing" — not an error,
  * which would make plan-time recall look broken on every such install.
  *
- * Two shapes reach this: a build with DB2 compiled out (the daemon's own), and
+ * Two shapes reach this: a build with KB_STORE compiled out (the daemon's own), and
  * a build with the store present but unreachable. The second is what this
  * closes the shim to reproduce; the first is asserted by the same code path
  * returning 0 rather than -1. */
@@ -272,7 +272,7 @@ int main(void)
 
    if (store_module_fixture_available())
       store_module_fixture_start();
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    test_tokenisation();
    test_signature_follows_meaning_not_spelling();

@@ -277,3 +277,13 @@ f7cd3721725d5226a990e2edaf0f5d8ab486add7:docs/validation/memory-mr04-final-evide
 f7cd3721725d5226a990e2edaf0f5d8ab486add7:docs/validation/memory-mr04-final-evidence-2026-09-25/T2/shared-memory.json:generic-api-key:674
 f7cd3721725d5226a990e2edaf0f5d8ab486add7:docs/validation/memory-mr04-final-evidence-2026-09-25/T3/local-memory.json:generic-api-key:92
 f837d02463a380c0d9fa2b5ed72ae1b2d814ec3f:docs/validation/memory-rule-expiry-2026-09-23/fresh/T3/local-memory.json:generic-api-key:76
+
+# Reviewed public OpenAPI input checksum in the memory ownership ledger, not a credential.
+f353b487b8a629a7f04d9422ff1e553df84e5a4d:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
+c23958b53565bb2011e23a2eabf201e301f10c55:tests/baselines/modules/memory-ownership.json:generic-api-key:2598
+# Reviewed public SHA-256 of the native-primitive OpenAPI input, not an API credential.
+53add717e77f0f80dfea610252a5814494772eba:tests/baselines/modules/memory-ownership.json:generic-api-key:2651
+
+# Reviewed disposable memory-placement fixture record key in historical raw evidence.
+# Current public evidence contains only named verdicts; this is not an API credential.
+2cb974d5ee6715399fac7a8ac9d3cd51bd1e56fb:docs/validation/egress-vault-repair-2026-10-05/published-native-T3.json:generic-api-key:7833

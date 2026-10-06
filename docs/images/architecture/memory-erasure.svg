@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="440" viewBox="0 0 1240 440" role="img" aria-labelledby="title desc"><title id="title">Erasure completes only after the selected memory owner is clean</title><desc id="desc">The existing subject-erasure workflow records canonical erasure, completes receipt replay, invokes provider cleanup and acknowledges verified completion. Failed cleanup uses the existing journal and request ID. Startup resets restored derived state before readiness.</desc><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#52657a"/></marker></defs><rect width="100%" height="100%" fill="#ffffff"/><style>text{font-family:DejaVu Sans,Arial,sans-serif;fill:#172b40}.title{font-size:23px;font-weight:700}.label{font-size:17px;font-weight:600}.body{font-size:15px}.edge{font-size:14px;fill:#394d62}</style>
+<text class="title" x="620.0" y="32" text-anchor="middle">Erasure completes only after the selected memory owner is clean</text>
+<rect x="20" y="100" width="230" height="125" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="135.0" y="128" text-anchor="middle">Existing erasure request</text>
+<text class="body" x="135.0" y="154" text-anchor="middle">Authenticated subject</text>
+<text class="body" x="135.0" y="177" text-anchor="middle">Stable request ID / journal</text>
+<style>.label{font-size:15px}</style>
+<rect x="340" y="100" width="250" height="125" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="465.0" y="128" text-anchor="middle">Canonical erasure + replay</text>
+<text class="body" x="465.0" y="154" text-anchor="middle">Existing owners / transactions</text>
+<text class="body" x="465.0" y="177" text-anchor="middle">Existing request journal</text>
+<text class="body" x="465.0" y="200" text-anchor="middle">Retained other sources survive</text>
+<rect x="680" y="100" width="240" height="125" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="800.0" y="128" text-anchor="middle">Clean derived provider state</text>
+<text class="body" x="800.0" y="154" text-anchor="middle">Native: no external state</text>
+<text class="body" x="800.0" y="177" text-anchor="middle">Cognee: reset node namespace</text>
+<text class="body" x="800.0" y="200" text-anchor="middle">Verify managed live absence</text>
+<rect x="1010" y="100" width="210" height="125" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="1115.0" y="128" text-anchor="middle">Completion coverage</text>
+<text class="body" x="1115.0" y="154" text-anchor="middle">Acknowledge only success</text>
+<text class="body" x="1115.0" y="177" text-anchor="middle">Repeat is idempotent</text>
+<polyline points="250,155 340,155" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="590,155 680,155" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="920,155 1010,155" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="800,225 800,280 135,280 135,225" fill="none" stroke="#52657a" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
+<text class="edge" x="490" y="310" text-anchor="middle">cleanup failure: same request retries, no completed coverage</text>
+<rect x="270" y="345" width="710" height="70" rx="10" fill="#edf4fa" stroke="#9ab0c5" stroke-width="1.5"/>
+<text class="label" x="625.0" y="373" text-anchor="middle">Memory startup / restore</text>
+<text class="body" x="625.0" y="399" text-anchor="middle">Canonical replay → selected provider reset → readiness</text>
+</svg>

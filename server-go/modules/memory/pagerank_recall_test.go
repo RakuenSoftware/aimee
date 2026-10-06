@@ -165,7 +165,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	for _, r := range got.Records {
 		if r.ID == ids["neighbor"] {
 			found = true
-			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != "unrelated payload" {
+			if !r.Version.ValidFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != "unrelated payload" {
 				t.Fatalf("unversioned neighbor: %+v", r)
 			}
 		}
@@ -186,7 +186,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	for _, r := range revised.Records {
 		if r.ID == ids["neighbor"] {
 			found = true
-			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "2" || r.Content != "revised unrelated payload" {
+			if !r.Version.ValidFor(r.ID) || r.Version.RecordRevision != "2" || r.Content != "revised unrelated payload" {
 				t.Fatalf("neighbor correction snapshot: %+v", r)
 			}
 		}

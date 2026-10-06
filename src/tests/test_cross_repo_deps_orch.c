@@ -6,18 +6,18 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "../modules/db2/c/cross_repo_deps.h"
-#include "../modules/db2/c/cross_repo_identity.h"
-#include "../modules/db2/c/cross_repo_review.h"
-#include "../modules/db2/c/cross_repo_route.h"
-#include "../modules/db2/c/db2.h"
-#include "../modules/db2/c/db_postgres.h"
+#include "modules/kb/c/kb_store_test_shim.h"
+#include "../modules/kb/c/cross_repo_deps.h"
+#include "../modules/kb/c/cross_repo_identity.h"
+#include "../modules/kb/c/cross_repo_review.h"
+#include "../modules/kb/c/cross_repo_route.h"
+#include "../modules/kb/c/kb_store.h"
+#include "../modules/kb/c/db_postgres.h"
 
 static void X(const char *sql)
 {
    char err[256] = "";
-   int rc = aimee_pg_exec(db2_conn(), sql, err, sizeof(err));
+   int rc = aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err));
    if (rc != 0)
       fprintf(stderr, "seed failed: %s\n  sql: %s\n", err, sql);
    assert(rc == 0);
@@ -202,7 +202,7 @@ static void test_ambiguous_to_review(void)
 
    /* but it WAS surfaced to the review queue (route-backed ambiguity). */
    xrepo_review_row_t rows[16];
-   int rn = db2_cross_repo_review_list("moonlight-qt", "open", rows, 16, NULL);
+   int rn = kb_store_cross_repo_review_list("moonlight-qt", "open", rows, 16, NULL);
    int found = 0;
    for (int i = 0; i < rn; i++)
       if (strcmp(rows[i].symbol, "AmbiguousThing") == 0)
@@ -306,7 +306,7 @@ static void test_structural_edge_gate(void)
    printf("ok\n");
 }
 
-/* Cold-start end-to-end: the curator drain's rebuild path (db2_cross_repo_rebuild_
+/* Cold-start end-to-end: the curator drain's rebuild path (kb_store_cross_repo_rebuild_
  * identities + rebuild_routes) populates cross_repo_route from raw file_imports/
  * files with NO hand-seeded route, and the resolver's gate then accepts the edge.
  * Proves the rebuild produces gate-acceptable routes (the cold-start backfill in
@@ -355,8 +355,8 @@ static void test_cold_start_rebuild_to_gate(void)
    edges = NULL;
 
    /* The drain's rebuild sequence (the cold-start backfill) populates routes. */
-   assert(db2_cross_repo_rebuild_identities() >= 0);
-   assert(db2_cross_repo_rebuild_routes() >= 1);
+   assert(kb_store_cross_repo_rebuild_identities() >= 0);
+   assert(kb_store_cross_repo_rebuild_routes() >= 1);
 
    /* Same resolver call now emits the edge — the real route satisfies the gate. */
    assert(canonical_index_cross_repo_deps("cs-app", &opts, &edges, &n, &trunc) == 0);
@@ -430,7 +430,7 @@ static void test_vendor_canonical_preference(void)
    edges = NULL;
    /* VendorCanonSym is NOT in the review queue (not ambiguous after canonical pass). */
    xrepo_review_row_t rows[16];
-   int rn = db2_cross_repo_review_list("vc-app", "open", rows, 16, NULL);
+   int rn = kb_store_cross_repo_review_list("vc-app", "open", rows, 16, NULL);
    for (int i = 0; i < rn; i++)
       assert(strcmp(rows[i].symbol, "VendorCanonSym") != 0);
 
@@ -1106,7 +1106,7 @@ static void test_reverse_of_build_suppressed(void)
 int main(void)
 {
    test_parse_module_id();
-   db2_test_shim_open();
+   kb_store_test_shim_open();
    test_empty_graceful();
    test_end_to_end();
    test_reverse_direction();

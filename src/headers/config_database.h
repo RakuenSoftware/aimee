@@ -3,7 +3,6 @@
 
 #include <stddef.h>
 
-int config_db2_url_effective(char *out, size_t n);
 int config_embedder_dims_default(void);
 int config_resolve_embedder_dims_current(void);
 int config_embedder_dims_current(void);

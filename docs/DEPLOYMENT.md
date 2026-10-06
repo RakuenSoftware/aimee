@@ -1,5 +1,14 @@
 # Deployment
 
+Deploy Server for a human's runtime and personal memory; deploy KB separately for a shared corpus.
+They use the same application image and module implementations with independent identities,
+Vaults, databases, and models. [Server and KB](SERVER_AND_KB.md) defines the ownership contract.
+
+![Separate Server and optional KB Compose projects, each with home and Vault, PostgreSQL and model sidecars](images/architecture/deployment.svg)
+
+The topology is current integration behavior. Published image versions and newer memory adapter
+builds have distinct support; see [release status](WHATS_NEW.md) before selecting a tag.
+
 ## Standard local Server
 
 `compose.yaml` starts a KB-free Server, standardized PostgreSQL, and a local embedder.
@@ -48,6 +57,10 @@ The last command returns a sensitive, single-use `aimee://` enrollment string. E
 Server's **Settings → Knowledge base** together with the two matching service credentials, then
 restart Server when Settings requests it. The connection is optional: an unreachable KB does not
 move personal data to shared storage or prevent local personal-memory operations.
+
+The same volume suffixes appear in both Compose files for compatibility. The distinct Compose
+project is what separates their actual volumes. A shared image, volume suffix, or PostgreSQL
+schema implementation does not make it safe to reuse another instance's state.
 
 ## Model services
 
@@ -188,3 +201,24 @@ authenticates over SSH.
 See [Upgrading](UPGRADING.md). Role changes and PostgreSQL storage migration are distinct from
 replacing an application image. Keep the old deployment and its backups until the new one has
 passed a restore and application-data check.
+
+## PostgreSQL provisioning
+
+The store image requires `POSTGRES_USER=postgres`. Fresh databases provision separate
+`aimee_store_migrator` and `aimee_store_runtime` roles. On restart, the image refreshes
+those credentials before opening TCP and preserves application object ownership and
+restricted grants. Domain schema changes run through the migration owner.
+
+Automatic adoption of older database layouts is removed. Startup does not rename
+`aimee_shared`, discover an `aimee` administrator, or transfer existing application
+objects. Existing volumes must already use the current database and role layout.
+
+## Optional memory engine
+
+Native memory is the default. The replaceable-memory build in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) can select Cognee through the
+[generic memory contract](modules/memory.md#memory-backend-contract). Configure the selected
+instance's backend URL and seal its API credential into its existing Vault before starting it.
+The backend's durable live store is a separate recovery dependency; it does not replace the
+instance's canonical PostgreSQL store or Vault. Follow the guide's authentication, JWT persistence,
+capacity, timeout, erasure and backup limits. There is no standard Cognee service in `compose.yaml`.

@@ -413,7 +413,7 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
 int eval_feedback_loop(void)
 {
    /* All reads/writes go through DB1-typed helpers (db1_eval_*,
-    * db2_rules_*, db2_agent_outcome_*, db2_anti_pattern_*) which
+    * kb_store_rules_*, kb_store_agent_outcome_*, kb_store_anti_pattern_*) which
     * reach the owning tier internally; no caller-owned connection is needed. */
 
    int adjustments = 0;
@@ -459,7 +459,7 @@ int eval_feedback_loop(void)
             int new_weight = rules[i].weight + 10;
             if (new_weight > 100)
                new_weight = 100;
-            db2_rules_update_weight(rules[i].id, new_weight);
+            kb_store_rules_update_weight(rules[i].id, new_weight);
             adjustments++;
          }
       }
@@ -486,8 +486,8 @@ int eval_feedback_loop(void)
     * (S2). */
 
    /* Also process agent_outcomes: failures and errors reinforce rules */
-   db2_agent_outcome_failure_t outcome_fails[20];
-   int outcome_fail_count = db2_agent_outcome_recent_failures(7, outcome_fails, 20);
+   kb_store_agent_outcome_failure_t outcome_fails[20];
+   int outcome_fail_count = kb_store_agent_outcome_recent_failures(7, outcome_fails, 20);
    for (int f = 0; f < outcome_fail_count; f++)
    {
       const char *orole = outcome_fails[f].role;
@@ -523,7 +523,7 @@ int eval_feedback_loop(void)
             int new_weight = rules[i].weight + 10;
             if (new_weight > 100)
                new_weight = 100;
-            db2_rules_update_weight(rules[i].id, new_weight);
+            kb_store_rules_update_weight(rules[i].id, new_weight);
             adjustments++;
          }
       }
@@ -531,8 +531,8 @@ int eval_feedback_loop(void)
 
    /* Auto-extract anti-patterns from repeated tool error patterns.
     * If the same tool_error_pattern appears in 3+ outcomes, create an anti-pattern. */
-   db2_agent_outcome_pattern_count_t patterns[32];
-   int pat_count = db2_agent_outcome_repeated_error_patterns(3, patterns, 32);
+   kb_store_agent_outcome_pattern_count_t patterns[32];
+   int pat_count = kb_store_agent_outcome_repeated_error_patterns(3, patterns, 32);
    for (int p = 0; p < pat_count; p++)
    {
       const char *pattern = patterns[p].pattern;
@@ -541,13 +541,13 @@ int eval_feedback_loop(void)
 
       /* Check if this anti-pattern already exists */
       anti_pattern_t existing[1];
-      int existing_count = db2_anti_pattern_check(NULL, pattern, existing, 1);
+      int existing_count = kb_store_anti_pattern_check(NULL, pattern, existing, 1);
       if (existing_count == 0)
       {
          char desc[512];
          snprintf(desc, sizeof(desc), "Auto-detected from %d agent failures: %s", patterns[p].count,
                   pattern);
-         db2_anti_pattern_insert(pattern, desc, "auto-outcome", "", 0.7, NULL);
+         kb_store_anti_pattern_insert(pattern, desc, "auto-outcome", "", 0.7, NULL);
       }
    }
    return adjustments;

@@ -27,7 +27,7 @@
 #include "kb_http_identity_login.h"
 #include "kb/kb_login_throttle.h"
 
-#include "modules/db2/c/management_identity_journal.h"
+#include "modules/kb/c/management_identity_journal.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_login.h"
 #include "kb_oidc_login_store.h"
@@ -153,16 +153,16 @@ kb_oidc_token_exchange_post(const kb_oidc_login_config_t *cfg,
  *
  * The stub records the team and subject it was handed, which is how the
  * "a callback cannot choose its own team" property is actually checked. */
-static db2_management_action_result_t stub_ctx_result = DB2_MANAGEMENT_ACTION_OK;
-static db2_management_action_result_t stub_intent_result = DB2_MANAGEMENT_ACTION_OK;
+static kb_store_management_action_result_t stub_ctx_result = KB_STORE_MANAGEMENT_ACTION_OK;
+static kb_store_management_action_result_t stub_intent_result = KB_STORE_MANAGEMENT_ACTION_OK;
 static int stub_ctx_calls, stub_intent_calls;
 static int64_t stub_seen_team;
 static char stub_seen_subject[600];
-static db2_identity_auth_mode_t stub_seen_mode;
+static kb_store_identity_auth_mode_t stub_seen_mode;
 
-db2_management_action_result_t db2_identity_login_context(const kb_principal_t *principal,
-                                                          int64_t team_id, char installation_id[33],
-                                                          char kid[DB2_IDENTITY_KID_MAX + 1])
+kb_store_management_action_result_t
+kb_store_identity_login_context(const kb_principal_t *principal, int64_t team_id,
+                                char installation_id[33], char kid[KB_STORE_IDENTITY_KID_MAX + 1])
 {
    stub_ctx_calls++;
    /* The route must pass an AUTHENTICATED principal — a zero-initialised one would
@@ -170,28 +170,27 @@ db2_management_action_result_t db2_identity_login_context(const kb_principal_t *
     * permissive stub hide it. */
    assert(principal && principal->authenticated);
    stub_seen_team = team_id;
-   if (stub_ctx_result != DB2_MANAGEMENT_ACTION_OK)
+   if (stub_ctx_result != KB_STORE_MANAGEMENT_ACTION_OK)
       return stub_ctx_result;
    snprintf(installation_id, 33, "%s", "0123456789abcdef0123456789abcdef");
-   snprintf(kid, DB2_IDENTITY_KID_MAX + 1, "%s", "p5-token-v1-test");
-   return DB2_MANAGEMENT_ACTION_OK;
+   snprintf(kid, KB_STORE_IDENTITY_KID_MAX + 1, "%s", "p5-token-v1-test");
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
 /* operation_init is pure (validate + draw three ids) but shares a translation unit
  * with the two functions above, so it is stubbed rather than linked. Its own
- * validation is covered by the db2 journal's test; what matters here is that the
+ * validation is covered by the kb_store journal's test; what matters here is that the
  * route feeds it the values the CONTEXT read, so the stub asserts exactly that and
  * nothing else. */
-db2_management_action_result_t
-db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id,
-                                   db2_identity_auth_mode_t auth_mode, const char *token_issuer,
-                                   const char *kid, int ttl_seconds, const char *installation_id,
-                                   db2_identity_intent_operation_t *out)
+kb_store_management_action_result_t kb_store_identity_intent_operation_init(
+    int64_t team_id, const char *target_server_id, kb_store_identity_auth_mode_t auth_mode,
+    const char *token_issuer, const char *kid, int ttl_seconds, const char *installation_id,
+    kb_store_identity_intent_operation_t *out)
 {
    assert(out && target_server_id && token_issuer && kid && installation_id);
    assert(strcmp(kid, "p5-token-v1-test") == 0);
    assert(strcmp(installation_id, "0123456789abcdef0123456789abcdef") == 0);
-   assert(ttl_seconds > 0 && ttl_seconds <= DB2_IDENTITY_TTL_MAX_SECONDS);
+   assert(ttl_seconds > 0 && ttl_seconds <= KB_STORE_IDENTITY_TTL_MAX_SECONDS);
    memset(out, 0, sizeof(*out));
    out->team_id = team_id;
    out->auth_mode = auth_mode;
@@ -205,12 +204,13 @@ db2_identity_intent_operation_init(int64_t team_id, const char *target_server_id
    snprintf(out->jti, sizeof(out->jti), "%s",
             "2222222222222222222222222222222222222222222222222222222222222222");
    snprintf(out->token_jti, sizeof(out->token_jti), "%s", "tok-jti-test-value");
-   return DB2_MANAGEMENT_ACTION_OK;
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
-db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *principal,
-                                                         const db2_identity_intent_operation_t *op,
-                                                         db2_identity_intent_t *out)
+kb_store_management_action_result_t
+kb_store_identity_intent_start(const kb_principal_t *principal,
+                               const kb_store_identity_intent_operation_t *op,
+                               kb_store_identity_intent_t *out)
 {
    stub_intent_calls++;
    assert(principal && principal->authenticated && op && out);
@@ -222,7 +222,7 @@ db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *p
    assert(strcmp(op->token_issuer, "kb") == 0);
    stub_seen_mode = op->auth_mode;
    memset(out, 0, sizeof(*out));
-   if (stub_intent_result != DB2_MANAGEMENT_ACTION_OK)
+   if (stub_intent_result != KB_STORE_MANAGEMENT_ACTION_OK)
       return stub_intent_result;
    /* The subject the DATABASE resolves. Deliberately echoed from what the scope
     * would carry, so the route's "return the recorded subject" contract is real. */
@@ -232,16 +232,16 @@ db2_management_action_result_t db2_identity_intent_start(const kb_principal_t *p
    snprintf(out->target_server_id, sizeof(out->target_server_id), "%s", op->target_server_id);
    out->team_id = op->team_id;
    out->expires_at = 1780000300;
-   return DB2_MANAGEMENT_ACTION_OK;
+   return KB_STORE_MANAGEMENT_ACTION_OK;
 }
 
 static void stub_intent_reset(const char *expected_subject)
 {
-   stub_ctx_result = DB2_MANAGEMENT_ACTION_OK;
-   stub_intent_result = DB2_MANAGEMENT_ACTION_OK;
+   stub_ctx_result = KB_STORE_MANAGEMENT_ACTION_OK;
+   stub_intent_result = KB_STORE_MANAGEMENT_ACTION_OK;
    stub_ctx_calls = stub_intent_calls = 0;
    stub_seen_team = 0;
-   stub_seen_mode = (db2_identity_auth_mode_t)0;
+   stub_seen_mode = (kb_store_identity_auth_mode_t)0;
    snprintf(stub_seen_subject, sizeof(stub_seen_subject), "%s", expected_subject);
 }
 
@@ -441,7 +441,7 @@ static void test_callback(EVP_PKEY *key, const char *jwks)
    assert(strstr(out, "\"subject\":\"oidc:https%3A//idp.example:alice\""));
    /* THE INTENT IS FILED, which is the point of the whole flow. */
    assert(stub_ctx_calls == 1 && stub_intent_calls == 1);
-   assert(stub_seen_mode == DB2_IDENTITY_AUTH_MODE_OIDC);
+   assert(stub_seen_mode == KB_STORE_IDENTITY_AUTH_MODE_OIDC);
    /* The team came from the PENDING login. The callback's query never named one. */
    assert(stub_seen_team == 770001);
    /* And the caller gets the pair the token authority mints from. */
@@ -653,7 +653,7 @@ static void test_login_pam(void)
    /* BOTH MODES REACH THE SAME INTENT STEP. If one of them ever stopped, that mode
     * would have acquired an authorization path the other lacks. */
    assert(stub_ctx_calls == 1 && stub_intent_calls == 1);
-   assert(stub_seen_mode == DB2_IDENTITY_AUTH_MODE_PAM);
+   assert(stub_seen_mode == KB_STORE_IDENTITY_AUTH_MODE_PAM);
    assert(stub_seen_team == 770001);
    assert(strstr(out, "\"correlation_id\":\"") && strstr(out, "\"jti\":\""));
    assert(stub_pam_calls == 1);
@@ -812,7 +812,7 @@ static void test_login_pam(void)
     * that it holds no write-tier grant reveals nothing it could not learn from an
     * operator — and hiding it would make the flow undebuggable. */
    stub_intent_reset("alice");
-   stub_intent_result = DB2_MANAGEMENT_ACTION_DENIED;
+   stub_intent_result = KB_STORE_MANAGEMENT_ACTION_DENIED;
    assert(route("POST", "/v1/identity/login/pam",
                 "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
                 "\"team_id\":770001}",
@@ -823,7 +823,7 @@ static void test_login_pam(void)
    /* Not a member of the named team: also 403, from the context read, and it never
     * reaches the intent writer. */
    stub_intent_reset("alice");
-   stub_ctx_result = DB2_MANAGEMENT_ACTION_DENIED;
+   stub_ctx_result = KB_STORE_MANAGEMENT_ACTION_DENIED;
    assert(route("POST", "/v1/identity/login/pam",
                 "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
                 "\"team_id\":770001}",
@@ -835,7 +835,7 @@ static void test_login_pam(void)
    /* A kb that cannot reach its own authority state answers 503, not 401: the
     * credential was fine and retrying with a different password is pointless. */
    stub_intent_reset("alice");
-   stub_ctx_result = DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+   stub_ctx_result = KB_STORE_MANAGEMENT_ACTION_UNAVAILABLE;
    assert(route("POST", "/v1/identity/login/pam",
                 "{\"username\":\"alice\",\"password\":\"correct\",\"server_id\":\"s\","
                 "\"team_id\":770001}",

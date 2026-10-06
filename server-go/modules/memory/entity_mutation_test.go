@@ -191,9 +191,9 @@ func exerciseEntityMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 // the waiting call must then re-read endpoints and refuse the absent entities.
 // The sequential replay above covers committed A->B / B->A cycle rejection.
 func TestEntityMutationConcurrentPostgres(t *testing.T) {
-	url := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	url := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
 	if url == "" {
-		t.Skip("set AIMEE_DB2_REPLAY_URL")
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

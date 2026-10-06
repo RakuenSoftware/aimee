@@ -468,6 +468,44 @@ jobs:
   # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
   # wildcard and runs `./...` in each, so a new package is covered by
   # construction rather than by somebody remembering.
+  memory-backends:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Contract, native bridge, Cognee adapter and egress race tests
+        working-directory: server-go
+        run: go test -race ./memory ./modules/memory ./modules/memory/cognee ./modules/egress
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Install pinned real Cognee API
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cognee-venv"
+          "$RUNNER_TEMP/cognee-venv/bin/pip" install 'cognee[api]==1.6.2'
+      - name: Real Cognee storage, retrieval and erasure contract (required, no skip)
+        run: |
+          python3 scripts/validation/memory/run-cognee-contract.py \
+            --python "$RUNNER_TEMP/cognee-venv/bin/python" \
+            --artifacts "$RUNNER_TEMP/cognee-contract"
+      - name: Retain Cognee diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cognee-memory-contract
+          path: |
+            ${{ runner.temp }}/cognee-contract/contract.log
+            ${{ runner.temp }}/cognee-contract/server.log
+            ${{ runner.temp }}/cognee-contract/summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
   go-unit-tests:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -783,10 +821,10 @@ jobs:
           ccache --show-stats
 
   # The same unit-test binaries, linked against real libpq instead of the sqlite
-  # shim, so DB2's SQL is EXECUTED by the engine that runs it in production rather
+  # shim, so KB domain SQL is EXECUTED by the engine that runs it in production rather
   # than TRANSLATED into another one.
   #
-  # WHY THIS IS NOT REDUNDANT WITH unit-tests. The shim rewrites DB2's SQL to
+  # WHY THIS IS NOT REDUNDANT WITH unit-tests. The shim rewrites KB domain SQL to
   # something sqlite accepts (tests/aimee_pg_sqlite_shim.c), so the places the two
   # engines differ are exactly the places it cannot vouch for -- and each one that
   # existed was a real defect the green suite reported as passing: confidence decay
@@ -821,8 +859,8 @@ jobs:
       # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
       # needs CREATEDB and a connection to `postgres` -- both true for the image's
       # bootstrap superuser.
-      AIMEE_TEST_DB2_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
-      # Make the content-scope proof exercise lazy DB2 pool connections as the
+      AIMEE_TEST_KB_STORE_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
+      # Make the content-scope proof exercise PostgreSQL provider session connections as the
       # production NOBYPASSRLS role, with a hermetic 768-dimensional embedder.
       # Each test process receives its own disposable database clone.
       AIMEE_TEST_PG_RUNTIME_POOL: "1"
@@ -843,7 +881,7 @@ jobs:
         # Same image and retry rationale as unit-tests: the runner pulls service
         # images with no retry, so a transient Docker Hub timeout would fail a
         # required check. max_connections is raised because each of the parallel
-        # test processes opens its own clone AND a 16-connection DB2 pool.
+        # test processes opens its own clone AND a provider-managed connection pool.
         run: |
           img=pgvector/pgvector:pg18
           for attempt in 1 2 3 4 5; do
@@ -913,13 +951,14 @@ jobs:
         if: failure()
         run: docker logs --tail 200 aimee-pg-tpl || true
 
-  db2-process-replay:
+  postgres-knowledge-replay:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
+      AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+      AIMEE_MEMORY_RUNTIME_URL: postgres://aimee_store_runtime:runtime_fixture@127.0.0.1:5432/aimee_postgres_ci
       # Temp-table tests must not fall through to packaged owner relations when
       # they deliberately drop a relation to exercise unavailable storage.
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
@@ -942,10 +981,10 @@ jobs:
             echo "docker pull $img failed (attempt $attempt/5); backing off"
             sleep $((attempt * 10))
           done
-          docker run -d --name aimee-db2-process-pg \
+          docker run -d --name aimee-postgres-pg \
             -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee \
-            -e POSTGRES_DB=aimee_db2_process_ci -p 5432:5432 "$img"
-      - name: Install DB2 replay dependencies
+            -e POSTGRES_DB=aimee_postgres_ci -p 5432:5432 "$img"
+      - name: Install PostgreSQL replay dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0
@@ -959,24 +998,32 @@ jobs:
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
-            docker exec aimee-db2-process-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            docker exec aimee-postgres-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
             sleep 2
           done
           echo "Postgres did not become ready in time"
-          docker logs aimee-db2-process-pg || true
+          docker logs aimee-postgres-pg || true
           exit 1
-      - name: Replay packaged DB2 operations through the event bus
-        run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
+      - name: Initialize the isolated knowledge replay schema
+        run: |
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_roles.sql
+          # Disposable CI credentials; exercise the same login used by Compose.
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" <<'SQL'
+          CREATE ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS PASSWORD 'runtime_fixture';
+          GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+          SQL
+          sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f -
+          psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
+      - name: Verify persisted erasure state upgrade and idempotence
+        run: python3 tests/e2e/knowledge-schema-upgrade.py
+      - name: Replay memory ownership and PostgreSQL sessions
+        run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
       - name: Replay Go memory ownership and isolated evaluator contracts
-        # Report memory independently when an earlier DB2 assertion fails.
+        # Report memory independently when an earlier PostgreSQL assertion fails.
         # Failed setup still fails this required job; no checks are waived.
         if: ${{ !cancelled() }}
         run: make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 memory-owner-replay-check
-      - name: Verify durable schema effect
-        run: |
-          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"
-          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select count(*) from information_schema.tables where table_schema=current_schema() and table_name in ('memories','kb_documents','kb_async_jobs')")" = "3"
-
   # This is part of the protected unit-test aggregate below. The fake LSP peer
   # proves framing; these pinned providers prove what the shipping client can
   # and cannot do with real protocol implementations before a PR reaches main.
@@ -1088,7 +1135,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests, frontend-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1099,9 +1146,10 @@ jobs:
           DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
           SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
           SHARDS_PG_RESULT: ${{ needs.unit-test-shards-pg.result }}
-          DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
+          POSTGRES_REPLAY_RESULT: ${{ needs.postgres-knowledge-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          MEMORY_BACKENDS_RESULT: ${{ needs.memory-backends.result }}
           FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
         run: |
@@ -1121,8 +1169,12 @@ jobs:
             echo "P1 RLS gate result: $P1_RESULT" >&2
             exit 1
           }
-          [ "$DB2_REPLAY_RESULT" = success ] || {
-            echo "DB2 process replay result: $DB2_REPLAY_RESULT" >&2
+          [ "$POSTGRES_REPLAY_RESULT" = success ] || {
+            echo "PostgreSQL session replay result: $POSTGRES_REPLAY_RESULT" >&2
+            exit 1
+          }
+          [ "$MEMORY_BACKENDS_RESULT" = success ] || {
+            echo "Memory backend contract result: $MEMORY_BACKENDS_RESULT" >&2
             exit 1
           }
           # Folded in here rather than left as its own context so it BLOCKS.
@@ -1141,7 +1193,7 @@ jobs:
             echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
+          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1186,6 +1238,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+      - name: Build the private PostgreSQL provider
+        run: cd server-go && CGO_ENABLED=0 go build -trimpath -o ../src/build/obj/aimee-module ./cmd/aimee-module
       - name: Start Postgres (pgvector) with pull retry
         # Same image and retry rationale as unit-tests: the schema needs the vector
         # and pg_trgm extensions, which the runner's preinstalled Postgres does not
@@ -1215,7 +1272,7 @@ jobs:
         # pkg-config, libzstd-dev and zlib1g-dev are listed EXPLICITLY and the other
         # jobs in this file do not list them. They are not optional:
         #   - PQ_CFLAGS comes from `pkg-config --cflags libpq`, so without pkg-config
-        #     there is no -I/usr/include/postgresql and db2/db_postgres.c fails with
+        #     there is no -I/usr/include/postgresql and the native SQL oracle fails with
         #     "libpq-fe.h: No such file or directory" despite libpq-dev being present.
         #   - L_CORE/L_KB link -lzstd -lz, so without those the provisioners fail at
         #     link with "cannot find -lzstd".
@@ -1239,6 +1296,7 @@ jobs:
           # shipped binary.
           make -j"$(nproc)" ../aimee-kb-token-roots-provision ../aimee-kb-jwks-publish \
                             identity-mint-live
+          install -D -m 0755 build/obj/aimee-module /usr/local/libexec/aimee-modules/aimee-module-postgres
           cd /src
           exec scripts/run-identity-mint-e2e.sh
           JOB
@@ -1493,8 +1551,8 @@ jobs:
       # authorization regression between the verifier and a route.
       - name: Live scope confinement over the wire
         env:
-          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
-        run: bash scripts/validate-kb-authz-live.sh
+          AIMEE_STORE_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: sudo -E bash scripts/validate-kb-authz-live.sh
       # The check above drives BEARER tokens. Production does not use one:
       # aimee-server presents a client certificate and the mTLS seam synthesises
       # a credential from its CN, which nothing else exercises. This enrols for
@@ -1503,8 +1561,8 @@ jobs:
       # routes and that the old colon-free CN would have been allowed.
       - name: Live mTLS certificate scope
         env:
-          AIMEE_DB2_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
-        run: bash scripts/validate-kb-mtls-scope-live.sh
+          AIMEE_STORE_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
+        run: sudo -E bash scripts/validate-kb-mtls-scope-live.sh
       - name: Postgres logs on failure
         if: failure()
         run: docker logs aimee-resid-pg 2>&1 | tail -60
@@ -1699,8 +1757,8 @@ jobs:
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
 
-      - name: Historical store volume upgrades in place
-        run: cd src && make postgres-store-upgrade-test
+      - name: Current store provisioning and restart
+        run: cd src && make postgres-store-bootstrap-test
 
       # Cheap and image-free: the gate that decides whether a kb may start without an
       # embedder. Getting it wrong in either direction ships a broken deploy — too
@@ -2036,8 +2094,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        # Exercise the same pgvector extension used by private code retrieval.
-        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        # Match the PostgreSQL 18 schema and Unicode rejection identity contract.
+        image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
         env:
           POSTGRES_USER: aimee
           POSTGRES_PASSWORD: aimee
@@ -2087,7 +2145,7 @@ jobs:
         env:
           PGPASSWORD: aimee
           AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_DB2_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
+          AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
           AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
           AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
           AIMEE_DB_TEST_REQUIRED: '1'
@@ -2097,7 +2155,7 @@ jobs:
           createdb -h 127.0.0.1 -U aimee memory_replay
           createdb -h 127.0.0.1 -U aimee memory_db1
           psql -h 127.0.0.1 -U aimee -d memory_replay -v ON_ERROR_STOP=1 -f scripts/postgres-hygiene-role.sql > /tmp/memory-replay-bootstrap.log
-          sed 's/__EMBED_DIM__/3/g' src/modules/db2/c/schema.sql | psql -h 127.0.0.1 -U aimee -d memory_replay --single-transaction -v ON_ERROR_STOP=1 >> /tmp/memory-replay-bootstrap.log
+          sed 's/__EMBED_DIM__/3/g' src/modules/kb/c/schema.sql | psql -h 127.0.0.1 -U aimee -d memory_replay --single-transaction -v ON_ERROR_STOP=1 >> /tmp/memory-replay-bootstrap.log
           python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment scripts.tests.test_memory_reliability_release
           python3 scripts/check_memory_reliability_release.py --output /tmp/memory-reliability-release.json
 
@@ -2166,6 +2224,9 @@ jobs:
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+      - name: Installed Vault helper under hardened egress (both roles)
+        if: matrix.topology == 'T3'
+        run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
       - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
         run: |
@@ -2181,7 +2242,7 @@ jobs:
               --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
-      - name: Upgrade and roll back the published 0.4.1 KB
+      - name: Recreate the current-layout KB and preserve scoped memory
         if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \

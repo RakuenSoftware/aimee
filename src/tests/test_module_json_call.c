@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_available = 1;
@@ -185,6 +186,26 @@ int main(void)
    assert(!reply);
    cJSON_Delete(memory_request);
    printf("  ok    expired or unavailable memory does not fabricate success\n");
+
+   /* Native erasure remains local. Configured providers require a verified
+    * lifecycle reply and receive enough budget for their governed transport. */
+   assert(setenv("AIMEE_MEMORY_BACKEND", "native", 1) == 0);
+   g_calls = 0;
+   assert(server_module_memory_reset_derived() == 0 && g_calls == 0);
+   assert(setenv("AIMEE_MEMORY_BACKEND", "cognee", 1) == 0);
+   g_result = AIMEE_MODULE_CALL_OK;
+   g_required_budget_ms = 6500;
+   g_reply = "{\"records\":[],\"deleted\":true}";
+   assert(server_module_memory_reset_derived() == 0);
+   assert(strstr(g_body, "\"operation\":\"reset-derived\""));
+   assert(strstr(g_body, "\"scope\":{\"type\":\"user\"}"));
+   g_reply = "{\"records\":[],\"deleted\":false}";
+   assert(server_module_memory_reset_derived() == -1);
+   g_result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+   assert(server_module_memory_reset_derived() == -1);
+   assert(unsetenv("AIMEE_MEMORY_BACKEND") == 0);
+   g_required_budget_ms = 0;
+   printf("  ok    erasure requires verified provider cleanup and preserves native behavior\n");
 
    g_result = AIMEE_MODULE_CALL_OK;
    memory_request = cJSON_CreateObject();

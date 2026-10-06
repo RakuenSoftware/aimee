@@ -12,7 +12,7 @@ import (
 // writes. RLS admits the target before comparing versions: knowledge of an old
 // version must not disclose a record outside the caller's current scope.
 func (s *postgresDataStore) lockKBLifecycleVersion(ctx context.Context, id int64, expected *MemoryRecordVersion) error {
-	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !expected.validFor(id) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !expected.ValidFor(id) {
 		return errors.New("memory: invalid conditional lifecycle mutation")
 	}
 	observed := MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}

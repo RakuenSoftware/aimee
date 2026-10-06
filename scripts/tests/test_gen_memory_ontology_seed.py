@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
-OUTPUTS = ["src/modules/db2/c/schema_sqlite.sql", "src/rel_types.c", "src/modules/db2/c/schema.sql", "src/modules/db2/support/rel_seed_primitives.c", "server-go/modules/memory/testdata/ontology_seed.tsv"]
+OUTPUTS = ["src/modules/kb/c/schema_sqlite.sql", "src/rel_types.c", "src/modules/kb/c/schema.sql", "src/modules/kb/support/rel_seed_primitives.c", "server-go/modules/memory/testdata/ontology_seed.tsv"]
 
 class OntologySeedGeneratorTests(unittest.TestCase):
     @classmethod
@@ -38,16 +38,11 @@ class OntologySeedGeneratorTests(unittest.TestCase):
                 self.assertEqual((root/path).read_bytes(),(REPO/path).read_bytes(),path)
             result = self.run_generator("--root",root,"--check")
             self.assertEqual(result.returncode,0,result.stderr)
-            spec = importlib.util.spec_from_file_location("closure",REPO/"scripts/check_db2_link_closure.py")
-            checker = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(checker)
-            policy = next(row for row in checker.SUPPORT_UNITS if row["path"]=="src/modules/db2/support/rel_seed_primitives.c")
-            self.assertEqual(policy["source_sha256"],hashlib.sha256((root/policy["path"]).read_bytes()).hexdigest())
     def test_drift_is_detected_without_writing(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             self.copy_outputs(root)
-            path = root/"src/modules/db2/c/schema.sql"
+            path = root/"src/modules/kb/c/schema.sql"
             path.write_text(path.read_text().replace("'works_for','person'","'works_for','other'",1))
             before = path.read_bytes()
             result = self.run_generator("--root",root,"--check")
@@ -65,13 +60,13 @@ class OntologySeedGeneratorTests(unittest.TestCase):
             self.assertEqual(result.returncode,1)
             for p in OUTPUTS:
                 self.assertEqual(before[p],(root/p).read_bytes())
-    def test_standalone_db2_output_and_failure(self):
+    def test_standalone_kb_store_output_and_failure(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw)/"seed.c"
-            result = self.run_generator("--db2-output",path)
+            result = self.run_generator("--kb-store-output",path)
             self.assertEqual(result.returncode,0,result.stderr)
-            self.assertEqual(path.read_bytes(),(REPO/"src/modules/db2/support/rel_seed_primitives.c").read_bytes())
-            result = self.run_generator("--db2-output",Path(raw)/"missing"/"seed.c")
+            self.assertEqual(path.read_bytes(),(REPO/"src/modules/kb/support/rel_seed_primitives.c").read_bytes())
+            result = self.run_generator("--kb-store-output",Path(raw)/"missing"/"seed.c")
             self.assertEqual(result.returncode,1)
             result = self.run_generator("unexpected")
             self.assertEqual(result.returncode,2)

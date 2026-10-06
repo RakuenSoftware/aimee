@@ -175,15 +175,14 @@ static void test_generic_env_source(void)
    setenv("AIMEE_VAULT_PKCS11_PIN", "vaulted-hsm-pin", 1);
    setenv("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server", 1);
    assert(vault_env_has_credential_environment() == 1);
-   assert(vault_env_bootstrap_init() == 5);
+   assert(vault_env_bootstrap_init() == 4);
    assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
    assert(getenv("AIMEE_STORE_URL") == NULL);
    assert(getenv("AIMEE_STORE_MIGRATION_URL") == NULL);
    assert(getenv("AIMEE_VAULT_PKCS11_PIN") == NULL);
    char value[128];
-   assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 1);
-   assert(strcmp(value, "postgresql://user:db-password@db/aimee") == 0);
+   assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 0);
    runtime_secret_wipe(value, sizeof(value));
    assert(runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", value, sizeof(value)) == 1);
    assert(strcmp(value, "vaulted-hsm-pin") == 0);
@@ -532,13 +531,13 @@ static void test_scoped_store_migration(void)
    setenv("AIMEE_VAULT_STORE_MIGRATION", "1", 1);
    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
       setenv(names[i], "replacement-value", 1);
-   assert(vault_env_bootstrap_init() == 3);
+   assert(vault_env_bootstrap_init() == 2);
    unsetenv("AIMEE_VAULT_STORE_MIGRATION");
    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
    {
       assert(vault_service_get_server_principal("environment", names[i], value, sizeof(value)) ==
              VAULT_OK);
-      assert(strcmp(value, i < 3 ? "replacement-value" : "original-value") == 0);
+      assert(strcmp(value, i < 2 ? "replacement-value" : "original-value") == 0);
       assert(getenv(names[i]) == NULL);
       setenv(names[i], "subsequent-start", 1);
    }
@@ -555,6 +554,7 @@ int main(void)
        "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));
    assert(!vault_env_egress_parent_path_ok("/tmp/aimee-module-egress"));
    assert(vault_env_egress_parent_attest() != 0);
+   assert(vault_env_egress_resource() != 0);
    assert(vault_env_postgres_resource() != 0);
    assert(vault_env_print_egress_credential("AIMEE_MCP_712_TOKEN") != 0);
 

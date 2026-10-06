@@ -195,7 +195,7 @@ bootstrap_postgres() {
 }
 
 # Postgres database setup. The aimee-kb daemon's startup auto-bootstrap
-# (kb_bootstrap_db2_resolve) will also retry these steps the first time it's
+# (kb_bootstrap_kb_store_resolve) will also retry these steps the first time it's
 # launched, but doing them at install time gives users a clean "scan works
 # right after install.sh" experience instead of a delayed failure.
 bootstrap_postgres

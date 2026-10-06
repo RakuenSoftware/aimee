@@ -1,0 +1,22 @@
+{
+  "profiles": [
+    {
+      "model": "gemma4-12b",
+      "bytes": 12863382944,
+      "sha256": "38e70517d10f5f5bacebd0bb2cc929dcca3670ad348e5b8a38ba219154ea8ddc",
+      "checkpoint": "existing staged Q8 GGUF"
+    },
+    {
+      "model": "gemma4-26b",
+      "bytes": 29135275488,
+      "sha256": "2b190fd2cd6d7ee93247159dffbd6bcb28aae97e002b52c9cf502536ac1a1f72",
+      "checkpoint": "existing staged Q8 GGUF"
+    },
+    {
+      "model": "qwen3-8-27b",
+      "bytes": 29047084448,
+      "sha256": "c0ce2b553fe0fb433388c6f22ee07197c398c735fcbf961cd86042bd657e33ca",
+      "checkpoint": "existing staged Q8 GGUF"
+    }
+  ]
+}

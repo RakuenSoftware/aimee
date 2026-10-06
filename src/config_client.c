@@ -96,6 +96,15 @@ const char *config_client_secret_name(const char *key)
    return NULL;
 }
 
+/* The external config dependency still carries inert pre-retirement defaults.
+ * Exclude that namespace from application snapshots and reject writes; keep
+ * credential classification above solely for legacy redaction. */
+static int config_key_is_retired(const char *key)
+{
+   return key &&
+          (strcmp(key, "db2") == 0 || strncmp(key, "db2_", 4) == 0 || strncmp(key, "db2.", 4) == 0);
+}
+
 static int config_client_fetch_locked(void)
 {
    cJSON *request = cJSON_CreateObject();
@@ -134,6 +143,14 @@ static int config_client_fetch_locked(void)
    {
       config_client_error("cannot retain config reply");
       return -1;
+   }
+   cJSON *field = copy->child;
+   while (field)
+   {
+      cJSON *next = field->next;
+      if (config_key_is_retired(field->string))
+         cJSON_Delete(cJSON_DetachItemViaPointer(copy, field));
+      field = next;
    }
    cJSON_Delete(g_config_client_values);
    g_config_client_values = copy;
@@ -295,7 +312,7 @@ cJSON *config_client_snapshot_copy(void)
 
 int config_client_set_value(const char *key, cJSON *value)
 {
-   if (!key || !value)
+   if (!key || !value || config_key_is_retired(key))
    {
       cJSON_Delete(value);
       return -1;

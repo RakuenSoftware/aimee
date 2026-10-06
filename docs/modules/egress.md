@@ -17,7 +17,7 @@ versioned bounded wire in `aimee/egress/module_api.h`; redirects require a fresh
 - `audit`: receives content-free authorization and transfer outcomes for the WORM evidence path.
 - `module-runtime`: attests principal `32`, caller identities, executable ownership, lifecycle, and stage grants.
 
-Memory embedding, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses
+Provider requests, memory embedding and backend calls, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses
 a distinct request-only bus identity so one consumer cannot borrow another consumer's destination policy.
 
 ## Providers and readiness
@@ -37,7 +37,15 @@ secrets such as `AIMEE_MCP_<principal>_TOKEN`. Ordinary callers cannot add a hos
 
 There is no public proxy URL or CLI tunnel. Callers use authenticated `egress` bus stages; operators see health,
 metrics, and audit outcomes. Forge credentials arrive as short-lived encrypted envelopes, while MCP
-credentials are resolved by exact principal. External response content returns only to the requesting caller.
+credentials are resolved by exact principal. The memory backend receives only its configured origin
+and allowed Cognee API routes, using the instance's existing Vault credential helper.
+The installed egress process opens a private helper pipe before bus attachment and
+runtime hardening. The helper attests its parent and disables its own dumpability
+before acknowledging readiness. It reads no credential until an admitted request
+arrives after egress has also become non-dumpable. Each lookup reads the current
+Vault entry, so rotation and revocation apply without recreating the pipe. A
+broken or timed-out pipe stops the owner; supervision establishes a new attested
+helper on restart. External response content returns only to the requesting caller.
 
 ## Data and migrations
 
@@ -60,7 +68,10 @@ the same authorization seam, then receives lifecycle and frame events until clos
 ## Tests and failure behavior
 
 Tests under `server-go/modules/egress` cover policy, DNS pinning, redirects, credentials, HTTP bounds,
-and SSE lifecycle. Unknown callers, disallowed destinations, mixed public/private answers, expired
+and SSE lifecycle. `tests/e2e/egress-vault-e2e.py` requires the installed helper
+handoff for both Server and KB, including process protection, credential rotation,
+unattested caller refusal and recovery after helper death. The T3 Docker CI job
+runs this gate. Unknown callers, disallowed destinations, mixed public/private answers, expired
 envelopes, oversized bodies, and helper failures fail closed without opening or retaining a connection.
 
 ## Operational diagnostics

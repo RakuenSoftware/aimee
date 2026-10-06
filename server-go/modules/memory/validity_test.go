@@ -100,7 +100,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 				if !reflect.DeepEqual(result, missing) {
 					t.Fatal("hidden metadata disclosed", result, missing)
 				}
-			} else if !decision.Version.validFor(id) || decision.CheckedAt == "" {
+			} else if !decision.Version.ValidFor(id) || decision.CheckedAt == "" {
 				t.Fatal("missing observation", decision)
 			}
 		}

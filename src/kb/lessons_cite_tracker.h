@@ -4,8 +4,8 @@
  * signal ("it came back to this source"), not "the agent acted on it".
  *
  * Pure + in-memory: a per-session ring of recently-cited node ids and the last
- * turn each was seen. Deterministic and unit-testable — the DB2 write and the
- * session-aware wiring live elsewhere (db2/lessons.c, the capture call-site). */
+ * turn each was seen. Deterministic and unit-testable — the KB_STORE write and the
+ * session-aware wiring live elsewhere (kb_store/lessons.c, the capture call-site). */
 #ifndef LESSONS_CITE_TRACKER_H
 #define LESSONS_CITE_TRACKER_H
 

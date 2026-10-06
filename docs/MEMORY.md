@@ -1,7 +1,50 @@
 # Memory behavior and migration
 
 The [module contract](modules/memory.md) defines ownership, dependencies and activation.
-This guide retains the detailed behavior and migration record.
+This guide describes the current Go owner. [Server and KB](SERVER_AND_KB.md) explains the two
+independent deployments; [Knowledge](KNOWLEDGE.md) covers everyday store selection and review.
+Historical implementation checkpoints live in [migration history](validation/memory-migration-history.md).
+
+## Current ownership and review
+
+Server placement owns durable personal `user_memories`, retained `user_memory_versions`, personal
+correction proposals, and vectors in Server PostgreSQL. KB placement owns shared `memories`, facts,
+shared correction proposals, and corpus retrieval. Both use the Go PostgreSQL provider; native KB
+algorithms use its session transport. The former DB2 provider and native libpq pool are retired.
+
+Ordinary get/store/list/search/recall default to Server's personal store. Explicit `store=kb`
+selects the configured KB. Correction-proposal listing and review retain a KB default, so personal
+review requires `store=user`. Neither scope nor a failed lookup changes placement.
+
+Both placements support linked correction proposals for protected content. Review requires verified
+user authority, the proposal ID, exact expected version, and payload digest. A model cannot approve
+its own draft. These contracts live in [public_correction_proposals.go](../server-go/modules/memory/public_correction_proposals.go),
+[correction_proposals.go](../server-go/modules/memory/correction_proposals.go), and
+[personal_proposals.go](../server-go/modules/memory/personal_proposals.go).
+The browser Memory Center provides correction-proposal listing, source/draft comparison and
+approve/reject actions with exact version and digest. Its store selector separates personal and
+shared review. Typed-fact console review remains a separate flow.
+
+Personal exact-ID reads can request `include_version` and select a retained revision with
+`at_version`; corrections and retirement accept `expected_version`. Historical payloads stay out of
+normal recall. The [personal revision implementation](../server-go/modules/memory/personal_versions.go)
+requires the matching owner and surviving parent. This differs from KB valid-time `read_policy` and
+legacy `as_of` inspection.
+
+## Replaceable retrieval engine
+
+The generic contract in `server-go/memory` supports Get, Search, Put and Delete. Native memory
+adapts the existing implementation; the Cognee adapter consumes that contract and uses the
+existing egress/Vault transport. Aimee retains canonical records and their admitted identity,
+versions, audit and lifecycle. Advanced native operations are separate capabilities.
+
+![Memory owner and canonical source with selectable native or Cognee retrieval](images/architecture/memory-backends.svg)
+
+This implementation is merged through [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005),
+newer than published 0.4.6. Use the [contract and provider guide](modules/memory.md#memory-backend-contract)
+for engine selection, optional cleanup, authoring and required CI. The
+[native](validation/memory-native-ct-253-2026-10-04.md) and
+[Cognee](validation/memory-cognee-ct-253-2026-10-04.md) deployment reports record bounded validation.
 
 ## Language and bus boundary
 
@@ -45,9 +88,9 @@ record envelopes, preserving exact int64 IDs, complete content and explicit owne
 refusals. Native adapters retain host authorization and transport duties.
 
 The [G0 closeout](proposals/pending/memory-reliability-g0-closeout.md) records
-file/API dispositions and validation. Complete DB2 retirement is a
-[future proposal TODO](proposals/pending/db2-as-a-go-module.md#future-proposal-todo-retire-db2-completely),
-separate from the memory language boundary.
+file/API dispositions and validation. [Database](DB.md#postgresql-provider-ownership) describes the
+completed PostgreSQL-provider cutover for both roles. Remaining C knowledge algorithms call that
+provider; they do not restore the retired native driver.
 
 ## Personal/shared recall composition
 
@@ -76,8 +119,9 @@ above 2^53-1.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v6` predicate applies active lifecycle, suppression and
-half-open valid time before shared lexical, whole-record/unit semantic, graph/
+The Go `current-validity-v18` predicate applies active lifecycle, suppression,
+half-open valid time, configured utility horizons, and derived-input currency before
+shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
 sticky activation cannot extend expired validity. Briefing episode summaries and
@@ -127,9 +171,12 @@ limit and require every memory source to resolve to a current visible parent.
 Entity discovery and later fact reads propagate errors; a failed read cannot
 leave a successful partial block. Operator review/history semantics are separate.
 
-The baseline policy fingerprint includes this version. This current-state slice
-does not certify all MR-01 surfaces, privileged historical/belief-time access,
-utility horizons or a final release/revocation generation check.
+The baseline policy fingerprint includes this version. Utility-horizon enforcement is optional
+and disabled by default; see [Utility horizons](#utility-horizons-mr-10). Source revalidation and
+release barriers are implemented in [source_revalidation.go](../server-go/modules/memory/source_revalidation.go)
+and [source_release.go](../server-go/modules/memory/source_release.go). Owner eligibility alone
+does not certify every historical access policy or final provider delivery; those boundaries need
+their own end-to-end evidence.
 
 ## Context projection and limits
 
@@ -194,12 +241,10 @@ The journal never exposes a hidden parent's identity through a secondary tag.
 Empty collections retain owner identity with generation zero without a read-side
 write. Existing KB audit envelopes also record the new row revision.
 
-This is the producer foundation for MR-02. Personal content history, further
-governed child/dependency coverage, durable consumer checkpoints and release checks remain
-separate work; the feed cannot certify derivative freshness by itself. Backup
-restoration must rotate the producer identity before replay resumes; automatic
-restore identity rotation and restore-resistant erasure intent are not implemented
-by this producer slice.
+The feed is the invalidation producer, not proof that a consumer has refreshed its derivatives.
+Personal content history and release checks are implemented in their owning paths. Consumer
+checkpoints, restore handling, and erased-source protection require the corresponding acceptance
+evidence; do not infer them from a successful feed response.
 
 ## Canonical KB mutation admission
 
@@ -210,8 +255,8 @@ Primary/secondary scopes, owner principal and sensitivity survive replacement;
 new authorship and confidence ceilings are derived from the admitted writer.
 
 Model replacement or retirement of user-authored or unknown-origin content returns
-`review_required`. This refusal preserves the active source; linked review proposals
-remain to be implemented. Episode/experience content stays immutable, and policy or
+`review_required` with a linked correction proposal where the proposal contract applies.
+The active source remains unchanged until an authorized review decision. Episode/experience content stays immutable, and policy or
 instruction content requires the reviewed replacement path. These checks also
 apply to same-key conflicts. Identical same-author upserts retain their ID and
 original captured author. Same-key creators serialize on the scoped identity,
@@ -221,9 +266,11 @@ The old data-stage `update-content` operation returns the new identity in `ids`;
 callers must use that identity after a successful correction. Scoped legacy delete
 uses the same model retirement policy as the public command. Explicit authorized
 hard deletion remains distinct. Transactional extraction capture/job failures roll
-back the entire replacement. This is the initial MR-02 KB slice, not completion of
-expected-version/idempotency keys, durable invalidation replay, personal-memory
-versioning, reviewed proposals or the full mutation/retention policy.
+back the entire replacement. Current commands also support expected-version admission, governed
+retry identities, personal retained revisions, and reviewed proposals. Their exact request
+contracts are distinct from this replacement transaction; see the owner commands and
+[release preparation](validation/release-0.4.6-preparation-2026-09-27.md). A successful replacement
+alone does not certify consumer replay or every retention path.
 
 ## Server search orchestration
 
@@ -290,7 +337,7 @@ database lifecycle and the same SQL client/provider wire used by production.
 Seeding, searches, context construction, diagnostics and scoring within one
 process therefore share one store. Each new process starts with an empty store.
 
-Set `AIMEE_DB2_EVAL_URL` to an explicit disposable PostgreSQL admin DSN with
+Set `AIMEE_KB_STORE_EVAL_URL` to an explicit disposable PostgreSQL admin DSN with
 database-creation rights. There is no fallback to live store configuration.
 The provider creates a random database from `template0`, applies the supplied
 packaged schema there, and drops that database at EOF, on protocol failure or
@@ -302,7 +349,7 @@ From `server-go`, with the environment variable already set:
 
 ```sh
 go run ./modules/memory/cmd/aimee-memory-eval \
-  -schema ../src/modules/db2/c/schema.sql -embedding-dim 1024 <<'JSONL'
+  -schema ../src/modules/kb/c/schema.sql -embedding-dim 1024 <<'JSONL'
 {"stage":"data","body":{"operation":"insert-epistemic","tier":"L2","kind":"fact","key":"eval-fixture","content":"eval-fixture content","confidence":0.9,"project":"evaluation"}}
 {"stage":"data","body":{"operation":"search","query":"eval-fixture","project":"evaluation","limit":10}}
 {"stage":"command","command":"runtime","body":{"operation":"benchmark-context","query":"eval-fixture","project":"evaluation"}}
@@ -474,3 +521,23 @@ descriptor targets the existing `memory.supersede` expected-version operation;
 that owner still decides whether replacement or a review proposal is authorized.
 Cards have no separately editable canonical text. Confidence calibration remains
 unknown unless the underlying owner can establish it.
+
+## Admission and review boundaries
+
+Both placements screen model-authored writes for direct instruction overrides such as
+"ignore all previous instructions". The check runs in the Go owner before storage,
+same-key replacement, and supersede; typed-fact admission checks endpoints before alias
+registration. Refusals return `reason=instruction_override` on public memory mutations
+and commit no replacement. Credential screening is a separate check.
+
+This is a bounded, deterministic check of direct line-leading commands after NFKC
+normalization. It preserves quoted examples, fenced excerpts, ordinary preferences,
+and verified user-authored text. It does not identify every obfuscation or indirect
+instruction. Successful storage grants no instruction authority. Serving-time integrity
+checks remain required for all recalled evidence, including imports and older rows.
+
+In Memory Center, select **Personal (local)** or **Knowledge base**, then
+**Correction proposals**. Inspect the current content, proposed content, target revision,
+and metadata before approving or rejecting. Requests always carry the selected store,
+proposal digest, and exact version. A changed revision disables review; the backend also
+checks the version transactionally. Terminal entries retain reviewer and decision IDs.

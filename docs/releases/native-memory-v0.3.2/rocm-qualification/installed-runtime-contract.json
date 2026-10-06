@@ -1,0 +1,47 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "version": "0.30.0",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "version": "0.30.0+rocm723",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "version": "0.30.0+cuda",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "version": "0.30.1",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "version": "0.31.0",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "version": "0.30.0rc1",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "version": "0.30.0.post1",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "version": "0.29.0",
+      "expected_accept": false,
+      "passed": true
+    }
+  ],
+  "wheel_record_verified": true,
+  "installed_client_executable": true
+}

@@ -1,5 +1,5 @@
 #include "kb_http_code.h"
-#include "modules/db2/c/canonical_index.h"
+#include "modules/kb/c/canonical_index.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

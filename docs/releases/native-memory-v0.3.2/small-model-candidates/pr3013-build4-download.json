@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "scope": "Public Git blob retrieval at PR3013 commit 3c1bda134; unsigned candidate, not release assets",
+  "checks": [
+    {
+      "model": "gemma4-e2b",
+      "file": "aimee_gemma4_e2b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e",
+      "bytes": 580483,
+      "verified": true
+    },
+    {
+      "model": "gemma4-e4b",
+      "file": "aimee_gemma4_e4b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0",
+      "bytes": 580349,
+      "verified": true
+    }
+  ]
+}

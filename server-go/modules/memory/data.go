@@ -16,6 +16,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
@@ -478,9 +479,11 @@ type DataStore interface {
 	Delete(context.Context, Scope, int64) (bool, error)
 }
 
-var ErrMemoryNotFound = errors.New("memory: record not found")
+var ErrMemoryNotFound = memorycontract.ErrNotFound
 
 type postgresDataStore struct {
+	backendRequest  DataRequest
+	backendFactory  BackendFactory
 	health          *healthOwnerState
 	recoveryDB      store.DB
 	personalActor   personalActor
@@ -527,6 +530,9 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
+	if s.backendFactory != nil {
+		return s.backendGet(ctx, scope, id)
+	}
 	return s.get(ctx, scope, id, false)
 }
 
@@ -763,6 +769,9 @@ FROM prospective_memories`).Scan(&armed, &triggered, &completed, &expired)
 }
 
 func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind, tier string, limit int) ([]Record, error) {
+	if s.backendFactory != nil {
+		return s.searchBackend(ctx, scope, query, kind, tier, limit)
+	}
 	req, planErr := s.planRecall(DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit})
 	if planErr != nil {
 		return nil, planErr
@@ -880,6 +889,9 @@ func searchPattern(query string) string {
 }
 
 func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out Record, err error) {
+	if s.backendFactory != nil {
+		return s.backendPut(ctx, scope, r)
+	}
 	defer func() {
 		if s.placement == PlacementServer {
 			s.recordMutation(DataRequest{Operation: "store"}, DataResponse{Records: []Record{out}}, err, "")
@@ -901,6 +913,9 @@ func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out
 }
 
 func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (changed bool, err error) {
+	if s.backendFactory != nil {
+		return s.backendDelete(ctx, scope, id)
+	}
 	if s.placement == PlacementKB {
 		// Mutation admission is distinct from serving eligibility. An expired or
 		// suppressed active record can still be retired by its authorized author.
@@ -978,7 +993,9 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	request.Kind = strings.TrimSpace(request.Kind)
 	request.Tier = strings.TrimSpace(request.Tier)
-	request.Key = strings.TrimSpace(request.Key)
+	if request.Operation != "fidelity-read" {
+		request.Key = strings.TrimSpace(request.Key)
+	}
 	request.Workspace = strings.TrimSpace(request.Workspace)
 	request.Project = strings.TrimSpace(request.Project)
 	request.SignalType = strings.TrimSpace(request.SignalType)
@@ -1089,6 +1106,34 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	// This is an internal lifecycle contract for the trusted connection host,
+	// not a model/user command. Existing owner routes admit subject erasure.
+	if request.Operation == "reset-derived" {
+		if invocation.PrincipalRef != 0 || options.data == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		remaining := invocation.Remaining(dataTimeout)
+		if remaining <= 0 || invocation.Cancelled() {
+			return nil, bus.ModuleStatusCancelled
+		}
+		parent := options.dataContext
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, remaining)
+		defer cancel()
+		if err := resetDerivedBackend(ctx, options.data); err != nil {
+			if ctx.Err() != nil || invocation.Cancelled() {
+				return nil, bus.ModuleStatusCancelled
+			}
+			if errors.Is(err, memorycontract.ErrUnsupported) {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			return nil, bus.ModuleStatusInternal
+		}
+		return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
+	}
+
 	if request.FilteredExport != nil && request.Operation != "export-filtered" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -1107,11 +1152,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.IngressPreview && (!request.PublicView || (request.Operation != "diagnose" && request.Operation != "explain")) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.validFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
+	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.ValidFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	versionedMutation := (options.placement == PlacementKB && (versionedCorrectionOperation(request.Operation) || request.Operation == "delete-as" || request.Operation == "reject" || request.Operation == "restore")) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
-	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.validFor(request.ID)) {
+	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.ValidFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	creation := (options.placement == PlacementServer && request.Operation == "store") || (options.placement == PlacementKB && request.Operation == "insert-epistemic")
@@ -1429,6 +1474,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				return nil, bus.ModuleStatusInternal
 			}
 			bound := *backend
+			bound.backendRequest = request
 			bound.db = transaction
 			bound.recoveryDB = db
 			options.data = &bound
@@ -1690,6 +1736,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(entries)
 		}
+	case "fidelity-read":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || request.Key == "" || len(request.Key) > 128 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response.Payload, err = backend.fidelityRead(ctx, request.Key)
+
 	case "demotion-run", "demotion-check":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
@@ -3125,6 +3178,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
+		if code == MutationInstructionRefused {
+			rollbackOnly = true
+		}
 		proposal := proposedCorrection(err)
 		response = DataResponse{Code: &code, Proposal: proposal}
 		// Canonical admission has not written a version. The linked draft and
@@ -3136,6 +3192,9 @@ set_config('aimee.memory_believed_at',$14,true)`,
 	}
 
 	if err != nil {
+		if errors.Is(err, memorycontract.ErrUnsupported) {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
 		if invocation.Cancelled() || ctx.Err() != nil {
 			return nil, bus.ModuleStatusCancelled
 		}

@@ -21,7 +21,7 @@ artifact linking, LLM and sidecar drivers, notify/version, and `kb_curator_synth
 into `aimee-kb`. The curator's public headers are reached by its in-KB consumers (`kb.c`, `cmd_kb.c`,
 the curator config/profile) through `-Imodules/kb-synthesis`; per the flat-layout convention the
 module-root headers are declared as `private_headers`. `kb_curator_provider.c` (the provider adapter in
-core, not KB-tier) and the DB2 artifact/link storage APIs stay their owners' and are consumed through
+core, not KB-tier) and the KB_STORE artifact/link storage APIs stay their owners' and are consumed through
 their contracts.
 
 The separately supervised `kb-synthesis` process serves one bounded Go stage at principal 22/event
@@ -82,7 +82,7 @@ ordinary response controls.
 ## Data and migrations
 
 The module reads entities, claims, evidence, and embeddings, then writes versioned `synthesis` artifacts,
-features, vector rows, and provenance links through DB2/PostgreSQL. Migrations must preserve prompt/model
+features, vector rows, and provenance links through KB_STORE/PostgreSQL. Migrations must preserve prompt/model
 version, topic identity, citations, artifact state, and suppression of duplicate work; generated
 syntheses are rebuildable only when their complete source evidence and version policy remain available.
 

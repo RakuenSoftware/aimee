@@ -1,0 +1,567 @@
+{
+  "status": "passed",
+  "model": "gemma4-e2b",
+  "scope": "Every real GGUF per-layer gate/projection converted to BF16 and admitted by vLLM ReplicatedLinear on CPU; not GPU inference",
+  "checks": [
+    {
+      "name": "model.language_model.layers.0.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.0.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.1.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.1.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.2.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.2.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.3.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.3.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.4.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.4.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.5.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.5.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.6.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.6.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.7.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.7.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.8.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.8.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.9.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.9.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.10.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.10.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.11.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.11.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.12.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.12.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.13.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.13.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.14.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.14.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.15.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.15.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.16.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.16.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.17.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.17.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.18.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.18.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.19.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.19.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.20.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.20.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.21.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.21.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.22.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.22.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.23.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.23.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.24.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.24.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.25.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.25.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.26.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.26.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.27.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.27.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.28.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.28.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.29.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.29.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.30.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.30.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.31.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.31.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.32.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.32.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.33.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.33.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.34.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        1536
+      ],
+      "passed": true
+    },
+    {
+      "name": "model.language_model.layers.34.per_layer_projection.weight",
+      "shape": [
+        1536,
+        256
+      ],
+      "passed": true
+    }
+  ]
+}

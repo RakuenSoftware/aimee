@@ -1,0 +1,1298 @@
+{
+  "version": 1,
+  "status": "pass",
+  "manifest_sha256": "3bb330f887d6a8cf94a92385009f72a3bda2df9fff2b54770f7fe3d2643669bd",
+  "implementation": "d1e31ad1eca51361e80e1fb0bdf71031eb3a871d",
+  "working_diff_sha256": "2182748d38c8d3cf9252371a8bdc69317a10f5789056a8775d359734579169f2",
+  "packages": {
+    "./modules/memory": {
+      "TestActionEvidenceRequiresCurrentGuardAndExactReceipt": "pass",
+      "TestAssertionGenerationCleanupIgnoresTempShadowPostgres": "pass",
+      "TestAuxiliaryTypedSourceObservationsPostgres": "pass",
+      "TestClientConcurrentCallsKeepRequestIdentity": "pass",
+      "TestClientDataJSONPreservesResponseAndRequestBytes": "pass",
+      "TestClientDataPreservesPlacementAndLargeIDs": "pass",
+      "TestClientDeadlineAndCancellation": "pass",
+      "TestClientEmbeddingThroughOwner": "pass",
+      "TestClientEmbeddingsPreserveOwnerOutcomes": "pass",
+      "TestClientFactFailureCannotLookAccepted": "pass",
+      "TestClientGateAndExtractionConformance": "pass",
+      "TestClientNoFallbackOrRetriesOnTransportFailure": "pass",
+      "TestClientPinnedWireRequests": "pass",
+      "TestClientPrivacyConformance": "pass",
+      "TestClientRejectsCorruptBinaryReplies": "pass",
+      "TestClientRejectsMalformedReplies": "pass",
+      "TestClientRejectsOversizeBeforeDispatch": "pass",
+      "TestCollectionDeadlineSyntax": "pass",
+      "TestCollectionEmptyRecallInvalidatedPostgres": "pass",
+      "TestCorrectionDigestCompatibility": "pass",
+      "TestEmbeddingHealthCompleteIdentityAndLegacy": "pass",
+      "TestEmbeddingIdentityCommitment": "pass",
+      "TestErasureRequiresOfflineOwnerCoverage": "pass",
+      "TestEvidenceLineageCopiesAndComposites": "pass",
+      "TestEvidenceLineageCurrentReleasePostgres": "pass",
+      "TestEvidenceLineageIncompleteTraversal": "pass",
+      "TestEvidenceLineageIndependenceRequiresCertificate": "pass",
+      "TestEvidenceLineageSharedFixtureAndConflicts": "pass",
+      "TestEvidenceLineageUnknownAndClaimBoundaries": "pass",
+      "TestExpectedVersionConcurrentCorrections": "pass",
+      "TestExpectedVersionValidation": "pass",
+      "TestExplorationCoverageSurvivesNativeRefresh": "pass",
+      "TestExplorationIndexGenerationFollowsRetainedParts": "pass",
+      "TestExplorationOfferBindsFinalReceiptModelAndLimits": "pass",
+      "TestExplorationOwnerObservationRejectsRestartAndScopeChanges": "pass",
+      "TestExplorationPlanCommitmentCoversRetainedNativeBlocks": "pass",
+      "TestGoCandidateFusionFairnessBoundsAndDuplicateVotes": "pass",
+      "TestHardRuleSourceObservationsPostgres": "pass",
+      "TestHealthRejectsUnboundedOrForgedPriorMetadata": "pass",
+      "TestHistoricalMemoryEvidencePostgres": "pass",
+      "TestHygieneCursorBindsScopeAndSnapshotIdentity": "pass",
+      "TestHygieneGovernedPostgres": "pass",
+      "TestHygieneRejectsMutationAndUnboundedInputs": "pass",
+      "TestIdempotencyContractValidation": "pass",
+      "TestIdempotentMutationConcurrentCommitAndDisconnect": "pass",
+      "TestIngressAssemblyBothPlacementsAndExactIDs": "pass",
+      "TestIngressAssemblyFactsFailureAndTaskConfidence": "pass",
+      "TestIngressAssemblyFoldingAndBounds": "pass",
+      "TestIngressBlockNativeGoldens": "pass",
+      "TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries": "pass",
+      "TestIngressFactSourceProjection": "pass",
+      "TestIngressLimitsCannotRaiseHostAllocation": "pass",
+      "TestIngressPackingDispositionsEveryChannel": "pass",
+      "TestIngressPropagatesTypedOwnerRefusal": "pass",
+      "TestIngressRefusesMalformedTypedOutcome": "pass",
+      "TestIngressRejectsAmbiguousTypedInputs": "pass",
+      "TestIngressRejectsMismatchedTypedProjection": "pass",
+      "TestIngressRetainedEvidenceMatchesRenderedSelection": "pass",
+      "TestIngressTypedProjectionEmptyDegradedAndUnavailable": "pass",
+      "TestIngressTypedProjectionRepackingAndIdentity": "pass",
+      "TestMR05FrozenCoverageEvaluation": "pass",
+      "TestMemoryEvidenceProjectionPostgres": "pass",
+      "TestMemoryEvidencePublicValidation": "pass",
+      "TestMemoryIndexRebuildCannotBlockRecallPostgres": "pass",
+      "TestMemoryLimitsRejectAmbiguousWireValues": "pass",
+      "TestMemoryRuntimeRoleReplay": "pass",
+      "TestMemoryScopeConcurrentPoolReuse": "pass",
+      "TestNativeHostStageIdentifiersMatchGo": "pass",
+      "TestNativeMixedOwnerReleaseRequiresBothAnswers": "pass",
+      "TestNativeRefreshReplacesOnlyNativeProofs": "pass",
+      "TestNativeStorageGraphCodesMatchGo": "pass",
+      "TestPersonalMemoryAuthority": "pass",
+      "TestPersonalMemoryChangeJournal": "pass",
+      "TestPriorRankDisplacementBoundAndDeterminism": "pass",
+      "TestPrivateCollectionEmptyRecallInvalidatedPostgres": "pass",
+      "TestProviderReceiptBindingNeedsSingleFreshAdmission": "pass",
+      "TestProviderReceiptObservationPreservesTransportUncertainty": "pass",
+      "TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations": "pass",
+      "TestProviderReceiptRecoveryStages": "pass",
+      "TestProviderReceiptRejectsMalformedAndOversizedBindings": "pass",
+      "TestProviderReceiptReplayRetention": "pass",
+      "TestProviderReceiptResponseRepresentationCompatibility": "pass",
+      "TestProviderReceiptWithoutSourceHandleIsAnExplicitGap": "pass",
+      "TestRankingArtifactsFrozen": "pass",
+      "TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForgery": "pass",
+      "TestReceiptVerificationIndependentEvidence": "pass",
+      "TestReceiptVerificationRejectsAmbiguousSchema": "pass",
+      "TestRetrievalCorpus": "pass",
+      "TestRuntimeCommandHostOnly": "pass",
+      "TestRuntimeConfidenceBothPlacements": "pass",
+      "TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer": "pass",
+      "TestScopeOwnerPostgres": "pass",
+      "TestSelectionConstraintCopiesAndCorrection": "pass",
+      "TestSelectionDisabledBaselineAndFloors": "pass",
+      "TestSelectionNearRankDiversity": "pass",
+      "TestSelectionPolicyReceiptSurvivesNativeRefresh": "pass",
+      "TestSelectionPotentialIndependentOriginSurvivesThirtyCopies": "pass",
+      "TestSelectionRequiredSurvivesThirtyCopies": "pass",
+      "TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres": "pass",
+      "TestSensitivityRejectsImpossibleCountBeforeAllocation": "pass",
+      "TestServedViewProtectedPacking": "pass",
+      "TestServedViewPublicValidation": "pass",
+      "TestServedViewsOwnerAndCachePostgres": "pass",
+      "TestServedViewsPrivatePlacementPostgres": "pass",
+      "TestSourceReleaseCapacityAndAccumulation": "pass",
+      "TestSourceReleaseConcurrentRequests": "pass",
+      "TestSourceReleaseFreshAnswerAndFailureIsolation": "pass",
+      "TestSourceReleaseRejectedCandidatePreservesAcceptedSources": "pass",
+      "TestSourceReleaseSendGuardAcknowledgement": "pass",
+      "TestSourceSendCompletionNeedsOnlyOpaqueToken": "pass",
+      "TestSourceSendGuardRequiresHostAuthority": "pass",
+      "TestSourceSendStorageBarrierPostgres": "pass",
+      "TestStagePriorCapsAndMaximumOverturn": "pass",
+      "TestStrictCommandsValidateTransportEnvelope": "pass",
+      "TestStructuredRecallSourceObservationsPostgres": "pass",
+      "TestSubjectErasureTransitiveCopiesPostgres": "pass",
+      "TestTypedContextDefaultsAndCompleteBudget": "pass",
+      "TestTypedContextHostBoundary": "pass",
+      "TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval": "pass",
+      "TestTypedProjectionCachedEncodingMatchesCanonicalChannels": "pass",
+      "TestTypedProjectionExactByteLimits": "pass",
+      "TestTypedProjectionRendersReviewedProcedureOnce": "pass",
+      "TestTypedProjectionRepackingHasLinearSerializationWork": "pass",
+      "TestUnitSemanticMergeKeepsVersionIdentity": "pass",
+      "TestUnitSemanticPolicyNativeWeights": "pass",
+      "TestUtilityHorizonBoundaryAndPurpose": "pass",
+      "TestUtilityHorizonExplicitDeadlineIsACap": "pass",
+      "TestUtilityHorizonRulePrecedenceAndDurableKinds": "pass",
+      "TestUtilityHorizonUnknownAnchorsAndPolicyIdentity": "pass",
+      "TestValidityServingParityPostgres": "pass",
+      "TestVersionedIngressByteBudget": "pass"
+    },
+    "./modules/execution-policy": {
+      "TestCleanRetryBaselineAndBudgetGaps": "pass",
+      "TestCleanRetryDisablePreservesInFlightOutcome": "pass",
+      "TestCleanRetryIsolationAndSharedLimits": "pass",
+      "TestCleanRetryPreservesUnknownAndVerifiedEffects": "pass",
+      "TestConfiguredStarvationThresholdDoesNotRewriteConfidence": "pass",
+      "TestDiscoveryFallbackAttestsActualRoots": "pass",
+      "TestExplorationConcurrentRetriesAndRestart": "pass",
+      "TestExplorationDoesNotRestrictUnobservedOrOtherProjectPaths": "pass",
+      "TestExplorationInvalidContractStillChargesOperator": "pass",
+      "TestExplorationInvalidationAndCalibration": "pass",
+      "TestExplorationLiteralZeroAndLegacyAdapter": "pass",
+      "TestExplorationRefundAndDistinctFiles": "pass",
+      "TestExplorationStarvationPreservesOperatorAndConfidence": "pass",
+      "TestExplorationStorageFailureAndIdentityMutation": "pass",
+      "TestIndexedFallbackCannotWidenOperatorOrSurviveExpiry": "pass",
+      "TestIndexedFallbackScopeConcurrencyAndRetry": "pass",
+      "TestToolJSONCannotIssueOrBypassContract": "pass"
+    },
+    "./modules/aimee/families": {
+      "TestCanonicalURLFoldsSpellingsOfOnePage": "pass",
+      "TestCanonicalURLKeepsDistinctPagesDistinct": "pass",
+      "TestCanonicalURLRefusesWhatTheCacheMustNotKeyOn": "pass",
+      "TestCleanRetryLiveSharedRoot": "pass",
+      "TestContextSnapshotActivationAdvancesAndReturnsPersistedState": "pass",
+      "TestContextSnapshotInsertTurnRequiresPositiveTurn": "pass",
+      "TestGovernedActionLiveAtomicOwner": "pass",
+      "TestTaskProjectionAbandonedAdmissionRetainsDigestOnly": "pass",
+      "TestTaskProjectionAdmissionReceiptHasNoDraftText": "pass",
+      "TestTaskProjectionAtomicOwnerPostgres": "pass",
+      "TestTaskProjectionPromotionProof": "pass",
+      "TestWebPageCanonicalURLRepliesWithTheRcCell": "pass"
+    },
+    "./cmd/aimee-module": {
+      "TestAdvertisedStagesMatchTheContractFile": "pass",
+      "TestModuleRegistryMatchesProcessContracts": "pass",
+      "TestModuleRegistryRejectsUnknownAndBadArguments": "pass"
+    },
+    "./modules/memory/cmd/aimee-memory-eval": {
+      "TestAgentModelBoundsOutput": "pass",
+      "TestAgentModelUsesExistingCLIWithoutShell": "pass",
+      "TestDatasetIsolatedGoReplay": "pass",
+      "TestDatasetParsingAndDenominators": "pass",
+      "TestLongMemQAAndModuleMissReports": "pass",
+      "TestQADatasetValidation": "pass",
+      "TestQAUnanswerableKeepsGoldOutOfReader": "pass",
+      "TestQAUsesIsolatedModuleAndScoredFailureAttempt": "pass",
+      "TestSessionSupportLabelsFollowEvidenceSessions": "pass",
+      "TestUnanswerableRetrievalPreservesCasesAndNullMetrics": "pass"
+    }
+  },
+  "python": {
+    "executed": 40,
+    "expected": 40,
+    "skipped": 0
+  },
+  "groups": [
+    {
+      "id": "validity_authority",
+      "cases": [
+        {
+          "id": "./modules/memory/TestValidityServingParityPostgres",
+          "package": "./modules/memory",
+          "test": "TestValidityServingParityPostgres",
+          "source": "server-go/modules/memory/validity_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExpectedVersionValidation",
+          "package": "./modules/memory",
+          "test": "TestExpectedVersionValidation",
+          "source": "server-go/modules/memory/version_contract_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExpectedVersionConcurrentCorrections",
+          "package": "./modules/memory",
+          "test": "TestExpectedVersionConcurrentCorrections",
+          "source": "server-go/modules/memory/version_contract_test.go"
+        },
+        {
+          "id": "./modules/memory/TestPersonalMemoryAuthority",
+          "package": "./modules/memory",
+          "test": "TestPersonalMemoryAuthority",
+          "source": "server-go/modules/memory/personal_admission_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIdempotencyContractValidation",
+          "package": "./modules/memory",
+          "test": "TestIdempotencyContractValidation",
+          "source": "server-go/modules/memory/mutation_retry_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIdempotentMutationConcurrentCommitAndDisconnect",
+          "package": "./modules/memory",
+          "test": "TestIdempotentMutationConcurrentCommitAndDisconnect",
+          "source": "server-go/modules/memory/mutation_retry_test.go"
+        },
+        {
+          "id": "./modules/memory/TestCorrectionDigestCompatibility",
+          "package": "./modules/memory",
+          "test": "TestCorrectionDigestCompatibility",
+          "source": "server-go/modules/memory/mutation_retry_test.go"
+        }
+      ]
+    },
+    {
+      "id": "time",
+      "cases": [
+        {
+          "id": "./modules/memory/TestSourceReleaseFreshAnswerAndFailureIsolation",
+          "package": "./modules/memory",
+          "test": "TestSourceReleaseFreshAnswerAndFailureIsolation",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceReleaseCapacityAndAccumulation",
+          "package": "./modules/memory",
+          "test": "TestSourceReleaseCapacityAndAccumulation",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceReleaseConcurrentRequests",
+          "package": "./modules/memory",
+          "test": "TestSourceReleaseConcurrentRequests",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceReleaseRejectedCandidatePreservesAcceptedSources",
+          "package": "./modules/memory",
+          "test": "TestSourceReleaseRejectedCandidatePreservesAcceptedSources",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestNativeMixedOwnerReleaseRequiresBothAnswers",
+          "package": "./modules/memory",
+          "test": "TestNativeMixedOwnerReleaseRequiresBothAnswers",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestStructuredRecallSourceObservationsPostgres",
+          "package": "./modules/memory",
+          "test": "TestStructuredRecallSourceObservationsPostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceSendStorageBarrierPostgres",
+          "package": "./modules/memory",
+          "test": "TestSourceSendStorageBarrierPostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceReleaseSendGuardAcknowledgement",
+          "package": "./modules/memory",
+          "test": "TestSourceReleaseSendGuardAcknowledgement",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceSendGuardRequiresHostAuthority",
+          "package": "./modules/memory",
+          "test": "TestSourceSendGuardRequiresHostAuthority",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSourceSendCompletionNeedsOnlyOpaqueToken",
+          "package": "./modules/memory",
+          "test": "TestSourceSendCompletionNeedsOnlyOpaqueToken",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHardRuleSourceObservationsPostgres",
+          "package": "./modules/memory",
+          "test": "TestHardRuleSourceObservationsPostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHistoricalMemoryEvidencePostgres",
+          "package": "./modules/memory",
+          "test": "TestHistoricalMemoryEvidencePostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestAuxiliaryTypedSourceObservationsPostgres",
+          "package": "./modules/memory",
+          "test": "TestAuxiliaryTypedSourceObservationsPostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestNativeRefreshReplacesOnlyNativeProofs",
+          "package": "./modules/memory",
+          "test": "TestNativeRefreshReplacesOnlyNativeProofs",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExplorationPlanCommitmentCoversRetainedNativeBlocks",
+          "package": "./modules/memory",
+          "test": "TestExplorationPlanCommitmentCoversRetainedNativeBlocks",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExplorationCoverageSurvivesNativeRefresh",
+          "package": "./modules/memory",
+          "test": "TestExplorationCoverageSurvivesNativeRefresh",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExplorationIndexGenerationFollowsRetainedParts",
+          "package": "./modules/memory",
+          "test": "TestExplorationIndexGenerationFollowsRetainedParts",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres",
+          "package": "./modules/memory",
+          "test": "TestSendGuardAbandonedReleaseDoesNotBlockReplacementPostgres",
+          "source": "server-go/modules/memory/source_release_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUtilityHorizonBoundaryAndPurpose",
+          "package": "./modules/memory",
+          "test": "TestUtilityHorizonBoundaryAndPurpose",
+          "source": "server-go/modules/memory/utility_horizon_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUtilityHorizonRulePrecedenceAndDurableKinds",
+          "package": "./modules/memory",
+          "test": "TestUtilityHorizonRulePrecedenceAndDurableKinds",
+          "source": "server-go/modules/memory/utility_horizon_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUtilityHorizonUnknownAnchorsAndPolicyIdentity",
+          "package": "./modules/memory",
+          "test": "TestUtilityHorizonUnknownAnchorsAndPolicyIdentity",
+          "source": "server-go/modules/memory/utility_horizon_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUtilityHorizonExplicitDeadlineIsACap",
+          "package": "./modules/memory",
+          "test": "TestUtilityHorizonExplicitDeadlineIsACap",
+          "source": "server-go/modules/memory/utility_horizon_test.go"
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "cases": [
+        {
+          "id": "./modules/memory/TestMemoryScopeConcurrentPoolReuse",
+          "package": "./modules/memory",
+          "test": "TestMemoryScopeConcurrentPoolReuse",
+          "source": "server-go/modules/memory/scope_pool_test.go"
+        },
+        {
+          "id": "./modules/memory/TestScopeOwnerPostgres",
+          "package": "./modules/memory",
+          "test": "TestScopeOwnerPostgres",
+          "source": "server-go/modules/memory/scope_owner_test.go"
+        },
+        {
+          "id": "./modules/memory/TestMemoryRuntimeRoleReplay",
+          "package": "./modules/memory",
+          "test": "TestMemoryRuntimeRoleReplay",
+          "source": "server-go/modules/memory/runtime_role_test.go"
+        }
+      ]
+    },
+    {
+      "id": "independence",
+      "cases": [
+        {
+          "id": "./modules/memory/TestEvidenceLineageCopiesAndComposites",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageCopiesAndComposites",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEvidenceLineageUnknownAndClaimBoundaries",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageUnknownAndClaimBoundaries",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEvidenceLineageIncompleteTraversal",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageIncompleteTraversal",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEvidenceLineageIndependenceRequiresCertificate",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageIndependenceRequiresCertificate",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEvidenceLineageSharedFixtureAndConflicts",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageSharedFixtureAndConflicts",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEvidenceLineageCurrentReleasePostgres",
+          "package": "./modules/memory",
+          "test": "TestEvidenceLineageCurrentReleasePostgres",
+          "source": "server-go/modules/memory/evidence_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestMemoryEvidenceProjectionPostgres",
+          "package": "./modules/memory",
+          "test": "TestMemoryEvidenceProjectionPostgres",
+          "source": "server-go/modules/memory/evidence_lineage_store_test.go"
+        },
+        {
+          "id": "./modules/memory/TestMemoryEvidencePublicValidation",
+          "package": "./modules/memory",
+          "test": "TestMemoryEvidencePublicValidation",
+          "source": "server-go/modules/memory/evidence_lineage_store_test.go"
+        }
+      ]
+    },
+    {
+      "id": "retrieval_selection",
+      "cases": [
+        {
+          "id": "./modules/memory/TestGoCandidateFusionFairnessBoundsAndDuplicateVotes",
+          "package": "./modules/memory",
+          "test": "TestGoCandidateFusionFairnessBoundsAndDuplicateVotes",
+          "source": "server-go/modules/memory/candidate_fusion_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionRequiredSurvivesThirtyCopies",
+          "package": "./modules/memory",
+          "test": "TestSelectionRequiredSurvivesThirtyCopies",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionConstraintCopiesAndCorrection",
+          "package": "./modules/memory",
+          "test": "TestSelectionConstraintCopiesAndCorrection",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionDisabledBaselineAndFloors",
+          "package": "./modules/memory",
+          "test": "TestSelectionDisabledBaselineAndFloors",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionNearRankDiversity",
+          "package": "./modules/memory",
+          "test": "TestSelectionNearRankDiversity",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionPolicyReceiptSurvivesNativeRefresh",
+          "package": "./modules/memory",
+          "test": "TestSelectionPolicyReceiptSurvivesNativeRefresh",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSelectionPotentialIndependentOriginSurvivesThirtyCopies",
+          "package": "./modules/memory",
+          "test": "TestSelectionPotentialIndependentOriginSurvivesThirtyCopies",
+          "source": "server-go/modules/memory/selection_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestPriorRankDisplacementBoundAndDeterminism",
+          "package": "./modules/memory",
+          "test": "TestPriorRankDisplacementBoundAndDeterminism",
+          "source": "server-go/modules/memory/ranking_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestStagePriorCapsAndMaximumOverturn",
+          "package": "./modules/memory",
+          "test": "TestStagePriorCapsAndMaximumOverturn",
+          "source": "server-go/modules/memory/ranking_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHealthRejectsUnboundedOrForgedPriorMetadata",
+          "package": "./modules/memory",
+          "test": "TestHealthRejectsUnboundedOrForgedPriorMetadata",
+          "source": "server-go/modules/memory/ranking_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestRankingArtifactsFrozen",
+          "package": "./modules/memory",
+          "test": "TestRankingArtifactsFrozen",
+          "source": "server-go/modules/memory/ranking_policy_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUnitSemanticPolicyNativeWeights",
+          "package": "./modules/memory",
+          "test": "TestUnitSemanticPolicyNativeWeights",
+          "source": "server-go/modules/memory/unit_recall_test.go"
+        },
+        {
+          "id": "./modules/memory/TestUnitSemanticMergeKeepsVersionIdentity",
+          "package": "./modules/memory",
+          "test": "TestUnitSemanticMergeKeepsVersionIdentity",
+          "source": "server-go/modules/memory/unit_recall_test.go"
+        },
+        {
+          "id": "./modules/memory/TestRetrievalCorpus",
+          "package": "./modules/memory",
+          "test": "TestRetrievalCorpus",
+          "source": "server-go/modules/memory/retrieval_eval_test.go"
+        }
+      ]
+    },
+    {
+      "id": "packing_receipts",
+      "cases": [
+        {
+          "id": "./modules/memory/TestProviderReceiptBindingNeedsSingleFreshAdmission",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptBindingNeedsSingleFreshAdmission",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptObservationPreservesTransportUncertainty",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptObservationPreservesTransportUncertainty",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptRejectsMalformedAndOversizedBindings",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptRejectsMalformedAndOversizedBindings",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptResponseRepresentationCompatibility",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptResponseRepresentationCompatibility",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptWithoutSourceHandleIsAnExplicitGap",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptWithoutSourceHandleIsAnExplicitGap",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptRecoveryStages",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptRecoveryStages",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestProviderReceiptReplayRetention",
+          "package": "./modules/memory",
+          "test": "TestProviderReceiptReplayRetention",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExplorationOfferBindsFinalReceiptModelAndLimits",
+          "package": "./modules/memory",
+          "test": "TestExplorationOfferBindsFinalReceiptModelAndLimits",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestExplorationOwnerObservationRejectsRestartAndScopeChanges",
+          "package": "./modules/memory",
+          "test": "TestExplorationOwnerObservationRejectsRestartAndScopeChanges",
+          "source": "server-go/modules/memory/provider_receipt_test.go"
+        },
+        {
+          "id": "./modules/memory/TestReceiptVerificationIndependentEvidence",
+          "package": "./modules/memory",
+          "test": "TestReceiptVerificationIndependentEvidence",
+          "source": "server-go/modules/memory/receipt_verification_test.go"
+        },
+        {
+          "id": "./modules/memory/TestReceiptVerificationRejectsAmbiguousSchema",
+          "package": "./modules/memory",
+          "test": "TestReceiptVerificationRejectsAmbiguousSchema",
+          "source": "server-go/modules/memory/receipt_verification_test.go"
+        },
+        {
+          "id": "./modules/memory/TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForgery",
+          "package": "./modules/memory",
+          "test": "TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForgery",
+          "source": "server-go/modules/memory/receipt_verification_test.go"
+        },
+        {
+          "id": "./modules/memory/TestStrictCommandsValidateTransportEnvelope",
+          "package": "./modules/memory",
+          "test": "TestStrictCommandsValidateTransportEnvelope",
+          "source": "server-go/modules/memory/receipt_verification_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressBlockNativeGoldens",
+          "package": "./modules/memory",
+          "test": "TestIngressBlockNativeGoldens",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries",
+          "package": "./modules/memory",
+          "test": "TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressAssemblyBothPlacementsAndExactIDs",
+          "package": "./modules/memory",
+          "test": "TestIngressAssemblyBothPlacementsAndExactIDs",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressAssemblyFoldingAndBounds",
+          "package": "./modules/memory",
+          "test": "TestIngressAssemblyFoldingAndBounds",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressAssemblyFactsFailureAndTaskConfidence",
+          "package": "./modules/memory",
+          "test": "TestIngressAssemblyFactsFailureAndTaskConfidence",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestVersionedIngressByteBudget",
+          "package": "./modules/memory",
+          "test": "TestVersionedIngressByteBudget",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressLimitsCannotRaiseHostAllocation",
+          "package": "./modules/memory",
+          "test": "TestIngressLimitsCannotRaiseHostAllocation",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestMemoryLimitsRejectAmbiguousWireValues",
+          "package": "./modules/memory",
+          "test": "TestMemoryLimitsRejectAmbiguousWireValues",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressRetainedEvidenceMatchesRenderedSelection",
+          "package": "./modules/memory",
+          "test": "TestIngressRetainedEvidenceMatchesRenderedSelection",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressTypedProjectionRepackingAndIdentity",
+          "package": "./modules/memory",
+          "test": "TestIngressTypedProjectionRepackingAndIdentity",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressFactSourceProjection",
+          "package": "./modules/memory",
+          "test": "TestIngressFactSourceProjection",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressRejectsMismatchedTypedProjection",
+          "package": "./modules/memory",
+          "test": "TestIngressRejectsMismatchedTypedProjection",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressTypedProjectionEmptyDegradedAndUnavailable",
+          "package": "./modules/memory",
+          "test": "TestIngressTypedProjectionEmptyDegradedAndUnavailable",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressRefusesMalformedTypedOutcome",
+          "package": "./modules/memory",
+          "test": "TestIngressRefusesMalformedTypedOutcome",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressRejectsAmbiguousTypedInputs",
+          "package": "./modules/memory",
+          "test": "TestIngressRejectsAmbiguousTypedInputs",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressPropagatesTypedOwnerRefusal",
+          "package": "./modules/memory",
+          "test": "TestIngressPropagatesTypedOwnerRefusal",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestIngressPackingDispositionsEveryChannel",
+          "package": "./modules/memory",
+          "test": "TestIngressPackingDispositionsEveryChannel",
+          "source": "server-go/modules/memory/ingress_assembly_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedProjectionRendersReviewedProcedureOnce",
+          "package": "./modules/memory",
+          "test": "TestTypedProjectionRendersReviewedProcedureOnce",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedProjectionExactByteLimits",
+          "package": "./modules/memory",
+          "test": "TestTypedProjectionExactByteLimits",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedProjectionCachedEncodingMatchesCanonicalChannels",
+          "package": "./modules/memory",
+          "test": "TestTypedProjectionCachedEncodingMatchesCanonicalChannels",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval",
+          "package": "./modules/memory",
+          "test": "TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedProjectionRepackingHasLinearSerializationWork",
+          "package": "./modules/memory",
+          "test": "TestTypedProjectionRepackingHasLinearSerializationWork",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedContextDefaultsAndCompleteBudget",
+          "package": "./modules/memory",
+          "test": "TestTypedContextDefaultsAndCompleteBudget",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        },
+        {
+          "id": "./modules/memory/TestTypedContextHostBoundary",
+          "package": "./modules/memory",
+          "test": "TestTypedContextHostBoundary",
+          "source": "server-go/modules/memory/typed_context_test.go"
+        }
+      ]
+    },
+    {
+      "id": "contracts_task_state",
+      "cases": [
+        {
+          "id": "./modules/execution-policy/TestExplorationDoesNotRestrictUnobservedOrOtherProjectPaths",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationDoesNotRestrictUnobservedOrOtherProjectPaths",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationLiteralZeroAndLegacyAdapter",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationLiteralZeroAndLegacyAdapter",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationConcurrentRetriesAndRestart",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationConcurrentRetriesAndRestart",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationInvalidationAndCalibration",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationInvalidationAndCalibration",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationRefundAndDistinctFiles",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationRefundAndDistinctFiles",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationStorageFailureAndIdentityMutation",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationStorageFailureAndIdentityMutation",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationStarvationPreservesOperatorAndConfidence",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationStarvationPreservesOperatorAndConfidence",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestExplorationInvalidContractStillChargesOperator",
+          "package": "./modules/execution-policy",
+          "test": "TestExplorationInvalidContractStillChargesOperator",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestToolJSONCannotIssueOrBypassContract",
+          "package": "./modules/execution-policy",
+          "test": "TestToolJSONCannotIssueOrBypassContract",
+          "source": "server-go/modules/execution-policy/exploration_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestIndexedFallbackScopeConcurrencyAndRetry",
+          "package": "./modules/execution-policy",
+          "test": "TestIndexedFallbackScopeConcurrencyAndRetry",
+          "source": "server-go/modules/execution-policy/exploration_recovery_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestIndexedFallbackCannotWidenOperatorOrSurviveExpiry",
+          "package": "./modules/execution-policy",
+          "test": "TestIndexedFallbackCannotWidenOperatorOrSurviveExpiry",
+          "source": "server-go/modules/execution-policy/exploration_recovery_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestDiscoveryFallbackAttestsActualRoots",
+          "package": "./modules/execution-policy",
+          "test": "TestDiscoveryFallbackAttestsActualRoots",
+          "source": "server-go/modules/execution-policy/exploration_recovery_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestConfiguredStarvationThresholdDoesNotRewriteConfidence",
+          "package": "./modules/execution-policy",
+          "test": "TestConfiguredStarvationThresholdDoesNotRewriteConfidence",
+          "source": "server-go/modules/execution-policy/exploration_recovery_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestTaskProjectionAtomicOwnerPostgres",
+          "package": "./modules/aimee/families",
+          "test": "TestTaskProjectionAtomicOwnerPostgres",
+          "source": "server-go/modules/aimee/families/task_projection_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestTaskProjectionPromotionProof",
+          "package": "./modules/aimee/families",
+          "test": "TestTaskProjectionPromotionProof",
+          "source": "server-go/modules/aimee/families/task_projection_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestTaskProjectionAbandonedAdmissionRetainsDigestOnly",
+          "package": "./modules/aimee/families",
+          "test": "TestTaskProjectionAbandonedAdmissionRetainsDigestOnly",
+          "source": "server-go/modules/aimee/families/task_projection_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestTaskProjectionAdmissionReceiptHasNoDraftText",
+          "package": "./modules/aimee/families",
+          "test": "TestTaskProjectionAdmissionReceiptHasNoDraftText",
+          "source": "server-go/modules/aimee/families/task_projection_test.go"
+        }
+      ]
+    },
+    {
+      "id": "lifecycle_operations",
+      "cases": [
+        {
+          "id": "./modules/memory/TestEmbeddingIdentityCommitment",
+          "package": "./modules/memory",
+          "test": "TestEmbeddingIdentityCommitment",
+          "source": "server-go/modules/memory/embedding_identity_test.go"
+        },
+        {
+          "id": "./modules/memory/TestEmbeddingHealthCompleteIdentityAndLegacy",
+          "package": "./modules/memory",
+          "test": "TestEmbeddingHealthCompleteIdentityAndLegacy",
+          "source": "server-go/modules/memory/embedding_identity_test.go"
+        },
+        {
+          "id": "./modules/memory/TestMemoryIndexRebuildCannotBlockRecallPostgres",
+          "package": "./modules/memory",
+          "test": "TestMemoryIndexRebuildCannotBlockRecallPostgres",
+          "source": "server-go/modules/memory/index_freshness_test.go"
+        },
+        {
+          "id": "./modules/memory/TestAssertionGenerationCleanupIgnoresTempShadowPostgres",
+          "package": "./modules/memory",
+          "test": "TestAssertionGenerationCleanupIgnoresTempShadowPostgres",
+          "source": "server-go/modules/memory/index_freshness_test.go"
+        },
+        {
+          "id": "./modules/memory/TestPersonalMemoryChangeJournal",
+          "package": "./modules/memory",
+          "test": "TestPersonalMemoryChangeJournal",
+          "source": "server-go/modules/memory/personal_change_journal_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSubjectErasureTransitiveCopiesPostgres",
+          "package": "./modules/memory",
+          "test": "TestSubjectErasureTransitiveCopiesPostgres",
+          "source": "server-go/modules/memory/erasure_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestErasureRequiresOfflineOwnerCoverage",
+          "package": "./modules/memory",
+          "test": "TestErasureRequiresOfflineOwnerCoverage",
+          "source": "server-go/modules/memory/erasure_lineage_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHygieneRejectsMutationAndUnboundedInputs",
+          "package": "./modules/memory",
+          "test": "TestHygieneRejectsMutationAndUnboundedInputs",
+          "source": "server-go/modules/memory/hygiene_preview_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHygieneCursorBindsScopeAndSnapshotIdentity",
+          "package": "./modules/memory",
+          "test": "TestHygieneCursorBindsScopeAndSnapshotIdentity",
+          "source": "server-go/modules/memory/hygiene_preview_test.go"
+        },
+        {
+          "id": "./modules/memory/TestHygieneGovernedPostgres",
+          "package": "./modules/memory",
+          "test": "TestHygieneGovernedPostgres",
+          "source": "server-go/modules/memory/hygiene_preview_test.go"
+        }
+      ]
+    },
+    {
+      "id": "query_caches",
+      "cases": [
+        {
+          "id": "./modules/memory/TestCollectionEmptyRecallInvalidatedPostgres",
+          "package": "./modules/memory",
+          "test": "TestCollectionEmptyRecallInvalidatedPostgres",
+          "source": "server-go/modules/memory/collection_source_test.go"
+        },
+        {
+          "id": "./modules/memory/TestPrivateCollectionEmptyRecallInvalidatedPostgres",
+          "package": "./modules/memory",
+          "test": "TestPrivateCollectionEmptyRecallInvalidatedPostgres",
+          "source": "server-go/modules/memory/collection_source_test.go"
+        },
+        {
+          "id": "./modules/memory/TestCollectionDeadlineSyntax",
+          "package": "./modules/memory",
+          "test": "TestCollectionDeadlineSyntax",
+          "source": "server-go/modules/memory/collection_source_test.go"
+        },
+        {
+          "id": "./modules/memory/TestServedViewProtectedPacking",
+          "package": "./modules/memory",
+          "test": "TestServedViewProtectedPacking",
+          "source": "server-go/modules/memory/served_view_test.go"
+        },
+        {
+          "id": "./modules/memory/TestServedViewPublicValidation",
+          "package": "./modules/memory",
+          "test": "TestServedViewPublicValidation",
+          "source": "server-go/modules/memory/served_view_test.go"
+        },
+        {
+          "id": "./modules/memory/TestServedViewsOwnerAndCachePostgres",
+          "package": "./modules/memory",
+          "test": "TestServedViewsOwnerAndCachePostgres",
+          "source": "server-go/modules/memory/served_view_test.go"
+        },
+        {
+          "id": "./modules/memory/TestServedViewsPrivatePlacementPostgres",
+          "package": "./modules/memory",
+          "test": "TestServedViewsPrivatePlacementPostgres",
+          "source": "server-go/modules/memory/served_view_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestContextSnapshotActivationAdvancesAndReturnsPersistedState",
+          "package": "./modules/aimee/families",
+          "test": "TestContextSnapshotActivationAdvancesAndReturnsPersistedState",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestContextSnapshotInsertTurnRequiresPositiveTurn",
+          "package": "./modules/aimee/families",
+          "test": "TestContextSnapshotInsertTurnRequiresPositiveTurn",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestCanonicalURLFoldsSpellingsOfOnePage",
+          "package": "./modules/aimee/families",
+          "test": "TestCanonicalURLFoldsSpellingsOfOnePage",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestCanonicalURLKeepsDistinctPagesDistinct",
+          "package": "./modules/aimee/families",
+          "test": "TestCanonicalURLKeepsDistinctPagesDistinct",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestCanonicalURLRefusesWhatTheCacheMustNotKeyOn",
+          "package": "./modules/aimee/families",
+          "test": "TestCanonicalURLRefusesWhatTheCacheMustNotKeyOn",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestWebPageCanonicalURLRepliesWithTheRcCell",
+          "package": "./modules/aimee/families",
+          "test": "TestWebPageCanonicalURLRepliesWithTheRcCell",
+          "source": "server-go/modules/aimee/families/runtime_caches_test.go"
+        }
+      ]
+    },
+    {
+      "id": "go_ownership",
+      "cases": [
+        {
+          "id": "./modules/memory/TestNativeHostStageIdentifiersMatchGo",
+          "package": "./modules/memory",
+          "test": "TestNativeHostStageIdentifiersMatchGo",
+          "source": "server-go/modules/memory/host_contract_test.go"
+        },
+        {
+          "id": "./modules/memory/TestNativeStorageGraphCodesMatchGo",
+          "package": "./modules/memory",
+          "test": "TestNativeStorageGraphCodesMatchGo",
+          "source": "server-go/modules/memory/host_contract_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientGateAndExtractionConformance",
+          "package": "./modules/memory",
+          "test": "TestClientGateAndExtractionConformance",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientPrivacyConformance",
+          "package": "./modules/memory",
+          "test": "TestClientPrivacyConformance",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientDataPreservesPlacementAndLargeIDs",
+          "package": "./modules/memory",
+          "test": "TestClientDataPreservesPlacementAndLargeIDs",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientEmbeddingsPreserveOwnerOutcomes",
+          "package": "./modules/memory",
+          "test": "TestClientEmbeddingsPreserveOwnerOutcomes",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientNoFallbackOrRetriesOnTransportFailure",
+          "package": "./modules/memory",
+          "test": "TestClientNoFallbackOrRetriesOnTransportFailure",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientDeadlineAndCancellation",
+          "package": "./modules/memory",
+          "test": "TestClientDeadlineAndCancellation",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientRejectsMalformedReplies",
+          "package": "./modules/memory",
+          "test": "TestClientRejectsMalformedReplies",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientRejectsCorruptBinaryReplies",
+          "package": "./modules/memory",
+          "test": "TestClientRejectsCorruptBinaryReplies",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientRejectsOversizeBeforeDispatch",
+          "package": "./modules/memory",
+          "test": "TestClientRejectsOversizeBeforeDispatch",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientConcurrentCallsKeepRequestIdentity",
+          "package": "./modules/memory",
+          "test": "TestClientConcurrentCallsKeepRequestIdentity",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientPinnedWireRequests",
+          "package": "./modules/memory",
+          "test": "TestClientPinnedWireRequests",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestSensitivityRejectsImpossibleCountBeforeAllocation",
+          "package": "./modules/memory",
+          "test": "TestSensitivityRejectsImpossibleCountBeforeAllocation",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientDataJSONPreservesResponseAndRequestBytes",
+          "package": "./modules/memory",
+          "test": "TestClientDataJSONPreservesResponseAndRequestBytes",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientFactFailureCannotLookAccepted",
+          "package": "./modules/memory",
+          "test": "TestClientFactFailureCannotLookAccepted",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestClientEmbeddingThroughOwner",
+          "package": "./modules/memory",
+          "test": "TestClientEmbeddingThroughOwner",
+          "source": "server-go/modules/memory/client_test.go"
+        },
+        {
+          "id": "./modules/memory/TestRuntimeCommandHostOnly",
+          "package": "./modules/memory",
+          "test": "TestRuntimeCommandHostOnly",
+          "source": "server-go/modules/memory/runtime_command_test.go"
+        },
+        {
+          "id": "./modules/memory/TestRuntimeConfidenceBothPlacements",
+          "package": "./modules/memory",
+          "test": "TestRuntimeConfidenceBothPlacements",
+          "source": "server-go/modules/memory/runtime_command_test.go"
+        },
+        {
+          "id": "./modules/memory/TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer",
+          "package": "./modules/memory",
+          "test": "TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer",
+          "source": "server-go/modules/memory/runtime_command_test.go"
+        },
+        {
+          "id": "./cmd/aimee-module/TestModuleRegistryMatchesProcessContracts",
+          "package": "./cmd/aimee-module",
+          "test": "TestModuleRegistryMatchesProcessContracts",
+          "source": "server-go/cmd/aimee-module/main_test.go"
+        },
+        {
+          "id": "./cmd/aimee-module/TestAdvertisedStagesMatchTheContractFile",
+          "package": "./cmd/aimee-module",
+          "test": "TestAdvertisedStagesMatchTheContractFile",
+          "source": "server-go/cmd/aimee-module/main_test.go"
+        },
+        {
+          "id": "./cmd/aimee-module/TestModuleRegistryRejectsUnknownAndBadArguments",
+          "package": "./cmd/aimee-module",
+          "test": "TestModuleRegistryRejectsUnknownAndBadArguments",
+          "source": "server-go/cmd/aimee-module/main_test.go"
+        }
+      ]
+    },
+    {
+      "id": "effects_retries",
+      "cases": [
+        {
+          "id": "./modules/aimee/families/TestGovernedActionLiveAtomicOwner",
+          "package": "./modules/aimee/families",
+          "test": "TestGovernedActionLiveAtomicOwner",
+          "source": "server-go/modules/aimee/families/governed_actions_test.go"
+        },
+        {
+          "id": "./modules/aimee/families/TestCleanRetryLiveSharedRoot",
+          "package": "./modules/aimee/families",
+          "test": "TestCleanRetryLiveSharedRoot",
+          "source": "server-go/modules/aimee/families/clean_retry_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestCleanRetryIsolationAndSharedLimits",
+          "package": "./modules/execution-policy",
+          "test": "TestCleanRetryIsolationAndSharedLimits",
+          "source": "server-go/modules/execution-policy/clean_retry_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestCleanRetryBaselineAndBudgetGaps",
+          "package": "./modules/execution-policy",
+          "test": "TestCleanRetryBaselineAndBudgetGaps",
+          "source": "server-go/modules/execution-policy/clean_retry_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestCleanRetryPreservesUnknownAndVerifiedEffects",
+          "package": "./modules/execution-policy",
+          "test": "TestCleanRetryPreservesUnknownAndVerifiedEffects",
+          "source": "server-go/modules/execution-policy/clean_retry_test.go"
+        },
+        {
+          "id": "./modules/execution-policy/TestCleanRetryDisablePreservesInFlightOutcome",
+          "package": "./modules/execution-policy",
+          "test": "TestCleanRetryDisablePreservesInFlightOutcome",
+          "source": "server-go/modules/execution-policy/clean_retry_test.go"
+        },
+        {
+          "id": "./modules/memory/TestActionEvidenceRequiresCurrentGuardAndExactReceipt",
+          "package": "./modules/memory",
+          "test": "TestActionEvidenceRequiresCurrentGuardAndExactReceipt",
+          "source": "server-go/modules/memory/action_evidence_test.go"
+        }
+      ]
+    },
+    {
+      "id": "injection_answerability",
+      "cases": [
+        {
+          "id": "./modules/memory/TestMR05FrozenCoverageEvaluation",
+          "package": "./modules/memory",
+          "test": "TestMR05FrozenCoverageEvaluation",
+          "source": "server-go/modules/memory/evidence_frozen_eval_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestDatasetParsingAndDenominators",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestDatasetParsingAndDenominators",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestDatasetIsolatedGoReplay",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestDatasetIsolatedGoReplay",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestUnanswerableRetrievalPreservesCasesAndNullMetrics",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestUnanswerableRetrievalPreservesCasesAndNullMetrics",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestQADatasetValidation",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestQADatasetValidation",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestQAUsesIsolatedModuleAndScoredFailureAttempt",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestQAUsesIsolatedModuleAndScoredFailureAttempt",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestLongMemQAAndModuleMissReports",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestLongMemQAAndModuleMissReports",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestSessionSupportLabelsFollowEvidenceSessions",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestSessionSupportLabelsFollowEvidenceSessions",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelUsesExistingCLIWithoutShell",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestAgentModelUsesExistingCLIWithoutShell",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestAgentModelBoundsOutput",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestAgentModelBoundsOutput",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        },
+        {
+          "id": "./modules/memory/cmd/aimee-memory-eval/TestQAUnanswerableKeepsGoldOutOfReader",
+          "package": "./modules/memory/cmd/aimee-memory-eval",
+          "test": "TestQAUnanswerableKeepsGoldOutOfReader",
+          "source": "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go"
+        }
+      ]
+    }
+  ],
+  "promotion": "unqualified: deterministic invariants do not measure live-model task quality or cost"
+}

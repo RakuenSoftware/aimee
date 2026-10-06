@@ -1,0 +1,13 @@
+{
+  "wheel": "aimee_native_runtime-0.3.2-3-cp312-cp312-linux_x86_64.whl",
+  "sha256": "1684ee2e5aa40ca9c0ed2818658de445bd112f440871372789e80709f9757bd2",
+  "status": "unsigned candidate",
+  "change": "accept vLLM 0.30.0 vendor local-version suffix; reject other public versions",
+  "changed_members": [
+    "aimee_native_runtime-0.3.2.dist-info/RECORD",
+    "aimee_native_runtime/compatibility.cpython-312-x86_64-linux-gnu.so"
+  ],
+  "source_contract_checks": 8,
+  "preserves_original_member_permissions": true,
+  "build_tag_change": "wheel filename only; optional WHEEL Build header absent in original"
+}

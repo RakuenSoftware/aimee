@@ -19,7 +19,7 @@ scan() {
   matches=""
   while IFS= read -r -d '' file; do
     case "$file" in
-      src/db1/*|src/modules/db2/c/*|src/tests/*) continue ;;
+      src/db1/*|src/modules/kb/c/*|src/tests/*) continue ;;
       src/*) ;;
       *) continue ;;
     esac
@@ -71,7 +71,7 @@ public_header_scan() {
   local description=$2
   local matches
 
-  matches="$(rg -n -e "$pattern" -- src/modules/db2/c/db2.h src/modules/db2/c/lifecycle.h || true)"
+  matches="$(rg -n -e "$pattern" -- src/modules/kb/c/kb_store.h src/modules/kb/c/lifecycle.h || true)"
   if [[ -n "$matches" ]]; then
     echo "tier-dep violation: $description" >&2
     echo "$matches" >&2
@@ -80,22 +80,22 @@ public_header_scan() {
 }
 
 scan '^\\s*#\\s*include\\s*<sqlite3\\.h>' "sqlite3 include outside src/db1"
-scan '^\\s*#\\s*include\\s*<libpq-fe\\.h>' "libpq include outside src/modules/db2/c"
-scan '"db2/db_postgres\\.h"' "db2 internal postgres header included outside src/modules/db2/c"
+scan '^\\s*#\\s*include\\s*<libpq-fe\\.h>' "libpq include outside src/modules/kb/c"
+scan '"kb_store/db_postgres\\.h"' "kb_store internal postgres header included outside src/modules/kb/c"
 scan 'aimee_stores_' "aimee_stores symbol outside tier ownership"
 scan '\\baimee_stores_t\\b' "aimee_stores_t symbol outside tier ownership"
-scan 'PGconn' "Postgres connection symbol outside src/modules/db2/c"
-scan '\\bPGresult\\b' "Postgres result symbol outside src/modules/db2/c"
-scan '\\bPQ[A-Z][A-Za-z0-9_]*\\(' "Postgres helper API outside src/modules/db2/c"
+scan 'PGconn' "Postgres connection symbol outside src/modules/kb/c"
+scan '\\bPGresult\\b' "Postgres result symbol outside src/modules/kb/c"
+scan '\\bPQ[A-Z][A-Za-z0-9_]*\\(' "Postgres helper API outside src/modules/kb/c"
 scan 'sqlite3_' "SQLite symbol outside src/db1"
 path_scan '"sqlite3"' \
   "agent policy exposes SQLite CLI capability outside DB1" \
   src/agent_policy.c
-scan 'project_store_' "legacy project-store lifecycle alias outside src/modules/db2/c"
-scan 'project_store_lifecycle\\.h' "legacy project-store lifecycle header outside src/modules/db2/c"
-scan '\\bdatabase_backend\\b' "legacy DB2 backend selector outside src/modules/db2/c"
+scan 'project_store_' "legacy project-store lifecycle alias outside src/modules/kb/c"
+scan 'project_store_lifecycle\\.h' "legacy project-store lifecycle header outside src/modules/kb/c"
+scan '\\bdatabase_backend\\b' "legacy KB_STORE backend selector outside src/modules/kb/c"
 path_scan '\\bdatabase_(url|pool_size)\\b' \
-  "legacy vague DB2 config keys outside src/modules/db2/c" \
+  "legacy vague KB_STORE config keys outside src/modules/kb/c" \
   src/headers/config.h src/headers/config_database.h src/cmd_data.c src/cmd_doctor.c \
   src/kb/kb_main.c
 path_scan '\\bdb_path\\b' \
@@ -104,33 +104,33 @@ path_scan '\\bdb_path\\b' \
 path_scan '\\bworkspace_root\\b' \
   "legacy workspace_root config shim" \
   src/headers/config.h
-path_scan '\\bdb2_(open|close)_shared_store\\b' \
-  "aimee-kb uses legacy DB2 shared-store lifecycle" \
+path_scan '\\bkb_store_(open|close)_shared_store\\b' \
+  "aimee-kb uses legacy KB_STORE shared-store lifecycle" \
   src/kb/kb_main.c
-path_scan '\\bdb2_(init|shutdown)\\b' \
-  "aimee-kb request paths manage DB2 lifecycle outside daemon main" \
+path_scan '\\bkb_store_(init|shutdown)\\b' \
+  "aimee-kb request paths manage KB_STORE lifecycle outside daemon main" \
   src/kb/kb.c src/kb/kb_service.c src/modules/kb_client/kb_client.c src/cmd_kb.c
-path_scan 'DB2_FORK_SPEC_SHARED_STORE|DB2_FORK_SPEC_POSTGRES|db2_child_reopen_shared_store|db2_child_close_shared_store|db2_(open|close)_shared_store' \
-  "non-DB2 code exposes legacy DB2 shared-store fork lifecycle" \
-  src/posix/memory.c src/posix/cmd_hooks.c src/windows/cmd_hooks.c src/modules/db2/c/db2.h src/modules/db2/c/lifecycle.h
-scan '\\bdb2_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \
-  "DB2 transitional SQLite lifecycle outside src/modules/db2/c"
-public_header_scan '\\bdb2_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \
-  "DB2 public lifecycle header exposes SQLite shim primitive"
+path_scan 'KB_STORE_FORK_SPEC_SHARED_STORE|KB_STORE_FORK_SPEC_POSTGRES|kb_store_child_reopen_shared_store|kb_store_child_close_shared_store|kb_store_(open|close)_shared_store' \
+  "non-KB_STORE code exposes legacy KB_STORE shared-store fork lifecycle" \
+  src/posix/memory.c src/posix/cmd_hooks.c src/windows/cmd_hooks.c src/modules/kb/c/kb_store.h src/modules/kb/c/lifecycle.h
+scan '\\bkb_store_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \
+  "KB_STORE transitional SQLite lifecycle outside src/modules/kb/c"
+public_header_scan '\\bkb_store_(shared_sqlite|register_shared_sqlite|open_shared_sqlite|close_shared_sqlite)\\b' \
+  "KB_STORE public lifecycle header exposes SQLite shim primitive"
 public_header_scan '\\b[Ss][Qq][Ll][Ii][Tt][Ee]3?\\b' \
-  "DB2 public lifecycle header exposes SQLite backend knowledge"
-scan '\\bdb2_is_ephemeral\\b' \
-  "DB2 backend-mode probe outside src/modules/db2/c"
-public_header_scan '\\bdb2_is_ephemeral\\b' \
-  "DB2 public lifecycle header exposes backend-mode probe"
-path_scan '\\bdb2_(open|close)_ephemeral_store\\b' \
-  "legacy DB2 ephemeral-store lifecycle exposed outside DB2" \
-  src/modules/agent_eval/agent_eval_memory_support.c src/modules/db2/c/db2.h src/modules/db2/c/lifecycle.h
-scan '\\b(DB2_FORK_SPEC_SHIM|db2_shim_|db2_is_shim|db2_pg_url)\\b' \
-  "DB2 shim lifecycle API outside src/modules/db2/c"
-public_header_scan '\\b(DB2_FORK_SPEC_SHIM|db2_shim_|db2_is_shim|db2_pg_url|[Ss][Hh][Ii][Mm])\\b' \
-  "DB2 public lifecycle header exposes shim backend vocabulary"
-scan '\\bdb2_(open|close)_legacy_shared_store' "DB2 shared-store lifecycle alias outside src/modules/db2/c"
+  "KB_STORE public lifecycle header exposes SQLite backend knowledge"
+scan '\\bkb_store_is_ephemeral\\b' \
+  "KB_STORE backend-mode probe outside src/modules/kb/c"
+public_header_scan '\\bkb_store_is_ephemeral\\b' \
+  "KB_STORE public lifecycle header exposes backend-mode probe"
+path_scan '\\bkb_store_(open|close)_ephemeral_store\\b' \
+  "legacy KB_STORE ephemeral-store lifecycle exposed outside KB_STORE" \
+  src/modules/agent_eval/agent_eval_memory_support.c src/modules/kb/c/kb_store.h src/modules/kb/c/lifecycle.h
+scan '\\b(KB_STORE_FORK_SPEC_SHIM|kb_store_shim_|kb_store_is_shim|kb_store_pg_url)\\b' \
+  "KB_STORE shim lifecycle API outside src/modules/kb/c"
+public_header_scan '\\b(KB_STORE_FORK_SPEC_SHIM|kb_store_shim_|kb_store_is_shim|kb_store_pg_url|[Ss][Hh][Ii][Mm])\\b' \
+  "KB_STORE public lifecycle header exposes shim backend vocabulary"
+scan '\\bkb_store_(open|close)_legacy_shared_store' "KB_STORE shared-store lifecycle alias outside src/modules/kb/c"
 path_scan 'legacy_state_path|load_legacy_state_file|session-[^[:space:]]+\\.state' \
   "legacy file-backed session state migration path" \
   src/session_state.c src/modules/guardrails/guardrails.h
@@ -143,19 +143,19 @@ path_scan 'server-side database handle|database handle|db handle|DB handle|DB ha
   src/agent_tasks.c src/headers/agent_coord.h \
   src/headers/agent_tasks.h src/headers/aimee.h src/headers/commands.h \
   src/posix/cmd_hooks.c
-scan '\\bdb2_tx_' "DB2 transaction primitive outside src/modules/db2/c"
+scan '\\bkb_store_tx_' "KB_STORE transaction primitive outside src/modules/kb/c"
 scan '\\bparse_sqlite_utc\\b|legacy sqlite-FTS5|SQLite-side|SQLite-backed stores|SQLite PRAGMAs|SQLite FTS5|sqlite wallclock' \
   "SQLite-named legacy/helper vocabulary outside src/db1"
 scan '\\bdb1_window_fts_(add|search|available)\\b|\\bdb1_window_fts_hit_t\\b' \
   "non-DB1 callers expose DB1 lexical-index implementation names"
-path_scan 'memory_collect_fts_via_vector|MEM_SOURCE_FTS|FTS string|FTS query string|FTS/graph|unit/fts|generic FTS path|memory FTS|FTS5 / semantic|pre-DB3 FTS|db2_memory_collect_fts_matches|memory_units_fts MATCH|memory_negation_fts FTS table' \
+path_scan 'memory_collect_fts_via_vector|MEM_SOURCE_FTS|FTS string|FTS query string|FTS/graph|unit/fts|generic FTS path|memory FTS|FTS5 / semantic|pre-DB3 FTS|kb_store_memory_collect_fts_matches|memory_units_fts MATCH|memory_negation_fts FTS table' \
   "memory recall helpers expose stale FTS collector names" \
-  src/modules/memory/memory_core_search.inc src/modules/db2/c/memory_query.h src/modules/db2/c/memory_query.c
-path_scan 'fts_search_via_vector|MAX_FTS_RESULTS|fts_res|n_fts|fts_weight|weights: fts|"fts"|ed_build_fts_match|db2_directive_match_by_fts|FTS over question|FTS match on question|alpha\*FTS|FTS and vector|FTS_OR|ED_FTS' \
+  src/modules/memory/memory_core_search.inc src/modules/kb/c/memory_query.h src/modules/kb/c/memory_query.c
+path_scan 'fts_search_via_vector|MAX_FTS_RESULTS|fts_res|n_fts|fts_weight|weights: fts|"fts"|ed_build_fts_match|kb_store_directive_match_by_fts|FTS over question|FTS match on question|alpha\*FTS|FTS and vector|FTS_OR|ED_FTS' \
   "KB/directive/query-plan surfaces expose stale FTS vocabulary" \
   src/kb/kb.c src/headers/config.h src/headers/memory.h src/headers/aimee.h \
   src/modules/memory/memory_directives.c src/cmd_memory_core.c src/modules/memory/memory_core_search.inc \
-  src/modules/db2/c/epistemic_directives.h src/modules/db2/c/epistemic_directives.c src/tests/test_kb.c
+  src/modules/kb/c/epistemic_directives.h src/modules/kb/c/epistemic_directives.c src/tests/test_kb.c
 path_scan 'use sqlite|sqlite WAL' \
   "SQLite-named compute comments outside src/db1" \
   src/server/server.c
@@ -163,17 +163,17 @@ path_scan '\\bsqlite_(memories|units|chunks)\\b' \
   "SQLite-named vector verify row-count fields" \
   src/kb/kb_service.c src/modules/kb_client/kb_client.h
 path_scan '\\b([Pp]ostgres|pg_trgm|libpq)\\b' \
-  "Postgres-named doctor DB surface outside src/modules/db2/c" \
+  "Postgres-named doctor DB surface outside src/modules/kb/c" \
   src/cmd_doctor.c
 path_scan '\\b(Postgres|libpq|pg_trgm)\\b' \
-  "Postgres-named DB2 implementation comments outside src/modules/db2/c" \
+  "Postgres-named KB_STORE implementation comments outside src/modules/kb/c" \
   src/cmd_index.c src/kb/kb_main.c src/dashboard.c src/cmd_work.c src/kb/kb.c \
   src/modules/memory/memory_core_search.inc src/headers/config.h src/db1/db_schema.c src/db1/db_schema.h
 path_scan 'system-provided SQLite|SQLite database \(all state\)|`db\.c`[[:space:]]*\|[[:space:]]*SQLite|shared Postgres tier|sqlite\.sql and postgres\.sql' \
   "source docs/build text exposes legacy storage ownership" \
   src/README.md src/Makefile
 path_scan 'Memory<br/>L0-L3, FTS5|memories table<br/>FTS5|4-tier memory \(L0-L3\), CRUD, FTS5 search|Queries the `memories_fts` FTS5 table|memory_find_facts\(\) \(FTS5 \+ DB3 dense recall|Term Match<br/>exact lowercase match<br/>in window_terms|FTS5 Match<br/>stemmed search<br/>in window_fts|Conversation: windows, decisions, window_terms, window_files, window_fts|Memory:[[:space:]]+memories, memories_fts' \
-  "source README exposes stale DB2 memory-as-SQLite documentation" \
+  "source README exposes stale KB_STORE memory-as-SQLite documentation" \
   src/README.md
 path_scan '`rules\.c`[[:space:]]*\|[[:space:]]*Rule storage|`feedback\.c`[[:space:]]*\|[[:space:]]*Feedback recording|`working_memory\.c`|`tasks\.c`[[:space:]]*\|[[:space:]]*Task graph, decisions, checkpoints|`db\.c` \(1492\)|`memory_promote\.c`|`memory\.c`[[:space:]]*\|[[:space:]]*1276|`memory_context\.c`|`memory_graph\.c`|`db_migrations\.c`|rules_generate\(db\)|memories L2 LIKE prompt|index_find\(\)|in memories table\?|tasks table' \
   "source README exposes stale pre-split source/API names" \
@@ -191,13 +191,13 @@ path_scan 'Full-text search across all memories|FTS5 syntax|FTS5 code search|Use
   "non-tier command/header text exposes backend-specific lexical search" \
   src/cmd_memory.c src/agent_tools.c src/kb/kb.c src/headers/index.h src/headers/kb.h
 path_scan 'FTS5 is required for memory full-text search|full-text memory search|Memory full-text search is unavailable without FTS5|Memory FTS5 full-text search|db\.c \(migration 28\), memory\.c' \
-  "top-level status/compat docs assign DB2 memory search to DB1 SQLite" \
+  "top-level status/compat docs assign KB_STORE memory search to DB1 SQLite" \
   docs/COMPATIBILITY.md docs/STATUS.md
 path_scan 'agent\.c, db\.c|cmd_memory\.c, memory\.c|database-backed state|\\bdb\.c\\b|memory_promote\.c|mcp_server\.c|State and storage\\ndb\.c, memory\.c|statically linked core runtime \+ data' \
   "status docs expose stale pre-split storage source names" \
   docs/STATUS.md
 path_scan 'Memory search \(FTS5\)|Full-text search on memories table|memories table via FTS5|FTS5 `MATCH`|reopening the database|database-backed paths|database-backed and context-assembly' \
-  "benchmark docs expose stale DB2 memory-as-SQLite latency model" \
+  "benchmark docs expose stale KB_STORE memory-as-SQLite latency model" \
   docs/BENCHMARKS.md
 path_scan 'memory\.c: 4-tier|^/\* memory\.c: POSIX|^/\* memory\.c: Windows|private declarations for memory\.c platform split|posix/memory\.c \(POSIX\)|windows/memory\.c \(Windows stubs\)|memory_scan_content is implemented in posix/memory\.c|Add error handling to src/memory\.c' \
   "source comments/examples expose stale memory.c source names" \
@@ -209,7 +209,7 @@ path_scan 'sqlite db postgres storage sql|"postgres"' \
 path_scan 'legacy no-gate behaviour|legacy DBs may|legacy edge|legacy rows|/\* legacy \*/' \
   "memory source comments expose legacy compatibility labels" \
   src/modules/memory/memory_core_tiers.inc src/modules/memory/memory_core_crud.inc src/modules/memory/memory_episodes.c \
-  src/modules/db2/include/aimee/db2/graph_kinds.h
+  src/modules/kb/include/aimee/kb/graph_kinds.h
 path_scan 'Untagged memories \(legacy\)|legacy promote/demote cycle|legacy hybrid|legacy `symbols` table' \
   "source comments expose legacy storage/route labels" \
   src/modules/memory/memory_assemble.c src/modules/memory/memory_maintenance.c src/headers/config.h src/cmd_doctor.c
@@ -218,18 +218,18 @@ path_scan 'legacy in-repo|legacy behavior|legacy: 1|legacy prospective-only|lega
   src/agent_policy.c src/git_verify.c src/cmd_data.c src/agent_runtime.c \
   src/mcp_tools.c
 if [[ -e src/headers/memory_curiosity.h ]]; then
-  echo "tier-dep violation: legacy DB2 curiosity re-export header is present" >&2
+  echo "tier-dep violation: legacy KB_STORE curiosity re-export header is present" >&2
   status=1
 fi
 path_scan 'DB\[SQLite\]|SQLite-backed local state|SQLite attack surfaces' \
   "security docs expose backend-specific DB1 storage internals" \
   docs/SECURITY.md
 if [[ -e scripts/migrate-sqlite-to-postgres.sh ]]; then
-  echo "tier-dep violation: legacy SQLite-to-DB2 migration script is present" >&2
+  echo "tier-dep violation: legacy SQLite-to-KB_STORE migration script is present" >&2
   status=1
 fi
 if [[ -e src/schema/postgres.sql ]]; then
-  echo "tier-dep violation: DB2 Postgres schema must live under src/modules/db2/c" >&2
+  echo "tier-dep violation: KB_STORE Postgres schema must live under src/modules/kb/c" >&2
   status=1
 fi
 if [[ -e src/schema/sqlite.sql ]]; then
@@ -238,14 +238,14 @@ if [[ -e src/schema/sqlite.sql ]]; then
 fi
 path_scan 'AIMEE_SCHEMA_SQLITE_SQL|AIMEE_SCHEMA_POSTGRES_SQL' \
   "generated schema constants expose backend product names" \
-  src/gen_schema.py src/db1/db_schema.c src/modules/db2/c/db_schema.c
+  src/gen_schema.py src/db1/db_schema.c src/modules/kb/c/db_schema.c
 path_scan 'SQLITE_ONLY_FTS_TABLES|\\bSQLITE\\b|\\bPOSTGRES\\b|sqlite-only|SQLite-only|Postgres-only|SQLite|Postgres|FTS-mirror|FTS5 virtual tables' \
   "schema-sync helper exposes backend product vocabulary" \
   scripts/check-schema-sync.py
 path_scan 'DATABASE_BACKENDS|Database backends|SQLite → Postgres|SQLite -> Postgres|A single `aimee` binary runs against either SQLite or Postgres|database_backend|database_url.*postgres' \
   "top-level docs expose legacy selectable database-backend architecture" \
   README.md docs/*.md
-path_scan 'legacy DB abstraction|Subsequent PRs migrate one DB1 subsystem|Remaining DB1 cleanup|DB2 migration: blocked|Postgres-only bench|today'\''s monolith|no legacy DB abstraction call-site changes|Pin-backends is the current PR chain|current PR chain on main|current PR chain|pin-backends chain|while the chain runs|DB2 migration' \
+path_scan 'legacy DB abstraction|Subsequent PRs migrate one DB1 subsystem|Remaining DB1 cleanup|KB_STORE migration: blocked|Postgres-only bench|today'\''s monolith|no legacy DB abstraction call-site changes|Pin-backends is the current PR chain|current PR chain on main|current PR chain|pin-backends chain|while the chain runs|KB_STORE migration' \
   "top-level docs expose stale storage migration roadmap" \
   docs/ROADMAP.md docs/PROPOSALS.md
 path_scan 'database_backend|backend: sqlite|database_url.*postgres|A single aimee binary can run either backend|revert to.*db_path' \
@@ -254,21 +254,21 @@ path_scan 'database_backend|backend: sqlite|database_url.*postgres|A single aime
 path_scan 'Postgres backend \(libpq\)|SQLite continues to work as the default|string constants for the SQLite and Postgres layers' \
   "CMake exposes legacy storage ownership" \
   CMakeLists.txt
-path_scan '\$\{AIMEE_SRC_DIR\}/(version_notifier|memory_curiosity|rules|feedback|workflow_session|working_memory|secret_store|notes|collab_rules|agent_diagnose|agent_clarify|file_snapshot)\.c|\$\{AIMEE_SRC_DIR\}/modules/db2/c/git_ownership\.c' \
+path_scan '\$\{AIMEE_SRC_DIR\}/(version_notifier|memory_curiosity|rules|feedback|workflow_session|working_memory|secret_store|notes|collab_rules|agent_diagnose|agent_clarify|file_snapshot)\.c|\$\{AIMEE_SRC_DIR\}/modules/kb/c/git_ownership\.c' \
   "CMake lists pre-split storage source paths" \
   CMakeLists.txt
 path_scan 'SQLite datetime\(\) compatibility shims|written against SQLite|SQLite'\''s julianday|See note in sqlite\.sql|mirrors of SQLite FTS5|sqlite\.sql\).*MATCH|managed Postgres' \
-  "DB2 schema comments expose legacy SQLite/Postgres migration framing" \
-  src/modules/db2/c/schema.sql
+  "KB_STORE schema comments expose legacy SQLite/Postgres migration framing" \
+  src/modules/kb/c/schema.sql
 path_scan 'pre-cutover sqlite|sqlite native|sqlite tolerates|sqlite needed|sqlite_changes|sqlite strftime|sqlite \(shim\)|legacy sqlite path|sqlite-side shim|sqlite-style|sqlite-FTS5|pm_fts5_to_tsquery|sqlite helpers|sqlite is lenient|postgres CREATE FUNCTION shim' \
-  "DB2 module comments expose legacy SQLite migration framing" \
-  src/modules/db2/c/memory_query.c src/modules/db2/c/memory_promotion.c src/modules/db2/c/kb_service_backend.c \
-  src/modules/db2/c/code_index.c src/modules/db2/c/memory_entity_graph.c src/modules/db2/c/memory_lifecycle.c \
-  src/modules/db2/c/kb_runtime_state.c src/src/modules/db2/c/memory_relations.c \
-  src/modules/db2/c/memory_row_mapper_pg.c
+  "KB_STORE module comments expose legacy SQLite migration framing" \
+  src/modules/kb/c/memory_query.c src/modules/kb/c/memory_promotion.c src/modules/kb/c/kb_service_backend.c \
+  src/modules/kb/c/code_index.c src/modules/kb/c/memory_entity_graph.c src/modules/kb/c/memory_lifecycle.c \
+  src/modules/kb/c/kb_runtime_state.c src/src/modules/kb/c/memory_relations.c \
+  src/modules/kb/c/memory_row_mapper_pg.c
 path_scan 'runs either SQLite or Postgres|schema/\{sqlite,postgres\}|Translate SQLite|rewrite_sqlite_(upsert|fts)|FTS5|SQLite-flavoured|SQLite positional placeholder|Postgres equivalents|Postgres path|SQLite path|sqlite-backed|real-postgres' \
-  "DB2 provider comments expose legacy backend-normalization vocabulary" \
-  src/modules/db2/c/db_postgres.c src/modules/db2/c/db_postgres.h
+  "KB_STORE provider comments expose legacy backend-normalization vocabulary" \
+  src/modules/kb/c/db_postgres.c src/modules/kb/c/db_postgres.h
 scan '/collections/' "Qdrant collection URL path in src/ (pgvector is in-process, no HTTP)"
 scan '/points/' "Qdrant points URL path in src/ (pgvector is in-process, no HTTP)"
 

@@ -198,7 +198,7 @@ def token_estimate_cost(model: str, input_tokens: int, output_tokens: int) -> fl
 def collect_vector_runtime_metadata(root: Path | None = None) -> dict[str, Any]:
     """Return best-effort memory-index metadata for benchmark artifacts.
 
-    Vectors live in pgvector inside DB2 (Postgres) since #1575; this hook
+    Vectors live in pgvector inside KB_STORE (Postgres) since #1575; this hook
     is left in place so future runs can route a real metadata RPC through
     the kb client without changing the artifact schema."""
     root = root or repo_root()

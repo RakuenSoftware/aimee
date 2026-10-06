@@ -10,6 +10,9 @@ import (
 // records. Explicit all-scope reads append other KB scopes; the runtime's RLS
 // policy still bounds the rows that this query can see.
 func (s *postgresDataStore) SearchVisible(ctx context.Context, req DataRequest) ([]Record, error) {
+	if s.backendFactory != nil {
+		return s.searchVisibleBackend(ctx, req)
+	}
 	if s.placement != PlacementKB {
 		return nil, errors.New("visible search requires KB placement")
 	}

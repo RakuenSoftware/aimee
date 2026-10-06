@@ -94,7 +94,7 @@ snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
 # The roles live at cluster scope, so they are created in the maintenance database first —
 # createdb -O below needs the owner role to already exist.
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/kb/c/schema_roles.sql >/dev/null 2>&1
 # OWNED BY aimee_kb_owner. kb re-applies the schema at boot as that role, and it cannot
 # redefine objects owned by postgres ("must be owner of function pg_now_text") — so whoever
 # pre-applies has to be the same role kb will connect as. A real deployment's migrate step is
@@ -103,7 +103,7 @@ runuser -u postgres -- createdb -O aimee_kb_owner "$db" 2>/dev/null \
   || runuser -u postgres -- createdb "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/kb/c/schema_roles.sql >/dev/null 2>&1
 # PostgreSQL 15+ stopped granting CREATE on schema public to non-owners, so the owner role
 # cannot apply the schema without this. A real deployment's migrate step holds the same
 # privilege; schema_roles.sql does not grant it because it does not know the database name.
@@ -122,12 +122,12 @@ kbpw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 # root. The OWNER role, because kb applies the schema itself on the dev path and the runtime
 # role deliberately has no CREATE on public.
 #
-# embedding_dim is PINNED in the config. Without a pin, db2_init prefers the dim RECORDED in
+# embedding_dim is PINNED in the config. Without a pin, kb_store_init prefers the dim RECORDED in
 # the database and treats a read failure as fatal ("reading recorded embedding dim failed") —
 # pinning skips that read outright. The hardened tier would also skip it, but requires
 # sslmode=verify-full, i.e. full TLS to Postgres, which is more rig than this test needs.
 #
-# Four wrong turns preceded this, all mine, and all resolved by reading db2_init.c instead of
+# Four wrong turns preceded this, all mine, and all resolved by reading kb_store_init.c instead of
 # guessing a fifth time: a socket DSN, the runtime role without hardening, the owner role
 # without a pin, and the hardened tier without TLS.
 export AIMEE_KB_API_BEARER_TOKEN="live-grant-token"
@@ -154,7 +154,7 @@ YAML
 kbpw=$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')
 psqlq -c "ALTER ROLE aimee_kb_owner LOGIN PASSWORD '$kbpw'" >/dev/null 2>&1 \
   || fail "could not give aimee_kb_owner a password"
-export AIMEE_DB2_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
+export AIMEE_STORE_URL="postgres://aimee_kb_owner:$kbpw@127.0.0.1:5432/$db"
 export AIMEE_KB_API_BEARER_TOKEN="live-grant-token"
 ./aimee-kb --http-port="$KB_PORT" >"$kb_log" 2>&1 &
 kb_pid=$!

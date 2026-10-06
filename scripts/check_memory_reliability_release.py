@@ -42,9 +42,9 @@ def main():
     for path, expected in manifest['inputs'].items():
         if digest(ROOT / path) != expected:
             raise ValueError('frozen input changed; explicit fixture review required: ' + path)
-    required_env = ('AIMEE_MEMORY_EVAL_URL', 'AIMEE_DB2_REPLAY_URL', 'AIMEE_TEST_PG_URL', 'AIMEE_DB_TEST_URL')
+    required_env = ('AIMEE_MEMORY_EVAL_URL', 'AIMEE_KB_STORE_REPLAY_URL', 'AIMEE_TEST_PG_URL', 'AIMEE_DB_TEST_URL')
     if any(not os.environ.get(key) for key in required_env):
-        raise ValueError('disposable memory, DB2, DB1 and evaluation databases required')
+        raise ValueError('disposable memory, KB_STORE, DB1 and evaluation databases required')
     packages = {}
     for group in manifest['groups']:
         if not group['cases']:

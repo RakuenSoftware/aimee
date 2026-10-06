@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "modules/db2/c/db2_witness_checkpoint.h"
-#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/kb/c/kb_store_witness_checkpoint.h"
+#include "modules/kb/c/kb_store_witness_emit.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_gate_state.h"
 #include "log.h"
@@ -62,8 +62,8 @@ int kb_witness_boot_check(char *err, size_t errlen)
     * "verified". */
    int64_t unknown = 0;
    char sample[64] = "";
-   int cov = db2_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, sample,
-                                                    sizeof sample);
+   int cov = kb_store_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, sample,
+                                                         sizeof sample);
    OPENSSL_cleanse(key_id, sizeof key_id);
    if (cov != 0)
    {
@@ -163,12 +163,12 @@ static time_t witness_interval(time_t production_s)
 
 static void emit_once(void)
 {
-   db2_witness_emit_stats_t s;
-   db2_witness_emit_result_t r =
-       db2_witness_emit_run(log_sink, NULL, KB_WITNESS_EMIT_MAX_PER_STREAM, &s);
+   kb_store_witness_emit_stats_t s;
+   kb_store_witness_emit_result_t r =
+       kb_store_witness_emit_run(log_sink, NULL, KB_WITNESS_EMIT_MAX_PER_STREAM, &s);
    switch (r)
    {
-   case DB2_WITNESS_EMIT_OK:
+   case KB_STORE_WITNESS_EMIT_OK:
       if (s.records_emitted || s.checkpoints_emitted)
          LOG_DEBUG("kb.witness",
                    "emitted records=%llu checkpoints=%llu snapshots=%llu backlog=%llu/%llu",
@@ -176,7 +176,7 @@ static void emit_once(void)
                    (unsigned long long)s.snapshots_emitted, (unsigned long long)s.backlog_records,
                    (unsigned long long)s.backlog_checkpoints);
       break;
-   case DB2_WITNESS_EMIT_PARITY_MISMATCH:
+   case KB_STORE_WITNESS_EMIT_PARITY_MISMATCH:
       /* The stored row and its canonical encoding disagree. Emitting past this
        * would publish evidence that can never match the store, so emission stops
        * here and stays stopped until an operator resolves it. Admission is
@@ -185,12 +185,12 @@ static void emit_once(void)
                 "INTEGRITY: witness record digest parity failed; emission halted at the "
                 "offending record (stored hash does not match its canonical encoding)");
       break;
-   case DB2_WITNESS_EMIT_SINK_FAILED:
+   case KB_STORE_WITNESS_EMIT_SINK_FAILED:
       LOG_WARN("kb.witness", "evidence emission sink rejected a frame; backlog will retry");
       break;
-   case DB2_WITNESS_EMIT_TRANSIENT:
+   case KB_STORE_WITNESS_EMIT_TRANSIENT:
       break; /* no connection or a retryable read failure; next tick retries */
-   case DB2_WITNESS_EMIT_ERROR:
+   case KB_STORE_WITNESS_EMIT_ERROR:
    default:
       LOG_WARN("kb.witness", "evidence emission failed; will retry");
       break;
@@ -208,19 +208,19 @@ void kb_witness_cadence_tick(time_t now)
    next = now + interval;
 
    int64_t seq = -1;
-   db2_witness_checkpoint_result_t r = db2_witness_checkpoint_produce(&seq);
+   kb_store_witness_checkpoint_result_t r = kb_store_witness_checkpoint_produce(&seq);
    switch (r)
    {
-   case DB2_WITNESS_CP_OK:
+   case KB_STORE_WITNESS_CP_OK:
       LOG_DEBUG("kb.witness", "checkpoint signed: seq=%lld", (long long)seq);
       break;
-   case DB2_WITNESS_CP_EMPTY:
-   case DB2_WITNESS_CP_TRANSIENT:
-   case DB2_WITNESS_CP_FENCE_STALE:
+   case KB_STORE_WITNESS_CP_EMPTY:
+   case KB_STORE_WITNESS_CP_TRANSIENT:
+   case KB_STORE_WITNESS_CP_FENCE_STALE:
       /* Benign: no evidence yet, a retryable serialization loss, or a fence race.
        * The next tick retries; none of these is a tamper signal. */
       break;
-   case DB2_WITNESS_CP_HEAD_MISMATCH:
+   case KB_STORE_WITNESS_CP_HEAD_MISMATCH:
       /* A shard head diverged from its log: the checkpoint cross-check refused to
        * sign. This is an integrity alert, not a crash — appends and egress
        * continue, but new signed roots stop until an operator resolves it. */
@@ -228,12 +228,12 @@ void kb_witness_cadence_tick(time_t now)
                 "INTEGRITY: checkpoint refused, shard head does not match evidence log "
                 "(head_log_mismatch); latest signed root is stale until resolved");
       break;
-   case DB2_WITNESS_CP_CEILING:
+   case KB_STORE_WITNESS_CP_CEILING:
       LOG_ERROR("kb.witness",
                 "INTEGRITY: checkpoint refused, shard count exceeds ceiling; latest signed "
                 "root is stale until resolved");
       break;
-   case DB2_WITNESS_CP_ERROR:
+   case KB_STORE_WITNESS_CP_ERROR:
    default:
       LOG_WARN("kb.witness", "checkpoint attempt failed (transient/config); will retry");
       break;
@@ -260,8 +260,8 @@ void kb_witness_cadence_tick(time_t now)
       if (now >= next_verify)
       {
          next_verify = now + verify_interval;
-         db2_witness_verify_report_t vr;
-         if (db2_witness_checkpoint_verify_run(KB_WITNESS_VERIFY_WINDOW, &vr) != 0)
+         kb_store_witness_verify_report_t vr;
+         if (kb_store_witness_checkpoint_verify_run(KB_WITNESS_VERIFY_WINDOW, &vr) != 0)
          {
             /* Could not verify is not verified. It is not proof of tampering
              * either, so this is a warning rather than an integrity alert — but it

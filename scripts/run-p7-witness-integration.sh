@@ -36,7 +36,7 @@ run_case() {
   echo "== P7-witness integration: $name =="
   psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $db;" >/dev/null
   psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $db;" >/dev/null
-  # The test's own db2_init applies the schema; it only needs the extensions.
+  # The test's own kb_store_init applies the schema; it only needs the extensions.
   psql -v ON_ERROR_STOP=1 "${BASE_URL%/*}/$db" \
     -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null
   # The test must not skip: an unset URL here would silently pass the gate.

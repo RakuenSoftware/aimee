@@ -21,6 +21,7 @@ def main() -> int:
     failures: list[str] = []
 
     required_docker = {
+        "PostgreSQL authority provider": r"COPY --from=postgres-provider /out/aimee-module-postgres /usr/local/libexec/aimee-modules/aimee-module-postgres",
         "isolated roots build": r"make -C src token-roots-provisioner-core jwks-publisher-core",
         "roots binary": r"COPY --from=build /src/aimee-kb-token-roots-provision",
         "publisher binary": r"COPY --from=build /src/aimee-kb-jwks-publish",

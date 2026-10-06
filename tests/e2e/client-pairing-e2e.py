@@ -8,6 +8,7 @@ revokes credentials, and restarts the application. Never target a user stack.
 No credentials are printed. Uses the supplied release Linux client unchanged.
 """
 import argparse
+import contextlib
 import concurrent.futures
 import http.cookiejar
 import json
@@ -75,6 +76,7 @@ def main():
     parser.add_argument('--store-db', required=True)
     parser.add_argument('--client', type=Path, required=True)
     parser.add_argument('--browser-script', type=Path)
+    parser.add_argument('--client-root', type=Path, help='retain private client identities for diagnosis')
     parser.add_argument('--web-url', default='https://127.0.0.1:8443')
     parser.add_argument('--api-url', default='https://127.0.0.1:8743')
     args = parser.parse_args()
@@ -115,7 +117,11 @@ def main():
         check('owner can list clients', code == 200 and 'bearer_token' not in json.dumps(body))
         return body['clients']
 
-    with tempfile.TemporaryDirectory(prefix='aimee-pairing-clients-') as directory:
+    if args.client_root:
+        args.client_root.mkdir(mode=0o700, parents=True)
+    directory_context = (contextlib.nullcontext(str(args.client_root)) if args.client_root else
+                         tempfile.TemporaryDirectory(prefix='aimee-pairing-clients-'))
+    with directory_context as directory:
         root = Path(directory)
 
         def client(device, *command, success=True):

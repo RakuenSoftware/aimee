@@ -23,8 +23,8 @@
 #include "eval_synthesis_store.h"
 #include "support/store_module_fixture.h"
 #include "kb_client.h"
-#include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
+#include "modules/kb/c/kb_store.h"
+#include "modules/kb/c/kb_store_test_shim.h"
 
 #include <aimee/learning/learning.h>
 
@@ -334,7 +334,7 @@ int main(void)
 {
    printf("eval_candidates: ");
 
-   db2_test_shim_open();
+   kb_store_test_shim_open();
 
    /* Refused on their arguments before any call leaves the client, so these
       hold with or without a store and run everywhere. */

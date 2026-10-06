@@ -8,7 +8,7 @@
  *
  * Decoupling: auth_oidc.c holds an optional resolver hook (kb_oidc_set_fleet_
  * resolver) so the verifier core stays free of a DB dependency; kb_main registers
- * the db2-backed resolver below at startup, and unit tests leave it unset (file
+ * the kb_store-backed resolver below at startup, and unit tests leave it unset (file
  * fallback). */
 #ifndef DEC_KB_OIDC_JWKS_FLEET_H
 #define DEC_KB_OIDC_JWKS_FLEET_H 1
@@ -28,7 +28,7 @@ extern "C"
    int kb_oidc_jwks_fleet_get(const char *issuer, char *out, size_t cap);
 
    /* Register kb_oidc_jwks_fleet_get as the verifier's fleet resolver (call once at
-    * kb startup, after db2_init). */
+    * kb startup, after kb_store_init). */
    void kb_oidc_jwks_fleet_enable(void);
 
    /* Pure: assemble a JWKS document from `n` JWK object strings into out[cap].

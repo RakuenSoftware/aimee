@@ -45,7 +45,7 @@ typedef struct
 typedef struct
 {
    int has_state;
-   db2_vault_rewrap_state_t state;
+   kb_store_vault_rewrap_state_t state;
    int64_t seal_epoch, fencing_token, old_generation, new_generation;
    char failure_class[65];
 } vault_reseal_orchestrator_output_t;
@@ -79,7 +79,7 @@ typedef struct
 
 typedef struct
 {
-   const db2_vault_rewrap_ops_t *db;
+   const kb_store_vault_rewrap_ops_t *db;
    const vault_reseal_custody_ops_t *custody;
 } vault_reseal_orchestrator_deps_t;
 

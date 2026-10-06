@@ -39,7 +39,7 @@ Connection precedence is:
 - installed provider CLIs and their local logins;
 - runner execution explicitly delegated back to this client.
 
-The client does not hold DB1, DB2, server vault keys, workflow state, or KB credentials.
+The client does not hold DB1, KB_STORE, server vault keys, workflow state, or KB credentials.
 
 Globally installed Aimee hooks apply repository policy only inside registered
 workspaces. Outside those workspaces, session startup, discovery, Git, and sub-agent

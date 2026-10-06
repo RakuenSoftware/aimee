@@ -9,14 +9,15 @@ in a prompt asking a model to behave.
 The claim IDs below are defined with exact artifacts, defaults, enforcement owners, negative tests,
 and limitations in [`security-claims.json`](security-claims.json). CI rejects an unqualified claim.
 
-- **SC-001:** the shipped thin client has no DB1 or DB2 linkage.
-- **SC-002:** the server has no DB2 query authority and the KB has no DB1 query authority.
+- **SC-001:** the shipped thin client has no DB1 or KB_STORE linkage.
+- **SC-002:** the server has no KB_STORE query authority and the KB has no DB1 query authority.
 - **SC-003:** network-reachable server and KB routes require an authenticated principal and declared
   capability; the KB's credential-free mode is restricted to process-local loopback and disables
   authenticated-owner mutations.
 - **SC-004:** remote writes require a KB-signed identity and a live per-user grant.
 - **SC-005:** registered tool paths pass schema, policy, assigned-workspace, and backend checks.
-- **SC-006:** delegate containers receive neither provider nor forge credentials by default.
+- **SC-006:** delegate containers receive neither provider nor forge credentials by default, and have no
+  direct network access.
 - **SC-007:** v2 WORM rows detect changes to chronology, attribution, ordering, and content; migrated
   v1 rows are exported as `v1-partial` and do not claim full-field coverage.
 - **SC-008:** write-capable delegates use mandatory container isolation with no host fallback.
@@ -254,5 +255,5 @@ data.
 - use the vault, never plaintext config, for credentials;
 - keep delegate network off unless the task needs it;
 - run `aimee audit verify` and monitor bus drops;
-- back up DB1, DB2, workflow state, vault custody, TLS state, and audit anchors;
+- back up DB1, KB_STORE, workflow state, vault custody, TLS state, and audit anchors;
 - test revocation and restore procedures before an incident.

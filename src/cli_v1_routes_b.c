@@ -720,7 +720,7 @@ static cJSON *marshal_git_cli(int argc, char **argv)
          continue;
 
       /* key=value / --key=value, typed exactly as verify types its arguments. */
-      const char *raw = arg;
+      char *raw = arg;
       if (strncmp(raw, "--", 2) == 0)
          raw += 2;
       char *eq = strchr(raw, '=');
@@ -828,7 +828,7 @@ static cJSON *marshal_git_verify(int argc, char **argv)
          continue;
       }
 
-      const char *raw = argv[i];
+      char *raw = argv[i];
       if (strncmp(raw, "--", 2) == 0)
          raw += 2;
 
@@ -1875,7 +1875,7 @@ void print_server_health(cJSON *resp)
           * the health port, so its diagnosis never reaches this response and
           * exists only in the container log. Measured: booting a 768-dimension
           * embedder over a corpus recorded at 384 logs the width, both sides, and
-          * the remedy, then holds DB2 unready until the container crashloops --
+          * the remedy, then holds KB_STORE unready until the container crashloops --
           * and every operator-facing surface said "unreachable", pointing away
           * from the one place that already knew the answer. Name that place. */
          printf("  if it never became healthy, the reason is in its own log and not\n");

@@ -2,11 +2,11 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
-#include "modules/db2/c/code_index.h"
-#include "modules/db2/c/css_graph.h"
-#include "modules/db2/c/entity_edges.h"
-#include "modules/db2/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
-#include "aimee/db2/graph_kinds.h"          /* REL_CO_EDITED / NODE_FILE */
+#include "modules/kb/c/code_index.h"
+#include "modules/kb/c/css_graph.h"
+#include "modules/kb/c/entity_edges.h"
+#include "modules/kb/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
+#include "aimee/kb/graph_kinds.h"          /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -89,8 +89,8 @@ static int file_list_append(file_list_t *list, const char *path)
 
 static void index_purge_hidden_paths(int64_t project_id)
 {
-   (void)db2_code_index_purge_files_matching(project_id, ".%");
-   (void)db2_code_index_purge_files_matching(project_id, "%/.%");
+   (void)kb_store_code_index_purge_files_matching(project_id, ".%");
+   (void)kb_store_code_index_purge_files_matching(project_id, "%/.%");
 }
 
 static int ascii_contains(const char *haystack, const char *needle)
@@ -346,11 +346,11 @@ static void purge_build_exclusions(int64_t project_id, const build_exclusion_lis
       if (len > 0 && exclude[len - 1] == '/')
       {
          snprintf(pattern, sizeof(pattern), "%s%%", exclude);
-         (void)db2_code_index_purge_files_matching(project_id, pattern);
+         (void)kb_store_code_index_purge_files_matching(project_id, pattern);
       }
       else
       {
-         (void)db2_code_index_purge_files_matching(project_id, exclude);
+         (void)kb_store_code_index_purge_files_matching(project_id, exclude);
       }
    }
 }
@@ -453,7 +453,7 @@ static void purge_subprojects(int64_t project_id, const char *root)
    for (int i = 0; i < count; i++)
    {
       snprintf(pattern, sizeof(pattern), "%s%%", prefixes[i]);
-      (void)db2_code_index_purge_files_matching(project_id, pattern);
+      (void)kb_store_code_index_purge_files_matching(project_id, pattern);
    }
    free(prefixes);
 }
@@ -632,8 +632,8 @@ static void cochange_flush(char names[][128], int ncount, cochange_pair_t *pairs
       int added = 0;
       /* window_id 0: git-history provenance (no session window). Upsert bumps
        * weight on repeat, so an N-times co-changed pair reaches weight N. */
-      db2_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
-                             (int)NODE_FILE, (int)NODE_FILE, &added);
+      kb_store_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
+                                  (int)NODE_FILE, (int)NODE_FILE, &added);
    }
 }
 
@@ -669,13 +669,13 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
    char key[192];
    snprintf(key, sizeof(key), "cochange_head:%s", project);
    char marker[128] = "";
-   int have_marker = (db2_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
+   int have_marker = (kb_store_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
    if (have_marker && !cochange_is_hex_sha(marker))
    {
       /* Corrupt/edited kb_runtime_state row: the marker is interpolated into a
        * git command below, so an unvalidated value must never reach the shell.
        * Resync forward without mining (same fail-safe as an orphaned marker). */
-      db2_kb_runtime_state_set(key, head);
+      kb_store_kb_runtime_state_set(key, head);
       free(head);
       free(esc);
       return;
@@ -700,7 +700,7 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
       free(anc);
       if (rc != 0) /* marker orphaned (rebase/force-update): resync, do not re-mine */
       {
-         db2_kb_runtime_state_set(key, head);
+         kb_store_kb_runtime_state_set(key, head);
          free(emarker);
          free(head);
          free(esc);
@@ -757,7 +757,7 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
              * HEAD, so the resume ancestor-check still holds). */
             if (cochange_is_hex_sha(cur_sha) && ++done >= COCHANGE_CKPT_EVERY)
             {
-               db2_kb_runtime_state_set(key, cur_sha);
+               kb_store_kb_runtime_state_set(key, cur_sha);
                done = 0;
             }
          }
@@ -783,7 +783,7 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
 
    /* Final marker = HEAD covers the whole processed range (the last --reverse
     * commit is HEAD itself). */
-   db2_kb_runtime_state_set(key, head);
+   kb_store_kb_runtime_state_set(key, head);
 
    free(pairs);
    free(log);
@@ -803,7 +803,7 @@ int index_scan_project(const char *name, const char *root, int force)
       return -1;
    }
 
-   int64_t project_id = db2_code_index_project_upsert(name, abs_root);
+   int64_t project_id = kb_store_code_index_project_upsert(name, abs_root);
    if (project_id < 0)
       return -1;
 
@@ -844,7 +844,7 @@ int index_scan_project(const char *name, const char *root, int force)
          continue;
       }
 
-      if (!force && !db2_code_index_file_modified_since(project_id, rel, st.st_mtime))
+      if (!force && !kb_store_code_index_file_modified_since(project_id, rel, st.st_mtime))
       {
          free(list.paths[i]);
          continue;
@@ -860,7 +860,7 @@ int index_scan_project(const char *name, const char *root, int force)
       }
 
       /* Upsert file record and get file_id */
-      int64_t file_id = db2_code_index_file_upsert(project_id, rel, ts);
+      int64_t file_id = kb_store_code_index_file_upsert(project_id, rel, ts);
       if (file_id < 0)
       {
          free(content);
@@ -894,7 +894,7 @@ int index_scan_project(const char *name, const char *root, int force)
           .calls = calls,
           .call_count = call_count,
       };
-      db2_code_index_file_replace(file_id, &data);
+      kb_store_code_index_file_replace(file_id, &data);
 
       /* WP-C: build the CSS style graph for .css files (plain CSS only; SCSS is
        * indexed from its compiled output, not source). The lexical class-name
@@ -904,7 +904,7 @@ int index_scan_project(const char *name, const char *root, int force)
          css_stylesheet_t *ss = css_analyze(content, content_len);
          if (ss)
          {
-            (void)db2_css_graph_replace(file_id, ss->rules, ss->rule_count);
+            (void)kb_store_css_graph_replace(file_id, ss->rules, ss->rule_count);
             css_stylesheet_free(ss);
          }
       }
@@ -919,7 +919,7 @@ int index_scan_project(const char *name, const char *root, int force)
          static char class_tokens[512][CSS_CLASS_TOKEN_MAX];
          int nt = css_extract_class_tokens(content, content_len, class_tokens, 512);
          if (nt > 0)
-            (void)db2_css_component_resolve(file_id, class_tokens, nt);
+            (void)kb_store_css_component_resolve(file_id, class_tokens, nt);
       }
 
       for (int j = 0; j < exp_count; j++)
@@ -945,12 +945,12 @@ int index_scan_project(const char *name, const char *root, int force)
 
 int index_list_projects(project_info_t *out, int max)
 {
-   return db2_code_index_project_list(out, max);
+   return kb_store_code_index_project_list(out, max);
 }
 
 int index_find(const char *identifier, term_hit_t *out, int max)
 {
-   return db2_code_index_term_find(identifier, out, max);
+   return kb_store_code_index_term_find(identifier, out, max);
 }
 
 int index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
@@ -960,7 +960,7 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
    memset(out, 0, sizeof(*out));
    snprintf(out->file, sizeof(out->file), "%s", file_path);
 
-   if (db2_code_index_blast_radius(project, file_path, out) != 0)
+   if (kb_store_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
    /* Expand with co_edited graph edges only when their legacy basename key
@@ -970,15 +970,15 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
       const char *match_name = base ? base + 1 : file_path;
 
       char co_buf[16][128];
-      int n = db2_entity_edge_co_targets(match_name, "co_edited", 3, co_buf, 16);
+      int n = kb_store_entity_edge_co_targets(match_name, "co_edited", 3, co_buf, 16);
       for (int b = 0; b < n && out->dependent_count < 64; b++)
       {
          const char *related = co_buf[b];
          if (!related[0] || strcmp(related, match_name) == 0)
             continue;
          char resolved[MAX_PATH_LEN];
-         if (db2_code_index_unique_file_basename(project, related, resolved, sizeof(resolved)) !=
-                 1 ||
+         if (kb_store_code_index_unique_file_basename(project, related, resolved,
+                                                      sizeof(resolved)) != 1 ||
              strcmp(resolved, file_path) == 0)
             continue;
          int found = -1;
@@ -1014,25 +1014,25 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
       }
    }
 
-   db2_code_index_blast_radius_local_first(project, out);
+   kb_store_code_index_blast_radius_local_first(project, out);
 
    return 0;
 }
 
 int index_structure(const char *project, const char *file_path, definition_t *out, int max)
 {
-   return db2_code_index_file_definitions(project, file_path, out, max);
+   return kb_store_code_index_file_definitions(project, file_path, out, max);
 }
 
 /* --- Blast radius preview for multiple files --- */
 
 int index_find_callers(const char *project, const char *symbol, caller_hit_t *out, int max)
 {
-   return db2_code_index_callers_find(project, symbol, out, max);
+   return kb_store_code_index_callers_find(project, symbol, out, max);
 }
 
 int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max)
 {
    /* The direct (non-HTTP) code-search path does not enrich line spans. */
-   return db2_code_index_code_search(query, project, out, max, 0);
+   return kb_store_code_index_code_search(query, project, out, max, 0);
 }

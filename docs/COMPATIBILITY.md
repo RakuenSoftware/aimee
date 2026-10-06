@@ -18,6 +18,16 @@ Linux client enrollment can create an mTLS certificate automatically. macOS and 
 native TLS stacks but currently need an explicitly provisioned client certificate when mTLS is
 required.
 
+## Native-memory model plugins
+
+The separate 0.3.3 candidate targets Linux x86-64, CPython 3.12, glibc 2.39+ and vLLM 0.30.0,
+including the tested `+rocm723` vendor build. All five adapters passed short native-memory smokes
+on one RX 7900 XTX without CPU weight offload. Tested profiles are Gemma4 E2B/E4B/12B
+UD-Q4_K_XL, Gemma4 26B Q3_K_M and Qwen3.8 27B Q4_K_M. The application platform table
+does not establish plugin compatibility. Signing and public-download installation remain pending.
+See [Native memory](NATIVE_MEMORY_PLUGIN.md) and
+[release preparation](releases/native-memory-v0.3.3/README.md).
+
 ## Coding tools
 
 | Tool | Hooks | MCP | Other path |
@@ -67,8 +77,10 @@ client with `aimee help --all` and the protocol handshake.
 ## Build requirements
 
 Server builds need a C11 toolchain, GNU Make, SQLite with FTS5, libcurl, OpenSSL, pthreads, PAM on
-Linux, and libpq for the KB build. Go builds cover the workflow and browser services. PostgreSQL 18,
-pgvector, and pgvectorscale are included in the default KB container.
+Linux, and the remaining dependencies listed in the Makefile. Go builds cover supervised modules,
+workflow and browser services; use the version declared in `server-go/go.mod`. Native application
+hosts do not own libpq pools. PostgreSQL 18 and pgvector run in the separate store service;
+pgvectorscale is optional where available. Some retained development fixtures still use libpq.
 
 The Makefile is canonical for Linux development. CMake carries portable thin-client and test builds.
 

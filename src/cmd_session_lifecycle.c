@@ -6,8 +6,8 @@
  * helpers shared with cmd_hooks.c live in cmd_hooks_scope.c. */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/rules.h"
+#include "modules/kb/c/memory_query.h"
+#include "modules/kb/c/rules.h"
 #include "kb_client.h"
 #include "headers/cmd_hooks_scope.h"
 #include "platform_process.h"
@@ -1424,7 +1424,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
 
    /* Run eval-to-behavior feedback loop — every helper below routes
     * through aimee-kb (kb_client_*), which auto-spawns the daemon if
-    * needed, so no caller-side DB2 init check is required. */
+    * needed, so no caller-side KB_STORE init check is required. */
    {
       /* Extract anti-patterns from feedback and failures */
       kb_client_anti_pattern_extract_from_feedback();
@@ -1435,7 +1435,7 @@ void cmd_wrapup(app_ctx_t *ctx, int argc, char **argv)
 
       /* Legacy monolithic command path. This file is not linked into the
        * shipped DB-free client; the server RPC port must split DB1 reads
-       * from DB2 writes before this is routed through shipped surfaces. */
+       * from KB_STORE writes before this is routed through shipped surfaces. */
       int adjustments = eval_feedback_loop();
       if (adjustments < 0)
          adjustments = 0;

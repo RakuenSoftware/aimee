@@ -26,8 +26,7 @@
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
-#include <aimee/db2/client.h>
-#include <aimee/db2/host_contracts.h>
+#include <aimee/kb/host_contracts.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/learning.h>
 #include <aimee/learning/module_api.h>
@@ -48,7 +47,7 @@
 
 static atomic_uint_fast64_t next_trace = 1;
 
-static const aimee_db2_vault_crypto_provider_t vault_crypto_provider = {
+static const aimee_kb_store_vault_crypto_provider_t vault_crypto_provider = {
     .aad_build_v2 = vault_aad_build_v2,
     .aad_build_v1_safe = vault_aad_build_v1_safe,
     .random = vault_crypto_random,
@@ -72,7 +71,7 @@ static int64_t vault_reseal_deadline_ms(uint32_t per_call_ms)
    return current <= INT64_MAX - per_call_ms ? current + per_call_ms : -1;
 }
 
-static const aimee_db2_vault_reseal_provider_t vault_reseal_provider = {
+static const aimee_kb_store_vault_reseal_provider_t vault_reseal_provider = {
     .deadline_ms = vault_reseal_deadline_ms,
     .operation_id_to_hex = vault_reseal_operation_id_to_hex,
     .operation_id_from_hex = vault_reseal_operation_id_from_hex,
@@ -103,7 +102,7 @@ vault_witness_verify_checkpoint_run_contract(const vault_witness_checkpoint_t *c
    return (int)vault_witness_verify_checkpoint_run(checkpoints, count, gap_after_index);
 }
 
-static const aimee_db2_vault_witness_provider_t vault_witness_provider = {
+static const aimee_kb_store_vault_witness_provider_t vault_witness_provider = {
     .checkpoint_digest = vault_witness_checkpoint_digest,
     .checkpoint_encode = vault_witness_checkpoint_encode,
     .checkpoint_sign = vault_witness_checkpoint_sign,
@@ -143,26 +142,31 @@ static int css_render_compare(const char *before_json, const char *after_json, i
    return 0;
 }
 
-_Static_assert((int)AIMEE_DB2_PRINCIPAL_NONE == (int)KB_PRIN_NONE, "DB2 principal NONE ABI drift");
-_Static_assert((int)AIMEE_DB2_PRINCIPAL_OIDC == (int)KB_PRIN_OIDC, "DB2 principal OIDC ABI drift");
-_Static_assert((int)AIMEE_DB2_PRINCIPAL_CERT == (int)KB_PRIN_CERT, "DB2 principal CERT ABI drift");
-_Static_assert((int)AIMEE_DB2_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
-               "DB2 principal OWNER ABI drift");
-_Static_assert((int)AIMEE_DB2_PRINCIPAL_HOST == (int)KB_PRIN_HOST, "DB2 principal HOST ABI drift");
-_Static_assert(AIMEE_DB2_CSS_CLASS_TOKEN_MAX == CSS_CLASS_TOKEN_MAX,
-               "DB2 CSS class-token ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_KEK_LEN == VAULT_KEK_LEN, "DB2 vault KEK ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_DEK_LEN == VAULT_DEK_LEN, "DB2 vault DEK ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_NONCE_LEN == VAULT_GCM_NONCE_LEN, "DB2 vault nonce ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_TAG_LEN == VAULT_GCM_TAG_LEN, "DB2 vault tag ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_WRAPPED_DEK_LEN == VAULT_WRAPPED_DEK_LEN,
-               "DB2 vault wrapped-DEK ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_RESEAL_RECEIPT_LEN == VAULT_RESEAL_RECEIPT_V1_LEN,
-               "DB2 vault reseal-receipt ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_LEN == VAULT_RESEAL_OPERATION_ID_LEN,
-               "DB2 vault reseal-operation ABI drift");
-_Static_assert(AIMEE_DB2_VAULT_RESEAL_OPERATION_HEX == VAULT_RESEAL_OPERATION_HEX_LEN,
-               "DB2 vault reseal-operation hex ABI drift");
+_Static_assert((int)AIMEE_KB_STORE_PRINCIPAL_NONE == (int)KB_PRIN_NONE,
+               "KB_STORE principal NONE ABI drift");
+_Static_assert((int)AIMEE_KB_STORE_PRINCIPAL_OIDC == (int)KB_PRIN_OIDC,
+               "KB_STORE principal OIDC ABI drift");
+_Static_assert((int)AIMEE_KB_STORE_PRINCIPAL_CERT == (int)KB_PRIN_CERT,
+               "KB_STORE principal CERT ABI drift");
+_Static_assert((int)AIMEE_KB_STORE_PRINCIPAL_OWNER == (int)KB_PRIN_OWNER,
+               "KB_STORE principal OWNER ABI drift");
+_Static_assert((int)AIMEE_KB_STORE_PRINCIPAL_HOST == (int)KB_PRIN_HOST,
+               "KB_STORE principal HOST ABI drift");
+_Static_assert(AIMEE_KB_STORE_CSS_CLASS_TOKEN_MAX == CSS_CLASS_TOKEN_MAX,
+               "KB_STORE CSS class-token ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_KEK_LEN == VAULT_KEK_LEN, "KB_STORE vault KEK ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_DEK_LEN == VAULT_DEK_LEN, "KB_STORE vault DEK ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_NONCE_LEN == VAULT_GCM_NONCE_LEN,
+               "KB_STORE vault nonce ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_TAG_LEN == VAULT_GCM_TAG_LEN, "KB_STORE vault tag ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_WRAPPED_DEK_LEN == VAULT_WRAPPED_DEK_LEN,
+               "KB_STORE vault wrapped-DEK ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_RESEAL_RECEIPT_LEN == VAULT_RESEAL_RECEIPT_V1_LEN,
+               "KB_STORE vault reseal-receipt ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_RESEAL_OPERATION_LEN == VAULT_RESEAL_OPERATION_ID_LEN,
+               "KB_STORE vault reseal-operation ABI drift");
+_Static_assert(AIMEE_KB_STORE_VAULT_RESEAL_OPERATION_HEX == VAULT_RESEAL_OPERATION_HEX_LEN,
+               "KB_STORE vault reseal-operation hex ABI drift");
 
 static uint64_t monotonic_ns(void)
 {
@@ -195,18 +199,6 @@ static int call_module(uint32_t event_kind, uint32_t stage_id, const void *reque
 {
    return call_module_with_budget(event_kind, stage_id, request, request_len, response,
                                   response_capacity, response_len, KB_MODULE_STAGE_DEADLINE_NS);
-}
-
-static aimee_module_call_result_t
-call_db2(void *context, uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
-         uint64_t deadline_ns, const void *request_body, uint32_t request_len, void *response_body,
-         uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-         void *cancel_context)
-{
-   (void)context;
-   return obs_bus_module_call(event_kind, stage_id, trace_id, deadline_ns, request_body,
-                              request_len, response_body, response_capacity, response_len,
-                              cancelled, cancel_context);
 }
 
 static int grounding_decide(aimee_kb_synthesis_claim_kind_t claim_kind, const char *const *claims,
@@ -262,11 +254,20 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    uint8_t *response = calloc(AIMEE_MODULE_MESSAGE_MAX_BODY + 1u, 1u);
    uint32_t response_len = 0;
    cJSON *root = NULL;
+   const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request_json, "operation");
+   uint64_t budget =
+       cJSON_IsString(operation) && strcmp(operation->valuestring, "reset-derived") == 0
+           ? 120ULL * 1000000000ULL
+           : KB_MODULE_MEMORY_DATA_DEADLINE_NS;
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (backend && backend[0] && strcmp(backend, "native") != 0 &&
+       strcmp(backend, "aimee-native") != 0)
+      budget = 120ULL * 1000000000ULL;
    if (request && request_len > 0 && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY &&
        request_len <= UINT32_MAX && response &&
        call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
                                (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                               &response_len, KB_MODULE_MEMORY_DATA_DEADLINE_NS) == 0)
+                               &response_len, budget) == 0)
       root = cJSON_ParseWithLength((const char *)response, response_len);
    free(request);
    free(response);
@@ -295,7 +296,7 @@ static int embed_over_module(const char *text, const char *command, int input_ty
    cJSON *request_json = cJSON_CreateObject();
    if (!request_json || !cJSON_AddStringToObject(request_json, "base_url", command) ||
        !cJSON_AddStringToObject(request_json, "input_type",
-                                input_type == AIMEE_DB2_EMBED_QUERY ? "query" : "document") ||
+                                input_type == AIMEE_KB_STORE_EMBED_QUERY ? "query" : "document") ||
        !cJSON_AddStringToObject(request_json, "text", text) ||
        !cJSON_AddNumberToObject(request_json, "max_dim", max_dim))
    {
@@ -365,7 +366,7 @@ static int embed_text(const char *text, const char *command, int input_type, flo
                       int max_dim)
 {
    if (!text || !command || !command[0] || !out || max_dim <= 0 ||
-       (input_type != AIMEE_DB2_EMBED_DOCUMENT && input_type != AIMEE_DB2_EMBED_QUERY))
+       (input_type != AIMEE_KB_STORE_EMBED_DOCUMENT && input_type != AIMEE_KB_STORE_EMBED_QUERY))
       return 0;
    return (command && (strncmp(command, "http://", 7) == 0 || strncmp(command, "https://", 8) == 0))
               ? embed_over_module(text, command, input_type, out, max_dim)
@@ -391,20 +392,6 @@ int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_t
                                                 kb_tables_ok);
 }
 
-int kb_module_db2_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
-{
-   uint64_t now = monotonic_ns();
-   if (!now)
-      return -1;
-   uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   if (trace == 0)
-      trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   return aimee_db2_health_call(call_db2, NULL, trace, now + KB_MODULE_STAGE_DEADLINE_NS, schema_ok,
-                                have_pg_trgm, kb_tables_ok, NULL, NULL) == AIMEE_MODULE_CALL_OK
-              ? 0
-              : -1;
-}
-
 /* Signal classification, for the router that runs HERE. The signal-capture
  * route is served by the KB -- that is where the learning tables live -- but
  * the classifier was registered only by the daemon, so every signal reaching
@@ -424,16 +411,33 @@ static int learning_classify(const char *signal, uint32_t *sink_mask)
 
 void kb_module_stage_adapters_configure(void)
 {
-   aimee_db2_register_mdl_score_provider(score_mdl);
-   aimee_db2_register_embed_provider(embed_text);
-   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
-   aimee_db2_register_css_render_compare_provider(css_render_compare);
-   aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
-                                             css_extract_class_tokens);
-   aimee_db2_register_vault_crypto_provider(&vault_crypto_provider);
-   aimee_db2_register_vault_reseal_provider(&vault_reseal_provider);
-   aimee_db2_register_vault_witness_provider(&vault_witness_provider);
+   aimee_kb_store_register_mdl_score_provider(score_mdl);
+   aimee_kb_store_register_embed_provider(embed_text);
+   aimee_kb_store_register_identity_key_provider(kb_identity_key_from_fields);
+   aimee_kb_store_register_css_render_compare_provider(css_render_compare);
+   aimee_kb_store_register_css_analysis_providers(css_analyze, css_stylesheet_free,
+                                                  css_extract_class_tokens);
+   aimee_kb_store_register_vault_crypto_provider(&vault_crypto_provider);
+   aimee_kb_store_register_vault_reseal_provider(&vault_reseal_provider);
+   aimee_kb_store_register_vault_witness_provider(&vault_witness_provider);
    kb_curator_grounding_register_provider(grounding_decide);
    kb_route_acl_register_authorization_provider(control_web_authorize);
    learning_router_register_signal_classifier(learning_classify);
+}
+
+int kb_module_memory_reset_derived(void)
+{
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
+       strcmp(backend, "aimee-native") == 0)
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "operation", "reset-derived");
+   cJSON *reply = kb_module_memory_data(request);
+   cJSON_Delete(request);
+   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
+   cJSON_Delete(reply);
+   return ok ? 0 : -1;
 }

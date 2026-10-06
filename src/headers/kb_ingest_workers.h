@@ -3,8 +3,8 @@
 
 /* kb_ingest_workers.h: aimee-kb's in-process KB ingest driver.
  *
- * aimee-kb owns DB2 directly, so it claims ingest jobs from the DB2
- * queue itself (db2_kb_ingest_queue_claim_next) and runs the full build
+ * aimee-kb owns KB_STORE directly, so it claims ingest jobs from the KB_STORE
+ * queue itself (kb_store_kb_ingest_queue_claim_next) and runs the full build
  * in-process (kb_build + canonical_index_scan_project) — no RPC round-trip
  * back to a server-side compute pool. This replaces the former
  * server_kb_workers.c dispatcher that ran while ingest compute lived in
@@ -14,7 +14,7 @@
 
 /* Start the ingest worker pool, periodic enqueue timer, and inotify watcher
  * on ctx (sized by cfg.kb_worker_count, clamped to KB_WORKER_MAX). No-op when
- * the cap is 0 or DB2 is unavailable. */
+ * the cap is 0 or KB_STORE is unavailable. */
 void kb_ingest_workers_start(kb_service_ctx_t *ctx);
 
 /* Stop and join all ingest threads on ctx. */

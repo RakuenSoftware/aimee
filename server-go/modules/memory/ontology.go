@@ -1,6 +1,10 @@
 package memory
 
-import "strings"
+import (
+	"strings"
+
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
+)
 
 // The typed-fact write gate, ported from src/modules/memory/memory_fact_gate.c
 // and the pure core of src/rel_types.c.
@@ -12,64 +16,38 @@ import "strings"
 //
 // Pure by construction — seed table only, no database. That is what lets it run
 // in the module process at all: a module reaches core over the bus and has no
-// DB2 handle of its own.
+// KB_STORE handle of its own.
 
-// NodeKind is an entity kind. Values match memory_node_kind_t exactly; they are
-// persisted as integer codes, so they are assigned rather than derived.
-type NodeKind uint32
-
-const (
-	NodeFile      NodeKind = 0
-	NodeFunction  NodeKind = 1
-	NodeStruct    NodeKind = 2
-	NodeModule    NodeKind = 3
-	NodeBug       NodeKind = 4
-	NodeCommit    NodeKind = 5
-	NodePr        NodeKind = 6
-	NodeDeveloper NodeKind = 7
-	NodeConcept   NodeKind = 8
-	NodeEvent     NodeKind = 9
-	NodePerson    NodeKind = 10
-	NodePlace     NodeKind = 11
-	NodeTimeExpr  NodeKind = 12
-	NodeDevice    NodeKind = 13
-	NodeOrg       NodeKind = 14
-	NodeIp        NodeKind = 15
-	NodeScalar    NodeKind = 16
-	// NodeOther is the ANY wildcard when it appears in a kind list.
-	NodeOther NodeKind = 99
-)
-
-// FactVerdict mirrors fact_gate_verdict_t. Only the values the pure gate can
-// return are defined here; DEFER and REJECT_SENSITIVE belong to the DB-backed
-// commit path in core and are never produced by this stage.
-type FactVerdict uint32
+type NodeKind = memorycontract.NodeKind
+type FactVerdict = memorycontract.FactVerdict
+type RelSensitivity = memorycontract.RelSensitivity
 
 const (
-	// FactAccept means a known relation whose ends satisfy its kind constraints.
-	FactAccept FactVerdict = 0
-	// FactRejectKind means a known relation used with a disallowed end kind.
-	FactRejectKind FactVerdict = 1
-	// FactNovel means the relation is not in the seed ontology; the caller
-	// consults the live table and stages or defers.
-	FactNovel FactVerdict = 2
-	// FactBadArg means no relation was supplied.
-	FactBadArg FactVerdict = 3
-)
-
-// RelSensitivity is a relation's PII gating tier. Values match
-// rel_sensitivity_t; they are persisted as text and compared as integers, so
-// the numbering is assigned rather than derived.
-type RelSensitivity uint32
-
-const (
-	// SensNormal is an identity or operational fact: injected above the
-	// confidence floor.
-	SensNormal RelSensitivity = 0
-	// SensPII is a regulated identifier: injected only when the turn asks for it.
-	SensPII RelSensitivity = 1
-	// SensSecret is a credential: never injected, served through the vault.
-	SensSecret RelSensitivity = 2
+	NodeFile       = memorycontract.NodeFile
+	NodeFunction   = memorycontract.NodeFunction
+	NodeStruct     = memorycontract.NodeStruct
+	NodeModule     = memorycontract.NodeModule
+	NodeBug        = memorycontract.NodeBug
+	NodeCommit     = memorycontract.NodeCommit
+	NodePr         = memorycontract.NodePr
+	NodeDeveloper  = memorycontract.NodeDeveloper
+	NodeConcept    = memorycontract.NodeConcept
+	NodeEvent      = memorycontract.NodeEvent
+	NodePerson     = memorycontract.NodePerson
+	NodePlace      = memorycontract.NodePlace
+	NodeTimeExpr   = memorycontract.NodeTimeExpr
+	NodeDevice     = memorycontract.NodeDevice
+	NodeOrg        = memorycontract.NodeOrg
+	NodeIp         = memorycontract.NodeIp
+	NodeScalar     = memorycontract.NodeScalar
+	NodeOther      = memorycontract.NodeOther
+	FactAccept     = memorycontract.FactAccept
+	FactRejectKind = memorycontract.FactRejectKind
+	FactNovel      = memorycontract.FactNovel
+	FactBadArg     = memorycontract.FactBadArg
+	SensNormal     = memorycontract.SensNormal
+	SensPII        = memorycontract.SensPII
+	SensSecret     = memorycontract.SensSecret
 )
 
 // relTypeDef is the authoritative seed row for both memory gates and schema

@@ -81,20 +81,20 @@ configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
 policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
 
-`src/modules/process-contracts.json` is also the implementation-language switch
-for supervised processes. Twenty-three identities run in the Go multicall
-executable in `server-go/cmd/aimee-module`: `config`, `memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
-`response-composition`, `execution-policy`, `governance`, `workflows`,
-`roundtable`, `kb-synthesis`, `runtime-web`, `control-web`, `benchmarks`,
-`sandbox`, `economizer`, `postgres`, `aimee`, and `egress`. Its basename selects
-an isolated identity and one module package under `server-go/modules`. The runtime
-bundle emits no C process source for those entries. Their C `module_adapter.c`
-files serve only as wire-parity fixtures while the deeper module-owned C surfaces
-are migrated in later batches. DB2 remains the separately supervised C process
-in the current catalog and crosses the same bus admission and wire boundary.
+`src/modules/process-contracts.json` declares the implementation language for supervised
+processes. The executable in `server-go/cmd/aimee-module` selects an isolated identity from its
+basename and serves that module's admitted stages without cgo.
 
-Each migrated process owns one bounded decision and nothing around it:
+The current process catalog contains 26 Go identities: `config`, `memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`, `response-composition`,
+`execution-policy`, `governance`, `workflows`, `roundtable`, `kb-synthesis`, `runtime-web`,
+`control-web`, `benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, `egress`,
+`providers`, `server` and `kb`. Placement and activation select the running set; the Server and
+KB role identities never run together. The catalog contains no supervised C KB_STORE process.
+The Go PostgreSQL module serves both placements. Transitional module-owned C resource/domain
+code remains, and C adapters used as parity fixtures do not establish a second policy owner.
+
+Some stages remain deliberately bounded decisions:
 
 - **workflows** owns the deterministic advance admission classification, and is
   not a second workflow lifecycle runtime. The server's interactive advance

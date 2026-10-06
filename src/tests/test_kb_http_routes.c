@@ -1,3 +1,5 @@
+static int derived_cleanup_failure, derived_cleanup_calls;
+#include <aimee/postgres/client.h>
 #include "module_commands.h"
 #include "support/module_runtime_fixture.h"
 #include "json_fluent.h"
@@ -23,11 +25,11 @@
 extern int handle_get_code_context(const char *query_string, char *out_buf, int out_cap);
 #include "kb_route_acl.h"
 #include "kb_scope.h"
-#include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
-#include "td_search_render.h"        /* consumer side of the /v1/search contract test */
-#include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
-#include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
-#include "modules/db2/c/code_project_lifecycle.h"
+#include "kb/http/kb_http_search.h" /* kb_http_search_project_scope: "scope" parsing */
+#include "td_search_render.h"       /* consumer side of the /v1/search contract test */
+#include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
+#include "modules/kb/c/lifecycle.h" /* §2c: kb_store_reembed_* / kb_store_dim_change_reset stub types */
+#include "modules/kb/c/code_project_lifecycle.h"
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -107,39 +109,39 @@ extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
     g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
-#include "db_postgres.h"        /* aimee_pg_* types for the tenancy-route db2 stubs below */
+#include "db_postgres.h"        /* aimee_pg_* types for the tenancy-route kb_store stubs below */
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-/* db2 accessor stubs: this test links the kb router but not the DB2 stack. The
+/* kb_store accessor stubs: this test links the kb router but not the KB_STORE stack. The
  * tenancy routes hard-fail on the shim (aimee_pg_is_shim()=1) inside
- * db2_tenant_require_pg BEFORE any accessor runs, so these are unreachable at
+ * kb_store_tenant_require_pg BEFORE any accessor runs, so these are unreachable at
  * runtime and exist only to satisfy the linker (proves the auth->actor->handler->
  * tenant-guard chain reaches 503; real RLS is proven by the Postgres gate). */
 int aimee_pg_is_shim(void)
 {
    return 1;
 }
-void *(db2_conn)(void)
+void *(kb_store_conn)(void)
 {
    return NULL;
 }
 
-/* Real code reaches the pool through the db2_conn() macro, which expands to
- * db2_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
-void *db2_conn_at(const char *site)
+/* Real code reaches the pool through the kb_store_conn() macro, which expands to
+ * kb_store_conn_at(site) so a lazy acquire can be attributed. Route the stub. */
+void *kb_store_conn_at(const char *site)
 {
    (void)site;
-   return (db2_conn)();
+   return (kb_store_conn)();
 }
-/* The real symbol is db2_lease_begin_at; db2_lease_begin is a macro in db2.h
+/* The real symbol is kb_store_lease_begin_at; kb_store_lease_begin is a macro in kb_store.h
  * that records the caller's file:line for stuck-lease attribution. */
-void db2_lease_begin_at(const char *site)
+void kb_store_lease_begin_at(const char *site)
 {
 }
-void db2_lease_end(void)
+void kb_store_lease_end(void)
 {
 }
-void db2_lease_release_idle(void)
+void kb_store_lease_release_idle(void)
 {
 }
 
@@ -148,9 +150,9 @@ static int g_erasure_complete_calls;
 static int g_erasure_reconcile_calls;
 static int g_erasure_pending_owners;
 
-int db2_subject_erasure_begin(const char *request_id, const char *subject,
-                              const char *sessions_json, int64_t *memory_count,
-                              int64_t *document_count, int *already_done)
+int kb_store_subject_erasure_begin(const char *request_id, const char *subject,
+                                   const char *sessions_json, int64_t *memory_count,
+                                   int64_t *document_count, int *already_done)
 {
    assert(strcmp(request_id, "erase-route-0123456789") == 0);
    assert(strcmp(subject, "subject@example.test") == 0);
@@ -162,8 +164,8 @@ int db2_subject_erasure_begin(const char *request_id, const char *subject,
    return 0;
 }
 
-int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
-                                 int *event_created)
+int kb_store_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                      int *event_created)
 {
    assert(strcmp(request_id, "erase-route-0123456789") == 0);
    assert(actor && actor[0]);
@@ -173,12 +175,12 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    return 0;
 }
 
-int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
-                            int64_t db1_count, int *event_created, int *coverage_complete,
-                            int64_t *pending_owners)
+int kb_store_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                                 int64_t db1_count, int *event_created, int *coverage_complete,
+                                 int64_t *pending_owners)
 {
    assert(transport != NULL);
-   int rc = db2_subject_erasure_complete(request_id, actor, db1_count, event_created);
+   int rc = kb_store_subject_erasure_complete(request_id, actor, db1_count, event_created);
    *pending_owners = g_erasure_pending_owners;
    *coverage_complete = g_erasure_pending_owners == 0;
    if (g_erasure_pending_owners)
@@ -207,25 +209,12 @@ int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *o
    return 0;
 }
 /* /v1/health reports pool starvation, so the route layer now reads the pool.
- * A route test wants no real DB2: report an idle pool so health stays "ok" and
+ * A route test wants no real KB_STORE: report an idle pool so health stays "ok" and
  * the route assertions are about routing, not pool state. */
-void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
-                    long *stuck, long *poisoned)
+int aimee_postgres_session_stats(aimee_postgres_session_stats_t *stats)
 {
-   if (size)
-      *size = 0;
-   if (in_use)
-      *in_use = 0;
-   if (waiters)
-      *waiters = 0;
-   if (lease_grants)
-      *lease_grants = 0;
-   if (lease_timeouts)
-      *lease_timeouts = 0;
-   if (stuck)
-      *stuck = 0;
-   if (poisoned)
-      *poisoned = 0;
+   *stats = (aimee_postgres_session_stats_t){.capacity = 16};
+   return 0;
 }
 
 static int code_project_manifest_stub(const char *project, code_project_manifest_t *out)
@@ -246,7 +235,8 @@ static int code_project_manifest_stub(const char *project, code_project_manifest
 
 static char g_lifecycle_audit_principal[576];
 
-int db2_code_project_detach(const char *project, const char *principal, int64_t *generation_out)
+int kb_store_code_project_detach(const char *project, const char *principal,
+                                 int64_t *generation_out)
 {
    if (!project || !project[0])
       return CODE_PROJECT_LIFECYCLE_ERROR;
@@ -257,21 +247,21 @@ int db2_code_project_detach(const char *project, const char *principal, int64_t 
    return 0;
 }
 
-int db2_code_project_purge_manifest(const char *project, code_project_manifest_t *out)
+int kb_store_code_project_purge_manifest(const char *project, code_project_manifest_t *out)
 {
    return code_project_manifest_stub(project, out);
 }
 
-int db2_code_project_gc_manifest(const char *project, int retention_days,
-                                 code_project_manifest_t *out)
+int kb_store_code_project_gc_manifest(const char *project, int retention_days,
+                                      code_project_manifest_t *out)
 {
    (void)retention_days;
    return code_project_manifest_stub(project, out);
 }
 
-int db2_code_project_purge_confirm(const char *project, const char *expected_hash,
-                                   const char *principal, const char *reason,
-                                   code_project_manifest_t *out)
+int kb_store_code_project_purge_confirm(const char *project, const char *expected_hash,
+                                        const char *principal, const char *reason,
+                                        code_project_manifest_t *out)
 {
    snprintf(g_lifecycle_audit_principal, sizeof(g_lifecycle_audit_principal), "%s",
             principal ? principal : "");
@@ -284,12 +274,12 @@ int db2_code_project_purge_confirm(const char *project, const char *expected_has
    return rc;
 }
 
-int db2_code_project_gc_confirm(const char *project, int retention_days, const char *expected_hash,
-                                const char *principal, const char *reason,
-                                code_project_manifest_t *out)
+int kb_store_code_project_gc_confirm(const char *project, int retention_days,
+                                     const char *expected_hash, const char *principal,
+                                     const char *reason, code_project_manifest_t *out)
 {
    (void)retention_days;
-   return db2_code_project_purge_confirm(project, expected_hash, principal, reason, out);
+   return kb_store_code_project_purge_confirm(project, expected_hash, principal, reason, out);
 }
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
@@ -418,7 +408,7 @@ typedef struct
    double sum_reward;
    double posterior_alpha;
    double posterior_beta;
-} db2_bandit_arm_stats_t;
+} kb_store_bandit_arm_stats_t;
 
 typedef struct
 {
@@ -566,7 +556,7 @@ char *kb_service_health_json(void)
 {
    char *r = malloc(160);
    if (r)
-      strcpy(r, "{\"status\":\"ok\",\"db2_ok\":true,\"pgvec_ok\":true,"
+      strcpy(r, "{\"status\":\"ok\",\"postgres_ok\":true,\"pgvec_ok\":true,"
                 "\"chunk_count\":7,\"embedding_count\":6}");
    return r;
 }
@@ -664,9 +654,9 @@ int kb_curator_contradictions_json(int limit, char *out, size_t out_cap)
    return 1;
 }
 
-/* §2c: /v1/reembed + search-guard db2 stubs (g_test_reembed_in_progress -> 503 guard). */
+/* §2c: /v1/reembed + search-guard kb_store stubs (g_test_reembed_in_progress -> 503 guard). */
 static int g_test_reembed_in_progress = 0;
-int db2_reembed_in_progress_get(int *target_dim, long *started_epoch)
+int kb_store_reembed_in_progress_get(int *target_dim, long *started_epoch)
 {
    if (g_test_reembed_in_progress)
    {
@@ -680,9 +670,9 @@ int db2_reembed_in_progress_get(int *target_dim, long *started_epoch)
    (void)started_epoch;
    return 0; /* not in progress -> search path proceeds */
 }
-/* structured-PDF db2 stubs live in tests/support/pdf_route_stubs.c (link-only; the real
+/* structured-PDF kb_store stubs live in tests/support/pdf_route_stubs.c (link-only; the real
  * SQL is exercised against the sqlite shim in test_kb_doc_pdf.c). */
-int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out)
+int kb_store_dim_change_reset(int target_dim, int force, int dry_run, kb_store_reembed_plan_t *out)
 {
    (void)force;
    (void)dry_run;
@@ -694,7 +684,7 @@ int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_pla
    }
    return 0;
 }
-int db2_reembed_in_progress_clear(void)
+int kb_store_reembed_in_progress_clear(void)
 {
    g_test_reembed_in_progress = 0;
    return 0;
@@ -702,7 +692,7 @@ int db2_reembed_in_progress_clear(void)
 /* Test-controllable recorded/running dims for the clear-maintenance consistency gate. */
 static int g_test_recorded_dim = 1024;
 static int g_test_running_dim = 1024;
-int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded, int *running)
+int kb_store_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded, int *running)
 {
    if (was_in_progress)
       *was_in_progress = g_test_reembed_in_progress;
@@ -716,11 +706,11 @@ int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded
    return 0;
 }
 int g_test_embedding_dim = 1024; /* §5 vector-leg tests flip this; default 1024 */
-int db2_embedding_dim(void)
+int kb_store_embedding_dim(void)
 {
    return g_test_embedding_dim;
 }
-int db2_probe_embedder_dim(int budget_ms, int *out)
+int kb_store_probe_embedder_dim(int budget_ms, int *out)
 {
    (void)budget_ms;
    if (out)
@@ -736,7 +726,7 @@ int config_resolve_embedder_dims_current(void)
    return 0;
 }
 
-int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
+int kb_store_curator_invalidations_since(int64_t since_id, void *out, int max)
 {
    (void)since_id;
    (void)out;
@@ -956,7 +946,7 @@ int canonical_index_find_excluding_project(const char *excluded_project, const c
    return canonical_index_find(identifier, out, max);
 }
 
-int db2_code_index_project_current_generation(const char *project, int64_t *generation_out)
+int kb_store_code_index_project_current_generation(const char *project, int64_t *generation_out)
 {
    if (!project || !project[0])
       return -2;
@@ -1120,7 +1110,7 @@ int canonical_index_code_search_excluding_project(const char *query, const char 
 
 /* canonical_index_find_callers stub lives in the _code.inc (line-count limit). */
 
-int db2_artifact_read(const char *id, void *out, void *c, int mc, int *cc)
+int kb_store_artifact_read(const char *id, void *out, void *c, int mc, int *cc)
 {
    (void)id;
    (void)out;
@@ -1131,7 +1121,7 @@ int db2_artifact_read(const char *id, void *out, void *c, int mc, int *cc)
    return -1;
 }
 
-int db2_artifact_links_read(const char *id, void *out, int m)
+int kb_store_artifact_links_read(const char *id, void *out, int m)
 {
    (void)id;
    (void)out;
@@ -1139,9 +1129,9 @@ int db2_artifact_links_read(const char *id, void *out, int m)
    return 0;
 }
 
-static db2_kb_service_async_queue_stats_t g_queue_status = {
+static kb_store_kb_service_async_queue_stats_t g_queue_status = {
     .pending = 4, .running = 2, .done = 7, .failed = 1, .total = 14};
-static db2_kb_service_async_queue_stats_t g_drain_status = {
+static kb_store_kb_service_async_queue_stats_t g_drain_status = {
     .pending = 1, .running = 0, .done = 10, .failed = 1, .total = 12, .processed = 3};
 static char g_drain_embed_cmd[64];
 static char g_drain_claimed_by[128];
@@ -1266,7 +1256,7 @@ char *kb_service_workers_json(kb_service_ctx_t *ctx)
                  "\"state\":\"sleeping\"}]}");
 }
 
-int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
+int kb_store_kb_service_async_queue_status(kb_store_kb_service_async_queue_stats_t *out)
 {
    if (!out)
       return -1;
@@ -1274,11 +1264,11 @@ int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
    return 0;
 }
 
-int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
-                                     int timeout_secs, const char *vector_collection,
-                                     db2_kb_service_vector_upsert_fn vector_upsert,
-                                     void *vector_upsert_ctx,
-                                     db2_kb_service_async_queue_stats_t *out)
+int kb_store_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                          int timeout_secs, const char *vector_collection,
+                                          kb_store_kb_service_vector_upsert_fn vector_upsert,
+                                          void *vector_upsert_ctx,
+                                          kb_store_kb_service_async_queue_stats_t *out)
 {
    (void)vector_upsert;
    (void)vector_upsert_ctx;
@@ -1293,7 +1283,7 @@ int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embeddi
    return 0;
 }
 
-int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out)
+int kb_store_kb_service_async_job_get(int64_t job_id, kb_store_kb_service_async_job_t *out)
 {
    g_job_get_id = job_id;
    if (g_job_get_rc <= 0)
@@ -1312,7 +1302,7 @@ int db2_kb_service_async_job_get(int64_t job_id, db2_kb_service_async_job_t *out
    return 1;
 }
 
-int db2_is_initialized(void)
+int kb_store_is_initialized(void)
 {
    return g_db_initialized;
 }
@@ -1320,7 +1310,7 @@ int db2_is_initialized(void)
 int pgvec_kb_service_ensure_kb_collection(int dim)
 {
    /* The route now sizes the collection at the deployment's runtime embedding
-    * dim (db2_embedding_dim(), i.e. g_test_embedding_dim here), not a hardcoded
+    * dim (kb_store_embedding_dim(), i.e. g_test_embedding_dim here), not a hardcoded
     * 384, so it matches the halfvec(__EMBED_DIM__) column. */
    assert(dim == g_test_embedding_dim);
    return g_pgvec_ensure_rc;
@@ -1481,7 +1471,7 @@ int canonical_index_verify_project(const char *name, const char *root, int deep,
    return 0;
 }
 
-int db2_kb_runtime_state_set_now(const char *key)
+int kb_store_kb_runtime_state_set_now(const char *key)
 {
    if (key && strcmp(key, "last_ingest_at") == 0)
       g_runtime_state_set_now++;
@@ -1609,7 +1599,7 @@ double config_demotion_half_life_days(void)
    return 30.0;
 }
 
-int db2_calibration_surfaces_with_data(int min_rows)
+int kb_store_calibration_surfaces_with_data(int min_rows)
 {
    assert(min_rows == 200);
    return 2;
@@ -1656,15 +1646,15 @@ int kb_bandit_reward(const char *decision_point, const char *decision_id, const 
    return 0;
 }
 
-int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+int kb_store_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
 {
    (void)decision_point;
    if (arm_out && arm_out_len)
       arm_out[0] = '\0';
    return -1; /* no promotion in tests */
 }
-int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
-                             const char *rollback_arm)
+int kb_store_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                                  const char *rollback_arm)
 {
    (void)decision_point;
    (void)arm_id;
@@ -1672,21 +1662,21 @@ int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
    return 0;
 }
 
-int db2_bandit_decision_points_list(char *buf, size_t len)
+int kb_store_bandit_decision_points_list(char *buf, size_t len)
 {
    /* The export asks the log which points exist; return the production-sampled one. */
    snprintf(buf, len, "[\"kb_memory_retrieval_limit\"]");
    return 0;
 }
 
-int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
+int kb_store_bandit_arms_list(const char *decision_point, char *buf, size_t len)
 {
    assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    snprintf(buf, len, "[\"10\"]");
    return 0;
 }
 
-int db2_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
+int kb_store_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
 {
    assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(limit == 500);
@@ -1704,8 +1694,8 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
    return 0;
 }
 
-int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
-                              db2_bandit_arm_stats_t *out)
+int kb_store_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
+                                   kb_store_bandit_arm_stats_t *out)
 {
    assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(out != NULL);
@@ -1745,8 +1735,8 @@ int workspace_repo_index_keys(const char *root, const char *fallback_workspace, 
 /* Captured so a route test can assert the priority it enqueued at. */
 static int g_ingest_priority = -1;
 
-int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, const char *workspace,
-                                int force, int priority)
+int kb_store_kb_ingest_queue_enqueue(const char *project, const char *root_path,
+                                     const char *workspace, int force, int priority)
 {
    g_ingest_priority = priority;
    snprintf(g_ingest_project, sizeof(g_ingest_project), "%s", project);
@@ -1756,7 +1746,7 @@ int db2_kb_ingest_queue_enqueue(const char *project, const char *root_path, cons
    return 0;
 }
 
-int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
+int kb_store_kb_ingest_queue_claim_next(kb_store_kb_ingest_job_t *out)
 {
    if (g_claim_rc < 0)
       return g_claim_rc;
@@ -1770,8 +1760,8 @@ int db2_kb_ingest_queue_claim_next(db2_kb_ingest_job_t *out)
    return 1;
 }
 
-int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
-                                 int embeddings_added)
+int kb_store_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_added,
+                                      int embeddings_added)
 {
    g_complete_job_id = job_id;
    g_complete_files = files_indexed;
@@ -1780,14 +1770,14 @@ int db2_kb_ingest_queue_complete(int64_t job_id, int files_indexed, int chunks_a
    return 0;
 }
 
-int db2_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
+int kb_store_kb_ingest_queue_fail(int64_t job_id, const char *error_message)
 {
    g_fail_job_id = job_id;
    snprintf(g_fail_error, sizeof(g_fail_error), "%s", error_message);
    return 0;
 }
 
-cJSON *db2_kb_file_index_snapshot_json(const char *project)
+cJSON *kb_store_kb_file_index_snapshot_json(const char *project)
 {
    snprintf(g_snapshot_project, sizeof(g_snapshot_project), "%s", project ? project : "");
    cJSON *arr = cJSON_CreateArray();
@@ -1798,8 +1788,8 @@ cJSON *db2_kb_file_index_snapshot_json(const char *project)
    return arr;
 }
 
-int db2_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
-                                             int64_t *out, int max)
+int kb_store_kb_documents_list_chunk_ids_for_file(const char *project, const char *file_path,
+                                                  int64_t *out, int max)
 {
    snprintf(g_delete_project, sizeof(g_delete_project), "%s", project ? project : "");
    snprintf(g_delete_path, sizeof(g_delete_path), "%s", file_path ? file_path : "");
@@ -1820,23 +1810,23 @@ int pgvec_kb_vector_delete_point(int64_t point_id)
    return 0;
 }
 
-void db2_vector_index_op_remove(int64_t point_id)
+void kb_store_vector_index_op_remove(int64_t point_id)
 {
    (void)point_id;
    g_vector_index_remove_count++;
 }
 
-void db2_kb_documents_delete_for_file(const char *project, const char *file_path)
+void kb_store_kb_documents_delete_for_file(const char *project, const char *file_path)
 {
    (void)project;
    (void)file_path;
    g_documents_delete_count++;
 }
 
-int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
-                                      const char *file_hash, int chunk_index,
-                                      const char *heading_path, int line_start, int line_end,
-                                      const char *content, int token_count)
+int64_t kb_store_kb_documents_insert_chunk(const char *project, const char *file_path,
+                                           const char *file_hash, int chunk_index,
+                                           const char *heading_path, int line_start, int line_end,
+                                           const char *content, int token_count)
 {
    (void)project;
    (void)file_path;
@@ -1850,15 +1840,15 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
    return 1000 + (++g_insert_chunk_count);
 }
 
-void db2_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
+void kb_store_kb_documents_link_neighbours(int64_t doc_id, int64_t prev_id)
 {
    (void)doc_id;
    (void)prev_id;
    g_link_count++;
 }
 
-int db2_kb_file_index_upsert(const char *project, const char *file_path, const char *file_hash,
-                             const char *content)
+int kb_store_kb_file_index_upsert(const char *project, const char *file_path, const char *file_hash,
+                                  const char *content)
 {
    snprintf(g_file_index_project, sizeof(g_file_index_project), "%s", project ? project : "");
    snprintf(g_file_index_path, sizeof(g_file_index_path), "%s", file_path ? file_path : "");
@@ -1879,15 +1869,15 @@ int pgvec_kb_vector_delete_current_project(const char *project)
    return pgvec_kb_vector_delete_project(project);
 }
 
-int db2_kb_file_index_delete_project(const char *project)
+int kb_store_kb_file_index_delete_project(const char *project)
 {
    (void)project;
    return 0;
 }
 
-int db2_kb_file_index_delete_current_project(const char *project)
+int kb_store_kb_file_index_delete_current_project(const char *project)
 {
-   return db2_kb_file_index_delete_project(project);
+   return kb_store_kb_file_index_delete_project(project);
 }
 
 /* ── slice-2 purge-route stubs: fence store + fan-out delete primitives ── */
@@ -1900,7 +1890,7 @@ static char g_fence_pid[128] = "";
 static char g_fence_project[256] = "";
 static int g_fence_heartbeats = 0;
 
-int db2_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
 {
    if (g_fence_write_rc)
       return -1;
@@ -1914,9 +1904,10 @@ int db2_kb_purge_fence_write(const char *project, const char *generation, const 
 
 /* Mirrors the real acquire's atomic read-decide-write against the in-memory
  * fence: refuse a live foreign fence without takeover, else publish. */
-int db2_kb_purge_fence_acquire(const char *project, const char *generation, const char *purge_id,
-                               int takeover, char *cur_gen, size_t gen_cap, char *cur_pid,
-                               size_t pid_cap, int *replaced_out)
+int kb_store_kb_purge_fence_acquire(const char *project, const char *generation,
+                                    const char *purge_id, int takeover, char *cur_gen,
+                                    size_t gen_cap, char *cur_pid, size_t pid_cap,
+                                    int *replaced_out)
 {
    if (cur_gen && gen_cap)
       snprintf(cur_gen, gen_cap, "%s", g_fence_gen);
@@ -1932,12 +1923,12 @@ int db2_kb_purge_fence_acquire(const char *project, const char *generation, cons
       return 0;
    if (replaced_out)
       *replaced_out = (g_fence_present && !same);
-   (void)db2_kb_purge_fence_write(project, generation, purge_id);
+   (void)kb_store_kb_purge_fence_write(project, generation, purge_id);
    return 1;
 }
 
-int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
-                            size_t pid_cap, int *live_out)
+int kb_store_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                                 size_t pid_cap, int *live_out)
 {
    (void)project;
    if (live_out)
@@ -1953,7 +1944,8 @@ int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, 
    return 1;
 }
 
-int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_heartbeat(const char *project, const char *generation,
+                                      const char *purge_id)
 {
    (void)project;
    if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
@@ -1963,7 +1955,7 @@ int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, co
    return 1;
 }
 
-int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
+int kb_store_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
 {
    (void)project;
    if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
@@ -1993,7 +1985,7 @@ int pgvec_curator_code_unit_delete_project(const char *project)
    return g_purge_curator_vectors_rc;
 }
 
-int db2_code_index_project_delete(const char *name)
+int kb_store_code_index_project_delete(const char *name)
 {
    (void)name;
    return g_purge_canonical_rc;
@@ -2011,7 +2003,7 @@ int pgvec_kbpdf_delete_project(const char *project)
    return g_purge_pdf_rc;
 }
 
-int db2_sketch_minhash_signature_delete_project(const char *project)
+int kb_store_sketch_minhash_signature_delete_project(const char *project)
 {
    (void)project;
    return g_purge_minhash_rc;
@@ -2023,24 +2015,24 @@ void kb_worker_notify(kb_service_ctx_t *ctx)
    g_worker_notify_count++;
 }
 
-int db2_kb_service_clear_project(const char *project)
+int kb_store_kb_service_clear_project(const char *project)
 {
    snprintf(g_clear_project, sizeof(g_clear_project), "%s", project);
    return g_clear_deleted;
 }
 
-int db2_kb_service_clear_current_project(const char *project)
+int kb_store_kb_service_clear_current_project(const char *project)
 {
-   return db2_kb_service_clear_project(project);
+   return kb_store_kb_service_clear_project(project);
 }
 
-int db2_kb_service_memory_record_exists(int64_t record_id)
+int kb_store_kb_service_memory_record_exists(int64_t record_id)
 {
    (void)record_id;
    return 1;
 }
 
-int db2_kb_service_kb_document_exists(int64_t document_id)
+int kb_store_kb_service_kb_document_exists(int64_t document_id)
 {
    (void)document_id;
    return 1;
@@ -2092,8 +2084,8 @@ int pgvec_kb_vector_upsert_document_batch(const int64_t *doc_ids, const float *v
    return 0;
 }
 
-void db2_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id, int ok,
-                                const char *message)
+void kb_store_vector_index_op_record(int64_t point_id, const char *collection, int64_t memory_id,
+                                     int ok, const char *message)
 {
    (void)point_id;
    (void)collection;
@@ -2116,7 +2108,7 @@ static void test_health_ex_rich(void)
    char buf[256];
    int status = kb_http_route_ex("GET", "/v1/health", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(status == 200);
-   assert(strstr(buf, "\"db2_ok\":true") != NULL);
+   assert(strstr(buf, "\"postgres_ok\":true") != NULL);
    assert(strstr(buf, "\"chunk_count\":7") != NULL);
 }
 
@@ -2166,10 +2158,10 @@ static void test_capabilities(void)
    aimee_command_registry_reset();
 }
 
-/* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
+/* ── kb_store_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
- *    exercised without a live DB2. ─────────────────────────────────────────── */
-#include "modules/db2/c/enrollments.h"
+ *    exercised without a live KB_STORE. ─────────────────────────────────────────── */
+#include "modules/kb/c/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
@@ -2186,9 +2178,9 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    snprintf(out, (size_t)out_cap, "{\"error\":\"egress unavailable\"}");
    return 503;
 }
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
-                          const char *cert_serial_norm, const char *expires_at, int legacy,
-                          int64_t *out_id)
+int kb_store_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                               const char *cert_serial_norm, const char *expires_at, int legacy,
+                               int64_t *out_id)
 {
    (void)scope;
    (void)fingerprint;
@@ -2201,10 +2193,10 @@ int db2_enrollment_insert(const char *scope, const char *fingerprint, const char
       *out_id = 1;
    return 0;
 }
-int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
-                         const char *old_serial_norm, const char *scope,
-                         const char *new_fingerprint, const char *new_issuer,
-                         const char *new_serial_norm, int64_t *out_id)
+int kb_store_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                              const char *old_serial_norm, const char *scope,
+                              const char *new_fingerprint, const char *new_issuer,
+                              const char *new_serial_norm, int64_t *out_id)
 {
    (void)old_fingerprint;
    (void)old_issuer;
@@ -2217,7 +2209,7 @@ int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
       *out_id = 2;
    return 0;
 }
-static void fill_stub_row(db2_enrollment_row_t *r)
+static void fill_stub_row(kb_store_enrollment_row_t *r)
 {
    memset(r, 0, sizeof(*r));
    r->id = 7;
@@ -2226,7 +2218,7 @@ static void fill_stub_row(db2_enrollment_row_t *r)
    snprintf(r->state, sizeof(r->state), "active");
    snprintf(r->issued_at, sizeof(r->issued_at), "2026-07-04 00:00:00");
 }
-int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
+int kb_store_enrollment_list(int limit, kb_store_enrollment_row_t *out, int max)
 {
    (void)limit;
    if (!out || max < 1)
@@ -2234,7 +2226,7 @@ int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
    fill_stub_row(&out[0]);
    return 1;
 }
-int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
+int kb_store_enrollment_revoke(int64_t id, kb_store_enrollment_row_t *out)
 {
    if (id != 7)
       return 1; /* not found */
@@ -2246,26 +2238,26 @@ int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
    }
    return 0;
 }
-int db2_enrollment_is_revoked(const char *fingerprint)
+int kb_store_enrollment_is_revoked(const char *fingerprint)
 {
    g_stub_revoked_calls++;
    return fingerprint && strcmp(fingerprint, "revoked-fp") == 0;
 }
-void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
+void kb_store_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 {
    (void)fingerprint;
    (void)scope;
 }
-void db2_enrollment_cache_flush(void)
+void kb_store_enrollment_cache_flush(void)
 {
 }
-static db2_console_oidc_t g_stub_oidc;
-int db2_console_oidc_get(db2_console_oidc_t *out)
+static kb_store_console_oidc_t g_stub_oidc;
+int kb_store_console_oidc_get(kb_store_console_oidc_t *out)
 {
    *out = g_stub_oidc;
    return g_stub_oidc.issuer[0] ? 0 : 1;
 }
-int db2_console_oidc_put(const db2_console_oidc_t *in)
+int kb_store_console_oidc_put(const kb_store_console_oidc_t *in)
 {
    g_stub_oidc = *in;
    snprintf(g_stub_oidc.updated_at, sizeof(g_stub_oidc.updated_at), "2026-07-04 00:00:00");
@@ -2279,11 +2271,11 @@ const char *config_default_dir(void)
    return platform_tmpdir();
 }
 
-/* ── db2 governance stubs (decision_log + audit read) for kb_http_governance.o ─
- * Note: we do NOT include db2/artifacts.h (it re-declares db2_artifact_* which
+/* ── kb_store governance stubs (decision_log + audit read) for kb_http_governance.o ─
+ * Note: we do NOT include kb_store/artifacts.h (it re-declares kb_store_artifact_* which
  * this file already stubs with different signatures). Mirror just the audit row
- * struct — layout must match db2/artifacts.h. */
-#include "modules/db2/c/decision_log.h"
+ * struct — layout must match kb_store/artifacts.h. */
+#include "modules/kb/c/decision_log.h"
 typedef struct
 {
    char id[64];
@@ -2295,10 +2287,10 @@ typedef struct
    char applied_at[32];
    double applied_confidence;
    int flagged_for_review;
-} db2_audit_event_row_t;
-int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
-                         db2_audit_event_row_t *out, int max);
-static void fill_decision(db2_decision_log_row_t *d, int64_t id)
+} kb_store_audit_event_row_t;
+int kb_store_audit_event_list(const char *since, const char *until, const char *scope_kind,
+                              int limit, kb_store_audit_event_row_t *out, int max);
+static void fill_decision(kb_store_decision_log_row_t *d, int64_t id)
 {
    memset(d, 0, sizeof(*d));
    d->id = id;
@@ -2308,8 +2300,8 @@ static void fill_decision(db2_decision_log_row_t *d, int64_t id)
    snprintf(d->status, sizeof(d->status), "active");
    snprintf(d->created_at, sizeof(d->created_at), "2026-07-04 00:00:00");
 }
-int db2_decision_log_list_scoped(const char *subject, const char *status, int limit,
-                                 db2_decision_log_row_t *out, int max)
+int kb_store_decision_log_list_scoped(const char *subject, const char *status, int limit,
+                                      kb_store_decision_log_row_t *out, int max)
 {
    (void)subject;
    (void)limit;
@@ -2320,23 +2312,23 @@ int db2_decision_log_list_scoped(const char *subject, const char *status, int li
    fill_decision(&out[0], 5);
    return 1;
 }
-int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
+int kb_store_decision_log_get(int64_t id, kb_store_decision_log_row_t *out)
 {
    if (id != 7)
       return -1;
    fill_decision(out, 7);
    return 0;
 }
-int64_t db2_decision_log_active_id(const char *subject, int64_t linked_policy_id)
+int64_t kb_store_decision_log_active_id(const char *subject, int64_t linked_policy_id)
 {
    (void)linked_policy_id;
    /* "policy:taken" already has an active decision (id 5); everything else free. */
    return (subject && strcmp(subject, "policy:taken") == 0) ? 5 : 0;
 }
-int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
-                            const char *rationale, const char *author, int64_t linked_policy_id,
-                            const char *revisit_when, int64_t supersedes_id,
-                            db2_decision_log_row_t *out)
+int kb_store_decision_log_record(const char *subject, const char *options, const char *chosen,
+                                 const char *rationale, const char *author,
+                                 int64_t linked_policy_id, const char *revisit_when,
+                                 int64_t supersedes_id, kb_store_decision_log_row_t *out)
 {
    (void)options;
    (void)chosen;
@@ -2351,23 +2343,23 @@ int db2_decision_log_record(const char *subject, const char *options, const char
    snprintf(out->subject, sizeof(out->subject), "%s", subject);
    return 0;
 }
-int db2_decision_log_set_outcome(int64_t id, const char *outcome)
+int kb_store_decision_log_set_outcome(int64_t id, const char *outcome)
 {
    (void)outcome;
    return id == 7 ? 0 : -1;
 }
-int db2_decision_log_set_status(int64_t id, const char *status)
+int kb_store_decision_log_set_status(int64_t id, const char *status)
 {
    (void)status;
    return id == 7 ? 0 : -1;
 }
-int db2_decision_log_set_revisit(int64_t id, const char *revisit_when)
+int kb_store_decision_log_set_revisit(int64_t id, const char *revisit_when)
 {
    (void)revisit_when;
    return id == 7 ? 0 : -1;
 }
-int db2_audit_event_list(const char *since, const char *until, const char *scope_kind, int limit,
-                         db2_audit_event_row_t *out, int max)
+int kb_store_audit_event_list(const char *since, const char *until, const char *scope_kind,
+                              int limit, kb_store_audit_event_row_t *out, int max)
 {
    (void)until;
    (void)scope_kind;
@@ -4557,7 +4549,7 @@ int canonical_index_find_callers_excluding_project(const char *excluded_project,
  * handle_get_code_cross_repo_deps live, so the S4a/S4b/S2b entry points it calls
  * must resolve at link time. The full engine is covered by the dedicated
  * test_cross_repo_* units; here we only need empty, well-formed results. The
- * db2/cross_repo headers' types are passed as void pointers and int (same
+ * kb_store/cross_repo headers' types are passed as void pointers and int (same
  * void-cast pattern as the canonical_index stubs above) so we avoid pulling the
  * real headers/memory.h + headers/index.h, which conflict with this file's
  * truncated local typedefs. */
@@ -4594,8 +4586,8 @@ int canonical_index_cross_repo_deps_ex(const char *project, const void *opts, vo
    return 0;
 }
 
-int db2_cross_repo_review_list(const char *caller_repo, const char *status, void *out, int max,
-                               int64_t *overflow_dropped)
+int kb_store_cross_repo_review_list(const char *caller_repo, const char *status, void *out, int max,
+                                    int64_t *overflow_dropped)
 {
    (void)caller_repo;
    (void)status;
@@ -4614,9 +4606,9 @@ const char *xrepo_tier_name(int t)
 
 /* S7: trust-write entry points kb_http_code.o references from the repo-trust
  * handler (full behavior lives in test_cross_repo_stats). */
-int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
-                             const char *request_id, char *prior_out, size_t prior_cap,
-                             int *changed_out)
+int kb_store_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                                  const char *request_id, char *prior_out, size_t prior_cap,
+                                  int *changed_out)
 {
    (void)project;
    (void)new_trust;
@@ -4629,7 +4621,7 @@ int db2_cross_repo_set_trust(const char *project, const char *new_trust, const c
    return 0;
 }
 
-int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
+int kb_store_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
 {
    (void)k;
    (void)m;
@@ -4884,9 +4876,9 @@ int pgvec_code_similar_pairs(const char *project, int k, double min_cosine, int 
    return 0;
 }
 
-/* Mirror of code_projection_edge_t (db2/code_projection.h) so the stub writes
+/* Mirror of code_projection_edge_t (kb_store/code_projection.h) so the stub writes
  * fields at the offsets the handler reads; cast a void* rather than include the
- * db2 header (same pattern as the canonical_index stubs). */
+ * kb_store header (same pattern as the canonical_index stubs). */
 typedef struct
 {
    char source[512];
@@ -4901,7 +4893,7 @@ typedef struct
    int w;
 } test_seed_edge_t;
 
-int db2_code_projection_list_edges(const char *project, void *out, int max)
+int kb_store_code_projection_list_edges(const char *project, void *out, int max)
 {
    assert(out);
    if (max < 4)
@@ -4946,26 +4938,26 @@ int db2_code_projection_list_edges(const char *project, void *out, int max)
    return n;
 }
 
-/* graph-feedback S1 (self-audit route) stubs. The audit route reaches these DB2
+/* graph-feedback S1 (self-audit route) stubs. The audit route reaches these KB_STORE
  * projection helpers; the hermetic fixture reports a visible generation with no
  * persisted communities and no source hash. Signatures are ABI-compatible with
- * db2/code_projection.h (int64_t==long long, code_projection_community_t*==void*,
+ * kb_store/code_projection.h (int64_t==long long, code_projection_community_t*==void*,
  * size_t) — the header is deliberately not included here (same reason the
  * list_edges stub above uses void*). The real prompt_sanitizer.o IS linked (pure,
  * no deps), so sanitize_for_prompt is exercised for real, not stubbed. */
-long long db2_code_projection_visible_id(const char *project)
+long long kb_store_code_projection_visible_id(const char *project)
 {
    (void)project;
    return 1;
 }
-int db2_code_projection_communities_list(long long gen_id, void *out, int max)
+int kb_store_code_projection_communities_list(long long gen_id, void *out, int max)
 {
    (void)gen_id;
    (void)out;
    (void)max;
    return 0;
 }
-int db2_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
+int kb_store_code_projection_visible_source_hash(const char *project, char *out, size_t out_len)
 {
    (void)project;
    if (out && out_len)
@@ -4974,22 +4966,22 @@ int db2_code_projection_visible_source_hash(const char *project, char *out, size
 }
 
 /* graph-feedback S2 (snapshot-diff route) stubs. ABI-compatible with
- * db2/code_projection.h; the hermetic fixture reports no arbitrary-generation
+ * kb_store/code_projection.h; the hermetic fixture reports no arbitrary-generation
  * edges, no generation metadata (so a diff call 409s), and no generation list. */
-int db2_code_projection_list_edges_for_gen(long long gen_id, void *out, int max)
+int kb_store_code_projection_list_edges_for_gen(long long gen_id, void *out, int max)
 {
    (void)gen_id;
    (void)out;
    (void)max;
    return 0;
 }
-int db2_code_projection_generation_meta(long long gen_id, void *out)
+int kb_store_code_projection_generation_meta(long long gen_id, void *out)
 {
    (void)gen_id;
    (void)out;
    return 1; /* no such generation */
 }
-int db2_code_projection_generations_list(const char *project, void *out, int max)
+int kb_store_code_projection_generations_list(const char *project, void *out, int max)
 {
    (void)project;
    (void)out;
@@ -4999,11 +4991,11 @@ int db2_code_projection_generations_list(const char *project, void *out, int max
 
 /* graph-feedback S3b (lessons route) stub: no outcome records in the hermetic
  * fixture, so the lessons artifact renders empty ("no lessons yet"). */
-int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
-                                   const char *project_id, int64_t generation_id,
-                                   const char *answer_outcome, const char *correction_text,
-                                   const char *finding_id, const char *actor_id,
-                                   const char *actor_source, int confirmed)
+int64_t kb_store_lessons_record_outcome(const char *session_id, const char *turn_id,
+                                        const char *project_id, int64_t generation_id,
+                                        const char *answer_outcome, const char *correction_text,
+                                        const char *finding_id, const char *actor_id,
+                                        const char *actor_source, int confirmed)
 {
    (void)session_id;
    (void)turn_id;
@@ -5017,14 +5009,15 @@ int64_t db2_lessons_record_outcome(const char *session_id, const char *turn_id,
    (void)confirmed;
    return 1;
 }
-int db2_lessons_record_citation(int64_t outcome_id, const char *node_id, const char *stance)
+int kb_store_lessons_record_citation(int64_t outcome_id, const char *node_id, const char *stance)
 {
    (void)outcome_id;
    (void)node_id;
    (void)stance;
    return 0;
 }
-int db2_lessons_list_outcomes(const char *project_id, long long community_gen, void *out, int max)
+int kb_store_lessons_list_outcomes(const char *project_id, long long community_gen, void *out,
+                                   int max)
 {
    (void)project_id;
    (void)community_gen;
@@ -5034,7 +5027,7 @@ int db2_lessons_list_outcomes(const char *project_id, long long community_gen, v
 }
 
 /* Hermetic mirror of the §3 provenance helper (kb_service_graph.c). The real
- * definition lives in a db2-heavy unit; this fake keeps the route test pure
+ * definition lives in a kb_store-heavy unit; this fake keeps the route test pure
  * while preserving the only branch the projection route exercises: a
  * code_projection edge is always "structural". */
 const char *kb_graph_edge_provenance(const char *edge_origin, int structural_weight)
@@ -5851,7 +5844,7 @@ int git_resolve_default_sha(const char *root, char *out, size_t outlen)
    snprintf(out, outlen, "%s", g_branch_sha);
    return 0;
 }
-int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
+int kb_store_kb_runtime_state_get(const char *key, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return -1;
@@ -5872,7 +5865,7 @@ int db2_kb_runtime_state_get(const char *key, char *out, size_t out_len)
    snprintf(out, out_len, "%s", g_stored_sha);
    return g_stored_sha[0] ? 0 : -1;
 }
-int db2_kb_runtime_state_set(const char *key, const char *value)
+int kb_store_kb_runtime_state_set(const char *key, const char *value)
 {
    (void)key;
    snprintf(g_runtime_state_set_val, sizeof(g_runtime_state_set_val), "%s", value ? value : "");
@@ -6012,7 +6005,7 @@ static void test_code_scan_ok(void)
    int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    /* A root_path scan QUEUES the walk; it does not perform it on this request
-    * thread. Doing it inline held a db2 connection for the whole walk and made
+    * thread. Doing it inline held a kb_store connection for the whole walk and made
     * the caller wait out a timeout it could not size -- which was then recorded
     * as the KB being unreachable. The route's promise is that the files are
     * queued and ready to be ingested, so it answers immediately with no counts. */
@@ -6029,7 +6022,7 @@ static void test_code_scan_ok(void)
    assert(strcmp(g_ingest_project, "proj-alpha") == 0);
    assert(strcmp(g_ingest_root, "/tmp/repo") == 0);
    assert(g_ingest_force == 1);
-   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority == KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
    /* A scan INDEXES; it does not curate. Curation is enqueued by the embed stage
     * once the project is fully embedded, so the pipeline order is
     * indexed -> embedded -> curated rather than indexed -> curated (racing embed).
@@ -6244,8 +6237,8 @@ static void test_ingest_enqueue_ok(void)
    assert(g_ingest_force == 1);
    /* An HTTP ingest is a request someone is waiting on, so it must enqueue ABOVE
     * the background sweep — otherwise it queues behind a whole reindex. */
-   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
-   assert(g_ingest_priority > DB2_KB_INGEST_PRIO_BULK);
+   assert(g_ingest_priority == KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority > KB_STORE_KB_INGEST_PRIO_BULK);
    assert(g_worker_notify_count == 1);
    assert(strstr(buf, "\"projects_queued\":1") != NULL);
 }
@@ -6253,7 +6246,7 @@ static void test_ingest_enqueue_ok(void)
 static void test_pipeline_status_ok(void)
 {
    char buf[512];
-   g_queue_status = (db2_kb_service_async_queue_stats_t){
+   g_queue_status = (kb_store_kb_service_async_queue_stats_t){
        .pending = 4,
        .running = 2,
        .done = 7,
@@ -6307,7 +6300,7 @@ static void test_workers_wrong_method(void)
 static void test_pipeline_status_failed(void)
 {
    char buf[512];
-   g_queue_status = (db2_kb_service_async_queue_stats_t){
+   g_queue_status = (kb_store_kb_service_async_queue_stats_t){
        .failed = 2,
        .total = 2,
    };
@@ -6597,6 +6590,17 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(s == 200 && strstr(buf, "\"status\":\"pending_owners\"") != NULL);
    assert(strstr(buf, "\"coverage_complete\":false") != NULL);
    assert(strstr(buf, "\"event_created\":false") != NULL);
+   /* A failed remote cleanup cannot emit completion evidence. The same
+    * existing request ID can retry after partial/unknown remote outcomes. */
+   int completed_before = g_erasure_complete_calls;
+   derived_cleanup_failure = 1;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 503 && g_erasure_complete_calls == completed_before);
+   derived_cleanup_failure = 0;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200 && g_erasure_complete_calls == completed_before + 1);
    g_erasure_pending_owners = 0;
 }
 
@@ -6691,7 +6695,7 @@ static void test_purge_project_writes_fence(void)
 static void test_purge_project_live_fence_409(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
    g_fence_live = 1;
    char buf[1024];
    int s =
@@ -6710,7 +6714,7 @@ static void test_purge_project_live_fence_409(void)
 static void test_purge_project_takeover_displaces(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
    g_fence_live = 1;
    char buf[2048];
    int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, OWNER_AUTH, OWNER_TOK,
@@ -6728,7 +6732,7 @@ static void test_purge_project_takeover_displaces(void)
 static void test_purge_project_stale_fence_replaced(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
    g_fence_live = 0; /* stale heartbeat: no takeover needed */
    char buf[2048];
    int s =
@@ -6778,7 +6782,7 @@ static void test_purge_project_bad_request(void)
 static void test_purge_heartbeat_match_and_mismatch(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
        kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, OWNER_AUTH, OWNER_TOK,
@@ -6800,7 +6804,7 @@ static void test_purge_heartbeat_match_and_mismatch(void)
 static void test_purge_finalize_mismatch_noop(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
        kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
@@ -6815,7 +6819,7 @@ static void test_purge_finalize_mismatch_noop(void)
 static void test_purge_finalize_match_clears(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
        kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, OWNER_AUTH, OWNER_TOK,
@@ -6829,7 +6833,7 @@ static void test_purge_finalize_match_clears(void)
 static void test_purge_cancel_match_clears(void)
 {
    purge_fence_reset();
-   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   assert(kb_store_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
    char buf[1024];
    int s =
        kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, OWNER_AUTH, OWNER_TOK,
@@ -7064,7 +7068,7 @@ static void test_feedback_scope_isolation(void)
     * scope_id. Here we verify the routing and response contract — each
     * submission must succeed (201) and produce an artifact id in the response.
     * Full DB-level isolation is exercised by tests/test_kb_http_routes_db.c
-    * which links the real kb_http_reflections.c against a DB2 shim. */
+    * which links the real kb_http_reflections.c against a KB_STORE shim. */
    char buf_a[256], buf_b[256];
    const char *body_a = "{\"kind\":\"feedback_positive\",\"session_id\":\"s-user-a\","
                         "\"scope_user\":\"user-a\",\"content\":\"good\"}";
@@ -7728,7 +7732,7 @@ static void test_code_build_queues_instead_of_embedding_inline(void)
    assert(strcmp(g_ingest_root, "/tmp/repo") == 0);
    assert(g_ingest_force == 1);
    /* An explicit request must not sit behind the periodic sweep. */
-   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority == KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
 }
 
 /* Repair embeds too, so it queues on the same grounds: an operator gets a
@@ -7752,7 +7756,7 @@ static void test_maintenance_repair_queues_too(void)
    assert(strcmp(g_ingest_project, "proj-repair") == 0);
    /* Repair is always a forced rebuild; that must survive the hand-off. */
    assert(g_ingest_force == 1);
-   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+   assert(g_ingest_priority == KB_STORE_KB_INGEST_PRIO_INTERACTIVE);
 }
 
 static void test_content_read_identity_boundary(void)
@@ -7993,4 +7997,10 @@ int main(void)
    test_maintenance_repair_queues_too();
    printf("ok\n");
    return 0;
+}
+
+int kb_module_memory_reset_derived(void)
+{
+   derived_cleanup_calls++;
+   return derived_cleanup_failure ? -1 : 0;
 }

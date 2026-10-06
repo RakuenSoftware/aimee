@@ -24,11 +24,11 @@
 #   AIMEE_ROOT     dir holding aimee-server / aimee-kb / aimee   (default /root/aimee)
 #   AIMEE_SRC      the source tree, for build/obj                (default $AIMEE_ROOT/src)
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/module-liveness)
-#   AIMEE_DB2_URL  libpq URL for a throwaway database
+#   AIMEE_STORE_URL  libpq URL for a throwaway database
 #   AIMEE_STORE_URL non-owner runtime URL for the daemon store (required)
 #   AIMEE_STORE_MIGRATION_URL owner URL used only for schema migration
 #                             (required and must name a different role)
-#   PGDB            optional psql read-back DSN (default $AIMEE_DB2_URL)
+#   PGDB            optional psql read-back DSN (default $AIMEE_STORE_URL)
 #   KB_PORT        TCP port for aimee-kb                         (default 18744)
 #
 # Every assertion prints PASS or FAIL; the script exits non-zero if any failed.
@@ -39,7 +39,6 @@ AIMEE_ROOT="${AIMEE_ROOT:-/root/aimee}"
 AIMEE_SRC="${AIMEE_SRC:-$AIMEE_ROOT/src}"
 WORKDIR="${WORKDIR:-/tmp/module-liveness}"
 KB_PORT="${KB_PORT:-18744}"
-export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///aimee_shared?host=/var/run/postgresql}"
 export AIMEE_STORE_URL="${AIMEE_STORE_URL:-}"
 export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
 [ -n "$AIMEE_STORE_URL" ] || {
@@ -48,7 +47,7 @@ export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
 [ -n "$AIMEE_STORE_MIGRATION_URL" ] || {
     echo "AIMEE_STORE_MIGRATION_URL is required and must name the schema owner" >&2; exit 1;
 }
-PGDB="${PGDB:-$AIMEE_DB2_URL}"
+PGDB="${PGDB:-$AIMEE_STORE_URL}"
 OBJ="$AIMEE_SRC/build/obj"
 [ -r "$OBJ/module-bundle/grants/kb/config.grant" ] || {
     python3 "$AIMEE_ROOT/scripts/export_c_repositories.py" --runtime-bundle "$OBJ/module-bundle" >/dev/null || exit 1
@@ -108,7 +107,7 @@ attach() { # attach <name> <home> <bus> <tag>
     local placement="$tag"
     [ "$placement" != srv ] || placement=server
     env HOME="$home" AIMEE_HOME="$home/.config/aimee" AIMEE_MODULE_PLACEMENT="$placement" \
-        AIMEE_DB1_PATH="$home/.config/aimee/aimee.db" AIMEE_DB2_URL="$AIMEE_DB2_URL" \
+        AIMEE_DB1_PATH="$home/.config/aimee/aimee.db" \
         AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
         "$home/.config/aimee/aimee-module-$name" "$bus" > "$WORKDIR/mod-$tag-$name.log" 2>&1 &
@@ -117,7 +116,7 @@ attach() { # attach <name> <home> <bus> <tag>
 }
 
 section "0  aimee-kb, with every module it is granted"
-# db2 is granted but deliberately not started in the KB image, so leaving it out
+# kb_store is granted but deliberately not started in the KB image, so leaving it out
 # mirrors production rather than forgetting it.
 KB_MODULES="config learning memory postgres kb-synthesis control-web benchmarks"
 KB_DEPLOYED=""
@@ -288,7 +287,7 @@ section "5  the service's own verdict, and no crashes"
 H=$(curl -sS --max-time 10 "$KB_URL/v1/health")
 if printf '%s' "$H" | grep -q 'store unavailable'; then
     bad "the KB calls its store unavailable while storing and retrieving through it"
-    printf '        (is AIMEE_DB2_URL reaching the postgres module?)\n'
+    printf '        (is AIMEE_STORE_URL reaching the postgres module?)\n'
 else
     ok "the KB does not contradict itself about its own store"
 fi

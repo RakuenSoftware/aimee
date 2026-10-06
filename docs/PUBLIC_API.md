@@ -2,9 +2,14 @@
 
 aimee exposes two versioned HTTP surfaces:
 
-- `aimee-server /v1` for clients, browsers, sessions, agents, tools, workflows, config, and
+- `aimee-server /v1` for clients, browsers, personal memory, private code, sessions, agents, tools, workflows, config, and
   OpenAI/Anthropic-compatible ingress;
-- `aimee-kb /v1` for memory, documents, code, retrieval, curation, and KB administration.
+- `aimee-kb /v1` for shared memory, documents, shared code, retrieval, curation, and KB administration.
+
+Server is usable without KB. Its ordinary memory operations default to `"store":"user"`;
+`"store":"kb"` selects the optional shared service. This selector chooses the owner before scope
+filtering. A project, working directory, missing ID, or owner outage never changes the selected
+store. See [Server and KB](SERVER_AND_KB.md) and the [memory contract](modules/memory.md).
 
 The generated references are authoritative:
 
@@ -61,9 +66,10 @@ Do not put tokens in query strings.
 
 ## Scope and writes
 
-KB operations can be global, workspace, project, or user scoped. The target scope comes from the
-operation's typed fields, not from a free-form path. A scoped principal cannot cross into another
-scope even when it knows an object ID.
+Memory placement is explicit: Server accepts instance-local user scope; KB accepts global,
+workspace, and project scopes and rejects user-memory scope. KB document access has its own
+principal and membership rules. Each operation takes scope from its typed fields and authenticated
+context. A numeric ID alone does not grant access or identify which store owns it.
 
 Remote writes are split into data and full authority. Data covers memory, documents, and index
 ingestion. Full also covers runner and workspace mutation. The route descriptor declares the class

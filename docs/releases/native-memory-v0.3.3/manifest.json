@@ -1,0 +1,99 @@
+{
+  "release": "native-memory-v0.3.3",
+  "version": "0.3.3",
+  "shared_runtime_build": 5,
+  "scope": "Five dedicated model plugins with one shared runtime; unsigned release candidate",
+  "assets": {
+    "aimee_gemma4_12b-0.3.3-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "e97f548ca4229f0ca3338145d74a5f4da777922cb34bf145490d69fe5a9f09a1",
+      "bytes": 669529,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_gemma4_12b-0.3.3-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_gemma4_26b-0.3.3-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "408662ceeda82cf73d340a5128b611021417c041e9e417de8977f7f8dfa9c79c",
+      "bytes": 669609,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_gemma4_26b-0.3.3-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_gemma4_e2b-0.3.3-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "4d761f017f0da74e528d7f489cd1be5d29e37b6fc6d2f31ecaf604f641332e5d",
+      "bytes": 672593,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_gemma4_e2b-0.3.3-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_gemma4_e4b-0.3.3-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "84d10344ca82fc50ce945668eae4b98ce14ec9af3946c7d4908b19f0cd8e14d5",
+      "bytes": 672525,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_gemma4_e4b-0.3.3-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_native_runtime-0.3.3-5-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "a6ddd22b908b8195e51e7a65953fd66f8987c9eb7944ed67bc5f6fcb14ed4511",
+      "bytes": 3007877,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_native_runtime-0.3.3-5-cp312-cp312-linux_x86_64.whl"
+    },
+    "aimee_qwen3_8_27b-0.3.3-cp312-cp312-linux_x86_64.whl": {
+      "sha256": "cc26ff0d0bed3a9506214f2355f356371add33e1133b2ce9024bf4749745e72d",
+      "bytes": 678020,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/aimee_qwen3_8_27b-0.3.3-cp312-cp312-linux_x86_64.whl"
+    },
+    "vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl": {
+      "sha256": "616360d726fbaf88c96ebbe9ec4a62fc69ba86cba591f1a8b609199ad5339246",
+      "bytes": 230630,
+      "url": "https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl"
+    }
+  },
+  "public_key_ed25519_hex": "5d14ca247841adcc1130a4d95b82ead12ba699c03f2ba45f2f47524abde0c6c2",
+  "compatibility": {
+    "platform": "Linux x86-64",
+    "python": "CPython 3.12",
+    "glibc": ">=2.39",
+    "vllm": "==0.30.0, including tested +rocm723 vendor build",
+    "execution": "Single-GPU text-only eager synchronous V1; prefix caching disabled"
+  },
+  "server_prerequisite": {
+    "route": "POST /v1/native/primitive",
+    "unique_records": true,
+    "max_records": 32,
+    "conflicting_rows": "refuse export",
+    "tested_image": "ghcr.io/rakuensoftware/aimee@sha256:e42752b9aafa9703ce9f11a703503a8bf0ea4fbe58dd6abbc8ccab5699904f0b",
+    "application_release": "1.0.0 publication remains separately approved"
+  },
+  "profiles": [
+    {
+      "package": "aimee-gemma4-e2b",
+      "checkpoint": "UD-Q4_K_XL",
+      "hardware": "one AMD Radeon RX 7900 XTX",
+      "cpu_weight_offload_gb": 0,
+      "qualification": "qualification/results.json"
+    },
+    {
+      "package": "aimee-gemma4-e4b",
+      "checkpoint": "UD-Q4_K_XL",
+      "hardware": "one AMD Radeon RX 7900 XTX",
+      "cpu_weight_offload_gb": 0,
+      "qualification": "qualification/results.json"
+    },
+    {
+      "package": "aimee-gemma4-12b",
+      "checkpoint": "UD-Q4_K_XL",
+      "hardware": "one AMD Radeon RX 7900 XTX",
+      "cpu_weight_offload_gb": 0,
+      "qualification": "qualification/results.json"
+    },
+    {
+      "package": "aimee-gemma4-26b",
+      "checkpoint": "Q3_K_M",
+      "hardware": "one AMD Radeon RX 7900 XTX",
+      "cpu_weight_offload_gb": 0,
+      "qualification": "qualification/results.json"
+    },
+    {
+      "package": "aimee-qwen3-8-27b",
+      "checkpoint": "Q4_K_M",
+      "hardware": "one AMD Radeon RX 7900 XTX",
+      "cpu_weight_offload_gb": 0,
+      "qualification": "qualification/results.json"
+    }
+  ],
+  "source_included": false,
+  "model_weights_included": false,
+  "vllm_runtime_included": false
+}

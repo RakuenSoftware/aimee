@@ -2,6 +2,11 @@
 
 ## Purpose and non-goals
 
+One Go implementation runs independently in Server and KB. Server owns durable personal memory;
+KB owns the shared corpus. [Server and KB](../SERVER_AND_KB.md) defines instance, store, and
+scope boundaries. PostgreSQL access in both placements belongs to the Go provider; the native
+DB2 provider is retired.
+
 The [memory behavior guide](../MEMORY.md) details Go ownership, retrieval validity,
 mutation admission, evaluation and caller migration.
 
@@ -43,7 +48,7 @@ adapter also replaces any supplied scope with `user`, so a client cannot use the
 server placement to address KB memory. The KB placement rejects user scope.
 
 The Go owner stores embedding generations in an unconstrained `vector` column,
-with dimensions recorded per version. Global DB2 dimension reset only discovers
+with dimensions recorded per version. Global KB_STORE dimension reset only discovers
 columns declared with a fixed vector dimension, so it cannot drop these Go-owned
 generations. Unknown dimension-bound tables still refuse the reset, including
 with force enabled. Rebuild/cutover of memory generations stays with Go.
@@ -68,8 +73,10 @@ JSON so the native parser cannot round record IDs or error receipts. Private
 get/delete/supersede accept canonical positive decimal-string int64 IDs;
 unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
 Go response. The host adds HTTP error classification through its existing
-runtime-web provider without rewriting owner tokens. This transport change does
-not implement personal version history or durable mutation receipts.
+runtime-web provider without rewriting owner tokens. Personal retained history now lives in
+`personal_versions.go`; `include_version`, `at_version`, and `expected_version` select its explicit
+read/mutation contracts. Both placements also support correction proposals and verified user
+review, described in the [behavior guide](../MEMORY.md#current-ownership-and-review).
 
 Personal review-list rendering now belongs to the Go owner through the private
 `user-review-list` runtime operation. It retains the Server envelope, both
@@ -240,9 +247,10 @@ The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,
 typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
 retired-engine fixtures are not substitutes for Go owner regressions.
-The required `db2-process-replay` CI job initializes the packaged DB2 owner,
-then runs `make -C src memory-owner-replay-check` with separate packaged-replay
-and empty scratch connections. `AIMEE_DB2_URL`, `AIMEE_MEMORY_EVAL_URL` and
+The required `postgres-knowledge-replay` CI job exercises the PostgreSQL provider
+and memory owner with separate replay and scratch connections. The manual
+`make -C src memory-owner-replay-check` gate requires `AIMEE_KB_STORE_REPLAY_URL`,
+`AIMEE_MEMORY_EVAL_URL` and
 `AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
 The target runs the full memory, isolated evaluator and module race suites with
 required PostgreSQL variables, including the restricted-role replay. Missing
@@ -273,7 +281,7 @@ memory implementation. The C bus itself is unchanged by this cutover.
 |---|---|
 | `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
 | `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
-| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/include/aimee/db2/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
+| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/kb/include/aimee/kb/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
 | `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
 
 `check_memory_c_boundary.py` also forbids database access from the benchmark
@@ -350,7 +358,7 @@ end-to-end ranking parity, legacy query/candidate expansion and unversioned-vect
 admission remain separate work. No production enablement or quality improvement
 is claimed without paired evaluation.
 
-There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
+There is no C memory engine and no C KB_STORE `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
 success; a local fallback is forbidden.
 
@@ -373,3 +381,240 @@ bus-framing tests, and update the descriptor-owned sources. Do not restore a
 retired C policy or storage implementation to satisfy a legacy ABI. Both role
 supervisors require memory; removing it requires migrating those consumers
 and their event contracts rather than silently dropping recall behavior.
+
+### Retained fidelity evidence
+
+The host-only `memory.runtime` operation `fidelity-read` reads retained
+`fidelity_report` and `fidelity_attribution` artifacts through the shared PostgreSQL
+module in both role compositions. The KB audit adapter forwards the exact turn ID.
+A missing report remains `not_evaluated`; owner or database failures become
+`evidence_unavailable` at the audit transport. Report and attribution count come
+from one statement snapshot. No native connection pool is used by this path.
+
+The former C fidelity writer APIs had no production callers and were removed with
+the C reader. This does not enable the deferred fidelity judge or add a new write
+API. Existing rows and the public audit response fields remain readable.
+
+### Replaceable backends and derived erasure
+
+The independent `server-go/memory` contract supplies existing wire framing, scopes,
+record types and the Store interface. Native remains the default; setting
+`AIMEE_MEMORY_BACKEND=cognee` selects the first alternative adapter through the
+existing memory module, egress and Vault. See the [backend implementation guide](#memory-backend-contract)
+for configuration, extension points and bounded retrieval behavior.
+
+Derived providers implement `Forget` for admitted record deletion and
+`ResetDerived` for subject-wide erasure. The existing private/shared coordinator
+resets this node's derived index before acknowledging completion, and retries
+reuse the existing erasure receipt/journal. Failed or unsupported cleanup cannot
+be acknowledged. Other nodes' derived namespaces and retained canonical records
+are preserved; retained records can be reindexed. A handler gate serializes
+provider requests before opening source snapshots, preventing old in-flight
+indexing from recreating erased copies after cleanup.
+
+Startup completes canonical restore replay and configured derived cleanup before
+publishing the memory handler. A failed cleanup prevents readiness. No additional
+binding process, subject ledger, erasure coordinator or audit owner is introduced.
+
+### Memory backend contract
+
+This contract and the Cognee adapter are implemented in
+[PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005), after published 0.4.6.
+Use a build containing that change for the configuration below.
+
+```mermaid
+flowchart LR
+    Request[Admitted scoped request] --> Owner[Existing Aimee memory owner]
+    Owner --> Source[Canonical records through PostgreSQL provider]
+    Owner --> Contract[Generic Store contract]
+    Contract --> Native[Native engine using existing modules]
+    Contract --> Adapter[Cognee adapter]
+    Adapter --> Egress[Existing egress and Vault]
+    Egress --> Cognee[Cognee derived datasets]
+    Adapter --> Source
+```
+
+The public Go contract is `github.com/JBailes/aimee/server-go/memory`. It contains scopes, public record types, the existing event/stage IDs and client framing. It imports no native memory implementation. The existing memory descriptor, bus admission and supervisor remain the host infrastructure.
+
+### Required operations
+
+Implement `memory.Store`: Get, Search, Put and Delete. `memory.Backend` adds a capability declaration with provider name, contract version 1 and the implemented operations. Use the caller context for cancellation. Exact reads return `memory.ErrNotFound` for unavailable records; deletion reports whether the canonical source changed. Empty search queries list eligible records. Keep IDs as int64, and versions as exact decimal strings. Scope is supplied by the admitted host, never inferred from query text.
+
+Put preserves the existing native upsert-by-kind/key behavior. Conditional mutation, authority, history, graph and learning are existing extended contracts; a Store implementation does not automatically claim them. `Client.DataJSON` and `Client.Command` preserve their existing wire access without importing native memory.
+
+The optional `DerivedStore.Forget(ctx, scope, id)` extension removes derived state without mutating canonical records. It must be idempotent and must work for records which are no longer serving-eligible. The existing native lifecycle invokes it before admitted retirement/destruction. A cleanup error stops that mutation.
+
+Providers with derived storage also implement `DerivedResetter.ResetDerived(ctx)`. This discards all derived copies owned by the current Aimee node, verifies their absence and preserves canonical records and other nodes' namespaces. The existing private/shared subject-erasure coordinator invokes the internal `reset-derived` data operation after canonical erasure and before completion acknowledgement. Missing capability, failure, cancellation and unknown outcomes prevent acknowledgement; the existing request ID and erasure journal provide retries. There is no additional ledger, coordinator or process. Providers which maintain no derived copies need neither extension.
+
+### Version 1 contract reference
+
+```go
+type Store interface {
+    Get(ctx context.Context, scope Scope, id int64) (Record, error)
+    Search(ctx context.Context, scope Scope, query, kind, tier string, limit int) ([]Record, error)
+    Put(ctx context.Context, scope Scope, record Record) (Record, error)
+    Delete(ctx context.Context, scope Scope, id int64) (bool, error)
+}
+type Backend interface {
+    Store
+    Capabilities() Capability
+}
+```
+
+| Operation | Required behavior |
+| --- | --- |
+| Get | Return the current serving-eligible canonical record in the exact admitted scope. An absent, inaccessible or no-longer-serving record returns `ErrNotFound`. Never fall back to another scope or placement. |
+| Search | Return at most `limit` distinct positive-ID records in that exact scope, filtered by nonempty `kind` and `tier`. An empty query lists eligible records. No matches is an empty result with no error. Nonempty queries use the provider's retrieval algorithm. |
+| Put | Preserve the source's upsert identity for `(scope, kind, key)` and return the persisted canonical record. The source assigns the ID; a provider must not invent a second record identity. Host admission and source transactions still apply. |
+| Delete | Return true when canonical deletion changes the source, false when there is nothing to delete. Required derived cleanup runs before canonical mutation; failures must leave that mutation retryable. |
+| Capabilities | Report a stable provider name, `Version: 1`, and baseline `get`, `search`, `put`, `delete`. Declare `forget` and `reset-derived` when supplied. This declaration does not grant bus authority or native extended operations. |
+
+`Record` includes `ID`, `Scope`, `Key`, `Content`, `Kind`, `Tier`, `Confidence`, and optional `Version`, `Historical`, `Authorship` and `UtilityHorizon`. Preserve canonical values and opaque JSON metadata through the bridge. Do not accept generated summaries as canonical content, synthesize authorship, or silently discard source revisions. IDs use signed 64-bit integers; revision counters are exact decimal strings. Historical views and conditional writes belong to the existing extended API; baseline search returns current records.
+
+`Scope.Canonical()` normalizes explicit scopes without authorizing them:
+
+| Type | Canonical value |
+| --- | --- |
+| `user` | `_user`; empty input is normalized to this value. |
+| `global` | `_global`; empty input is normalized to this value. |
+| `workspace` | Nonempty explicit workspace value. |
+| `project` | Nonempty explicit project value. |
+
+Unknown types, invalid user/global values and values over 1024 bytes are rejected. User scope is local to the already-admitted personal runtime; `_user` does not denote every user's records. The host chooses placement and scope. A provider must never choose tenancy from a prompt, query, record content or a numeric ID. If the source implements `NamespaceStore`, its stable opaque audience namespace can distinguish otherwise identical scopes; the provider must also isolate each node's derived state. Cognee combines the host's persisted node identity with scope and exact source revision.
+
+Return errors usable with `errors.Is`:
+
+| Error | Meaning |
+| --- | --- |
+| `ErrNotFound` | Exact canonical record unavailable in the admitted scope. |
+| `ErrUnsupported` | Requested contract extension is unavailable. |
+| `ErrUnavailable` | Provider/storage/network failure, invalid response or unknown outcome. |
+| `ErrCapacity` | A declared completeness or response bound would be exceeded. Never substitute silent truncation. |
+| `context.Canceled` / `context.DeadlineExceeded` | Caller cancelled or its deadline expired. Preserve these causes. |
+
+Keep credentials out of contract arguments, records, errors and logs. Transport is injected by host composition. Provider-specific retries must stay within the supplied context and preserve idempotency; do not retry a non-idempotent write by guessing that a lost response means it never committed. `ClientStore` preserves existing structured host refusals as `RefusalError`; callers must not reinterpret an authorization refusal as a backend outage.
+
+### Add a backend to Aimee
+
+1. Add a provider package under `server-go/modules/memory/<provider>/` which imports the public `server-go/memory` contract. Implement `Backend` using the supplied canonical `Store` and an injected transport/client. Avoid native SQL, bus admission and credential resolution inside this package.
+2. Keep canonical storage and native extended APIs in the existing owner. For derived indexing, implement both `DerivedStore` and `DerivedResetter`, including cleanup verification and retries after unknown outcomes. Providers without derived copies need neither.
+3. Add compile-time interface assertions and behavioral tests. Cover exact scope, IDs above 2^53, source revision changes, empty queries, filters, limits, cancellation, unavailable storage, deletion retries and derived reset isolation. The native bridge tests are in `store_adapter_test.go`; Cognee's adapter and live tests provide the first working integration example.
+4. Register the factory in `configuredMemoryBackend` (or inject it with `WithMemoryBackend` in another host composition). Construct it from the request-bound source passed to the factory. Validate provider configuration before readiness; unknown names must fail rather than silently select native. Add any outbound origin/credential policy to the existing egress and Vault contracts.
+5. Add provider files and tests to the existing memory descriptor `src/modules/memory/module.yaml`. If host transport changes, update that existing module's descriptor too. Reuse the current runtime manifest, principal grants and restart infrastructure; do not create another binding registry or supervisor.
+6. Run the contract/bridge tests, a real-provider test, existing PostgreSQL replay and source/export checks. Add the provider's real test to CI and to the required aggregate. Document provider-specific bounds and operational configuration. Build and install the existing module executable and generated grants, then restart the memory owner.
+
+For a full replacement of the baseline canonical Store, `ContractDataStore` is the host bridge. Such an implementation must preserve the source guarantees and does not inherit native graph, learning, authority or lifecycle support merely by implementing four methods. Prefer the supplied source plus a derived engine when replacing retrieval algorithms.
+
+The smallest adapter with no derived storage can delegate the existing source. This example establishes the exact package boundary; replace its Search implementation with your engine's retrieval and canonical revalidation:
+
+```go
+package mymemory
+
+import (
+    "context"
+    memory "github.com/JBailes/aimee/server-go/memory"
+)
+
+type Backend struct { source memory.Store }
+
+func New(source memory.Store) *Backend { return &Backend{source: source} }
+func (*Backend) Capabilities() memory.Capability {
+    return memory.Capability{Name: "mymemory", Version: 1,
+        Operations: []string{"get", "search", "put", "delete"}}
+}
+func (b *Backend) Get(ctx context.Context, s memory.Scope, id int64) (memory.Record, error) {
+    return b.source.Get(ctx, s, id)
+}
+func (b *Backend) Search(ctx context.Context, s memory.Scope, q, k, t string, n int) ([]memory.Record, error) {
+    return b.source.Search(ctx, s, q, k, t, n)
+}
+func (b *Backend) Put(ctx context.Context, s memory.Scope, r memory.Record) (memory.Record, error) {
+    return b.source.Put(ctx, s, r)
+}
+func (b *Backend) Delete(ctx context.Context, s memory.Scope, id int64) (bool, error) {
+    return b.source.Delete(ctx, s, id)
+}
+var _ memory.Backend = (*Backend)(nil)
+```
+
+The current factory selects compiled Go adapters. Installing an SDK or Python package by itself does not register a provider. An independently hosted module must use the existing executable registration and memory event/stage contract and implement the same guarantees; no runtime plugin discovery mechanism is added here.
+
+### Hosting
+
+A backend can use any implementation internally. Cognee imports only the generic contract and standard library. Its host supplies an authorized `Store` and a transport function; it has no supervisor, SQL, Vault, audit or admission implementation.
+
+For an implementation hosted in the existing memory service:
+
+```go
+handler := native.NewHandler(executor,
+    native.WithDataStore(placement, existingSource),
+    native.WithMemoryBackend(func(source memory.Store) (memory.Backend, error) {
+        return mybackend.New(source), nil
+    }))
+```
+
+For a complete baseline Store implementation, pass `native.ContractDataStore{Store: backend}` to `WithDataStore`. Native-specific handler options belong in this host composition, not in provider code. Existing module manifests/executable registration support another module executable using the same bus wire contract; this change introduces no provider process registry or switch-generation service. A Go adapter is compiled/registered in host composition; adding an adapter does not mean that an arbitrary installed Python package is automatically discovered.
+
+Consumers can use `memory.ClientStore{Client: client, TraceID: trace}` for the four typed operations over the existing bus. The compatibility client in the native package delegates to the same independent client. No wire IDs changed.
+
+### Cognee configuration
+
+Set `AIMEE_MEMORY_BACKEND=cognee` and `AIMEE_MEMORY_BACKEND_URL=https://your-cognee-origin` (the alias `AIMEE_COGNEE_URL` is also accepted). An empty backend, `native` or `aimee-native` selects native. Unknown names or invalid origins fail startup. A custom Go backend is injected with `WithMemoryBackend`; it does not need to pretend to be Cognee or use Cognee's API.
+
+Authentication defaults to bearer. Import `AIMEE_MEMORY_BACKEND_TOKEN` through the existing Vault credential mechanism. The memory process supplies only its credential handle; egress resolves the token and binds the request to the configured origin. `AIMEE_MEMORY_BACKEND_AUTH=none` is available for a server configured to accept unauthenticated requests. The existing egress allowlist admits only add, cognify, search, dataset listing and individual dataset deletion.
+
+Run the server and KB with their own `AIMEE_HOME`, immutable node identity, module policy directory and canonical storage namespace, as the existing deployment topology requires. Provision PostgreSQL 18 and the existing owner/runtime role split before boot; apply schema and runtime/default grants through the existing PostgreSQL migration path. Install the generated module executables at the grant-pinned paths, including the canonical egress/PostgreSQL helpers, and start the existing role supervisor. A one-shot module launcher cannot recover from dependencies which attach later during startup.
+
+Cognee authentication is also provider configuration. Aimee forwards the configured bearer and fails closed on 401; it does not silently renew credentials or fall back to native retrieval. Cognee 1.6.2 generates a process-local JWT signing secret when `FASTAPI_USERS_JWT_SECRET` is unset, which invalidates prior session tokens on restart. Persist that secret securely in Cognee when using session tokens, account for their expiration, and rotate the Aimee credential through its existing Vault mechanism. Use a provider-supported durable API credential for unattended service operation. The validation fixtures use synthetic credentials only.
+
+Cognee retains derived retrieval state; Aimee retains canonical identities, admission, audit and lifecycle. Search reconciles exact revision-specific datasets, waits for completed cognification, queries CHUNKS, sorts distances within this backend and re-reads canonical records. It never converts generated prose into records. Cognee 1.6.2 was verified with a real local API, SQLite/LanceDB/Ladybug and deterministic model/embedding fixtures. `only_context` is false: CHUNKS itself is non-generative, while context-only mode returns text and loses scores.
+
+The first adapter has explicit limits: 256 eligible records per scope snapshot and 1 MiB response bodies. Larger inputs return `ErrCapacity`, never silent truncation. Cognification is synchronous and follows the existing two-minute data/egress deadline, clamped by the caller. Existing public command bridges have their own deadline (currently 60 seconds for private memory commands); large cold indexing can exhaust that budget and return an unavailable/cancelled outcome. Retries reconcile already-created derived datasets against the canonical source. This is an initial adapter, not a large-corpus indexing implementation. Empty queries use the authorized source listing without external indexing.
+
+Existing extended native graph, learning, history and code-index APIs remain owned by native memory; selecting Cognee replaces the baseline retrieval path, not those algorithms.
+
+Subject-wide erasure now includes the configured Cognee node namespace. Cleanup conservatively removes this node's complete derived index, including retired revisions and records already erased from the source. Retained canonical records are reindexed on subsequent retrieval. This avoids duplicating subject/provenance tracking inside the adapter, and cleanup is independent of the 256-record retrieval limit. The memory handler serializes provider calls before opening source snapshots, so an older in-flight indexing request finishes before cleanup acknowledges success. Waiting requests retain cancellation/deadline handling.
+
+At module startup, the existing canonical erasure replay runs first; configured derived storage is reset before publishing the memory handler. Failure prevents startup/readiness. Thus restoring an external Cognee index does not bypass retained canonical erasure intents when the memory owner restarts. Restore node identity and surviving canonical control metadata as prescribed by the existing backup boundary, and restart the memory owner after restoring Cognee. Coverage concerns managed live provider state; independently retained vendor backups or detached provider accounts are outside `managed_application_stores`, as with the existing erasure workflow.
+
+### Verification
+
+`go test -race -short ./...` covers contract framing, the native bridge, HTTP routing, scope isolation, stale-record refusal, cancelled requests, failed deletion retry, verified node reset, foreign-node isolation, restored derived copies and in-flight indexing barriers. Native erasure route tests verify that cleanup failure cannot emit completion evidence and that the same request ID can retry. The existing `memory-owner-replay-check` exercises real PostgreSQL compatibility.
+
+For a disposable real Cognee server, run the opt-in test with `AIMEE_COGNEE_TEST_URL`, `AIMEE_COGNEE_TEST_USER` and `AIMEE_COGNEE_TEST_PASSWORD`, then `go test -v ./modules/memory/cognee -run TestCogneeLiveContract -count=1`. The test creates/deletes datasets in that account. Keep credentials out of checked-in files.
+
+API references: [Cognee CHUNKS implementation](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/retrieval/chunks_retriever.py), [Cognee API introduction](https://docs.cognee.ai/api-reference/introduction).
+
+### Continuous integration
+
+The `memory-backends` job in `.github/workflows/ci.yml` runs race tests for the independent contract, native bridge, memory lifecycle, Cognee adapter and egress. It installs pinned `cognee[api]==1.6.2` in a disposable virtual environment and runs the real API with SQLite/LanceDB/Ladybug storage and deterministic local model fixtures. The runner requires an actual `TestCogneeLiveContract` pass, so an unset environment or skipped live test cannot make the job green. The required `unit-tests` aggregate includes this job. Existing real-PostgreSQL replay remains a separate required gate.
+
+Reproduce the real-provider job locally:
+
+```sh
+python3 -m venv /tmp/cognee-contract-venv
+/tmp/cognee-contract-venv/bin/pip install 'cognee[api]==1.6.2'
+python3 scripts/validation/memory/run-cognee-contract.py \
+  --python /tmp/cognee-contract-venv/bin/python \
+  --artifacts /tmp/cognee-contract-evidence-unique-run
+```
+
+Use a new artifact directory for each run. The runner starts API/model processes on ephemeral loopback ports, waits for readiness, runs retrieval/delete/cross-scope erasure and retry checks, and stops every process even on failure. Retained artifacts contain fixture storage, server diagnostics, the Go test log and a JSON result. It needs no external model service, production credentials or vendor account. Deterministic models validate protocol and storage behavior; they do not establish retrieval quality on production corpora.
+
+#### Subject erasure and readiness
+
+```mermaid
+flowchart LR
+    Request[Existing erasure request and journal] --> Canonical[Canonical erasure and replay]
+    Canonical --> Cleanup[Selected provider cleanup]
+    Cleanup -->|verified success| Complete[Completion coverage]
+    Cleanup -->|failure: same request ID| Request
+    Startup[Memory startup or restore] --> Replay[Canonical replay]
+    Replay --> Reset[Provider reset]
+    Reset --> Ready[Memory ready]
+```
+
+Subject-wide erasure can already have committed canonical removal when provider cleanup fails.
+The failure prevents completion coverage and retries with the existing journal/request ID; it is
+not a distributed transaction. Ordinary admitted record deletion separately calls `Forget` before
+its source mutation. Startup replays canonical erasure and resets selected derived state before readiness.

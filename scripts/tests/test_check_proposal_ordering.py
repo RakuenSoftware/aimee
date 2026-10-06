@@ -66,7 +66,7 @@ class ProposalOrderingTests(unittest.TestCase):
     def make_repo(self) -> tuple[tempfile.TemporaryDirectory[str], Path, str]:
         tmp = tempfile.TemporaryDirectory()
         repo = Path(tmp.name)
-        self.git(repo, "init", "-q")
+        self.git(repo, "init", "-q", "--initial-branch=master")
         (repo / "README.md").write_text("base\n", encoding="utf-8")
         cutoff = self.commit(repo, "base")
         return tmp, repo, cutoff

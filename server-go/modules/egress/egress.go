@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -124,9 +125,10 @@ type resolver interface {
 }
 
 type policy struct {
-	resolver        resolver
-	credentials     *credentialBroker
-	allowPrivateMCP bool // tests only; production constructors leave this false
+	resolver           resolver
+	credentials        *credentialBroker
+	backendCredentials credentialResolver
+	allowPrivateMCP    bool // tests only; production constructors leave this false
 }
 
 func NewHandler() bus.ModuleHandler {
@@ -134,6 +136,10 @@ func NewHandler() bus.ModuleHandler {
 }
 
 func newHandler(r resolver) bus.ModuleHandler {
+	return newHandlerWithCredentials(r, nil)
+}
+
+func newHandlerWithCredentials(r resolver, vault credentialResolver) bus.ModuleHandler {
 	var once sync.Once
 	var initialized bus.ModuleHandler
 	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
@@ -142,8 +148,8 @@ func newHandler(r resolver) bus.ModuleHandler {
 			if err != nil {
 				return
 			}
-			p := policy{resolver: r, credentials: broker}
-			s := newStreamService(p, newVaultCredentialResolver())
+			p := policy{resolver: r, credentials: broker, backendCredentials: vault}
+			s := newStreamService(p, vault)
 			initialized = func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
 				if invocation.PrincipalClass != 1 {
 					return nil, bus.ModuleStatusInvalidRequest
@@ -211,7 +217,7 @@ func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decisio
 		if address.IP == nil {
 			continue
 		}
-		if request.Purpose != "embedding" && request.Purpose != "embedding-health" && request.Purpose != "provider" &&
+		if request.Purpose != "embedding" && request.Purpose != "embedding-health" && request.Purpose != "provider" && request.Purpose != "memory-backend" &&
 			!(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
 			!publicIP(address.IP) {
 			return deny("target resolved to a non-public address")
@@ -233,8 +239,9 @@ func callerPurposeAllowed(ref uint32, request Request, target *url.URL) bool {
 	case ProvidersClientRef:
 		return request.Purpose == "provider" && (request.Method == "GET" || request.Method == "POST")
 	case MemoryClientRef:
-		return (request.Purpose == "embedding" && request.Method == "POST" &&
-			(strings.HasSuffix(target.EscapedPath(), "/embed") || strings.HasSuffix(target.EscapedPath(), "/embed_batch"))) ||
+		return (request.Purpose == "memory-backend" && memoryBackendOriginAllowed(target) && memoryBackendTargetAllowed(request.Method, target.EscapedPath())) ||
+			(request.Purpose == "embedding" && request.Method == "POST" &&
+				(strings.HasSuffix(target.EscapedPath(), "/embed") || strings.HasSuffix(target.EscapedPath(), "/embed_batch"))) ||
 			(request.Purpose == "embedding-health" && request.Method == "GET" &&
 				strings.HasSuffix(target.EscapedPath(), "/health"))
 	case GitClientRef:
@@ -352,4 +359,41 @@ func publicIP(ip net.IP) bool {
 	}
 	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
+}
+
+// Memory adapters reuse governed egress; these are Cognee's documented API
+// routes, not arbitrary backend-supplied destinations or administrative APIs.
+func memoryBackendTargetAllowed(method, path string) bool {
+	switch path {
+	case "/api/v1/add", "/api/v1/cognify", "/api/v1/search":
+		return method == "POST"
+	case "/api/v1/datasets":
+		return method == "GET"
+	}
+	if method != "DELETE" || !strings.HasPrefix(path, "/api/v1/datasets/") {
+		return false
+	}
+	id := strings.TrimPrefix(path, "/api/v1/datasets/")
+	if len(id) != 36 {
+		return false
+	}
+	for i, c := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func memoryBackendOriginAllowed(target *url.URL) bool {
+	endpoint := os.Getenv("AIMEE_MEMORY_BACKEND_URL")
+	if endpoint == "" {
+		endpoint = os.Getenv("AIMEE_COGNEE_URL")
+	}
+	allowed, err := url.Parse(endpoint)
+	return err == nil && allowed.Host != "" && allowed.User == nil && (allowed.Path == "" || allowed.Path == "/") && allowed.RawQuery == "" && allowed.Fragment == "" && target.RawQuery == "" && target.Fragment == "" && target.Scheme == allowed.Scheme && strings.EqualFold(target.Host, allowed.Host)
 }

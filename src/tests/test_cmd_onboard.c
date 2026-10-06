@@ -97,7 +97,7 @@ static void scratch_cleanup(const char *tmpdir)
    char cmd[640];
    /* The onboarding flow under test autostarts an aimee-kb daemon bound to a
     * socket under tmpdir. Kill it before removing the home so the daemon is not
-    * orphaned: leaked aimee-kb daemons retry DB2 provisioning and were the root
+    * orphaned: leaked aimee-kb daemons retry KB_STORE provisioning and were the root
     * source of the stuck-`createdb` runaway (see #2569). tmpdir is a unique
     * mkdtemp path, so this only targets this test's own daemon. */
    snprintf(cmd, sizeof(cmd), "pkill -KILL -f 'aimee-kb --socket=%s' 2>/dev/null", tmpdir);

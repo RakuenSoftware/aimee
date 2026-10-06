@@ -56,7 +56,8 @@ modules; the identity handler exposes no role-editing endpoint.
 First boot writes a synced, read-only `instance-identity.json` in the instance
 home. Subsequent boots must match its role and UUID. Preserve the complete home
 in backups and restore it with the corresponding storage and Vault state.
-Storage schema changes belong to PostgreSQL and memory; this module provides
+Memory schema changes belong to memory, and knowledge schema changes belong to KB.
+PostgreSQL executes migrations and owns every database connection; this role provides
 no automatic conversion between a Server home and a KB home.
 
 ## Security and privacy
@@ -102,3 +103,16 @@ manifest, retaining the bus grant checks. Do not add an identity mutation to
 `NewHandler` or enable both roles in one manifest. Removing this role from its
 own composition fails the required-module check; retire its principal identity
 rather than reusing the number for another module.
+
+### Native knowledge host
+
+KB owns its existing knowledge SQL and persisted graph definitions under
+`src/modules/kb/c`. Database I/O is exclusively the PostgreSQL module's session
+contract. No native pool, libpq driver, KB_STORE executable, or KB_STORE descriptor remains.
+The internal `kb_store_*` names in these domain APIs and historical SQL identifiers
+are retained compatibility names, not another database provider.
+
+Startup verifies the schema using runtime authority. An older schema is upgraded
+through the PostgreSQL provider's fixed migration profile, restricted to the
+bootstrap thread, and that connection is closed before runtime serving begins.
+The audit writer runs off the bus consumer so provider replies remain routable.

@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "cuda_owned_units": {
+    "aimee-plugin-validation-20261006-gemma4-e2b": "inactive",
+    "aimee-plugin-validation-20261006-gemma4-e4b": "inactive",
+    "aimee-plugin-validation-20261006-qwen3-8-27b": "inactive"
+  },
+  "cuda_compute_processes": "",
+  "amd_vram_bytes": [
+    29175808,
+    28000256
+  ],
+  "source_fixture_state": "running",
+  "owned_loopback_forwards_and_control_stopped": true,
+  "other_amd_job": "left paused as requested"
+}

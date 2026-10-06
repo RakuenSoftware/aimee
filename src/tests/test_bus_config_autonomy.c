@@ -61,6 +61,9 @@ cJSON *config_client_transport_call(uint32_t event_kind, uint32_t stage_id, cJSO
       cJSON *response = success();
       cJSON *values = cJSON_AddObjectToObject(response, "values");
       must(values && cJSON_AddNumberToObject(values, "max_iterations", 37), "snapshot values");
+      cJSON_AddNumberToObject(values, "db2_pool_size", 99);
+      cJSON_AddStringToObject(values, "db2_url", "retired-credential");
+      cJSON_AddObjectToObject(values, "db2");
       must(cJSON_AddStringToObject(values, "kb_mode", "local") != NULL, "kb mode");
       must(cJSON_AddStringToObject(values, "kb_client_url", "") != NULL, "kb URL");
       must(cJSON_AddStringToObject(values, "embedder_model", "bekko-a25m") != NULL,
@@ -168,6 +171,18 @@ int main(void)
    must(!strcmp(cJSON_GetObjectItemCaseSensitive(value, "model")->valuestring, "provider/model"),
         "removed model name");
 
+   cJSON *snapshot = config_client_snapshot_copy();
+   must(snapshot && !cJSON_GetObjectItemCaseSensitive(snapshot, "db2_pool_size") &&
+            !cJSON_GetObjectItemCaseSensitive(snapshot, "db2_url") &&
+            !cJSON_GetObjectItemCaseSensitive(snapshot, "db2"),
+        "retired defaults are not exposed");
+   cJSON_Delete(snapshot);
+   int calls_before = snapshot_calls;
+   must(config_client_set_number("db2_pool_size", 32) != 0 &&
+            config_client_set_string("db2.vector.corpus_index", "diskann") != 0 &&
+            config_secret_store("AIMEE_DB2_URL", "unused") != 0,
+        "retired settings cannot be written");
+   must(snapshot_calls == calls_before, "retired writes do not reach the provider");
    must(config_client_key_is_secret("db2_url"), "DB URL is not config data");
    must(
        !strcmp(config_client_secret_name("kb_client_bearer_token"), "AIMEE_KB_CLIENT_BEARER_TOKEN"),
