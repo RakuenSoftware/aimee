@@ -1,206 +1,126 @@
-# E2B and E4B native adapter validation
+# E2B and E4B native adapter qualification
 
-Date: 2026-10-06. Host: `.253`.
+Date: 2026-10-06. Host: `.253`. Current artifacts: **0.3.2 build 4**.
 
-Two additional model plugins built and passed CPU native-memory validation:
-`aimee-gemma4-e2b` and `aimee-gemma4-e4b`. Each model passed 42 lifecycle checks,
-with six real inference requests and five native-bank preparations. The stock
-model parameters remained on CPU and unchanged. Both fixtures were cleaned up.
+Both adapters passed qualification on the tested CUDA Q8_0 text-serving profile
+and are ready for the larger-model smoke stage. Their wheels are in PR #3013.
+They remain unsigned candidates: release signing, inclusion in the final manifest
+and installation from a published release are still required.
 
-The plugins follow the existing aimee-qwen pattern: one dedicated Rust adapter
-and library, a checked binding contract, separate command and module namespace,
-and the unchanged `aimee-native-runtime==0.3.2` dependency. Rust owns model
-geometry, shared K/V source mapping, publication admission and live positions.
-The model-specific capture binding handles upstream shared layers without
-copying the common serving runtime.
+## Results
 
-| Gate | Result |
-|---|---|
-| E2B CPU lifecycle | 42/42 |
-| E4B CPU lifecycle | 42/42 |
-| Installed plugin identity and checkpoint contracts | 20/20 |
-| Shared K/V capture binding | 10/10 |
-| Rust adapter tests, including both new model geometries | 6/6 |
-| Existing layout and finalization regression tests | 4/4 |
-| Final wheel RECORD, namespace, symbols, shared dependency and metadata audit | Passed |
+Counts below describe separate gates; they are not summed into one score.
 
-Lifecycle checks include cold and warm recall of a random six-digit canary,
-warm bank reuse, conditional correction and a changed bank, retirement and
-abstention, restored memory, changed-recipient rejection, and real server
-revocation before another decode. Aimee supplied the current source through a
-standard enrolled mTLS client with a pinned server certificate. The canary was
-absent from the main conversation. The main conversation cache remained unchanged
-after each private decode. Native banks were published and admitted through the
-installed Rust adapter, then read by the established Transformers CPU attention
-harness. Recipient-change rejection in this run is enforced by that harness;
-it is not a separate qualification of the vLLM serving broker.
-
-The application image was
-`ghcr.io/rakuensoftware/aimee@sha256:e42752b9aafa9703ce9f11a703503a8bf0ea4fbe58dd6abbc8ccab5699904f0b`,
-from source `73cd98ce5b350323dd8956bb750d45a500ead3db`. The current `:testing`
-manifest was checked after execution and still resolved to that digest.
-
-E2B used the existing verified CPU checkpoint at revision
-`3e22461f65e89153144f8adb70e3b8c2cc9845a7` of `google/gemma-4-E2B-it`.
-E4B used revision `ee0ef6023621cff504d758262d4e04895a5af4a2` of
-`google/gemma-4-E4B-it`; its 15,992,595,884-byte safetensors file matched the
-upstream SHA-256 `cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503`.
-
-The first E2B attempt lacked the harness dependency `accelerate`. A later
-attempt found an assertion bug: the absence response `unknown` was already
-allowed in the prompt and must not be treated as leaked memory. Cleanup also
-needed to accept HTTP 404 for an already retired fixture. These harness defects
-were corrected before the full passing runs. Failed attempts remain archived.
-
-This validates CPU model and adapter behavior. The vLLM serving backend, GPU
-execution, and public signed release installation remain unqualified by these
-runs. The final wheels are unsigned local validation candidates. Their Rust
-libraries are byte-identical to the libraries used during inference; the final
-shared-K/V binding passed its structural tests. Finalization added dependency
-metadata and notices while preserving executable members.
-
-| Plugin | Earlier build-2 wheel SHA-256 |
-|---|---|
-| gemma4-e2b | `aab9e90748151e6d700aaad1d60585bef055a35fab5b1c2b73098f0abdb4f4c0` |
-| gemma4-e4b | `be890245b08e05cd2878dce3686e095699d5064a3f31d4f895745e3c9eb461d2` |
-
-Raw named-verdict reports are alongside this file. Model weights, credentials,
-and private source remain outside the public application repository.
-
-## Release qualification in progress
-
-The two wheel files were downloaded independently from PR #3013 and matched
-both SHA-256 values above. Each passed a fresh isolated environment installation,
-dependency checks, console startup and serving-module imports. The shared K/V
-capture tests also passed in each separate clean environment.
-
-Each installed Rust adapter passed 45 additional admission checks: valid position
-mapping and complete segments; rejection of changed geometry, rotary parameters,
-incomplete or duplicate segments, invalid position ranges, memory lengths outside
-the admitted bound and integer overflow. These tests do not run model inference.
-
-Actual vLLM CUDA lifecycle validation started on the RTX 5080 using the E2B Q8_0
-checkpoint. Standard client enrollment succeeded after adding the test harness's
-CLI retry. The serving process started, but no completed inference or lifecycle
-verdict was observed. SSH briefly stopped responding while ICMP remained
-reachable. After SSH recovered, the owned model unit was confirmed stopped
-during tokenizer loading, before inference. Memory pressure was low after recovery
-and I/O pressure was elevated. The cause of the SSH interruption is unconfirmed;
-the attempt remains archived.
-
-A subsequent run refused to start because the GPU was occupied by the separate
-`jmlr-gemma-prefix-integration-recovery-20261006-r4` research service. That job was
-left running. Actual native vLLM inference and its lifecycle failure checks remain
-pending. Both candidates remain unsigned and are not release-qualified. The
-12B, 26B and Qwen 3.8 27B smoke tests have not started.
-
-Both Q8_0 GGUF checkpoints matched their pinned upstream hashes:
-
-| Model | Repository revision | SHA-256 |
+| Gate | E2B | E4B |
 |---|---|---|
-| E2B | `ggml-org/gemma-4-E2B-it-GGUF@b4243c156154b6dca9324415f8c7ccc098b4aed1` | `996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a` |
-| E4B | `ggml-org/gemma-4-E4B-it-GGUF@b8093469224f83f5c38f691eb906c380e9e63114` | `34be82b17b4942d389b9b527170c4b058027abdd32531fda063d3d97dd8ce80a` |
+| CPU native-memory lifecycle | 42/42 | 42/42 |
+| Installed Rust admission checks | 45/45 | 45/45 |
+| Actual vLLM CUDA lifecycle, short prefix | 26/26 | 26/26 |
+| Actual vLLM CUDA lifecycle, multi-chunk prefix | 27/27 | 27/27 |
+| GGUF tensor destination and shape audit | 600/600 | 719/719 |
+| Real GGUF replicated projection loads | 70/70 | 84/84 |
+| Projection conversion rejection/preservation checks | 6/6 | 6/6 |
+| Shared-K/V capture checks in each clean environment | 5/5 | 5/5 |
+| Independent installation, dependencies, console and imports | Passed | Passed |
+| Final wheel audit and public PR download hashes | Passed | Passed |
 
-The first E4B download was truncated and rejected by its checksum check. Those
-bytes were quarantined. A fresh download passed verification before any model
-load. No rejected checkpoint was loaded.
+Six Rust adapter tests, four existing layout/finalization regression tests,
+20 installed identity/checkpoint contract checks and the original ten capture
+binding checks also passed. Their reports retain their original artifact scope.
 
-## Build 3: per-layer GGUF weights
+Each actual CUDA matrix checks cold and warm recall of a random six-digit canary,
+bank reuse, conditional correction and a changed bank, retirement and abstention,
+restoration, malformed authenticated requests, unsupported inference endpoints,
+caller publication override rejection, complete SSE streaming, subsequent recall,
+two concurrent requests, real source outage and recovery, frozen-recipient
+rejection, original-recipient recovery and real server revocation. The canary is
+absent from the chat prompt. Aimee supplies source records through a standard
+enrolled mTLS client with a pinned server certificate.
 
-The checkpoint audit found that the upstream Gemma GGUF mapper omitted the
-small models' per-layer token embeddings, model projection, projection norm,
-and three per-layer input tensors. Build 3 adds a dedicated model-specific
-loader mapping these tensors. The common serving runtime is unchanged. Unknown
-root tensors, duplicate destinations and missing per-layer embedding weights
-are rejected. Derived rotary frequencies are omitted, as in the existing loader.
+The long-prefix runs use wheel bytes downloaded directly from PR #3013. Both
+publish a 240-token native bank, spanning two 128-token GPU prefill chunks, and
+repeat the complete lifecycle. This exercises the new shared-K/V source binding
+across real chunk boundaries. All fixtures were cleaned up, the owned source
+container recovered, and both owned model services stopped. The larger-model
+smoke tests have not started.
 
-All 600 E2B and 719 E4B loaded GGUF tensor destinations and shapes matched the
-pinned HF safetensors metadata. Both rebuilt wheels passed the wheel audit;
-their Rust libraries remain byte-identical to those used in the CPU lifecycle
-runs. The build-2 wheels have been replaced in this PR; historical build-2 reports
-retain their original hashes. Build 3 is installed in the separate clean
-environments and actual E2B vLLM serving qualification has resumed.
+## Qualified profile
 
-| Plugin | Earlier build-3 wheel SHA-256 |
+Linux x86-64, CPython 3.12, vLLM 0.30.0, Torch 2.13.0, Triton 3.7.1 and an RTX
+5080. Serving uses BF16 attention/cache, Q8_0 GGUF weights, one GPU, text-only eager
+synchronous V1 execution, prefix caching disabled, a 2,048-token context,
+128-token prefill chunks, one scheduled sequence and a 1,024-block KV-cache cap.
+Native bank budgets are 1 GiB host and 128 MiB device.
+
+Reported loaded-model memory is 4.89 GiB for E2B and 7.76 GiB for E4B. These
+figures exclude other GPU allocations and are not peak-memory measurements.
+ROCm/HIP, arbitrary quantizations, multimodal requests and a vLLM CPU serving
+port are outside this qualification. The CPU lifecycle uses the established
+Transformers attention harness with installed Rust publication/admission and
+position mapping; it does not qualify a CPU port of the vLLM backend.
+
+The tested application is
+`ghcr.io/rakuensoftware/aimee@sha256:e42752b9aafa9703ce9f11a703503a8bf0ea4fbe58dd6abbc8ccab5699904f0b`,
+from source `73cd98ce5b350323dd8956bb750d45a500ead3db`.
+The `:testing` registry manifest was rechecked after the final runs and still
+resolved to this digest.
+
+## Model and artifact identity
+
+HF geometry/tokenizer inputs are pinned to `google/gemma-4-E2B-it` revision
+`3e22461f65e89153144f8adb70e3b8c2cc9845a7` and `google/gemma-4-E4B-it` revision
+`ee0ef6023621cff504d758262d4e04895a5af4a2`. E4B's CPU safetensors file matched
+SHA-256 `cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503`.
+E2B used the existing verified CPU checkpoint on the research host.
+
+| Q8_0 checkpoint | Pinned revision | SHA-256 |
+|---|---|---|
+| `ggml-org/gemma-4-E2B-it-GGUF` | `b4243c156154b6dca9324415f8c7ccc098b4aed1` | `996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a` |
+| `ggml-org/gemma-4-E4B-it-GGUF` | `b8093469224f83f5c38f691eb906c380e9e63114` | `34be82b17b4942d389b9b527170c4b058027abdd32531fda063d3d97dd8ce80a` |
+
+| Current wheel | SHA-256 |
 |---|---|
-| gemma4-e2b | `fce3936772353eed603b5c4e34bd953cd9da2e813a71e65fc709c96b04699986` |
-| gemma4-e4b | `5ef67b2d20ffcd3dadb711e2aa227c5ddca17996702c44b0fbde54722e955b07` |
+| `aimee_gemma4_e2b-0.3.2-4-cp312-cp312-linux_x86_64.whl` | `3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e` |
+| `aimee_gemma4_e4b-0.3.2-4-cp312-cp312-linux_x86_64.whl` | `4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0` |
 
-The mapping audit checks metadata; it does not establish successful model loading,
-quantized kernel execution or native recall. Those remain required release gates.
+Both Rust libraries are byte-identical to those used in CPU lifecycle validation.
+The shared `aimee-native-runtime==0.3.2` bytes and the pinned GGUF dependency remain
+unchanged. Each model retains its own Rust adapter, binding, namespace and command.
+Rust owns geometry, shared-K/V source mapping, publication admission and positions.
+Model-specific framework bindings handle shared K/V capture and GGUF tensor loading.
 
-## Build 4: replicated per-layer projections
+## Defects found and corrected
 
-Actual E2B vLLM loading reached the mapped per-layer gate and failed: vLLM's
-`ReplicatedLinear` loader cannot receive packed GGUF lazy parameters. Build 4
-materializes only the per-layer gate and projection matrices as BF16 before
-loading; embeddings and other weights retain the existing GGUF path. This is
-implemented in the two model plugins, with no shared runtime change.
+Build 2 omitted small-model per-layer embedding/projection weights from GGUF
+mapping. Build 3 maps every loaded tensor to the pinned HF destination and shape,
+and rejects unknown root tensors, duplicate destinations and missing per-layer
+embedding weights. Only the derived rotary-frequency tensor is omitted.
 
-All 70 E2B and 84 E4B real quantized projection matrices passed conversion,
-finite-value and shape checks, then loaded through the actual vLLM
-`ReplicatedLinear.weight_loader` into CPU parameters with exact equality.
-This checks the loading function without a GPU model execution. The first test
-attempt tried constructing a full linear layer without initializing vLLM's
-parallel process group; the test was corrected to call its real loading function
-with a parameter directly.
+Actual build-3 loading found that vLLM's `ReplicatedLinear` loader cannot receive
+packed GGUF parameters. Build 4 materializes the small per-layer gate/projection
+matrices as BF16 before loading; embeddings and other weights retain the existing
+GGUF path. Every real converted matrix passed the actual loading function on CPU,
+then both complete models passed CUDA inference.
 
-Both build-4 wheels passed the wheel audit and are installed in the independent
-environments. Their Rust libraries remain byte-identical to the CPU-qualified
-libraries. The build-3 files are replaced; their reports retain original hashes.
-Actual E2B GPU serving is being retried. Neither plugin is release-qualified yet.
+A fixture cap of 128 KV blocks was insufficient for a 2,048-token context despite
+available GPU memory. Increasing it to 1,024 blocks resolved startup. The outage
+harness also needed to enter the host network namespace for Proxmox control.
+These fixture changes did not change the wheels.
 
-| Plugin | Current build-4 wheel SHA-256 |
-|---|---|
-| gemma4-e2b | `3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e` |
-| gemma4-e4b | `4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0` |
+Earlier CPU attempts exposed a missing `accelerate` harness dependency, an
+assertion incorrectly treating the allowed absence answer `unknown` as leakage,
+and cleanup rejecting HTTP 404 for an already retired record. Standard enrollment
+needed its CLI retry. The projection-loading test initially constructed a layer
+without a vLLM parallel group; it was corrected to call the real loading function
+with a CPU parameter. Passing runs followed each correction.
 
-## Actual E2B CUDA baseline
+One E4B GGUF download was truncated and rejected by its checksum before loading.
+It was quarantined; a fresh download passed verification. A brief SSH interruption
+caused one E2B startup to be stopped during tokenizer loading; its cause is
+unconfirmed. Another startup correctly refused an occupied GPU and left the
+unrelated research job running.
 
-Build 4 passed 18/18 native vLLM lifecycle checks on the RTX 5080: cold and warm
-recall, bank reuse, conditional correction, retirement and abstention, restoration,
-frozen-recipient rejection, original-recipient recovery and actual server
-revocation before warmed inference. The model loaded with 4.89 GiB reported
-model memory. This figure is not total GPU peak memory.
-
-The first build-4 fixture capped KV cache at 128 blocks, insufficient for a
-2,048-token context despite 8.73 GiB available. Raising the fixture cap to 1,024
-blocks allowed startup. This changed the qualification configuration, not the wheel.
-
-A wider E2B run passed streaming completion, subsequent recall, two concurrent
-requests, malformed request rejection, unsupported endpoint rejection and rejection
-of caller-supplied publication selection. Its source-outage step failed before
-stopping the fixture: Proxmox control commands ran inside the CT network namespace.
-The harness now enters the host network namespace for these control operations.
-The complete wider matrix is being rerun; its failed attempt is archived. E4B's
-actual vLLM matrix is still pending. No release-readiness conclusion is claimed yet.
-
-Both installed build-4 plugins also passed six projection conversion checks,
-including rejection of missing, duplicate or unknown quantization type records
-and preservation of already-floating projections and unrelated packed weights.
-
-## Complete E2B CUDA release matrix
-
-The corrected run passed 26/26 checks using the build-4 wheel, including all
-baseline lifecycle checks plus authenticated malformed-request rejection,
-unsupported endpoint rejection, caller publication override rejection, complete
-SSE streaming recall, subsequent recall, two concurrent requests, real source
-outage denial and recovery. The owned Aimee server container was stopped and
-restarted for the outage test; warmed model bytes could not authorize another
-inference while the source was unavailable. Its API recovered and native recall
-succeeded again. Fixture cleanup passed and the owned model unit stopped.
-
-Both build-4 wheel files were downloaded from PR #3013 and matched their reviewed
-hashes. The E4B CUDA matrix is now running. Signing and public release installation
-remain pending; these files are still unsigned candidates.
-
-## Complete E4B CUDA release matrix
-
-E4B passed the same 26/26 checks with build 4, including real source outage,
-recovery and server revocation. Fixture cleanup passed and its owned serving
-unit stopped. Both models now pass the complete short-prefix CUDA lifecycle.
-
-The final additional runs reinstall each wheel from the verified public PR
-retrieval and repeat the lifecycle with a native prefix longer than the
-128-token prefill chunk. This specifically qualifies shared-K/V capture across
-real GPU chunk boundaries. Those runs are still pending.
+Historical build-2/build-3 reports and hashes remain unchanged. Failed attempts
+remain archived on the private research host. Named-verdict reports are alongside
+this file. Model weights, credentials, private build inputs and signing keys
+remain outside the public application repository.

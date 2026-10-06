@@ -130,8 +130,11 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The current 0.3.2 candidate provides separate Gemma4 12B, Gemma4 26B A4B and Qwen3.8 27B
-plugins on one shared runtime. Its server prerequisite and remaining publication gates are in the
+a replaceable retrieval engine solve different parts of the memory path. The 0.3.2 candidates provide
+separate Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B plugins on one shared runtime.
+[E2B and E4B qualification](docs/releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
+covers CPU adapter checks and actual CUDA native-memory serving. The server prerequisite, artifact
+signing status and remaining publication gates are in the
 [release preparation record](docs/releases/native-memory-v0.3.2/README.md).
 
 ## Start with one Server

@@ -1,24 +1,23 @@
-# E2B and E4B release candidates
+# E2B and E4B qualification candidates
 
-These two additional model plugins use the existing `aimee-native-runtime==0.3.2`.
-The opaque wheels are included here for review at the user's request. Private
-source, build inputs, model weights and credentials are excluded.
+Both 0.3.2 build-4 plugins passed CPU adapter checks and actual vLLM CUDA Q8_0
+text-serving qualification. Each passed a 26-check short-prefix lifecycle and a
+27-check multi-chunk lifecycle using its wheel downloaded from PR #3013. The
+latter publishes a 240-token native bank across two GPU prefill chunks.
 
-The current build-4 wheels include the dedicated small-model GGUF mapping
-and BF16 loading for the small replicated per-layer projections.
-Build 2 was replaced after its mapper omitted per-layer embedding weights.
-The underlying Rust libraries are unchanged and passed CPU model/adapter
-lifecycle checks, 42 per model. The installed
-Rust adapters publish and admit native banks and map live positions; the existing
-Transformers CPU attention harness reads them. Installed identity and checkpoint
-checks, shared-K/V capture tests and wheel audits also passed.
+The checks include cold/warm recall, correction, retirement, streaming, concurrent
+requests, real source outage/recovery, recipient isolation and server revocation.
+See [qualification scope and results](VALIDATION.md) and the named JSON reports.
+The adapters are ready for the larger-model smoke stage on this tested profile.
 
-See [validation scope and results](VALIDATION.md) and the named-verdict JSON reports.
-The wheels are unsigned local candidates. Actual vLLM serving qualification and
-release failure testing are in progress. These results do not qualify that serving
-backend or replace the larger models' GPU qualification.
+Each plugin follows the existing dedicated Rust adapter and thin binding pattern,
+with the unchanged `aimee-native-runtime==0.3.2`. Model-specific bindings handle
+shared K/V capture and the small models' per-layer GGUF weights. Build 4 corrects
+the mapping and replicated-projection loading defects found during qualification.
+Historical reports retain their original hashes; the current wheel bytes are
+pinned by `small-wheel-audit-build4.json` and `pr3013-build4-download.json`.
 
-The existing signed five-wheel manifest and verifier remain the manifest for the
-original three-model candidate. These additional files are not signed members of
-that manifest. Final signing and release metadata must cover the selected final
-bytes before publication.
+The wheels remain unsigned candidates. The existing signed manifest and verifier
+cover the original three-model stage. Final metadata, signing and public release
+installation must cover these selected bytes before publication. Model weights,
+credentials, private build inputs and signing keys are excluded from this PR.

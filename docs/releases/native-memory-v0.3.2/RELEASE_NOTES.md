@@ -26,3 +26,12 @@ unique, bounded source export; application 0.4.6 is incompatible. The
 These notes prepare a release. The local candidate is signed, verified and unpublished; public download
 and clean installation remain pending. Remove this pending-status paragraph only after those
 checks are recorded against the published assets and compatible application image.
+
+
+Gemma4 E2B and E4B build-4 plugins are additional qualified candidates on the same
+runtime. They passed CUDA Q8_0 native lifecycle tests, including multi-chunk
+capture, streaming, concurrency, source outage and revocation. Their wheels and
+[qualification evidence](https://github.com/RakuenSoftware/aimee/blob/testing/docs/releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
+are in the preparation PR. They remain unsigned and outside the original five-wheel
+manifest; include them in release notes as delivered packages only after the final
+signed asset set and verifier cover them.

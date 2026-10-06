@@ -6,8 +6,11 @@ model weights, preparation and cached native state; selected memory stays outsid
 
 ![Aimee selects records while the enrolled inference host prepares model-specific attention memory](images/architecture/native-attention.svg)
 
-The current release candidate is **0.3.2 build 2, unpublished**. It replaces the generic 0.2.3
-plugin with three dedicated adapters and one shared `aimee-native-runtime==0.3.2` dependency.
+The current candidates are **0.3.2, unpublished**: the original three model plugins use
+build 2; Gemma4 E2B and E4B use build 4. Five dedicated adapters share one
+`aimee-native-runtime==0.3.2` dependency. The E2B/E4B wheels passed
+[CPU and actual CUDA qualification](releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
+and remain unsigned candidates outside the original signed manifest.
 Its [release preparation record](releases/native-memory-v0.3.2/README.md) pins the wheel bytes and
 lists the remaining server, signing and publication gates. The signed
 [0.2.3 stage](releases/native-memory-v0.2.3/README.md) retains its original evidence.
@@ -16,6 +19,8 @@ lists the remaining server, signing and publication gates. The signed
 
 | Model | Package and console command | Tested 0.3.2 checkpoint |
 | --- | --- | --- |
+| Gemma4 E2B | `aimee-gemma4-e2b` | Q8_0 GGUF, build 4 candidate |
+| Gemma4 E4B | `aimee-gemma4-e4b` | Q8_0 GGUF, build 4 candidate |
 | Gemma4 12B | `aimee-gemma4-12b` | Q4_K_M GGUF |
 | Gemma4 26B A4B | `aimee-gemma4-26b` | Q3_K_M GGUF |
 | Qwen3.8 27B | `aimee-qwen3-8-27b` | FP8 with 18 GiB CPU matrix offload |
