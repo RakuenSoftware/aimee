@@ -88,8 +88,8 @@ memory needs its separate authorization and selection contract.
 The server needs `POST /v1/native/primitive` plus unique, bounded source export. Published Aimee
 0.4.6 lacks that route. The pinned testing image in the
 [release manifest](releases/native-memory-v0.3.3/manifest.json) provides it and passed the model
-smokes. The image built after PR #3013, application publication and installation from public
-plugin downloads have separate validation gates.
+smokes. PR #3013 changed documentation and artifacts, so it required no new application image.
+Application publication and installation from public plugin downloads have separate validation gates.
 
 Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
 Changing native/Cognee retrieval and installing a model attention plugin are separate operations.

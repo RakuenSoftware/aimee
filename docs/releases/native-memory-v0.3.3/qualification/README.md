@@ -8,7 +8,9 @@ Each model used one RX 7900 XTX with zero CPU weight offload.
 
 E2B, E4B and 12B used UD-Q4_K_XL; 26B used Q3_K_M; Qwen3.8 27B used Q4_K_M.
 The application was the pinned testing image recorded in the results, before the documentation-only
-merge of PR #3013. Validation of the image built from that merge is a separate pending rerun.
+merge of PR #3013. That merge changed documentation and artifacts and required no new application
+image. Fresh [application validation](../../../validation/current-testing-release-2026-10-06.md) passed
+2,314 checks against this same current testing digest.
 
 Each smoke withdrew admission during initial preparation, denied unauthenticated inference and
 unauthorized source selection, stored an authorized canary, recovered it through actual native
