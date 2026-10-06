@@ -116,8 +116,8 @@ must be re-encoded. The enrolled path currently selects personal memory. Shared 
 memory needs its separate authorization and selection contract.
 
 The server needs `POST /v1/native/primitive` plus unique, bounded source export. Use Aimee
-1.0.0 or the exact qualified image in the
-[release manifest](releases/native-memory-v0.3.3/manifest.json) provides it and passed the model
+1.0.0 or the exact qualified image recorded in the
+[release manifest](releases/native-memory-v0.3.3/manifest.json). That image passed the model
 smokes. Aimee 0.4.6 lacks the required route.
 
 Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
