@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "pr": 3013,
+  "commit": "e73321953",
+  "profiles": [
+    {
+      "wheel": "aimee_native_runtime-0.3.2-3-cp312-cp312-linux_x86_64.whl",
+      "sha256": "1684ee2e5aa40ca9c0ed2818658de445bd112f440871372789e80709f9757bd2",
+      "bytes": 2977635,
+      "matches_amd_installed_input": true
+    },
+    {
+      "wheel": "aimee_gemma4_e2b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e",
+      "bytes": 580483,
+      "matches_amd_installed_input": true
+    },
+    {
+      "wheel": "aimee_gemma4_e4b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0",
+      "bytes": 580349,
+      "matches_amd_installed_input": true
+    }
+  ]
+}

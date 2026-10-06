@@ -17,7 +17,10 @@ calls. You take on a server, its backups and its upgrades in exchange for contro
 
 ![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge and Cognee retrieval are optional](docs/images/architecture/overview.svg)
 
-## Security is part of the runtime
+## Security and Governance are the core of the runtime
+
+**We guarantee that every action an LLM takes on your system through Aimee can be fully
+and completely tracked, at any time, back to the responsible run, identity and authorization.**
 
 We assume a model, a prompt, retrieved text and a tool argument can all be hostile. Aimee puts
 access checks in the services that own the data and the backends that execute the action. A model
@@ -130,8 +133,11 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The current 0.3.2 candidate provides separate Gemma4 12B, Gemma4 26B A4B and Qwen3.8 27B
-plugins on one shared runtime. Its server prerequisite and remaining publication gates are in the
+a replaceable retrieval engine solve different parts of the memory path. The 0.3.2 candidates provide
+separate Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B plugins on one shared runtime.
+[E2B and E4B qualification](docs/releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
+covers CPU adapter checks and actual CUDA native-memory serving. The server prerequisite, artifact
+signing status and remaining publication gates are in the
 [release preparation record](docs/releases/native-memory-v0.3.2/README.md).
 
 ## Start with one Server

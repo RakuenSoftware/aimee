@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "model": "gemma4-e4b",
+  "scope": "Installed build-4 model projection conversion rejection tests; no GPU inference",
+  "checks": [
+    {
+      "name": "packed weight without type",
+      "passed": true
+    },
+    {
+      "name": "type without weight",
+      "passed": true
+    },
+    {
+      "name": "duplicate type",
+      "passed": true
+    },
+    {
+      "name": "unknown quantization type",
+      "passed": true
+    },
+    {
+      "name": "already floating projection preserved",
+      "passed": true
+    },
+    {
+      "name": "other packed weights preserved",
+      "passed": true
+    }
+  ]
+}

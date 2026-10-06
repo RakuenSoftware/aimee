@@ -1,0 +1,187 @@
+{
+  "status": "passed",
+  "model": "gemma4-e4b",
+  "scope": "installed Rust adapter negative ABI admission; no model inference",
+  "checks": [
+    {
+      "name": "reject changed model_type",
+      "passed": true
+    },
+    {
+      "name": "reject changed num_hidden_layers",
+      "passed": true
+    },
+    {
+      "name": "reject changed hidden_size",
+      "passed": true
+    },
+    {
+      "name": "reject changed num_attention_heads",
+      "passed": true
+    },
+    {
+      "name": "reject changed num_key_value_heads",
+      "passed": true
+    },
+    {
+      "name": "reject changed head_dim",
+      "passed": true
+    },
+    {
+      "name": "reject changed global_head_dim",
+      "passed": true
+    },
+    {
+      "name": "reject changed num_kv_shared_layers",
+      "passed": true
+    },
+    {
+      "name": "reject changed hidden_size_per_layer_input",
+      "passed": true
+    },
+    {
+      "name": "reject changed vocab_size_per_layer_input",
+      "passed": true
+    },
+    {
+      "name": "reject changed sliding_window",
+      "passed": true
+    },
+    {
+      "name": "reject changed use_double_wide_mlp",
+      "passed": true
+    },
+    {
+      "name": "reject changed attention_k_eq_v",
+      "passed": true
+    },
+    {
+      "name": "reject changed num_global_key_value_heads",
+      "passed": true
+    },
+    {
+      "name": "reject changed enable_moe_block",
+      "passed": true
+    },
+    {
+      "name": "reject missing layer",
+      "passed": true
+    },
+    {
+      "name": "reject wrong layer kind",
+      "passed": true
+    },
+    {
+      "name": "reject wrong rotary theta",
+      "passed": true
+    },
+    {
+      "name": "reject wrong rotary factor",
+      "passed": true
+    },
+    {
+      "name": "valid three-row positions",
+      "passed": true
+    },
+    {
+      "name": "maximum admitted memory shift",
+      "passed": true
+    },
+    {
+      "name": "reject no rows",
+      "passed": true
+    },
+    {
+      "name": "reject too many rows",
+      "passed": true
+    },
+    {
+      "name": "reject ragged rows",
+      "passed": true
+    },
+    {
+      "name": "reject negative position",
+      "passed": true
+    },
+    {
+      "name": "reject uncovered positions",
+      "passed": true
+    },
+    {
+      "name": "reject overlapping ranges",
+      "passed": true
+    },
+    {
+      "name": "reject gap in ranges",
+      "passed": true
+    },
+    {
+      "name": "reject reversed range",
+      "passed": true
+    },
+    {
+      "name": "reject range past end",
+      "passed": true
+    },
+    {
+      "name": "reject negative memory",
+      "passed": true
+    },
+    {
+      "name": "reject overlarge memory",
+      "passed": true
+    },
+    {
+      "name": "reject overflow",
+      "passed": true
+    },
+    {
+      "name": "valid complete memory segments",
+      "passed": true
+    },
+    {
+      "name": "reject missing segment",
+      "passed": true
+    },
+    {
+      "name": "reject extra segment",
+      "passed": true
+    },
+    {
+      "name": "reject duplicate segment",
+      "passed": true
+    },
+    {
+      "name": "reject invalid layer",
+      "passed": true
+    },
+    {
+      "name": "reject wrong head count",
+      "passed": true
+    },
+    {
+      "name": "reject wrong width",
+      "passed": true
+    },
+    {
+      "name": "reject wrong token extent",
+      "passed": true
+    },
+    {
+      "name": "reject invalid value flag",
+      "passed": true
+    },
+    {
+      "name": "reject memory token count 0",
+      "passed": true
+    },
+    {
+      "name": "reject memory token count 1025",
+      "passed": true
+    },
+    {
+      "name": "reject unsupported operation",
+      "passed": true
+    }
+  ]
+}

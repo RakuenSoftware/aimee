@@ -1,0 +1,119 @@
+{
+  "status": "passed",
+  "model": "gemma4-e2b",
+  "checks_scope": "actual vLLM ROCm 7900 XTX single-GPU Q8 multi-chunk enrolled lifecycle",
+  "checks": [
+    {
+      "name": "initial source admission withdrawn",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference denied",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference cannot select source",
+      "passed": true
+    },
+    {
+      "name": "authorized canary stored",
+      "passed": true
+    },
+    {
+      "name": "cold actual native recall",
+      "passed": true
+    },
+    {
+      "name": "real native prefix spans multiple prefill chunks",
+      "passed": true
+    },
+    {
+      "name": "warm actual native recall",
+      "passed": true
+    },
+    {
+      "name": "warm bank reused",
+      "passed": true
+    },
+    {
+      "name": "conditional correction committed",
+      "passed": true
+    },
+    {
+      "name": "corrected actual native recall",
+      "passed": true
+    },
+    {
+      "name": "correction prepares a new bank",
+      "passed": true
+    },
+    {
+      "name": "conditional retirement succeeds",
+      "passed": true
+    },
+    {
+      "name": "retired actual native recall",
+      "passed": true
+    },
+    {
+      "name": "retired source clears active bank",
+      "passed": true
+    },
+    {
+      "name": "restored authorized source stored",
+      "passed": true
+    },
+    {
+      "name": "restored actual native recall",
+      "passed": true
+    },
+    {
+      "name": "malformed authenticated request rejected",
+      "passed": true
+    },
+    {
+      "name": "unsupported inference endpoint rejected",
+      "passed": true
+    },
+    {
+      "name": "caller cannot override authorized publication",
+      "passed": true
+    },
+    {
+      "name": "streaming native recall completes",
+      "passed": true
+    },
+    {
+      "name": "after streaming actual native recall",
+      "passed": true
+    },
+    {
+      "name": "concurrent requests preserve native recall",
+      "passed": true
+    },
+    {
+      "name": "source outage blocks warmed inference",
+      "passed": true
+    },
+    {
+      "name": "after source recovery actual native recall",
+      "passed": true
+    },
+    {
+      "name": "frozen client identity cannot switch recipients",
+      "passed": true
+    },
+    {
+      "name": "original identity recovered actual native recall",
+      "passed": true
+    },
+    {
+      "name": "actual server revocation blocks warm native inference",
+      "passed": true
+    }
+  ],
+  "artifact_source": "unsigned PR3013 0.3.2 build-4 candidate",
+  "prefix_token_extents": [
+    240
+  ]
+}

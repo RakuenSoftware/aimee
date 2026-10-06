@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "scope": "Audit wheel identity, RECORD, namespace isolation and Rust adapter symbols.",
+  "plugins": [
+    {
+      "adapter": "gemma4-12b",
+      "wheel": "aimee_gemma4_12b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "33e4c156d4d3e8e6639f87be72444a65bb41dac37bba2763c27020dab2e485a7",
+      "bytes": 577401,
+      "members": 34,
+      "library_sha256": "2cc4a3c39b28950d80bcb2c1a9bc480f405d884d9cafd8426e655b343a568fa9"
+    },
+    {
+      "adapter": "gemma4-26b",
+      "wheel": "aimee_gemma4_26b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "baf623cbd7f8270aafaae4956c106f7de672ef7ca46b2044eab391e50323f308",
+      "bytes": 577520,
+      "members": 34,
+      "library_sha256": "7ca20a61ee5081d7bad7f7369e97bff4c1b97b0400385aca0a1f76c7e881cca2"
+    },
+    {
+      "adapter": "qwen3-8-27b",
+      "wheel": "aimee_qwen3_8_27b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "924ee4eed36db17c54b070b2b90a301f28094e6b593e2cae0c688ba868acdb3f",
+      "bytes": 585575,
+      "members": 34,
+      "library_sha256": "b04a919d23b2181424415cf1f5413aaa01c9efe2fc9f983a5bfae9a6f893e418"
+    },
+    {
+      "adapter": "gemma4-e2b",
+      "wheel": "aimee_gemma4_e2b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e",
+      "bytes": 580483,
+      "members": 36,
+      "library_sha256": "4cba15998cc71c307ed37afd4fc21c7bb4a4fea79d19ad63154e4f0fbb4d1f00"
+    },
+    {
+      "adapter": "gemma4-e4b",
+      "wheel": "aimee_gemma4_e4b-0.3.2-4-cp312-cp312-linux_x86_64.whl",
+      "sha256": "4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0",
+      "bytes": 580349,
+      "members": 36,
+      "library_sha256": "3f735d27608c225120765c82c6e2e5133b0a214d422132e395b834e252043182"
+    }
+  ],
+  "shared_runtime": {
+    "wheel": "aimee_native_runtime-0.3.2-3-cp312-cp312-linux_x86_64.whl",
+    "sha256": "1684ee2e5aa40ca9c0ed2818658de445bd112f440871372789e80709f9757bd2",
+    "required_by": 5
+  }
+}

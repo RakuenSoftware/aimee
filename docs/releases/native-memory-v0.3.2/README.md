@@ -1,21 +1,28 @@
-# Three native-memory plugins need a separate 0.3.2 release
+# Five native-memory plugins need a separate 0.3.2 release
 
-The proposed `native-memory-v0.3.2` prerelease delivers Gemma4 12B, Gemma4 26B A4B and Qwen3.8
-27B plugins on one shared native runtime. The candidate is version **0.3.2 build 2**. Its five
+The proposed `native-memory-v0.3.2` prerelease has Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8
+27B plugins on one shared native runtime. The original three-model stage is **0.3.2 build 2**. Its five
 wheel files have been copied to a local asset stage and checked against the reviewed candidate
-hashes. **The new payload is signed, verified and unpublished.** The earlier signed
+hashes. **That original payload is signed, verified and unpublished.** E2B and E4B are
+**build-4 unsigned candidates**, with CPU and actual CUDA qualification recorded
+[separately](small-model-candidates/VALIDATION.md). The extended
+[ROCm qualification and larger-model smokes](rocm-qualification/README.md) use a
+corrected, unsigned shared-runtime build-3 candidate. These additions are not
+in the original signed payload. The earlier signed
 [0.2.3 stage](../native-memory-v0.2.3/README.md) preserves different bytes and different coverage.
 
-[manifest.json](manifest.json) fixes the five asset names, SHA-256 digests, sizes, proposed URLs,
+[manifest.json](manifest.json) fixes the original five asset names, SHA-256 digests, sizes, proposed URLs,
 platform requirements and server prerequisite. [SHA256SUMS](SHA256SUMS) additionally pins the
 manifest. The public repository consumes opaque release artifacts; private implementation and
 build inputs remain outside it. Model weights, credentials and private signing material are excluded.
 
-## One runtime serves three dedicated adapters
+## One runtime serves five dedicated adapters
 
 | Wheel package | Role |
 | --- | --- |
 | `aimee-native-runtime==0.3.2` | Common enrollment, source selection, supervision and vLLM integration |
+| `aimee-gemma4-e2b==0.3.2` | Dedicated Gemma4 E2B adapter and command; unsigned build 4 |
+| `aimee-gemma4-e4b==0.3.2` | Dedicated Gemma4 E4B adapter and command; unsigned build 4 |
 | `aimee-gemma4-12b==0.3.2` | Dedicated Gemma4 12B Rust adapter and command |
 | `aimee-gemma4-26b==0.3.2` | Dedicated Gemma4 26B A4B Rust adapter and command |
 | `aimee-qwen3-8-27b==0.3.2` | Dedicated Qwen3.8 27B Rust adapter and command |
@@ -46,7 +53,7 @@ recorded export repair. The follow-up supplies the same required behavior with c
 conflict validation. Final application image qualification and publication remain separate from
 these projection tests and from the recorded GPU results.
 
-## The candidate has execution evidence within a narrow profile
+## Original three-model delivery evidence
 
 The reviewed delivery report records 21 actual enrolled lifecycle checks per final plugin,
 87 serving-bridge tests without skips, Qwen 324/324 recall cases, co-installation/uninstall isolation,
@@ -68,9 +75,14 @@ established by the new candidate evidence.
 
 ## Finish the delivery in this order
 
-1. Merge the source-export repair, qualify the final application image, and publish
-   the compatible application through its separate approval gates.
-2. Verify all 14 staged assets with the default verifier. The controlled pipeline signed each
+1. Retain the source-export repair already merged into `testing`, complete final
+   application promotion checks, and publish the compatible application through its
+   separate approval gates. The small-model qualification used the current
+   `testing-73cd98c` image; larger-model smoke tests against it remain the next stage.
+2. If E2B/E4B are included, extend the final manifest, checksums, signature asset set,
+   verifier and draft-release inputs to cover their reviewed build-4 bytes. The
+   existing signed manifest and verifier cover only the original five wheels.
+   For that original stage, verify all 14 assets with the default verifier. The controlled pipeline signed each
    of the five wheels, `manifest.json` and `SHA256SUMS` with the reviewed Ed25519 key; all seven
    detached signatures verify. Keep that verification after any transfer.
 3. Run [create_draft_release.sh](create_draft_release.sh) with the signed asset directory and exact
@@ -89,3 +101,12 @@ python3 docs/releases/native-memory-v0.3.2/verify_assets.py /path/to/release-ass
 The verifier requires all seven signatures. Optional `--hashes-only` mode checks identity alone
 and cannot satisfy the draft-release script. Retain the trust-key review if the signing
 pipeline changes keys; a key bundled with downloaded bytes alone does not establish their origin.
+
+## Additional small-model candidates
+
+[E2B and E4B candidates](small-model-candidates/README.md) add two dedicated model
+plugins on the same shared runtime. Their current build-4 wheels passed CPU
+adapter checks and actual CUDA Q8_0 text-serving lifecycle matrices, including
+multi-chunk capture, streaming, concurrency, source outage and revocation. The
+wheels and named reports are included for review. They remain unsigned and are
+not members of the existing three-model release manifest.

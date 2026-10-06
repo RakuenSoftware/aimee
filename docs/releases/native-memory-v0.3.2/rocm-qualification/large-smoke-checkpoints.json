@@ -1,0 +1,32 @@
+{
+  "status": "verified",
+  "profiles": [
+    {
+      "model": "gemma4-12b",
+      "bytes": 12863382944,
+      "sha256": "38e70517d10f5f5bacebd0bb2cc929dcca3670ad348e5b8a38ba219154ea8ddc",
+      "checkpoint": "existing staged Q8 GGUF",
+      "tensor_parallel_size": 1,
+      "cpu_offload_gb": 0,
+      "quantization": "Q8_0"
+    },
+    {
+      "model": "gemma4-26b",
+      "bytes": 13286734912,
+      "sha256": "cbb174d5585b8dd2e8f8d9d2294b8beb6eaa0022bceaf1989bc8d0e0ec2f473c",
+      "checkpoint": "verified owned Q3_K_M copy",
+      "tensor_parallel_size": 1,
+      "cpu_offload_gb": 0,
+      "quantization": "Q3_K_M"
+    },
+    {
+      "model": "qwen3-8-27b",
+      "bytes": 29047084448,
+      "sha256": "c0ce2b553fe0fb433388c6f22ee07197c398c735fcbf961cd86042bd657e33ca",
+      "checkpoint": "existing staged Q8 GGUF",
+      "tensor_parallel_size": 1,
+      "cpu_offload_gb": 18,
+      "quantization": "Q8_0"
+    }
+  ]
+}

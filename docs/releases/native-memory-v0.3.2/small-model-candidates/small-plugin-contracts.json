@@ -1,0 +1,86 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "name": "gemma4-e2b own dedicated adapter admitted",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects foreign binding gemma4-12b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects foreign binding gemma4-26b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects foreign binding qwen3-8-27b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects foreign binding gemma4-e4b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b checkpoint publication identity accepted",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b changed tokenizer rejected",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b different checkpoint rejected",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b installed library matches binding digest",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b ships exactly its dedicated Rust symbol",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b own dedicated adapter admitted",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects foreign binding gemma4-12b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects foreign binding gemma4-26b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects foreign binding qwen3-8-27b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects foreign binding gemma4-e2b",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b checkpoint publication identity accepted",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b changed tokenizer rejected",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b different checkpoint rejected",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b installed library matches binding digest",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b ships exactly its dedicated Rust symbol",
+      "passed": true
+    }
+  ],
+  "shared_runtime_version": "0.3.2"
+}
