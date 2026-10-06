@@ -66,3 +66,24 @@ metadata and notices while preserving executable members.
 
 Raw named-verdict reports are alongside this file. Model weights, credentials,
 and private source remain outside the public application repository.
+
+## Release qualification in progress
+
+The two wheel files were downloaded independently from PR #3013 and matched
+both SHA-256 values above. E2B passed a fresh isolated environment installation,
+dependency checks, console startup and serving-module imports. E4B's equivalent
+installation is still pending.
+
+Actual vLLM CUDA lifecycle validation has started on the RTX 5080 using the
+E2B Q8_0 checkpoint, verified against its pinned upstream SHA-256. Client
+enrollment succeeded after correcting the test harness to retry the standard
+CLI enrollment. The serving process started, but no completed inference or
+lifecycle verdict has been observed. The host subsequently stopped responding
+to SSH while remaining reachable by ICMP. A stop request for the owned model
+unit could not be confirmed. Host memory and I/O pressure are unconfirmed;
+there is no evidence yet establishing the cause.
+
+The first E4B Q8_0 download was truncated and rejected by its checksum check.
+Those bytes were quarantined; a new download is pending verification. No
+rejected checkpoint was loaded. Both candidates remain unsigned and are not
+release-qualified. The 12B, 26B and Qwen 3.8 27B smoke tests have not started.
