@@ -178,3 +178,18 @@ actual vLLM matrix is still pending. No release-readiness conclusion is claimed 
 Both installed build-4 plugins also passed six projection conversion checks,
 including rejection of missing, duplicate or unknown quantization type records
 and preservation of already-floating projections and unrelated packed weights.
+
+## Complete E2B CUDA release matrix
+
+The corrected run passed 26/26 checks using the build-4 wheel, including all
+baseline lifecycle checks plus authenticated malformed-request rejection,
+unsupported endpoint rejection, caller publication override rejection, complete
+SSE streaming recall, subsequent recall, two concurrent requests, real source
+outage denial and recovery. The owned Aimee server container was stopped and
+restarted for the outage test; warmed model bytes could not authorize another
+inference while the source was unavailable. Its API recovered and native recall
+succeeded again. Fixture cleanup passed and the owned model unit stopped.
+
+Both build-4 wheel files were downloaded from PR #3013 and matched their reviewed
+hashes. The E4B CUDA matrix is now running. Signing and public release installation
+remain pending; these files are still unsigned candidates.
