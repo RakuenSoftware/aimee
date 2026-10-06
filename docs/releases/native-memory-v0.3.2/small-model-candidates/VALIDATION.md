@@ -193,3 +193,14 @@ succeeded again. Fixture cleanup passed and the owned model unit stopped.
 Both build-4 wheel files were downloaded from PR #3013 and matched their reviewed
 hashes. The E4B CUDA matrix is now running. Signing and public release installation
 remain pending; these files are still unsigned candidates.
+
+## Complete E4B CUDA release matrix
+
+E4B passed the same 26/26 checks with build 4, including real source outage,
+recovery and server revocation. Fixture cleanup passed and its owned serving
+unit stopped. Both models now pass the complete short-prefix CUDA lifecycle.
+
+The final additional runs reinstall each wheel from the verified public PR
+retrieval and repeat the lifecycle with a native prefix longer than the
+128-token prefill chunk. This specifically qualifies shared-K/V capture across
+real GPU chunk boundaries. Those runs are still pending.
