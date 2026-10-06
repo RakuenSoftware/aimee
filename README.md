@@ -133,12 +133,12 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The 0.3.3 candidate provides
+a replaceable retrieval engine solve different parts of the memory path. The [0.3.3 release](https://github.com/RakuenSoftware/aimee/releases/tag/native-memory-v0.3.3) provides
 separate Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B plugins on one shared runtime.
 All five passed [native-memory smokes](docs/releases/native-memory-v0.3.3/qualification/README.md)
 on a 7900 XTX with existing NAS GGUFs and no CPU weight offload. The server prerequisite,
 signing status and publication gates are in the
-[release preparation record](docs/releases/native-memory-v0.3.3/README.md).
+[release record](docs/releases/native-memory-v0.3.3/README.md).
 
 ## Start with one Server
 

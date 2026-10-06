@@ -1,4 +1,4 @@
-# Native memory with a local vLLM model
+# Native-memory model plugins
 
 The native-memory plugins let a supported local model consume Aimee-selected records through its
 attention state. Aimee owns the source records and their authorization. The inference host owns
@@ -6,12 +6,13 @@ model weights, preparation and cached native state; selected memory stays outsid
 
 ![Aimee selects records while the enrolled inference host prepares model-specific attention memory](images/architecture/native-attention.svg)
 
-The current candidate is **0.3.3, unsigned and unpublished**. Five dedicated adapters share
+The [0.3.3 plugin release](https://github.com/RakuenSoftware/aimee/releases/tag/native-memory-v0.3.3)
+contains five dedicated adapters sharing
 `aimee-native-runtime==0.3.3`, build 5. All five passed
 [native-memory smokes](releases/native-memory-v0.3.3/qualification/README.md) on one RX 7900 XTX
 with existing NAS GGUFs and zero CPU weight offload. The
-[release preparation record](releases/native-memory-v0.3.3/README.md) pins the final wheel bytes
-and signing/publication gates. Earlier 0.3.2 and 0.2.3 evidence belongs to its recorded bytes.
+[release record](releases/native-memory-v0.3.3/README.md) pins the signed wheel bytes
+and supported execution profiles. Earlier 0.3.2 and 0.2.3 evidence belongs to its recorded bytes.
 
 ## Choose the plugin for your checkpoint
 
@@ -32,22 +33,51 @@ Each plugin carries its own Rust adapter and checked model binding. Common enrol
 supervision and vLLM integration live in the shared runtime. Co-installation preserves separate
 namespaces; one serving process selects one adapter. Python/Cython remains the framework bridge.
 
-## Install the reviewed candidate and enroll
+## Download, verify and install 0.3.3
 
-**The commands below use locally supplied release wheels. Public release URLs are pending.**
-Install the GPU runtime in a Python 3.12 environment, verify the supplied wheels using the
-[release verifier](releases/native-memory-v0.3.3/verify_assets.py), then select your package:
+Download the seven wheels and their signed metadata from the
+[GitHub release](https://github.com/RakuenSoftware/aimee/releases/tag/native-memory-v0.3.3).
+The following commands fetch the complete release; no private checkout or locally supplied
+candidate files are needed. They require Bash, curl, OpenSSL and Python 3.12.
 
 ```sh
-python -m pip install --no-index --no-deps --find-links /path/to/release-wheels \
-  'aimee-native-runtime==0.3.3' 'aimee-gemma4-12b==0.3.3' 'vllm-gguf-plugin==0.0.5+triton'
-python -m pip check
-# Replace aimee-gemma4-12b with the matching package from the table.
+release_url=https://github.com/RakuenSoftware/aimee/releases/download/native-memory-v0.3.3
+mkdir -p native-memory-0.3.3
+for asset in \
+  aimee_gemma4_12b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  aimee_gemma4_26b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  aimee_gemma4_e2b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  aimee_gemma4_e4b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  aimee_native_runtime-0.3.3-5-cp312-cp312-linux_x86_64.whl \
+  aimee_qwen3_8_27b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl \
+  manifest.json SHA256SUMS
+do
+  curl --fail --location "$release_url/$asset" -o "native-memory-0.3.3/$asset" || exit 1
+  curl --fail --location "$release_url/$asset.sig" -o "native-memory-0.3.3/$asset.sig" || exit 1
+done
+curl --fail --location \
+  https://raw.githubusercontent.com/RakuenSoftware/aimee/native-memory-v0.3.3/docs/releases/native-memory-v0.3.3/verify_assets.py \
+  -o native-memory-0.3.3/verify_assets.py
+python3 native-memory-0.3.3/verify_assets.py native-memory-0.3.3
 ```
 
-The wheel directory must contain the exact reviewed shared runtime, selected model adapter and
-GGUF loader. Start from an environment with the correct GPU-specific vLLM runtime and its
-dependencies already installed; these commands do not resolve missing dependencies from an index.
+The verifier checks all seven wheel hashes and all nine Ed25519 signatures against the pinned
+release key. Run it without `--hashes-only`; an unsigned payload must fail verification.
+
+Install the GPU-specific vLLM runtime and its dependencies in a Python 3.12 environment, then
+install the shared runtime, your selected adapter and the GGUF loader from the verified download:
+
+```sh
+python -m pip install --no-index --no-deps \
+  ./native-memory-0.3.3/aimee_native_runtime-0.3.3-5-cp312-cp312-linux_x86_64.whl \
+  ./native-memory-0.3.3/aimee_gemma4_12b-0.3.3-cp312-cp312-linux_x86_64.whl \
+  ./native-memory-0.3.3/vllm_gguf_plugin-0.0.5+triton-py3-none-any.whl
+python -m pip check
+# Replace the 12B wheel with the matching adapter from the table.
+```
+
+These commands preserve your GPU runtime and do not fetch missing dependencies from an index.
 Aimee binaries and model weights are separate. Use your existing checkpoint storage.
 
 Create an invitation in Settings → Clients and enroll the standard thin client as described in
@@ -85,11 +115,10 @@ warm cache reuse. Gemma uses stock positive-position capture; older negative-pos
 must be re-encoded. The enrolled path currently selects personal memory. Shared organization
 memory needs its separate authorization and selection contract.
 
-The server needs `POST /v1/native/primitive` plus unique, bounded source export. Published Aimee
-0.4.6 lacks that route. The pinned testing image in the
+The server needs `POST /v1/native/primitive` plus unique, bounded source export. Use Aimee
+1.0.0 or the exact qualified image in the
 [release manifest](releases/native-memory-v0.3.3/manifest.json) provides it and passed the model
-smokes. PR #3013 changed documentation and artifacts, so it required no new application image.
-Application publication and installation from public plugin downloads have separate validation gates.
+smokes. Aimee 0.4.6 lacks the required route.
 
 Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
 Changing native/Cognee retrieval and installing a model attention plugin are separate operations.

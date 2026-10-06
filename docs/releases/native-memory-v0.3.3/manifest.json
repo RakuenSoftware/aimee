@@ -2,7 +2,7 @@
   "release": "native-memory-v0.3.3",
   "version": "0.3.3",
   "shared_runtime_build": 5,
-  "scope": "Five dedicated model plugins with one shared runtime; unsigned release candidate",
+  "scope": "Five dedicated model plugins with one shared runtime; signed five-model preview",
   "assets": {
     "aimee_gemma4_12b-0.3.3-cp312-cp312-linux_x86_64.whl": {
       "sha256": "e97f548ca4229f0ca3338145d74a5f4da777922cb34bf145490d69fe5a9f09a1",
@@ -54,7 +54,7 @@
     "max_records": 32,
     "conflicting_rows": "refuse export",
     "tested_image": "ghcr.io/rakuensoftware/aimee@sha256:e42752b9aafa9703ce9f11a703503a8bf0ea4fbe58dd6abbc8ccab5699904f0b",
-    "application_release": "1.0.0 publication remains separately approved"
+    "application_release": "Aimee 1.0.0; qualification used the exact tested image recorded here"
   },
   "profiles": [
     {

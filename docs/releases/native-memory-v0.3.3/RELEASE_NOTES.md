@@ -1,4 +1,4 @@
-# Native memory 0.3.3 candidate
+# Native memory 0.3.3
 
 Five dedicated adapters share one native runtime: Gemma4 E2B, E4B, 12B, 26B A4B and
 Qwen3.8 27B. The release payload includes shared-runtime build 5 and the pinned GGUF loader.
@@ -12,5 +12,6 @@ is single-GPU, text-only, eager synchronous V1 serving with prefix caching disab
 
 The compatible Aimee application supplies authorized native source export. Model weights, vLLM,
 Aimee binaries and private source are separate from these artifacts. Verify the signed manifest and
-all assets before installation. Qualification is bounded to the documented profiles; signing,
-publication and installation from public downloads remain separate release gates.
+all assets before installation. All seven wheels, the manifest and checksums have detached Ed25519 signatures.
+Use the [download and installation guide](https://github.com/RakuenSoftware/aimee/blob/testing/docs/NATIVE_MEMORY_PLUGIN.md).
+Qualification is bounded to the documented profiles; model weights and the GPU runtime are supplied separately.
