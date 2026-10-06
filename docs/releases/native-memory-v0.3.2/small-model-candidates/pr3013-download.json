@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "source_commit": "a0ed4221632967d91f76e4c0a635e7d5e9971667",
+  "scope": "Public PR Git blob download, not published release asset download",
+  "plugins": [
+    {
+      "wheel": "aimee_gemma4_e2b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "aab9e90748151e6d700aaad1d60585bef055a35fab5b1c2b73098f0abdb4f4c0",
+      "passed": true
+    },
+    {
+      "wheel": "aimee_gemma4_e4b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "be890245b08e05cd2878dce3686e095699d5064a3f31d4f895745e3c9eb461d2",
+      "passed": true
+    }
+  ]
+}

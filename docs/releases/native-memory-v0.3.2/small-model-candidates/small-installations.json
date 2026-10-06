@@ -1,0 +1,60 @@
+{
+  "status": "passed",
+  "profiles": [
+    {
+      "model": "gemma4-e2b",
+      "wheel_sha256": "aab9e90748151e6d700aaad1d60585bef055a35fab5b1c2b73098f0abdb4f4c0",
+      "status": "passed",
+      "phases": [
+        {
+          "name": "create",
+          "returncode": 0
+        },
+        {
+          "name": "install",
+          "returncode": 0
+        },
+        {
+          "name": "dependencies",
+          "returncode": 0
+        },
+        {
+          "name": "console",
+          "returncode": 0
+        },
+        {
+          "name": "imports",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "model": "gemma4-e4b",
+      "wheel_sha256": "be890245b08e05cd2878dce3686e095699d5064a3f31d4f895745e3c9eb461d2",
+      "status": "passed",
+      "phases": [
+        {
+          "name": "create",
+          "returncode": 0
+        },
+        {
+          "name": "install",
+          "returncode": 0
+        },
+        {
+          "name": "dependencies",
+          "returncode": 0
+        },
+        {
+          "name": "console",
+          "returncode": 0
+        },
+        {
+          "name": "imports",
+          "returncode": 0
+        }
+      ]
+    }
+  ],
+  "source": "local PR candidate; unsigned; isolated environments"
+}

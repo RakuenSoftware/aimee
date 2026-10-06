@@ -70,20 +70,37 @@ and private source remain outside the public application repository.
 ## Release qualification in progress
 
 The two wheel files were downloaded independently from PR #3013 and matched
-both SHA-256 values above. E2B passed a fresh isolated environment installation,
-dependency checks, console startup and serving-module imports. E4B's equivalent
-installation is still pending.
+both SHA-256 values above. Each passed a fresh isolated environment installation,
+dependency checks, console startup and serving-module imports. The shared K/V
+capture tests also passed in each separate clean environment.
 
-Actual vLLM CUDA lifecycle validation has started on the RTX 5080 using the
-E2B Q8_0 checkpoint, verified against its pinned upstream SHA-256. Client
-enrollment succeeded after correcting the test harness to retry the standard
-CLI enrollment. The serving process started, but no completed inference or
-lifecycle verdict has been observed. The host subsequently stopped responding
-to SSH while remaining reachable by ICMP. A stop request for the owned model
-unit could not be confirmed. Host memory and I/O pressure are unconfirmed;
-there is no evidence yet establishing the cause.
+Each installed Rust adapter passed 45 additional admission checks: valid position
+mapping and complete segments; rejection of changed geometry, rotary parameters,
+incomplete or duplicate segments, invalid position ranges, memory lengths outside
+the admitted bound and integer overflow. These tests do not run model inference.
 
-The first E4B Q8_0 download was truncated and rejected by its checksum check.
-Those bytes were quarantined; a new download is pending verification. No
-rejected checkpoint was loaded. Both candidates remain unsigned and are not
-release-qualified. The 12B, 26B and Qwen 3.8 27B smoke tests have not started.
+Actual vLLM CUDA lifecycle validation started on the RTX 5080 using the E2B Q8_0
+checkpoint. Standard client enrollment succeeded after adding the test harness's
+CLI retry. The serving process started, but no completed inference or lifecycle
+verdict was observed. SSH briefly stopped responding while ICMP remained
+reachable. After SSH recovered, the owned model unit was confirmed stopped
+during tokenizer loading, before inference. Memory pressure was low after recovery
+and I/O pressure was elevated. The cause of the SSH interruption is unconfirmed;
+the attempt remains archived.
+
+A subsequent run refused to start because the GPU was occupied by the separate
+`jmlr-gemma-prefix-integration-recovery-20261006-r4` research service. That job was
+left running. Actual native vLLM inference and its lifecycle failure checks remain
+pending. Both candidates remain unsigned and are not release-qualified. The
+12B, 26B and Qwen 3.8 27B smoke tests have not started.
+
+Both Q8_0 GGUF checkpoints matched their pinned upstream hashes:
+
+| Model | Repository revision | SHA-256 |
+|---|---|---|
+| E2B | `ggml-org/gemma-4-E2B-it-GGUF@b4243c156154b6dca9324415f8c7ccc098b4aed1` | `996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a` |
+| E4B | `ggml-org/gemma-4-E4B-it-GGUF@b8093469224f83f5c38f691eb906c380e9e63114` | `34be82b17b4942d389b9b527170c4b058027abdd32531fda063d3d97dd8ce80a` |
+
+The first E4B download was truncated and rejected by its checksum check. Those
+bytes were quarantined. A fresh download passed verification before any model
+load. No rejected checkpoint was loaded.
