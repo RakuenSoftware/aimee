@@ -20,12 +20,13 @@ required.
 
 ## Native-memory model plugins
 
-The separate 0.3.2 candidate targets Linux x86-64, CPython 3.12, glibc 2.39+ and exactly vLLM
-0.30.0. Its measured CUDA profiles are Gemma4 12B Q4_K_M, Gemma4 26B A4B Q3_K_M and Qwen3.8
-27B FP8 with CPU matrix offload. The application platform table above does not establish plugin
-compatibility. The signed candidate and source-export repair are prepared; final image qualification
-and public installation remain pending. See
-[Native memory](NATIVE_MEMORY_PLUGIN.md) and its [release preparation](releases/native-memory-v0.3.2/README.md).
+The separate 0.3.3 candidate targets Linux x86-64, CPython 3.12, glibc 2.39+ and vLLM 0.30.0,
+including the tested `+rocm723` vendor build. All five adapters passed short native-memory smokes
+on one RX 7900 XTX without CPU weight offload. Tested profiles are Gemma4 E2B/E4B/12B
+UD-Q4_K_XL, Gemma4 26B Q3_K_M and Qwen3.8 27B Q4_K_M. The application platform table
+does not establish plugin compatibility. Signing and public-download installation remain pending.
+See [Native memory](NATIVE_MEMORY_PLUGIN.md) and
+[release preparation](releases/native-memory-v0.3.3/README.md).
 
 ## Coding tools
 

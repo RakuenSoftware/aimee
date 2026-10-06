@@ -39,7 +39,7 @@ The shipped runtime makes specific, tested guarantees:
 - **Execution stays inside its grant.** Registered tools check schema, policy, assigned workspace
   and backend authority. Write-capable delegates require container isolation; failure to establish
   it refuses the delegate rather than falling back to the host. Containers receive no provider or
-  forge credentials and no network access by default.
+  forge credentials by default and no direct network access.
 - **Credentials have an owner.** Provider and integration secrets live in the owning instance's
   Vault. Long-lived application containers carry no credential-shaped environment keys. Governed
   requests resolve credentials after authorization; ordinary delegate execution receives no copy.
@@ -133,12 +133,12 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The 0.3.2 candidates provide
+a replaceable retrieval engine solve different parts of the memory path. The 0.3.3 candidate provides
 separate Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B plugins on one shared runtime.
-[E2B and E4B qualification](docs/releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
-covers CPU adapter checks and actual CUDA native-memory serving. The server prerequisite, artifact
-signing status and remaining publication gates are in the
-[release preparation record](docs/releases/native-memory-v0.3.2/README.md).
+All five passed [native-memory smokes](docs/releases/native-memory-v0.3.3/qualification/README.md)
+on a 7900 XTX with existing NAS GGUFs and no CPU weight offload. The server prerequisite,
+signing status and publication gates are in the
+[release preparation record](docs/releases/native-memory-v0.3.3/README.md).
 
 ## Start with one Server
 
