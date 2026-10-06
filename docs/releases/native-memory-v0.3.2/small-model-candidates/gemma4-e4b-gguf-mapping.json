@@ -1,0 +1,8678 @@
+{
+  "status": "passed",
+  "model": "gemma4-e4b",
+  "scope": "Every mapped GGUF tensor name and shape compared with pinned HF safetensors metadata; no inference",
+  "checks": [
+    {
+      "tensor": "output_norm.weight",
+      "target": "model.language_model.norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "per_layer_model_proj.weight",
+      "target": "model.language_model.per_layer_model_projection.weight",
+      "shape": [
+        10752,
+        2560
+      ],
+      "expected_shape": [
+        10752,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "per_layer_proj_norm.weight",
+      "target": "model.language_model.per_layer_projection_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "per_layer_token_embd.weight",
+      "target": "model.language_model.embed_tokens_per_layer.weight",
+      "shape": [
+        262144,
+        10752
+      ],
+      "expected_shape": [
+        262144,
+        10752
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "token_embd.weight",
+      "target": "model.language_model.embed_tokens.weight",
+      "shape": [
+        262144,
+        2560
+      ],
+      "expected_shape": [
+        262144,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_k.weight",
+      "target": "model.language_model.layers.0.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_k_norm.weight",
+      "target": "model.language_model.layers.0.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_norm.weight",
+      "target": "model.language_model.layers.0.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_output.weight",
+      "target": "model.language_model.layers.0.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_q.weight",
+      "target": "model.language_model.layers.0.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_q_norm.weight",
+      "target": "model.language_model.layers.0.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.attn_v.weight",
+      "target": "model.language_model.layers.0.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.ffn_down.weight",
+      "target": "model.language_model.layers.0.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.ffn_gate.weight",
+      "target": "model.language_model.layers.0.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.ffn_norm.weight",
+      "target": "model.language_model.layers.0.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.ffn_up.weight",
+      "target": "model.language_model.layers.0.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.inp_gate.weight",
+      "target": "model.language_model.layers.0.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.layer_output_scale.weight",
+      "target": "model.language_model.layers.0.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.post_attention_norm.weight",
+      "target": "model.language_model.layers.0.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.post_ffw_norm.weight",
+      "target": "model.language_model.layers.0.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.post_norm.weight",
+      "target": "model.language_model.layers.0.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.0.proj.weight",
+      "target": "model.language_model.layers.0.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_k.weight",
+      "target": "model.language_model.layers.1.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_k_norm.weight",
+      "target": "model.language_model.layers.1.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_norm.weight",
+      "target": "model.language_model.layers.1.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_output.weight",
+      "target": "model.language_model.layers.1.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_q.weight",
+      "target": "model.language_model.layers.1.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_q_norm.weight",
+      "target": "model.language_model.layers.1.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.attn_v.weight",
+      "target": "model.language_model.layers.1.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.ffn_down.weight",
+      "target": "model.language_model.layers.1.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.ffn_gate.weight",
+      "target": "model.language_model.layers.1.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.ffn_norm.weight",
+      "target": "model.language_model.layers.1.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.ffn_up.weight",
+      "target": "model.language_model.layers.1.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.inp_gate.weight",
+      "target": "model.language_model.layers.1.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.layer_output_scale.weight",
+      "target": "model.language_model.layers.1.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.post_attention_norm.weight",
+      "target": "model.language_model.layers.1.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.post_ffw_norm.weight",
+      "target": "model.language_model.layers.1.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.post_norm.weight",
+      "target": "model.language_model.layers.1.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.1.proj.weight",
+      "target": "model.language_model.layers.1.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_k.weight",
+      "target": "model.language_model.layers.2.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_k_norm.weight",
+      "target": "model.language_model.layers.2.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_norm.weight",
+      "target": "model.language_model.layers.2.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_output.weight",
+      "target": "model.language_model.layers.2.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_q.weight",
+      "target": "model.language_model.layers.2.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_q_norm.weight",
+      "target": "model.language_model.layers.2.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.attn_v.weight",
+      "target": "model.language_model.layers.2.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.ffn_down.weight",
+      "target": "model.language_model.layers.2.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.ffn_gate.weight",
+      "target": "model.language_model.layers.2.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.ffn_norm.weight",
+      "target": "model.language_model.layers.2.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.ffn_up.weight",
+      "target": "model.language_model.layers.2.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.inp_gate.weight",
+      "target": "model.language_model.layers.2.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.layer_output_scale.weight",
+      "target": "model.language_model.layers.2.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.post_attention_norm.weight",
+      "target": "model.language_model.layers.2.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.post_ffw_norm.weight",
+      "target": "model.language_model.layers.2.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.post_norm.weight",
+      "target": "model.language_model.layers.2.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.2.proj.weight",
+      "target": "model.language_model.layers.2.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_k.weight",
+      "target": "model.language_model.layers.3.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_k_norm.weight",
+      "target": "model.language_model.layers.3.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_norm.weight",
+      "target": "model.language_model.layers.3.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_output.weight",
+      "target": "model.language_model.layers.3.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_q.weight",
+      "target": "model.language_model.layers.3.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_q_norm.weight",
+      "target": "model.language_model.layers.3.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.attn_v.weight",
+      "target": "model.language_model.layers.3.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.ffn_down.weight",
+      "target": "model.language_model.layers.3.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.ffn_gate.weight",
+      "target": "model.language_model.layers.3.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.ffn_norm.weight",
+      "target": "model.language_model.layers.3.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.ffn_up.weight",
+      "target": "model.language_model.layers.3.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.inp_gate.weight",
+      "target": "model.language_model.layers.3.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.layer_output_scale.weight",
+      "target": "model.language_model.layers.3.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.post_attention_norm.weight",
+      "target": "model.language_model.layers.3.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.post_ffw_norm.weight",
+      "target": "model.language_model.layers.3.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.post_norm.weight",
+      "target": "model.language_model.layers.3.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.3.proj.weight",
+      "target": "model.language_model.layers.3.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_k.weight",
+      "target": "model.language_model.layers.4.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_k_norm.weight",
+      "target": "model.language_model.layers.4.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_norm.weight",
+      "target": "model.language_model.layers.4.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_output.weight",
+      "target": "model.language_model.layers.4.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_q.weight",
+      "target": "model.language_model.layers.4.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_q_norm.weight",
+      "target": "model.language_model.layers.4.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.attn_v.weight",
+      "target": "model.language_model.layers.4.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.ffn_down.weight",
+      "target": "model.language_model.layers.4.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.ffn_gate.weight",
+      "target": "model.language_model.layers.4.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.ffn_norm.weight",
+      "target": "model.language_model.layers.4.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.ffn_up.weight",
+      "target": "model.language_model.layers.4.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.inp_gate.weight",
+      "target": "model.language_model.layers.4.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.layer_output_scale.weight",
+      "target": "model.language_model.layers.4.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.post_attention_norm.weight",
+      "target": "model.language_model.layers.4.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.post_ffw_norm.weight",
+      "target": "model.language_model.layers.4.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.post_norm.weight",
+      "target": "model.language_model.layers.4.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.4.proj.weight",
+      "target": "model.language_model.layers.4.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_k.weight",
+      "target": "model.language_model.layers.5.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_k_norm.weight",
+      "target": "model.language_model.layers.5.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_norm.weight",
+      "target": "model.language_model.layers.5.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_output.weight",
+      "target": "model.language_model.layers.5.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_q.weight",
+      "target": "model.language_model.layers.5.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_q_norm.weight",
+      "target": "model.language_model.layers.5.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.attn_v.weight",
+      "target": "model.language_model.layers.5.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.ffn_down.weight",
+      "target": "model.language_model.layers.5.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.ffn_gate.weight",
+      "target": "model.language_model.layers.5.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.ffn_norm.weight",
+      "target": "model.language_model.layers.5.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.ffn_up.weight",
+      "target": "model.language_model.layers.5.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.inp_gate.weight",
+      "target": "model.language_model.layers.5.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.layer_output_scale.weight",
+      "target": "model.language_model.layers.5.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.post_attention_norm.weight",
+      "target": "model.language_model.layers.5.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.post_ffw_norm.weight",
+      "target": "model.language_model.layers.5.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.post_norm.weight",
+      "target": "model.language_model.layers.5.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.5.proj.weight",
+      "target": "model.language_model.layers.5.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_k.weight",
+      "target": "model.language_model.layers.6.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_k_norm.weight",
+      "target": "model.language_model.layers.6.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_norm.weight",
+      "target": "model.language_model.layers.6.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_output.weight",
+      "target": "model.language_model.layers.6.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_q.weight",
+      "target": "model.language_model.layers.6.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_q_norm.weight",
+      "target": "model.language_model.layers.6.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.attn_v.weight",
+      "target": "model.language_model.layers.6.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.ffn_down.weight",
+      "target": "model.language_model.layers.6.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.ffn_gate.weight",
+      "target": "model.language_model.layers.6.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.ffn_norm.weight",
+      "target": "model.language_model.layers.6.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.ffn_up.weight",
+      "target": "model.language_model.layers.6.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.inp_gate.weight",
+      "target": "model.language_model.layers.6.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.layer_output_scale.weight",
+      "target": "model.language_model.layers.6.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.post_attention_norm.weight",
+      "target": "model.language_model.layers.6.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.post_ffw_norm.weight",
+      "target": "model.language_model.layers.6.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.post_norm.weight",
+      "target": "model.language_model.layers.6.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.6.proj.weight",
+      "target": "model.language_model.layers.6.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_k.weight",
+      "target": "model.language_model.layers.7.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_k_norm.weight",
+      "target": "model.language_model.layers.7.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_norm.weight",
+      "target": "model.language_model.layers.7.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_output.weight",
+      "target": "model.language_model.layers.7.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_q.weight",
+      "target": "model.language_model.layers.7.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_q_norm.weight",
+      "target": "model.language_model.layers.7.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.attn_v.weight",
+      "target": "model.language_model.layers.7.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.ffn_down.weight",
+      "target": "model.language_model.layers.7.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.ffn_gate.weight",
+      "target": "model.language_model.layers.7.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.ffn_norm.weight",
+      "target": "model.language_model.layers.7.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.ffn_up.weight",
+      "target": "model.language_model.layers.7.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.inp_gate.weight",
+      "target": "model.language_model.layers.7.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.layer_output_scale.weight",
+      "target": "model.language_model.layers.7.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.post_attention_norm.weight",
+      "target": "model.language_model.layers.7.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.post_ffw_norm.weight",
+      "target": "model.language_model.layers.7.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.post_norm.weight",
+      "target": "model.language_model.layers.7.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.7.proj.weight",
+      "target": "model.language_model.layers.7.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_k.weight",
+      "target": "model.language_model.layers.8.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_k_norm.weight",
+      "target": "model.language_model.layers.8.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_norm.weight",
+      "target": "model.language_model.layers.8.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_output.weight",
+      "target": "model.language_model.layers.8.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_q.weight",
+      "target": "model.language_model.layers.8.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_q_norm.weight",
+      "target": "model.language_model.layers.8.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.attn_v.weight",
+      "target": "model.language_model.layers.8.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.ffn_down.weight",
+      "target": "model.language_model.layers.8.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.ffn_gate.weight",
+      "target": "model.language_model.layers.8.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.ffn_norm.weight",
+      "target": "model.language_model.layers.8.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.ffn_up.weight",
+      "target": "model.language_model.layers.8.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.inp_gate.weight",
+      "target": "model.language_model.layers.8.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.layer_output_scale.weight",
+      "target": "model.language_model.layers.8.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.post_attention_norm.weight",
+      "target": "model.language_model.layers.8.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.post_ffw_norm.weight",
+      "target": "model.language_model.layers.8.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.post_norm.weight",
+      "target": "model.language_model.layers.8.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.8.proj.weight",
+      "target": "model.language_model.layers.8.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_k.weight",
+      "target": "model.language_model.layers.9.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_k_norm.weight",
+      "target": "model.language_model.layers.9.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_norm.weight",
+      "target": "model.language_model.layers.9.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_output.weight",
+      "target": "model.language_model.layers.9.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_q.weight",
+      "target": "model.language_model.layers.9.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_q_norm.weight",
+      "target": "model.language_model.layers.9.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.attn_v.weight",
+      "target": "model.language_model.layers.9.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.ffn_down.weight",
+      "target": "model.language_model.layers.9.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.ffn_gate.weight",
+      "target": "model.language_model.layers.9.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.ffn_norm.weight",
+      "target": "model.language_model.layers.9.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.ffn_up.weight",
+      "target": "model.language_model.layers.9.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.inp_gate.weight",
+      "target": "model.language_model.layers.9.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.layer_output_scale.weight",
+      "target": "model.language_model.layers.9.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.post_attention_norm.weight",
+      "target": "model.language_model.layers.9.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.post_ffw_norm.weight",
+      "target": "model.language_model.layers.9.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.post_norm.weight",
+      "target": "model.language_model.layers.9.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.9.proj.weight",
+      "target": "model.language_model.layers.9.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_k.weight",
+      "target": "model.language_model.layers.10.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_k_norm.weight",
+      "target": "model.language_model.layers.10.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_norm.weight",
+      "target": "model.language_model.layers.10.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_output.weight",
+      "target": "model.language_model.layers.10.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_q.weight",
+      "target": "model.language_model.layers.10.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_q_norm.weight",
+      "target": "model.language_model.layers.10.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.attn_v.weight",
+      "target": "model.language_model.layers.10.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.ffn_down.weight",
+      "target": "model.language_model.layers.10.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.ffn_gate.weight",
+      "target": "model.language_model.layers.10.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.ffn_norm.weight",
+      "target": "model.language_model.layers.10.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.ffn_up.weight",
+      "target": "model.language_model.layers.10.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.inp_gate.weight",
+      "target": "model.language_model.layers.10.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.layer_output_scale.weight",
+      "target": "model.language_model.layers.10.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.post_attention_norm.weight",
+      "target": "model.language_model.layers.10.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.post_ffw_norm.weight",
+      "target": "model.language_model.layers.10.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.post_norm.weight",
+      "target": "model.language_model.layers.10.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.10.proj.weight",
+      "target": "model.language_model.layers.10.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_k.weight",
+      "target": "model.language_model.layers.11.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_k_norm.weight",
+      "target": "model.language_model.layers.11.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_norm.weight",
+      "target": "model.language_model.layers.11.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_output.weight",
+      "target": "model.language_model.layers.11.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_q.weight",
+      "target": "model.language_model.layers.11.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_q_norm.weight",
+      "target": "model.language_model.layers.11.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.attn_v.weight",
+      "target": "model.language_model.layers.11.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.ffn_down.weight",
+      "target": "model.language_model.layers.11.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.ffn_gate.weight",
+      "target": "model.language_model.layers.11.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.ffn_norm.weight",
+      "target": "model.language_model.layers.11.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.ffn_up.weight",
+      "target": "model.language_model.layers.11.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.inp_gate.weight",
+      "target": "model.language_model.layers.11.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.layer_output_scale.weight",
+      "target": "model.language_model.layers.11.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.post_attention_norm.weight",
+      "target": "model.language_model.layers.11.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.post_ffw_norm.weight",
+      "target": "model.language_model.layers.11.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.post_norm.weight",
+      "target": "model.language_model.layers.11.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.11.proj.weight",
+      "target": "model.language_model.layers.11.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_k.weight",
+      "target": "model.language_model.layers.12.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_k_norm.weight",
+      "target": "model.language_model.layers.12.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_norm.weight",
+      "target": "model.language_model.layers.12.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_output.weight",
+      "target": "model.language_model.layers.12.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_q.weight",
+      "target": "model.language_model.layers.12.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_q_norm.weight",
+      "target": "model.language_model.layers.12.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.attn_v.weight",
+      "target": "model.language_model.layers.12.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.ffn_down.weight",
+      "target": "model.language_model.layers.12.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.ffn_gate.weight",
+      "target": "model.language_model.layers.12.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.ffn_norm.weight",
+      "target": "model.language_model.layers.12.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.ffn_up.weight",
+      "target": "model.language_model.layers.12.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.inp_gate.weight",
+      "target": "model.language_model.layers.12.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.layer_output_scale.weight",
+      "target": "model.language_model.layers.12.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.post_attention_norm.weight",
+      "target": "model.language_model.layers.12.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.post_ffw_norm.weight",
+      "target": "model.language_model.layers.12.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.post_norm.weight",
+      "target": "model.language_model.layers.12.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.12.proj.weight",
+      "target": "model.language_model.layers.12.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_k.weight",
+      "target": "model.language_model.layers.13.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_k_norm.weight",
+      "target": "model.language_model.layers.13.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_norm.weight",
+      "target": "model.language_model.layers.13.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_output.weight",
+      "target": "model.language_model.layers.13.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_q.weight",
+      "target": "model.language_model.layers.13.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_q_norm.weight",
+      "target": "model.language_model.layers.13.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.attn_v.weight",
+      "target": "model.language_model.layers.13.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.ffn_down.weight",
+      "target": "model.language_model.layers.13.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.ffn_gate.weight",
+      "target": "model.language_model.layers.13.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.ffn_norm.weight",
+      "target": "model.language_model.layers.13.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.ffn_up.weight",
+      "target": "model.language_model.layers.13.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.inp_gate.weight",
+      "target": "model.language_model.layers.13.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.layer_output_scale.weight",
+      "target": "model.language_model.layers.13.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.post_attention_norm.weight",
+      "target": "model.language_model.layers.13.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.post_ffw_norm.weight",
+      "target": "model.language_model.layers.13.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.post_norm.weight",
+      "target": "model.language_model.layers.13.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.13.proj.weight",
+      "target": "model.language_model.layers.13.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_k.weight",
+      "target": "model.language_model.layers.14.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_k_norm.weight",
+      "target": "model.language_model.layers.14.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_norm.weight",
+      "target": "model.language_model.layers.14.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_output.weight",
+      "target": "model.language_model.layers.14.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_q.weight",
+      "target": "model.language_model.layers.14.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_q_norm.weight",
+      "target": "model.language_model.layers.14.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.attn_v.weight",
+      "target": "model.language_model.layers.14.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.ffn_down.weight",
+      "target": "model.language_model.layers.14.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.ffn_gate.weight",
+      "target": "model.language_model.layers.14.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.ffn_norm.weight",
+      "target": "model.language_model.layers.14.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.ffn_up.weight",
+      "target": "model.language_model.layers.14.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.inp_gate.weight",
+      "target": "model.language_model.layers.14.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.layer_output_scale.weight",
+      "target": "model.language_model.layers.14.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.post_attention_norm.weight",
+      "target": "model.language_model.layers.14.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.post_ffw_norm.weight",
+      "target": "model.language_model.layers.14.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.post_norm.weight",
+      "target": "model.language_model.layers.14.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.14.proj.weight",
+      "target": "model.language_model.layers.14.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_k.weight",
+      "target": "model.language_model.layers.15.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_k_norm.weight",
+      "target": "model.language_model.layers.15.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_norm.weight",
+      "target": "model.language_model.layers.15.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_output.weight",
+      "target": "model.language_model.layers.15.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_q.weight",
+      "target": "model.language_model.layers.15.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_q_norm.weight",
+      "target": "model.language_model.layers.15.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.attn_v.weight",
+      "target": "model.language_model.layers.15.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.ffn_down.weight",
+      "target": "model.language_model.layers.15.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.ffn_gate.weight",
+      "target": "model.language_model.layers.15.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.ffn_norm.weight",
+      "target": "model.language_model.layers.15.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.ffn_up.weight",
+      "target": "model.language_model.layers.15.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.inp_gate.weight",
+      "target": "model.language_model.layers.15.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.layer_output_scale.weight",
+      "target": "model.language_model.layers.15.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.post_attention_norm.weight",
+      "target": "model.language_model.layers.15.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.post_ffw_norm.weight",
+      "target": "model.language_model.layers.15.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.post_norm.weight",
+      "target": "model.language_model.layers.15.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.15.proj.weight",
+      "target": "model.language_model.layers.15.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_k.weight",
+      "target": "model.language_model.layers.16.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_k_norm.weight",
+      "target": "model.language_model.layers.16.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_norm.weight",
+      "target": "model.language_model.layers.16.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_output.weight",
+      "target": "model.language_model.layers.16.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_q.weight",
+      "target": "model.language_model.layers.16.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_q_norm.weight",
+      "target": "model.language_model.layers.16.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.attn_v.weight",
+      "target": "model.language_model.layers.16.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.ffn_down.weight",
+      "target": "model.language_model.layers.16.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.ffn_gate.weight",
+      "target": "model.language_model.layers.16.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.ffn_norm.weight",
+      "target": "model.language_model.layers.16.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.ffn_up.weight",
+      "target": "model.language_model.layers.16.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.inp_gate.weight",
+      "target": "model.language_model.layers.16.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.layer_output_scale.weight",
+      "target": "model.language_model.layers.16.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.post_attention_norm.weight",
+      "target": "model.language_model.layers.16.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.post_ffw_norm.weight",
+      "target": "model.language_model.layers.16.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.post_norm.weight",
+      "target": "model.language_model.layers.16.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.16.proj.weight",
+      "target": "model.language_model.layers.16.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_k.weight",
+      "target": "model.language_model.layers.17.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_k_norm.weight",
+      "target": "model.language_model.layers.17.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_norm.weight",
+      "target": "model.language_model.layers.17.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_output.weight",
+      "target": "model.language_model.layers.17.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_q.weight",
+      "target": "model.language_model.layers.17.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_q_norm.weight",
+      "target": "model.language_model.layers.17.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.attn_v.weight",
+      "target": "model.language_model.layers.17.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.ffn_down.weight",
+      "target": "model.language_model.layers.17.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.ffn_gate.weight",
+      "target": "model.language_model.layers.17.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.ffn_norm.weight",
+      "target": "model.language_model.layers.17.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.ffn_up.weight",
+      "target": "model.language_model.layers.17.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.inp_gate.weight",
+      "target": "model.language_model.layers.17.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.layer_output_scale.weight",
+      "target": "model.language_model.layers.17.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.post_attention_norm.weight",
+      "target": "model.language_model.layers.17.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.post_ffw_norm.weight",
+      "target": "model.language_model.layers.17.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.post_norm.weight",
+      "target": "model.language_model.layers.17.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.17.proj.weight",
+      "target": "model.language_model.layers.17.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_k.weight",
+      "target": "model.language_model.layers.18.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_k_norm.weight",
+      "target": "model.language_model.layers.18.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_norm.weight",
+      "target": "model.language_model.layers.18.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_output.weight",
+      "target": "model.language_model.layers.18.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_q.weight",
+      "target": "model.language_model.layers.18.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_q_norm.weight",
+      "target": "model.language_model.layers.18.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.attn_v.weight",
+      "target": "model.language_model.layers.18.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.ffn_down.weight",
+      "target": "model.language_model.layers.18.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.ffn_gate.weight",
+      "target": "model.language_model.layers.18.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.ffn_norm.weight",
+      "target": "model.language_model.layers.18.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.ffn_up.weight",
+      "target": "model.language_model.layers.18.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.inp_gate.weight",
+      "target": "model.language_model.layers.18.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.layer_output_scale.weight",
+      "target": "model.language_model.layers.18.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.post_attention_norm.weight",
+      "target": "model.language_model.layers.18.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.post_ffw_norm.weight",
+      "target": "model.language_model.layers.18.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.post_norm.weight",
+      "target": "model.language_model.layers.18.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.18.proj.weight",
+      "target": "model.language_model.layers.18.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_k.weight",
+      "target": "model.language_model.layers.19.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_k_norm.weight",
+      "target": "model.language_model.layers.19.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_norm.weight",
+      "target": "model.language_model.layers.19.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_output.weight",
+      "target": "model.language_model.layers.19.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_q.weight",
+      "target": "model.language_model.layers.19.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_q_norm.weight",
+      "target": "model.language_model.layers.19.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.attn_v.weight",
+      "target": "model.language_model.layers.19.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.ffn_down.weight",
+      "target": "model.language_model.layers.19.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.ffn_gate.weight",
+      "target": "model.language_model.layers.19.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.ffn_norm.weight",
+      "target": "model.language_model.layers.19.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.ffn_up.weight",
+      "target": "model.language_model.layers.19.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.inp_gate.weight",
+      "target": "model.language_model.layers.19.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.layer_output_scale.weight",
+      "target": "model.language_model.layers.19.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.post_attention_norm.weight",
+      "target": "model.language_model.layers.19.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.post_ffw_norm.weight",
+      "target": "model.language_model.layers.19.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.post_norm.weight",
+      "target": "model.language_model.layers.19.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.19.proj.weight",
+      "target": "model.language_model.layers.19.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_k.weight",
+      "target": "model.language_model.layers.20.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_k_norm.weight",
+      "target": "model.language_model.layers.20.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_norm.weight",
+      "target": "model.language_model.layers.20.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_output.weight",
+      "target": "model.language_model.layers.20.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_q.weight",
+      "target": "model.language_model.layers.20.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_q_norm.weight",
+      "target": "model.language_model.layers.20.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.attn_v.weight",
+      "target": "model.language_model.layers.20.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.ffn_down.weight",
+      "target": "model.language_model.layers.20.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.ffn_gate.weight",
+      "target": "model.language_model.layers.20.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.ffn_norm.weight",
+      "target": "model.language_model.layers.20.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.ffn_up.weight",
+      "target": "model.language_model.layers.20.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.inp_gate.weight",
+      "target": "model.language_model.layers.20.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.layer_output_scale.weight",
+      "target": "model.language_model.layers.20.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.post_attention_norm.weight",
+      "target": "model.language_model.layers.20.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.post_ffw_norm.weight",
+      "target": "model.language_model.layers.20.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.post_norm.weight",
+      "target": "model.language_model.layers.20.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.20.proj.weight",
+      "target": "model.language_model.layers.20.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_k.weight",
+      "target": "model.language_model.layers.21.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_k_norm.weight",
+      "target": "model.language_model.layers.21.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_norm.weight",
+      "target": "model.language_model.layers.21.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_output.weight",
+      "target": "model.language_model.layers.21.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_q.weight",
+      "target": "model.language_model.layers.21.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_q_norm.weight",
+      "target": "model.language_model.layers.21.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.attn_v.weight",
+      "target": "model.language_model.layers.21.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.ffn_down.weight",
+      "target": "model.language_model.layers.21.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.ffn_gate.weight",
+      "target": "model.language_model.layers.21.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.ffn_norm.weight",
+      "target": "model.language_model.layers.21.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.ffn_up.weight",
+      "target": "model.language_model.layers.21.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.inp_gate.weight",
+      "target": "model.language_model.layers.21.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.layer_output_scale.weight",
+      "target": "model.language_model.layers.21.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.post_attention_norm.weight",
+      "target": "model.language_model.layers.21.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.post_ffw_norm.weight",
+      "target": "model.language_model.layers.21.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.post_norm.weight",
+      "target": "model.language_model.layers.21.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.21.proj.weight",
+      "target": "model.language_model.layers.21.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_k.weight",
+      "target": "model.language_model.layers.22.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_k_norm.weight",
+      "target": "model.language_model.layers.22.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_norm.weight",
+      "target": "model.language_model.layers.22.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_output.weight",
+      "target": "model.language_model.layers.22.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_q.weight",
+      "target": "model.language_model.layers.22.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_q_norm.weight",
+      "target": "model.language_model.layers.22.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.attn_v.weight",
+      "target": "model.language_model.layers.22.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.ffn_down.weight",
+      "target": "model.language_model.layers.22.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.ffn_gate.weight",
+      "target": "model.language_model.layers.22.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.ffn_norm.weight",
+      "target": "model.language_model.layers.22.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.ffn_up.weight",
+      "target": "model.language_model.layers.22.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.inp_gate.weight",
+      "target": "model.language_model.layers.22.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.layer_output_scale.weight",
+      "target": "model.language_model.layers.22.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.post_attention_norm.weight",
+      "target": "model.language_model.layers.22.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.post_ffw_norm.weight",
+      "target": "model.language_model.layers.22.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.post_norm.weight",
+      "target": "model.language_model.layers.22.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.22.proj.weight",
+      "target": "model.language_model.layers.22.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_k.weight",
+      "target": "model.language_model.layers.23.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_k_norm.weight",
+      "target": "model.language_model.layers.23.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_norm.weight",
+      "target": "model.language_model.layers.23.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_output.weight",
+      "target": "model.language_model.layers.23.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_q.weight",
+      "target": "model.language_model.layers.23.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_q_norm.weight",
+      "target": "model.language_model.layers.23.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.attn_v.weight",
+      "target": "model.language_model.layers.23.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.ffn_down.weight",
+      "target": "model.language_model.layers.23.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.ffn_gate.weight",
+      "target": "model.language_model.layers.23.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.ffn_norm.weight",
+      "target": "model.language_model.layers.23.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.ffn_up.weight",
+      "target": "model.language_model.layers.23.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.inp_gate.weight",
+      "target": "model.language_model.layers.23.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.layer_output_scale.weight",
+      "target": "model.language_model.layers.23.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.post_attention_norm.weight",
+      "target": "model.language_model.layers.23.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.post_ffw_norm.weight",
+      "target": "model.language_model.layers.23.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.post_norm.weight",
+      "target": "model.language_model.layers.23.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.23.proj.weight",
+      "target": "model.language_model.layers.23.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_k.weight",
+      "target": "model.language_model.layers.24.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_k_norm.weight",
+      "target": "model.language_model.layers.24.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_norm.weight",
+      "target": "model.language_model.layers.24.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_output.weight",
+      "target": "model.language_model.layers.24.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_q.weight",
+      "target": "model.language_model.layers.24.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_q_norm.weight",
+      "target": "model.language_model.layers.24.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.attn_v.weight",
+      "target": "model.language_model.layers.24.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.ffn_down.weight",
+      "target": "model.language_model.layers.24.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.ffn_gate.weight",
+      "target": "model.language_model.layers.24.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.ffn_norm.weight",
+      "target": "model.language_model.layers.24.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.ffn_up.weight",
+      "target": "model.language_model.layers.24.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.inp_gate.weight",
+      "target": "model.language_model.layers.24.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.layer_output_scale.weight",
+      "target": "model.language_model.layers.24.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.post_attention_norm.weight",
+      "target": "model.language_model.layers.24.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.post_ffw_norm.weight",
+      "target": "model.language_model.layers.24.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.post_norm.weight",
+      "target": "model.language_model.layers.24.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.24.proj.weight",
+      "target": "model.language_model.layers.24.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_k.weight",
+      "target": "model.language_model.layers.25.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_k_norm.weight",
+      "target": "model.language_model.layers.25.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_norm.weight",
+      "target": "model.language_model.layers.25.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_output.weight",
+      "target": "model.language_model.layers.25.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_q.weight",
+      "target": "model.language_model.layers.25.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_q_norm.weight",
+      "target": "model.language_model.layers.25.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.attn_v.weight",
+      "target": "model.language_model.layers.25.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.ffn_down.weight",
+      "target": "model.language_model.layers.25.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.ffn_gate.weight",
+      "target": "model.language_model.layers.25.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.ffn_norm.weight",
+      "target": "model.language_model.layers.25.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.ffn_up.weight",
+      "target": "model.language_model.layers.25.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.inp_gate.weight",
+      "target": "model.language_model.layers.25.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.layer_output_scale.weight",
+      "target": "model.language_model.layers.25.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.post_attention_norm.weight",
+      "target": "model.language_model.layers.25.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.post_ffw_norm.weight",
+      "target": "model.language_model.layers.25.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.post_norm.weight",
+      "target": "model.language_model.layers.25.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.25.proj.weight",
+      "target": "model.language_model.layers.25.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_k.weight",
+      "target": "model.language_model.layers.26.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_k_norm.weight",
+      "target": "model.language_model.layers.26.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_norm.weight",
+      "target": "model.language_model.layers.26.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_output.weight",
+      "target": "model.language_model.layers.26.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_q.weight",
+      "target": "model.language_model.layers.26.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_q_norm.weight",
+      "target": "model.language_model.layers.26.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.attn_v.weight",
+      "target": "model.language_model.layers.26.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.ffn_down.weight",
+      "target": "model.language_model.layers.26.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.ffn_gate.weight",
+      "target": "model.language_model.layers.26.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.ffn_norm.weight",
+      "target": "model.language_model.layers.26.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.ffn_up.weight",
+      "target": "model.language_model.layers.26.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.inp_gate.weight",
+      "target": "model.language_model.layers.26.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.layer_output_scale.weight",
+      "target": "model.language_model.layers.26.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.post_attention_norm.weight",
+      "target": "model.language_model.layers.26.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.post_ffw_norm.weight",
+      "target": "model.language_model.layers.26.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.post_norm.weight",
+      "target": "model.language_model.layers.26.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.26.proj.weight",
+      "target": "model.language_model.layers.26.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_k.weight",
+      "target": "model.language_model.layers.27.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_k_norm.weight",
+      "target": "model.language_model.layers.27.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_norm.weight",
+      "target": "model.language_model.layers.27.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_output.weight",
+      "target": "model.language_model.layers.27.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_q.weight",
+      "target": "model.language_model.layers.27.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_q_norm.weight",
+      "target": "model.language_model.layers.27.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.attn_v.weight",
+      "target": "model.language_model.layers.27.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.ffn_down.weight",
+      "target": "model.language_model.layers.27.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.ffn_gate.weight",
+      "target": "model.language_model.layers.27.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.ffn_norm.weight",
+      "target": "model.language_model.layers.27.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.ffn_up.weight",
+      "target": "model.language_model.layers.27.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.inp_gate.weight",
+      "target": "model.language_model.layers.27.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.layer_output_scale.weight",
+      "target": "model.language_model.layers.27.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.post_attention_norm.weight",
+      "target": "model.language_model.layers.27.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.post_ffw_norm.weight",
+      "target": "model.language_model.layers.27.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.post_norm.weight",
+      "target": "model.language_model.layers.27.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.27.proj.weight",
+      "target": "model.language_model.layers.27.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_k.weight",
+      "target": "model.language_model.layers.28.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_k_norm.weight",
+      "target": "model.language_model.layers.28.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_norm.weight",
+      "target": "model.language_model.layers.28.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_output.weight",
+      "target": "model.language_model.layers.28.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_q.weight",
+      "target": "model.language_model.layers.28.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_q_norm.weight",
+      "target": "model.language_model.layers.28.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.attn_v.weight",
+      "target": "model.language_model.layers.28.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.ffn_down.weight",
+      "target": "model.language_model.layers.28.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.ffn_gate.weight",
+      "target": "model.language_model.layers.28.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.ffn_norm.weight",
+      "target": "model.language_model.layers.28.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.ffn_up.weight",
+      "target": "model.language_model.layers.28.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.inp_gate.weight",
+      "target": "model.language_model.layers.28.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.layer_output_scale.weight",
+      "target": "model.language_model.layers.28.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.post_attention_norm.weight",
+      "target": "model.language_model.layers.28.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.post_ffw_norm.weight",
+      "target": "model.language_model.layers.28.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.post_norm.weight",
+      "target": "model.language_model.layers.28.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.28.proj.weight",
+      "target": "model.language_model.layers.28.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_k.weight",
+      "target": "model.language_model.layers.29.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_k_norm.weight",
+      "target": "model.language_model.layers.29.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_norm.weight",
+      "target": "model.language_model.layers.29.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_output.weight",
+      "target": "model.language_model.layers.29.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_q.weight",
+      "target": "model.language_model.layers.29.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_q_norm.weight",
+      "target": "model.language_model.layers.29.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.attn_v.weight",
+      "target": "model.language_model.layers.29.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.ffn_down.weight",
+      "target": "model.language_model.layers.29.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.ffn_gate.weight",
+      "target": "model.language_model.layers.29.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.ffn_norm.weight",
+      "target": "model.language_model.layers.29.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.ffn_up.weight",
+      "target": "model.language_model.layers.29.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.inp_gate.weight",
+      "target": "model.language_model.layers.29.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.layer_output_scale.weight",
+      "target": "model.language_model.layers.29.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.post_attention_norm.weight",
+      "target": "model.language_model.layers.29.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.post_ffw_norm.weight",
+      "target": "model.language_model.layers.29.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.post_norm.weight",
+      "target": "model.language_model.layers.29.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.29.proj.weight",
+      "target": "model.language_model.layers.29.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_k.weight",
+      "target": "model.language_model.layers.30.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_k_norm.weight",
+      "target": "model.language_model.layers.30.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_norm.weight",
+      "target": "model.language_model.layers.30.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_output.weight",
+      "target": "model.language_model.layers.30.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_q.weight",
+      "target": "model.language_model.layers.30.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_q_norm.weight",
+      "target": "model.language_model.layers.30.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.attn_v.weight",
+      "target": "model.language_model.layers.30.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.ffn_down.weight",
+      "target": "model.language_model.layers.30.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.ffn_gate.weight",
+      "target": "model.language_model.layers.30.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.ffn_norm.weight",
+      "target": "model.language_model.layers.30.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.ffn_up.weight",
+      "target": "model.language_model.layers.30.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.inp_gate.weight",
+      "target": "model.language_model.layers.30.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.layer_output_scale.weight",
+      "target": "model.language_model.layers.30.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.post_attention_norm.weight",
+      "target": "model.language_model.layers.30.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.post_ffw_norm.weight",
+      "target": "model.language_model.layers.30.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.post_norm.weight",
+      "target": "model.language_model.layers.30.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.30.proj.weight",
+      "target": "model.language_model.layers.30.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_k.weight",
+      "target": "model.language_model.layers.31.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_k_norm.weight",
+      "target": "model.language_model.layers.31.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_norm.weight",
+      "target": "model.language_model.layers.31.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_output.weight",
+      "target": "model.language_model.layers.31.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_q.weight",
+      "target": "model.language_model.layers.31.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_q_norm.weight",
+      "target": "model.language_model.layers.31.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.attn_v.weight",
+      "target": "model.language_model.layers.31.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.ffn_down.weight",
+      "target": "model.language_model.layers.31.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.ffn_gate.weight",
+      "target": "model.language_model.layers.31.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.ffn_norm.weight",
+      "target": "model.language_model.layers.31.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.ffn_up.weight",
+      "target": "model.language_model.layers.31.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.inp_gate.weight",
+      "target": "model.language_model.layers.31.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.layer_output_scale.weight",
+      "target": "model.language_model.layers.31.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.post_attention_norm.weight",
+      "target": "model.language_model.layers.31.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.post_ffw_norm.weight",
+      "target": "model.language_model.layers.31.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.post_norm.weight",
+      "target": "model.language_model.layers.31.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.31.proj.weight",
+      "target": "model.language_model.layers.31.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_k.weight",
+      "target": "model.language_model.layers.32.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_k_norm.weight",
+      "target": "model.language_model.layers.32.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_norm.weight",
+      "target": "model.language_model.layers.32.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_output.weight",
+      "target": "model.language_model.layers.32.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_q.weight",
+      "target": "model.language_model.layers.32.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_q_norm.weight",
+      "target": "model.language_model.layers.32.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.attn_v.weight",
+      "target": "model.language_model.layers.32.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.ffn_down.weight",
+      "target": "model.language_model.layers.32.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.ffn_gate.weight",
+      "target": "model.language_model.layers.32.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.ffn_norm.weight",
+      "target": "model.language_model.layers.32.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.ffn_up.weight",
+      "target": "model.language_model.layers.32.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.inp_gate.weight",
+      "target": "model.language_model.layers.32.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.layer_output_scale.weight",
+      "target": "model.language_model.layers.32.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.post_attention_norm.weight",
+      "target": "model.language_model.layers.32.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.post_ffw_norm.weight",
+      "target": "model.language_model.layers.32.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.post_norm.weight",
+      "target": "model.language_model.layers.32.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.32.proj.weight",
+      "target": "model.language_model.layers.32.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_k.weight",
+      "target": "model.language_model.layers.33.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_k_norm.weight",
+      "target": "model.language_model.layers.33.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_norm.weight",
+      "target": "model.language_model.layers.33.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_output.weight",
+      "target": "model.language_model.layers.33.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_q.weight",
+      "target": "model.language_model.layers.33.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_q_norm.weight",
+      "target": "model.language_model.layers.33.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.attn_v.weight",
+      "target": "model.language_model.layers.33.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.ffn_down.weight",
+      "target": "model.language_model.layers.33.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.ffn_gate.weight",
+      "target": "model.language_model.layers.33.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.ffn_norm.weight",
+      "target": "model.language_model.layers.33.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.ffn_up.weight",
+      "target": "model.language_model.layers.33.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.inp_gate.weight",
+      "target": "model.language_model.layers.33.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.layer_output_scale.weight",
+      "target": "model.language_model.layers.33.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.post_attention_norm.weight",
+      "target": "model.language_model.layers.33.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.post_ffw_norm.weight",
+      "target": "model.language_model.layers.33.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.post_norm.weight",
+      "target": "model.language_model.layers.33.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.33.proj.weight",
+      "target": "model.language_model.layers.33.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_k.weight",
+      "target": "model.language_model.layers.34.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_k_norm.weight",
+      "target": "model.language_model.layers.34.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_norm.weight",
+      "target": "model.language_model.layers.34.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_output.weight",
+      "target": "model.language_model.layers.34.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_q.weight",
+      "target": "model.language_model.layers.34.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_q_norm.weight",
+      "target": "model.language_model.layers.34.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.attn_v.weight",
+      "target": "model.language_model.layers.34.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.ffn_down.weight",
+      "target": "model.language_model.layers.34.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.ffn_gate.weight",
+      "target": "model.language_model.layers.34.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.ffn_norm.weight",
+      "target": "model.language_model.layers.34.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.ffn_up.weight",
+      "target": "model.language_model.layers.34.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.inp_gate.weight",
+      "target": "model.language_model.layers.34.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.layer_output_scale.weight",
+      "target": "model.language_model.layers.34.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.post_attention_norm.weight",
+      "target": "model.language_model.layers.34.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.post_ffw_norm.weight",
+      "target": "model.language_model.layers.34.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.post_norm.weight",
+      "target": "model.language_model.layers.34.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.34.proj.weight",
+      "target": "model.language_model.layers.34.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_k.weight",
+      "target": "model.language_model.layers.35.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_k_norm.weight",
+      "target": "model.language_model.layers.35.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_norm.weight",
+      "target": "model.language_model.layers.35.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_output.weight",
+      "target": "model.language_model.layers.35.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_q.weight",
+      "target": "model.language_model.layers.35.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_q_norm.weight",
+      "target": "model.language_model.layers.35.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.attn_v.weight",
+      "target": "model.language_model.layers.35.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.ffn_down.weight",
+      "target": "model.language_model.layers.35.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.ffn_gate.weight",
+      "target": "model.language_model.layers.35.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.ffn_norm.weight",
+      "target": "model.language_model.layers.35.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.ffn_up.weight",
+      "target": "model.language_model.layers.35.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.inp_gate.weight",
+      "target": "model.language_model.layers.35.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.layer_output_scale.weight",
+      "target": "model.language_model.layers.35.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.post_attention_norm.weight",
+      "target": "model.language_model.layers.35.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.post_ffw_norm.weight",
+      "target": "model.language_model.layers.35.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.post_norm.weight",
+      "target": "model.language_model.layers.35.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.35.proj.weight",
+      "target": "model.language_model.layers.35.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_k.weight",
+      "target": "model.language_model.layers.36.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_k_norm.weight",
+      "target": "model.language_model.layers.36.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_norm.weight",
+      "target": "model.language_model.layers.36.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_output.weight",
+      "target": "model.language_model.layers.36.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_q.weight",
+      "target": "model.language_model.layers.36.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_q_norm.weight",
+      "target": "model.language_model.layers.36.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.attn_v.weight",
+      "target": "model.language_model.layers.36.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.ffn_down.weight",
+      "target": "model.language_model.layers.36.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.ffn_gate.weight",
+      "target": "model.language_model.layers.36.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.ffn_norm.weight",
+      "target": "model.language_model.layers.36.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.ffn_up.weight",
+      "target": "model.language_model.layers.36.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.inp_gate.weight",
+      "target": "model.language_model.layers.36.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.layer_output_scale.weight",
+      "target": "model.language_model.layers.36.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.post_attention_norm.weight",
+      "target": "model.language_model.layers.36.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.post_ffw_norm.weight",
+      "target": "model.language_model.layers.36.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.post_norm.weight",
+      "target": "model.language_model.layers.36.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.36.proj.weight",
+      "target": "model.language_model.layers.36.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_k.weight",
+      "target": "model.language_model.layers.37.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_k_norm.weight",
+      "target": "model.language_model.layers.37.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_norm.weight",
+      "target": "model.language_model.layers.37.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_output.weight",
+      "target": "model.language_model.layers.37.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_q.weight",
+      "target": "model.language_model.layers.37.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_q_norm.weight",
+      "target": "model.language_model.layers.37.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.attn_v.weight",
+      "target": "model.language_model.layers.37.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.ffn_down.weight",
+      "target": "model.language_model.layers.37.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.ffn_gate.weight",
+      "target": "model.language_model.layers.37.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.ffn_norm.weight",
+      "target": "model.language_model.layers.37.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.ffn_up.weight",
+      "target": "model.language_model.layers.37.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.inp_gate.weight",
+      "target": "model.language_model.layers.37.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.layer_output_scale.weight",
+      "target": "model.language_model.layers.37.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.post_attention_norm.weight",
+      "target": "model.language_model.layers.37.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.post_ffw_norm.weight",
+      "target": "model.language_model.layers.37.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.post_norm.weight",
+      "target": "model.language_model.layers.37.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.37.proj.weight",
+      "target": "model.language_model.layers.37.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_k.weight",
+      "target": "model.language_model.layers.38.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_k_norm.weight",
+      "target": "model.language_model.layers.38.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_norm.weight",
+      "target": "model.language_model.layers.38.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_output.weight",
+      "target": "model.language_model.layers.38.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_q.weight",
+      "target": "model.language_model.layers.38.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_q_norm.weight",
+      "target": "model.language_model.layers.38.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.attn_v.weight",
+      "target": "model.language_model.layers.38.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.ffn_down.weight",
+      "target": "model.language_model.layers.38.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.ffn_gate.weight",
+      "target": "model.language_model.layers.38.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.ffn_norm.weight",
+      "target": "model.language_model.layers.38.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.ffn_up.weight",
+      "target": "model.language_model.layers.38.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.inp_gate.weight",
+      "target": "model.language_model.layers.38.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.layer_output_scale.weight",
+      "target": "model.language_model.layers.38.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.post_attention_norm.weight",
+      "target": "model.language_model.layers.38.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.post_ffw_norm.weight",
+      "target": "model.language_model.layers.38.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.post_norm.weight",
+      "target": "model.language_model.layers.38.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.38.proj.weight",
+      "target": "model.language_model.layers.38.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_k.weight",
+      "target": "model.language_model.layers.39.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_k_norm.weight",
+      "target": "model.language_model.layers.39.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_norm.weight",
+      "target": "model.language_model.layers.39.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_output.weight",
+      "target": "model.language_model.layers.39.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_q.weight",
+      "target": "model.language_model.layers.39.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_q_norm.weight",
+      "target": "model.language_model.layers.39.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.attn_v.weight",
+      "target": "model.language_model.layers.39.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.ffn_down.weight",
+      "target": "model.language_model.layers.39.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.ffn_gate.weight",
+      "target": "model.language_model.layers.39.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.ffn_norm.weight",
+      "target": "model.language_model.layers.39.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.ffn_up.weight",
+      "target": "model.language_model.layers.39.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.inp_gate.weight",
+      "target": "model.language_model.layers.39.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.layer_output_scale.weight",
+      "target": "model.language_model.layers.39.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.post_attention_norm.weight",
+      "target": "model.language_model.layers.39.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.post_ffw_norm.weight",
+      "target": "model.language_model.layers.39.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.post_norm.weight",
+      "target": "model.language_model.layers.39.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.39.proj.weight",
+      "target": "model.language_model.layers.39.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_k.weight",
+      "target": "model.language_model.layers.40.self_attn.k_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_k_norm.weight",
+      "target": "model.language_model.layers.40.self_attn.k_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_norm.weight",
+      "target": "model.language_model.layers.40.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_output.weight",
+      "target": "model.language_model.layers.40.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        2048
+      ],
+      "expected_shape": [
+        2560,
+        2048
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_q.weight",
+      "target": "model.language_model.layers.40.self_attn.q_proj.weight",
+      "shape": [
+        2048,
+        2560
+      ],
+      "expected_shape": [
+        2048,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_q_norm.weight",
+      "target": "model.language_model.layers.40.self_attn.q_norm.weight",
+      "shape": [
+        256
+      ],
+      "expected_shape": [
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.attn_v.weight",
+      "target": "model.language_model.layers.40.self_attn.v_proj.weight",
+      "shape": [
+        512,
+        2560
+      ],
+      "expected_shape": [
+        512,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.ffn_down.weight",
+      "target": "model.language_model.layers.40.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.ffn_gate.weight",
+      "target": "model.language_model.layers.40.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.ffn_norm.weight",
+      "target": "model.language_model.layers.40.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.ffn_up.weight",
+      "target": "model.language_model.layers.40.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.inp_gate.weight",
+      "target": "model.language_model.layers.40.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.layer_output_scale.weight",
+      "target": "model.language_model.layers.40.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.post_attention_norm.weight",
+      "target": "model.language_model.layers.40.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.post_ffw_norm.weight",
+      "target": "model.language_model.layers.40.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.post_norm.weight",
+      "target": "model.language_model.layers.40.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.40.proj.weight",
+      "target": "model.language_model.layers.40.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_k.weight",
+      "target": "model.language_model.layers.41.self_attn.k_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_k_norm.weight",
+      "target": "model.language_model.layers.41.self_attn.k_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_norm.weight",
+      "target": "model.language_model.layers.41.input_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_output.weight",
+      "target": "model.language_model.layers.41.self_attn.o_proj.weight",
+      "shape": [
+        2560,
+        4096
+      ],
+      "expected_shape": [
+        2560,
+        4096
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_q.weight",
+      "target": "model.language_model.layers.41.self_attn.q_proj.weight",
+      "shape": [
+        4096,
+        2560
+      ],
+      "expected_shape": [
+        4096,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_q_norm.weight",
+      "target": "model.language_model.layers.41.self_attn.q_norm.weight",
+      "shape": [
+        512
+      ],
+      "expected_shape": [
+        512
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.attn_v.weight",
+      "target": "model.language_model.layers.41.self_attn.v_proj.weight",
+      "shape": [
+        1024,
+        2560
+      ],
+      "expected_shape": [
+        1024,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.ffn_down.weight",
+      "target": "model.language_model.layers.41.mlp.down_proj.weight",
+      "shape": [
+        2560,
+        10240
+      ],
+      "expected_shape": [
+        2560,
+        10240
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.ffn_gate.weight",
+      "target": "model.language_model.layers.41.mlp.gate_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.ffn_norm.weight",
+      "target": "model.language_model.layers.41.pre_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.ffn_up.weight",
+      "target": "model.language_model.layers.41.mlp.up_proj.weight",
+      "shape": [
+        10240,
+        2560
+      ],
+      "expected_shape": [
+        10240,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.inp_gate.weight",
+      "target": "model.language_model.layers.41.per_layer_input_gate.weight",
+      "shape": [
+        256,
+        2560
+      ],
+      "expected_shape": [
+        256,
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.layer_output_scale.weight",
+      "target": "model.language_model.layers.41.layer_scalar",
+      "shape": [
+        1
+      ],
+      "expected_shape": [
+        1
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.post_attention_norm.weight",
+      "target": "model.language_model.layers.41.post_attention_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.post_ffw_norm.weight",
+      "target": "model.language_model.layers.41.post_feedforward_layernorm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.post_norm.weight",
+      "target": "model.language_model.layers.41.post_per_layer_input_norm.weight",
+      "shape": [
+        2560
+      ],
+      "expected_shape": [
+        2560
+      ],
+      "passed": true
+    },
+    {
+      "tensor": "blk.41.proj.weight",
+      "target": "model.language_model.layers.41.per_layer_projection.weight",
+      "shape": [
+        2560,
+        256
+      ],
+      "expected_shape": [
+        2560,
+        256
+      ],
+      "passed": true
+    }
+  ]
+}

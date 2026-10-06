@@ -3,12 +3,12 @@
   "scope": "Add pinned GGUF dependency metadata; preserve every executable wheel member.",
   "plugins": [
     {
-      "wheel": "aimee_gemma4_e2b-0.3.2-3-cp312-cp312-linux_x86_64.whl",
-      "sha256": "fce3936772353eed603b5c4e34bd953cd9da2e813a71e65fc709c96b04699986",
+      "wheel": "aimee_gemma4_e2b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "aab9e90748151e6d700aaad1d60585bef055a35fab5b1c2b73098f0abdb4f4c0",
       "code_identical_to": "aimee_gemma4_e2b-0.3.2-cp312-cp312-linux_x86_64.whl",
-      "original_sha256": "969d5a0fd83e6eb2f59604db5b6c1241bdc646409122db997374a9bc2b25af0b",
+      "original_sha256": "992b9eb4382a9c0355c6193d8ebadd1313faf3dd5f633fd9bd8d420db0c48c0c",
       "code_member_sha256": {
-        "aimee_gemma4_e2b/__init__.py": "06e4de73d5b4dfa46c1cc86a7d80289d819b375e5aa209f7cacb5eade6db18f0",
+        "aimee_gemma4_e2b/__init__.py": "62f32c342cf26cb030e9f972cc8da63b698b9b816d1b7b3a18099e570a1bff4f",
         "aimee_gemma4_e2b/admission.py": "a580347854be5e768fabe2ddcf969065e9d077a53c3839c4c7ce2273f5125ab8",
         "aimee_gemma4_e2b/attention_capture.py": "82af3ec988b7c4adc7e2d02e6f23913a8bd6eb296d388f73bb2b25d9085f43c4",
         "aimee_gemma4_e2b/backend.py": "e922572c1157e73faba2aa9f6676d6ee6adb284402cdbdcf4805cb51f4180ac6",
@@ -30,7 +30,6 @@
         "aimee_gemma4_e2b/runtime_ops.py": "48932b5b255e93102a6090521c821b757034315c7b985dce72d96d86d97880bb",
         "aimee_gemma4_e2b/selection.py": "3cb1c302dc16cd3c501c8fdec2b8460a54c3feaa133fc4f98eadd076c3ed3054",
         "aimee_gemma4_e2b/small_model_capture.py": "acdc4a8fc44dd1e63b53f5e6f450ed53175e5425f120578b0ddda9038762e52f",
-        "aimee_gemma4_e2b/small_model_gguf.py": "53293401df3d0d5126895698aab59ed307908b574bba5c4c4f6037484652cd51",
         "aimee_gemma4_e2b/state.py": "c90dbb91cafe3d5f7ee2cf5a00827a2a94cefdbf94e6ebf442eee0bb0e8d6424",
         "aimee_gemma4_e2b/store.py": "7595a6b9868a550087c63b52e1a3efdea603df034aece3801db342556d66ee96",
         "aimee_gemma4_e2b/stream_completion.py": "3e08f69e4975208c2ed68dbf5f51419914c93a363924b2f11e3cf9f968f102d0",
@@ -41,12 +40,12 @@
       }
     },
     {
-      "wheel": "aimee_gemma4_e4b-0.3.2-3-cp312-cp312-linux_x86_64.whl",
-      "sha256": "5ef67b2d20ffcd3dadb711e2aa227c5ddca17996702c44b0fbde54722e955b07",
+      "wheel": "aimee_gemma4_e4b-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+      "sha256": "be890245b08e05cd2878dce3686e095699d5064a3f31d4f895745e3c9eb461d2",
       "code_identical_to": "aimee_gemma4_e4b-0.3.2-cp312-cp312-linux_x86_64.whl",
-      "original_sha256": "32c3ba9e82a9bdd2569fcca329513d6fedba6c8dfcb0f63727c96b1d061aa7eb",
+      "original_sha256": "783a7c76c4019508b07c636f9f539c3ef4670de8436503605ec0e437269bba3f",
       "code_member_sha256": {
-        "aimee_gemma4_e4b/__init__.py": "073de202693a5fad5ee0feeb8b6b8423f60784e1ebf1e516543d3d10e7a81683",
+        "aimee_gemma4_e4b/__init__.py": "9fa641c89efb4c3baf134c05547da14e769eeb2e5e9b7b60df19a8de0cd6ff74",
         "aimee_gemma4_e4b/admission.py": "a580347854be5e768fabe2ddcf969065e9d077a53c3839c4c7ce2273f5125ab8",
         "aimee_gemma4_e4b/attention_capture.py": "82af3ec988b7c4adc7e2d02e6f23913a8bd6eb296d388f73bb2b25d9085f43c4",
         "aimee_gemma4_e4b/backend.py": "e922572c1157e73faba2aa9f6676d6ee6adb284402cdbdcf4805cb51f4180ac6",
@@ -68,7 +67,6 @@
         "aimee_gemma4_e4b/runtime_ops.py": "48932b5b255e93102a6090521c821b757034315c7b985dce72d96d86d97880bb",
         "aimee_gemma4_e4b/selection.py": "3cb1c302dc16cd3c501c8fdec2b8460a54c3feaa133fc4f98eadd076c3ed3054",
         "aimee_gemma4_e4b/small_model_capture.py": "acdc4a8fc44dd1e63b53f5e6f450ed53175e5425f120578b0ddda9038762e52f",
-        "aimee_gemma4_e4b/small_model_gguf.py": "53293401df3d0d5126895698aab59ed307908b574bba5c4c4f6037484652cd51",
         "aimee_gemma4_e4b/state.py": "c90dbb91cafe3d5f7ee2cf5a00827a2a94cefdbf94e6ebf442eee0bb0e8d6424",
         "aimee_gemma4_e4b/store.py": "7595a6b9868a550087c63b52e1a3efdea603df034aece3801db342556d66ee96",
         "aimee_gemma4_e4b/stream_completion.py": "3e08f69e4975208c2ed68dbf5f51419914c93a363924b2f11e3cf9f968f102d0",

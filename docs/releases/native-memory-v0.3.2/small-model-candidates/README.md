@@ -4,7 +4,10 @@ These two additional model plugins use the existing `aimee-native-runtime==0.3.2
 The opaque wheels are included here for review at the user's request. Private
 source, build inputs, model weights and credentials are excluded.
 
-Both passed CPU model/adapter lifecycle checks, 42 per model. The installed
+The current build-3 wheels include the dedicated small-model GGUF mapping.
+Build 2 was replaced after its mapper omitted per-layer embedding weights.
+The underlying Rust libraries are unchanged and passed CPU model/adapter
+lifecycle checks, 42 per model. The installed
 Rust adapters publish and admit native banks and map live positions; the existing
 Transformers CPU attention harness reads them. Installed identity and checkpoint
 checks, shared-K/V capture tests and wheel audits also passed.

@@ -59,7 +59,7 @@ libraries are byte-identical to the libraries used during inference; the final
 shared-K/V binding passed its structural tests. Finalization added dependency
 metadata and notices while preserving executable members.
 
-| Plugin | Final wheel SHA-256 |
+| Plugin | Earlier build-2 wheel SHA-256 |
 |---|---|
 | gemma4-e2b | `aab9e90748151e6d700aaad1d60585bef055a35fab5b1c2b73098f0abdb4f4c0` |
 | gemma4-e4b | `be890245b08e05cd2878dce3686e095699d5064a3f31d4f895745e3c9eb461d2` |
@@ -104,3 +104,27 @@ Both Q8_0 GGUF checkpoints matched their pinned upstream hashes:
 The first E4B download was truncated and rejected by its checksum check. Those
 bytes were quarantined. A fresh download passed verification before any model
 load. No rejected checkpoint was loaded.
+
+## Build 3: per-layer GGUF weights
+
+The checkpoint audit found that the upstream Gemma GGUF mapper omitted the
+small models' per-layer token embeddings, model projection, projection norm,
+and three per-layer input tensors. Build 3 adds a dedicated model-specific
+loader mapping these tensors. The common serving runtime is unchanged. Unknown
+root tensors, duplicate destinations and missing per-layer embedding weights
+are rejected. Derived rotary frequencies are omitted, as in the existing loader.
+
+All 600 E2B and 719 E4B loaded GGUF tensor destinations and shapes matched the
+pinned HF safetensors metadata. Both rebuilt wheels passed the wheel audit;
+their Rust libraries remain byte-identical to those used in the CPU lifecycle
+runs. The build-2 wheels have been replaced in this PR; historical build-2 reports
+retain their original hashes. Build 3 is installed in the separate clean
+environments and actual E2B vLLM serving qualification has resumed.
+
+| Plugin | Current build-3 wheel SHA-256 |
+|---|---|
+| gemma4-e2b | `fce3936772353eed603b5c4e34bd953cd9da2e813a71e65fc709c96b04699986` |
+| gemma4-e4b | `5ef67b2d20ffcd3dadb711e2aa227c5ddca17996702c44b0fbde54722e955b07` |
+
+The mapping audit checks metadata; it does not establish successful model loading,
+quantized kernel execution or native recall. Those remain required release gates.

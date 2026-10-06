@@ -1,0 +1,27 @@
+{
+  "status": "passed",
+  "scope": "Audit wheel identity, RECORD, namespace isolation and Rust adapter symbols.",
+  "plugins": [
+    {
+      "adapter": "gemma4-e2b",
+      "wheel": "aimee_gemma4_e2b-0.3.2-3-cp312-cp312-linux_x86_64.whl",
+      "sha256": "fce3936772353eed603b5c4e34bd953cd9da2e813a71e65fc709c96b04699986",
+      "bytes": 580020,
+      "members": 36,
+      "library_sha256": "4cba15998cc71c307ed37afd4fc21c7bb4a4fea79d19ad63154e4f0fbb4d1f00"
+    },
+    {
+      "adapter": "gemma4-e4b",
+      "wheel": "aimee_gemma4_e4b-0.3.2-3-cp312-cp312-linux_x86_64.whl",
+      "sha256": "5ef67b2d20ffcd3dadb711e2aa227c5ddca17996702c44b0fbde54722e955b07",
+      "bytes": 579886,
+      "members": 36,
+      "library_sha256": "3f735d27608c225120765c82c6e2e5133b0a214d422132e395b834e252043182"
+    }
+  ],
+  "shared_runtime": {
+    "wheel": "aimee_native_runtime-0.3.2-2-cp312-cp312-linux_x86_64.whl",
+    "sha256": "a3c42174676713cc8b60b8da1fd0c2f13b983a169dd03b3bdaf2241384c490f4",
+    "required_by": 2
+  }
+}
