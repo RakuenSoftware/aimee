@@ -15,11 +15,11 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "dc68ddec299b00eda17fe9dc1cbd61061ac54d4371b4207c99fa1947c54b21ac"
+          "sha256": "e39738c6ea06b6fd1c3c52e6ca1eef7f0670ef5923815ef267a4bf58404beb54"
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "be3505cfee3b3ae42f3efe15ed59cda3cfa9d0fbad3df53c800985aead5b8724"
+          "sha256": "e57a35299129c5ba00449ab6539a32454eeab32480cd16705d49dbff96dc9029"
         }
       ]
     },
