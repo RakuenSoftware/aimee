@@ -1,6 +1,6 @@
 # ROCm release qualification
 
-Date: 2026-10-06. Host: `.253`, two RX 7900 XTX cards (`gfx1100`).
+Date: 2026-10-06. Host: `.253`, RX 7900 XTX (`gfx1100`) and RTX 5080.
 
 E2B and E4B each passed all 27 checks in the extended multi-chunk native-memory
 matrix, including source outage/recovery, streaming, concurrent requests,
@@ -35,15 +35,19 @@ The corrected check compares public versions. Eight installed compiled-module
 checks accept 0.30.0 with vendor suffixes and reject other releases, prereleases
 and postreleases. The rebuilt wheel's RECORD hashes and installed executable
 permissions passed verification. Only the compiled compatibility module and
-RECORD contents changed; the filename carries the new build tag, and model adapters and other runtime members
-retain their original bytes.
+RECORD contents changed. The filename carries the new build tag; all 33 other
+runtime members and every model adapter retain their original bytes.
 
 The unsigned replacement runtime candidate is
 `aimee_native_runtime-0.3.2-3-cp312-cp312-linux_x86_64.whl`, SHA-256
 `1684ee2e5aa40ca9c0ed2818658de445bd112f440871372789e80709f9757bd2`.
 It requires release signing and manifest inclusion. The existing signed build-2
-runtime and its historical CUDA reports remain unchanged. Qwen passed CUDA native lifecycle validation with this replacement runtime.
-The small-model CUDA matrices are being repeated with these exact runtime bytes.
+runtime and its historical CUDA reports remain unchanged. Both small models
+also passed the complete 27-check CUDA matrix again with these exact replacement
+runtime bytes. Qwen passed its 18-check CUDA lifecycle with the same runtime.
+All test records were cleaned up, owned model services stopped, the source
+fixture recovered, and temporary loopback forwards/control stopped. Both AMD
+cards and the CUDA card are clear; the other AMD job remains paused as requested.
 
 The tested stack is CPython 3.12, vLLM `0.30.0+rocm723`, Torch
 `2.12.0+git6bbd260`, HIP `7.2.53211` and Triton `3.7.1`. Each plugin has its
@@ -54,7 +58,7 @@ V1 eager execution, prefix caching disabled, a 2,048-token context and 128-token
 prefill chunks. A standard enrolled mTLS client reads from the owned CT9210
 Aimee fixture through loopback-only forwards.
 
-`runtime-profile.json`, `runtime-build3.json`, `installed-runtime-contract.json`
-`runtime-member-audit.json`, `gemma4-e2b-rocm-lifecycle.json` and
-`gemma4-e2b-rocm-multichunk.json` and `gemma4-e4b-rocm-multichunk.json` record the current evidence. Model weights,
-private implementation source and authority credentials are excluded.
+The named JSON reports record the individual lifecycle results, runtime profile,
+checkpoint identities, PR download hashes, five-plugin wheel audit, installed
+version checks and final cleanup. Model weights, private implementation source
+and authority credentials are excluded.

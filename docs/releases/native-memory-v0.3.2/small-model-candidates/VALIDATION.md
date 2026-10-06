@@ -3,10 +3,12 @@
 Date: 2026-10-06. Host: `.253`. Current artifacts: **0.3.2 build 4**.
 
 Both adapters passed qualification on the tested CUDA Q8_0 text-serving profile
-and are ready for the larger-model smoke stage. Their wheels are in PR #3013.
+and completed the larger-model smoke stage. Their wheels are in PR #3013.
 Additional [ROCm qualification](../rocm-qualification/README.md) found and corrected
 a shared-runtime vendor-version check. Both models passed 27/27 extended ROCm
-checks with its replacement build-3 runtime. The CUDA results below use the original build-2 runtime.
+checks with its replacement build-3 runtime, then repeated the complete CUDA
+matrix with the same replacement bytes: 27/27 each. The historical CUDA results
+below use the original build-2 runtime.
 They remain unsigned candidates: release signing, inclusion in the final manifest
 and installation from a published release are still required.
 
@@ -45,7 +47,8 @@ publish a 240-token native bank, spanning two 128-token GPU prefill chunks, and
 repeat the complete lifecycle. This exercises the new shared-K/V source binding
 across real chunk boundaries. All fixtures were cleaned up, the owned source
 container recovered, and both owned model services stopped. The larger-model
-smoke tests have not started.
+smoke tests passed 18/18 each on their
+[named hardware profiles](../rocm-qualification/README.md).
 
 ## Qualified profile
 

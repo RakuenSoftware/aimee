@@ -8,10 +8,14 @@ latter publishes a 240-token native bank across two GPU prefill chunks.
 The checks include cold/warm recall, correction, retirement, streaming, concurrent
 requests, real source outage/recovery, recipient isolation and server revocation.
 See [qualification scope and results](VALIDATION.md) and the named JSON reports.
-The adapters are ready for the larger-model smoke stage on this tested profile.
+Both also passed 27/27 extended checks on 7900 XTX / ROCm with the corrected
+shared-runtime build-3 candidate. The 12B, 26B and Qwen 27B native smoke tests
+passed 18/18 each on their [named hardware profiles](../rocm-qualification/README.md).
 
 Each plugin follows the existing dedicated Rust adapter and thin binding pattern,
-with the unchanged `aimee-native-runtime==0.3.2`. Model-specific bindings handle
+with one `aimee-native-runtime==0.3.2` dependency. The original CUDA runs use
+signed runtime build 2. Both models also repeated all 27 CUDA checks with
+corrected runtime build 3, matching the ROCm runs. Model-specific bindings handle
 shared K/V capture and the small models' per-layer GGUF weights. Build 4 corrects
 the mapping and replicated-projection loading defects found during qualification.
 Historical reports retain their original hashes; the current wheel bytes are

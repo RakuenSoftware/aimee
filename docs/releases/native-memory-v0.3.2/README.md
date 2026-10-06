@@ -5,7 +5,10 @@ The proposed `native-memory-v0.3.2` prerelease has Gemma4 E2B, E4B, 12B, 26B A4B
 wheel files have been copied to a local asset stage and checked against the reviewed candidate
 hashes. **That original payload is signed, verified and unpublished.** E2B and E4B are
 **build-4 unsigned candidates**, with CPU and actual CUDA qualification recorded
-[separately](small-model-candidates/VALIDATION.md). The earlier signed
+[separately](small-model-candidates/VALIDATION.md). The extended
+[ROCm qualification and larger-model smokes](rocm-qualification/README.md) use a
+corrected, unsigned shared-runtime build-3 candidate. These additions are not
+in the original signed payload. The earlier signed
 [0.2.3 stage](../native-memory-v0.2.3/README.md) preserves different bytes and different coverage.
 
 [manifest.json](manifest.json) fixes the original five asset names, SHA-256 digests, sizes, proposed URLs,

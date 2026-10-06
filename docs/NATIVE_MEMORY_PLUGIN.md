@@ -10,7 +10,9 @@ The current candidates are **0.3.2, unpublished**: the original three model plug
 build 2; Gemma4 E2B and E4B use build 4. Five dedicated adapters share one
 `aimee-native-runtime==0.3.2` dependency. The E2B/E4B wheels passed
 [CPU and actual CUDA qualification](releases/native-memory-v0.3.2/small-model-candidates/VALIDATION.md)
-and remain unsigned candidates outside the original signed manifest.
+and the extended [7900 XTX / ROCm matrix](releases/native-memory-v0.3.2/rocm-qualification/README.md).
+ROCm testing required a corrected, unsigned shared-runtime build-3 candidate.
+The small-model wheels and replacement runtime remain outside the original signed manifest.
 Its [release preparation record](releases/native-memory-v0.3.2/README.md) pins the wheel bytes and
 lists the remaining server, signing and publication gates. The signed
 [0.2.3 stage](releases/native-memory-v0.2.3/README.md) retains its original evidence.
@@ -21,7 +23,7 @@ lists the remaining server, signing and publication gates. The signed
 | --- | --- | --- |
 | Gemma4 E2B | `aimee-gemma4-e2b` | Q8_0 GGUF, build 4 candidate |
 | Gemma4 E4B | `aimee-gemma4-e4b` | Q8_0 GGUF, build 4 candidate |
-| Gemma4 12B | `aimee-gemma4-12b` | Q4_K_M GGUF |
+| Gemma4 12B | `aimee-gemma4-12b` | Q8_0 GGUF ROCm smoke; earlier Q4_K_M profile |
 | Gemma4 26B A4B | `aimee-gemma4-26b` | Q3_K_M GGUF |
 | Qwen3.8 27B | `aimee-qwen3-8-27b` | FP8 with 18 GiB CPU matrix offload |
 
