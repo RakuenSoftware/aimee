@@ -122,3 +122,9 @@ smokes. Aimee 0.4.6 lacks the required route.
 
 Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
 Changing native/Cognee retrieval and installing a model attention plugin are separate operations.
+
+## Release archive contents
+
+The 0.3.3 tag contains release notes and the license only. GitHub's automatic source archives
+contain documentation, not the Aimee application repository. Download the signed wheels for
+installation; they include the reviewed Python/Triton runtime bridges and compiled native modules.

@@ -15,3 +15,9 @@ Aimee binaries and private source are separate from these artifacts. Verify the 
 all assets before installation. All seven wheels, the manifest and checksums have detached Ed25519 signatures.
 Use the [download and installation guide](https://github.com/RakuenSoftware/aimee/blob/testing/docs/NATIVE_MEMORY_PLUGIN.md).
 Qualification is bounded to the documented profiles; model weights and the GPU runtime are supplied separately.
+
+The release tag contains only these release notes and the license. GitHub's automatic ZIP and
+tar archives contain no Aimee application repository source or plugin build sources. Install the
+signed wheel assets, not those documentation archives. The wheels preserve their reviewed
+Python/Triton runtime bridges and compiled native modules; this is not a claim that every wheel
+member is compiled machine code.

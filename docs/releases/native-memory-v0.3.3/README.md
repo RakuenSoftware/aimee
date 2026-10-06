@@ -42,3 +42,10 @@ All nine detached signatures are required. The pinned Ed25519 public key is pres
 
 [Release notes](RELEASE_NOTES.md) and the [plugin guide](../../NATIVE_MEMORY_PLUGIN.md)
 describe the published payload, enrollment and supported execution.
+
+## Distribution without application source archives
+
+The release tag is an independent documentation-only commit containing the release notes and
+license. It is not an Aimee application commit. GitHub's automatic archives therefore contain
+no application repository source or plugin build sources. Install the signed wheels.
+The reviewed wheels include Python/Triton runtime files needed by the serving stack.
