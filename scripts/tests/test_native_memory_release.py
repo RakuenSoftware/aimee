@@ -1,4 +1,4 @@
-"""Refusal checks for the public three-model release verifier."""
+"""Refusal checks for the public native-memory release verifiers."""
 import hashlib
 import importlib.util
 import json
@@ -13,6 +13,10 @@ VERIFIER = ROOT / 'docs/releases/native-memory-v0.3.2/verify_assets.py'
 
 
 class NativeMemoryReleaseTests(unittest.TestCase):
+    verifier_path = VERIFIER
+    version = "0.3.2"
+    build_identity = {"build": 2}
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='native-release-test-')
         self.addCleanup(self.temporary.cleanup)
@@ -21,7 +25,7 @@ class NativeMemoryReleaseTests(unittest.TestCase):
         self.assets = self.root / 'assets'
         self.source.mkdir()
         self.assets.mkdir()
-        shutil.copyfile(VERIFIER, self.source / 'verify_assets.py')
+        shutil.copyfile(self.verifier_path, self.source / 'verify_assets.py')
         spec = importlib.util.spec_from_file_location('native_release_test',
                                                     self.source / 'verify_assets.py')
         self.verifier = importlib.util.module_from_spec(spec)
@@ -39,7 +43,7 @@ class NativeMemoryReleaseTests(unittest.TestCase):
             info[name] = {'sha256': hashlib.sha256(payload).hexdigest(), 'bytes': len(payload),
                           'url': 'https://github.com/RakuenSoftware/aimee/releases/download/'
                           + self.verifier.RELEASE + '/' + name}
-        manifest = {'release': self.verifier.RELEASE, 'version': '0.3.2', 'build': 2,
+        manifest = {'release': self.verifier.RELEASE, 'version': self.version, **self.build_identity,
                     'assets': info, 'public_key_ed25519_hex': self.verifier.PUBLIC_KEY}
         (self.source / 'manifest.json').write_text(json.dumps(manifest))
         sums = ''.join(v['sha256'] + '  ' + n + '\n' for n, v in info.items())
@@ -77,6 +81,12 @@ class NativeMemoryReleaseTests(unittest.TestCase):
         (self.assets / 'manifest.json').write_text('{}')
         with self.assertRaisesRegex(ValueError, 'differs from reviewed bytes'):
             self.verifier.verify(self.assets, hashes_only=True)
+
+
+class FiveModelReleaseTests(NativeMemoryReleaseTests):
+    verifier_path = ROOT / "docs/releases/native-memory-v0.3.3/verify_assets.py"
+    version = "0.3.3"
+    build_identity = {"shared_runtime_build": 5}
 
 
 if __name__ == '__main__':

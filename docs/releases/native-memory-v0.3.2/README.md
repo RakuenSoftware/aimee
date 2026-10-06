@@ -1,5 +1,8 @@
 # Five native-memory plugins need a separate 0.3.2 release
 
+The [0.3.3 candidate](../native-memory-v0.3.3/README.md) supersedes this stage. The records below
+retain their original artifact versions and validation limits.
+
 The proposed `native-memory-v0.3.2` prerelease has Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8
 27B plugins on one shared native runtime. The original three-model stage is **0.3.2 build 2**. Its five
 wheel files have been copied to a local asset stage and checked against the reviewed candidate

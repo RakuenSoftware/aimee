@@ -43,8 +43,8 @@ because another release can land while a run sits in the queue.
 `main-merge-approval`; both environments need required reviewers. An environment with no reviewers
 approves automatically. Check repository settings before treating the gates as enforced.
 
-The separate [native-memory 0.3.2 candidate](releases/native-memory-v0.3.2/README.md) has its own
-reviewed wheel identities, signatures and draft prerelease. The application workflow does not build
+The separate [native-memory 0.3.3 candidate](releases/native-memory-v0.3.3/README.md) has its own
+reviewed seven-wheel payload and requires nine detached signatures before creating its draft prerelease. The application workflow does not build
 or publish those plugins. Publish a compatible application first, then verify a clean plugin install
 from the public release assets.
 

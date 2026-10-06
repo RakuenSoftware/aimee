@@ -28,8 +28,8 @@ See [Upgrading](UPGRADING.md) before reusing an older store.
 [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds the generic memory contract and
 Cognee adapter, with required real-provider CI and deployed native/Cognee validation. Its implementation
 is not part of the published 0.4.6 image. See the [memory contract](modules/memory.md#memory-backend-contract).
-The separate native-memory 0.3.2 candidate has three dedicated model plugins on one shared runtime.
-Its [release preparation record](releases/native-memory-v0.3.2/README.md) identifies the server
+The separate native-memory 0.3.3 candidate has five dedicated model plugins on one shared runtime.
+Its [release preparation record](releases/native-memory-v0.3.3/README.md) identifies the server
 export prerequisite and publication checks. The signed 0.2.3 stage remains historical evidence.
 
 ## 0.4.6: memory reliability

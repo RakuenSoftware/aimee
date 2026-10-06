@@ -1,0 +1,44 @@
+{
+  "status": "passed",
+  "model": "qwen3-8-27b",
+  "checks_scope": "short native-memory cold and warm smoke; NAS GGUFs and NAS-backed data",
+  "checks": [
+    {
+      "name": "initial source admission withdrawn",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference denied",
+      "passed": true
+    },
+    {
+      "name": "unauthenticated inference cannot select source",
+      "passed": true
+    },
+    {
+      "name": "authorized canary stored",
+      "passed": true
+    },
+    {
+      "name": "cold actual native recall",
+      "passed": true
+    },
+    {
+      "name": "warm actual native recall",
+      "passed": true
+    },
+    {
+      "name": "warm bank reused",
+      "passed": true
+    }
+  ],
+  "fixture_connect_attempts": 1,
+  "artifact_source": "Installed model adapter 0.3.3; shared runtime 0.3.3 build 5; one 7900 XTX; no CPU weight offload",
+  "gguf_path": "/opt/aimee-nas-models/hf/hub/models--ggml-org--Qwen3.8-27B-GGUF/snapshots/0669b98607d47046c7c2b3f801011d54a08cfccf/Qwen3.8-27B-Q4_K_M.gguf",
+  "model_wheel_version": "0.3.3",
+  "shared_runtime_build": 5,
+  "cpu_offload_gb": 0,
+  "device_memory_budget": 268435456,
+  "cold_http_status": 200,
+  "warm_http_status": 200
+}

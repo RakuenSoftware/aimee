@@ -16,7 +16,8 @@ and limitations in [`security-claims.json`](security-claims.json). CI rejects an
   authenticated-owner mutations.
 - **SC-004:** remote writes require a KB-signed identity and a live per-user grant.
 - **SC-005:** registered tool paths pass schema, policy, assigned-workspace, and backend checks.
-- **SC-006:** delegate containers receive neither provider nor forge credentials by default.
+- **SC-006:** delegate containers receive neither provider nor forge credentials by default, and have no
+  direct network access.
 - **SC-007:** v2 WORM rows detect changes to chronology, attribution, ordering, and content; migrated
   v1 rows are exported as `v1-partial` and do not claim full-field coverage.
 - **SC-008:** write-capable delegates use mandatory container isolation with no host fallback.
