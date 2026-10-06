@@ -119,9 +119,11 @@ Cognee 1.6.2 is the first alternative retrieval engine. Aimee retains canonical 
 authorization, identity, audit and lifecycle. A replacement uses the existing module infrastructure.
 
 Native memory passed deployed private/shared API and lifecycle checks in disposable containers.
-Cognee adapter checks cover provider-outage retry and derived-state cleanup; qualification of the
-installed image remains a release gate. Its first adapter bounds a
-retrieval scope to 256 eligible records and refuses larger scopes explicitly. This implementation
+The published testing image passed [119 Cognee checks](docs/validation/egress-vault-repair-2026-10-05.md),
+including HTTP, CLI and MCP access, provider-outage recovery, derived-state cleanup and managed
+subject erasure across both application stores. The fixture and erasure coverage limits are
+recorded with the results. The first adapter bounds a retrieval scope to 256 eligible records
+and refuses larger scopes explicitly. This implementation
 is part of the 1.0.0 release work and is absent from the older 0.4.6 image. The
 [contract and authoring guide](docs/modules/memory.md#memory-backend-contract) describes integration,
 configuration and limits.

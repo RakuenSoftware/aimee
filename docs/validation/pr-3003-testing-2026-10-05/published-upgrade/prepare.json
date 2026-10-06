@@ -1,0 +1,42 @@
+[
+  {
+    "name": "kb store succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb store succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb get succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb baseline state and identity retained privately",
+    "passed": true
+  },
+  {
+    "name": "kb baseline quiesced for whole-CT snapshot",
+    "passed": true
+  },
+  {
+    "name": "server store succeeds",
+    "passed": true
+  },
+  {
+    "name": "server get succeeds",
+    "passed": true
+  },
+  {
+    "name": "server baseline state and identity retained privately",
+    "passed": true
+  },
+  {
+    "name": "server baseline quiesced for whole-CT snapshot",
+    "passed": true
+  }
+]

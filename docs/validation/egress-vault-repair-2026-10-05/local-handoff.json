@@ -1,0 +1,74 @@
+[
+  {
+    "name": "kb memory boots through real Vault bearer handoff",
+    "passed": true
+  },
+  {
+    "name": "kb container metadata excludes credentials",
+    "passed": true
+  },
+  {
+    "name": "kb egress stays non-dumpable",
+    "passed": true
+  },
+  {
+    "name": "kb helper stays non-dumpable",
+    "passed": true
+  },
+  {
+    "name": "kb unattested helper invocation refuses readiness",
+    "passed": true
+  },
+  {
+    "name": "kb existing pipe observes Vault credential rotation",
+    "passed": true
+  },
+  {
+    "name": "kb rotation retains the hardened credential owner",
+    "passed": true
+  },
+  {
+    "name": "kb helper failure restarts owner and restores credential handoff",
+    "passed": true
+  },
+  {
+    "name": "kb recovered composition is healthy",
+    "passed": true
+  },
+  {
+    "name": "server memory boots through real Vault bearer handoff",
+    "passed": true
+  },
+  {
+    "name": "server container metadata excludes credentials",
+    "passed": true
+  },
+  {
+    "name": "server egress stays non-dumpable",
+    "passed": true
+  },
+  {
+    "name": "server helper stays non-dumpable",
+    "passed": true
+  },
+  {
+    "name": "server unattested helper invocation refuses readiness",
+    "passed": true
+  },
+  {
+    "name": "server existing pipe observes Vault credential rotation",
+    "passed": true
+  },
+  {
+    "name": "server rotation retains the hardened credential owner",
+    "passed": true
+  },
+  {
+    "name": "server helper failure restarts owner and restores credential handoff",
+    "passed": true
+  },
+  {
+    "name": "server recovered composition is healthy",
+    "passed": true
+  }
+]

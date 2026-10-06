@@ -1,0 +1,396 @@
+{
+  "source_sha256": "9dd5f0ac05018e02c468cbe9a6a09c9db5da58141399f448c253582de8dff9ff",
+  "client_version": "aimee-testing-client vtesting-ed1d778",
+  "checks": [
+    {
+      "name": "client-pairing.log: client management requires login",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: bootstrap login works",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: temporary bootstrap account cannot own devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: permanent owner account created",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: owner login works",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Workstation one",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Workstation two",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: device bearer also works through x-api-key",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 0",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 1",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 2",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 3",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 4",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 5",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 6",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Additional device 7",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cancellation preserves other devices",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: pending invitation cannot mint more tokens",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second dashboard user can log in",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: another user cannot manage owner clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: another user cannot manage owner clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: another user cannot manage owner clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second remote set",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first remote set",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: owner can list clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: two devices have distinct paired certificates",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first memory search",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first can recall shared owner memories",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second memory search",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second can recall shared owner memories",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: replay remote set",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: create invitation for Expired invitation",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: invitation response is not cached",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: expired remote set",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: owner can list clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: expiry appears in roster",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: one client revocation succeeds",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: revocation is retryable",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: first memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: owner login survives restart",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: owner can list clients",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: individual revocation persists",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: other device remains paired",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: explicit global rotation succeeds",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: second memory store",
+      "passed": true
+    },
+    {
+      "name": "client-pairing.log: independent client pairing end-to-end",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: standalone server ready",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: database readiness reflects connectivity",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: unused delegations are idle",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: local retrieval is active without KB",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: restart restores readiness",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: existing repository automatically indexed and embedded",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: repository indexing does not invent personal memories",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: project inventory includes discovered clone",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: definition lookup",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: caller lookup",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: fusion defaults on",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: fusion includes related code",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: investigation attaches source code and generation",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: blast radius includes callers",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: file structure retains definitions",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: default-branch changes automatically indexed",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: removed files disappear from index",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: updated code is re-embedded",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: database outage fails readiness",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: dashboard reports database failure",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: database recovery restores readiness",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: instance restart ready",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: instance off setting is honored",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: off retains direct retrieval without graph expansion",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: off policy survives restart",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: off is still active after restart",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: instance restart ready",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: default on restored independently of clients",
+      "passed": true
+    },
+    {
+      "name": "private-index.log: standalone private indexing end-to-end",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "private_index": "passed"
+}

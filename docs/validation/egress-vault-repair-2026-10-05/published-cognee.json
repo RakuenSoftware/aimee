@@ -1,0 +1,478 @@
+[
+  {
+    "name": "real Cognee 1.6.2 authenticates disposable account",
+    "passed": true
+  },
+  {
+    "name": "kb with Cognee reaches candidate-image readiness",
+    "passed": true
+  },
+  {
+    "name": "kb keeps credentials out of container metadata",
+    "passed": true
+  },
+  {
+    "name": "server with Cognee reaches candidate-image readiness",
+    "passed": true
+  },
+  {
+    "name": "server keeps credentials out of container metadata",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_client_bearer_token",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_service_identity_token",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_connection_string",
+    "passed": true
+  },
+  {
+    "name": "optional KB config seals kb_mode",
+    "passed": true
+  },
+  {
+    "name": "user canonical store succeeds",
+    "passed": true
+  },
+  {
+    "name": "user real Cognee retrieval uses canonical scoped records",
+    "passed": true
+  },
+  {
+    "name": "kb canonical store succeeds",
+    "passed": true
+  },
+  {
+    "name": "kb real Cognee retrieval uses canonical scoped records",
+    "passed": true
+  },
+  {
+    "name": "both immutable node namespaces own real derived datasets",
+    "passed": true
+  },
+  {
+    "name": "real provider catalog failure refuses retrieval without native fallback",
+    "passed": true
+  },
+  {
+    "name": "real provider catalog recovers through the same runtime",
+    "passed": true
+  },
+  {
+    "name": "new canonical record supplies the real add route",
+    "passed": true
+  },
+  {
+    "name": "real provider add failure refuses retrieval without native fallback",
+    "passed": true
+  },
+  {
+    "name": "real provider add recovers through the same runtime",
+    "passed": true
+  },
+  {
+    "name": "real provider cognify failure refuses retrieval without native fallback",
+    "passed": true
+  },
+  {
+    "name": "real provider cognify recovers through the same runtime",
+    "passed": true
+  },
+  {
+    "name": "real provider search failure refuses retrieval without native fallback",
+    "passed": true
+  },
+  {
+    "name": "real provider search recovers through the same runtime",
+    "passed": true
+  },
+  {
+    "name": "malformed catalog is refused by the real runtime",
+    "passed": true
+  },
+  {
+    "name": "malformed catalog recovery preserves canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "invalid dataset identity is refused by the real runtime",
+    "passed": true
+  },
+  {
+    "name": "invalid dataset identity recovery preserves canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "incomplete cognification is refused by the real runtime",
+    "passed": true
+  },
+  {
+    "name": "incomplete cognification recovery preserves canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "foreign retrieval result is refused by the real runtime",
+    "passed": true
+  },
+  {
+    "name": "foreign retrieval result recovery preserves canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "real Cognee rejects a rotated invalid Vault bearer without native fallback",
+    "passed": true
+  },
+  {
+    "name": "provider authentication failure preserves exact canonical reads",
+    "passed": true
+  },
+  {
+    "name": "real Cognee observes restored Vault bearer on the existing pipe",
+    "passed": true
+  },
+  {
+    "name": "Cognee selection retains the canonical versioned correction API",
+    "passed": true
+  },
+  {
+    "name": "real Cognee reindexes the corrected canonical revision",
+    "passed": true
+  },
+  {
+    "name": "user recall traverses the selected real Cognee backend",
+    "passed": true
+  },
+  {
+    "name": "user native CLI recall reaches real Cognee",
+    "passed": true
+  },
+  {
+    "name": "user MCP recall reaches real Cognee with canonical scope",
+    "passed": true
+  },
+  {
+    "name": "kb recall traverses the selected real Cognee backend",
+    "passed": true
+  },
+  {
+    "name": "shared CLI recall respects native activation cooldown",
+    "passed": true
+  },
+  {
+    "name": "kb native CLI recall reaches real Cognee",
+    "passed": true
+  },
+  {
+    "name": "kb MCP recall reaches real Cognee with canonical scope",
+    "passed": true
+  },
+  {
+    "name": "native memory export uses Cognee selection and exact canonical versions",
+    "passed": true
+  },
+  {
+    "name": "real Cognee removes obsolete correction datasets",
+    "passed": true
+  },
+  {
+    "name": "real provider delete failure refuses a canonical retirement receipt",
+    "passed": true
+  },
+  {
+    "name": "failed real dataset deletion preserves the active canonical record",
+    "passed": true
+  },
+  {
+    "name": "same deletion succeeds after real dataset route recovery",
+    "passed": true
+  },
+  {
+    "name": "user exposes a canonical version for conditional deletion",
+    "passed": true
+  },
+  {
+    "name": "kb exposes a canonical version for conditional deletion",
+    "passed": true
+  },
+  {
+    "name": "user provider outage refuses destructive completion",
+    "passed": true
+  },
+  {
+    "name": "kb provider outage refuses destructive completion",
+    "passed": true
+  },
+  {
+    "name": "user outage preserves serving canonical record",
+    "passed": true
+  },
+  {
+    "name": "user same conditional request succeeds after provider recovery",
+    "passed": true
+  },
+  {
+    "name": "user deletion retry is idempotent",
+    "passed": true
+  },
+  {
+    "name": "user deleted record leaves current canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "kb outage preserves serving canonical record",
+    "passed": true
+  },
+  {
+    "name": "kb same conditional request succeeds after provider recovery",
+    "passed": true
+  },
+  {
+    "name": "kb deletion retry is idempotent",
+    "passed": true
+  },
+  {
+    "name": "kb deleted record leaves current canonical retrieval",
+    "passed": true
+  },
+  {
+    "name": "both nodes remove real deleted derived datasets",
+    "passed": true
+  },
+  {
+    "name": "shared user-authority deletion destroys canonical row",
+    "passed": true
+  },
+  {
+    "name": "personal retirement leaves no active canonical row",
+    "passed": true
+  },
+  {
+    "name": "unrelated canonical record survives deletion",
+    "passed": true
+  },
+  {
+    "name": "retained canonical record reindexes after deletion",
+    "passed": true
+  },
+  {
+    "name": "fixture restores derived data for a deleted record",
+    "passed": true
+  },
+  {
+    "name": "supervised memory restart removes restored derived state for deleted records",
+    "passed": true
+  },
+  {
+    "name": "restart cannot reactivate retired canonical row",
+    "passed": true
+  },
+  {
+    "name": "derived reset preserves unrelated canonical record",
+    "passed": true
+  },
+  {
+    "name": "retained canonical record reindexes after derived reset",
+    "passed": true
+  },
+  {
+    "name": "public search refuses empty keywords without contacting Cognee",
+    "passed": true
+  },
+  {
+    "name": "public canonical listing bypasses Cognee",
+    "passed": true
+  },
+  {
+    "name": "user creates a canonical eligibility fixture",
+    "passed": true
+  },
+  {
+    "name": "user eligible fixture reaches real derived retrieval",
+    "passed": true
+  },
+  {
+    "name": "user expired record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "user restored expired record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "user retired record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "user restored retired record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "user synthetic eligibility target cleans up through the versioned API",
+    "passed": true
+  },
+  {
+    "name": "shared reconciliation fixture retains an eligible record in the queried scope",
+    "passed": true
+  },
+  {
+    "name": "kb creates a canonical eligibility fixture",
+    "passed": true
+  },
+  {
+    "name": "kb eligible fixture reaches real derived retrieval",
+    "passed": true
+  },
+  {
+    "name": "kb expired record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "kb restored expired record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "kb retired record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "kb restored retired record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "kb suppressed record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "kb restored suppressed record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "kb future record is excluded and its derived dataset removed",
+    "passed": true
+  },
+  {
+    "name": "kb restored future record reindexes through real Cognee",
+    "passed": true
+  },
+  {
+    "name": "kb synthetic eligibility target cleans up through the versioned API",
+    "passed": true
+  },
+  {
+    "name": "257 canonical records refuse Cognee capacity without provider calls or fallback",
+    "passed": true
+  },
+  {
+    "name": "Cognee capacity refusal preserves exact canonical reads",
+    "passed": true
+  },
+  {
+    "name": "retrieval recovers after synthetic capacity fixture removal",
+    "passed": true
+  },
+  {
+    "name": "user creates an authored operator erasure target",
+    "passed": true
+  },
+  {
+    "name": "user operator target reaches real derived retrieval",
+    "passed": true
+  },
+  {
+    "name": "kb creates an authored operator erasure target",
+    "passed": true
+  },
+  {
+    "name": "kb operator target reaches real derived retrieval",
+    "passed": true
+  },
+  {
+    "name": "operator targets have verified private authorship and explicit shared subject ownership",
+    "passed": true
+  },
+  {
+    "name": "a distinct local principal authors an unrelated record",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_mode",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_connection_string",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_service_identity_token",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_client_bearer_token",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_client_url",
+    "passed": true
+  },
+  {
+    "name": "operator transport config applies kb_mode",
+    "passed": true
+  },
+  {
+    "name": "explicit operator transport authenticates to KB",
+    "passed": true
+  },
+  {
+    "name": "managed subject erasure cannot certify a Cognee provider outage",
+    "passed": true
+  },
+  {
+    "name": "same managed subject request retries to verified completion",
+    "passed": true
+  },
+  {
+    "name": "managed subject completion retry is idempotent",
+    "passed": true
+  },
+  {
+    "name": "managed erasure physically removes the personal target and history",
+    "passed": true
+  },
+  {
+    "name": "managed erasure physically removes the shared target",
+    "passed": true
+  },
+  {
+    "name": "managed completion verifies both real derived namespaces absent",
+    "passed": true
+  },
+  {
+    "name": "managed erasure preserves the other principal canonical record",
+    "passed": true
+  },
+  {
+    "name": "fixture restores an actually erased subject dataset",
+    "passed": true
+  },
+  {
+    "name": "memory restart removes restored subject-erased derived data",
+    "passed": true
+  },
+  {
+    "name": "memory restart cannot resurrect physically erased personal data",
+    "passed": true
+  },
+  {
+    "name": "other principal reindexes after managed erasure replay",
+    "passed": true
+  },
+  {
+    "name": "real Cognee exercised local completion and embedding models",
+    "passed": true
+  }
+]

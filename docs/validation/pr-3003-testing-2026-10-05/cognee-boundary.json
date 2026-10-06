@@ -1,0 +1,13 @@
+{
+  "candidate": "testing-ed1d778",
+  "unmodified_attempt": "cognee-image",
+  "observed_error": "memory: derived erasure replay: memory: backend unavailable",
+  "provider_authentication_passed": true,
+  "provider_dataset_requests": 0,
+  "kb_readiness_passed": false,
+  "diagnostic_attempt": "cognee-image-r2",
+  "diagnostic_parent_executable_readlink_exit": 1,
+  "diagnostic_modified_disposable_container": true,
+  "credential_bytes_published": false,
+  "merge_verdict": "blocked"
+}
