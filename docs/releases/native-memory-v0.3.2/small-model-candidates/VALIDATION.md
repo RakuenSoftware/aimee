@@ -154,3 +154,27 @@ Actual E2B GPU serving is being retried. Neither plugin is release-qualified yet
 |---|---|
 | gemma4-e2b | `3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e` |
 | gemma4-e4b | `4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0` |
+
+## Actual E2B CUDA baseline
+
+Build 4 passed 18/18 native vLLM lifecycle checks on the RTX 5080: cold and warm
+recall, bank reuse, conditional correction, retirement and abstention, restoration,
+frozen-recipient rejection, original-recipient recovery and actual server
+revocation before warmed inference. The model loaded with 4.89 GiB reported
+model memory. This figure is not total GPU peak memory.
+
+The first build-4 fixture capped KV cache at 128 blocks, insufficient for a
+2,048-token context despite 8.73 GiB available. Raising the fixture cap to 1,024
+blocks allowed startup. This changed the qualification configuration, not the wheel.
+
+A wider E2B run passed streaming completion, subsequent recall, two concurrent
+requests, malformed request rejection, unsupported endpoint rejection and rejection
+of caller-supplied publication selection. Its source-outage step failed before
+stopping the fixture: Proxmox control commands ran inside the CT network namespace.
+The harness now enters the host network namespace for these control operations.
+The complete wider matrix is being rerun; its failed attempt is archived. E4B's
+actual vLLM matrix is still pending. No release-readiness conclusion is claimed yet.
+
+Both installed build-4 plugins also passed six projection conversion checks,
+including rejection of missing, duplicate or unknown quantization type records
+and preservation of already-floating projections and unrelated packed weights.
