@@ -1,0 +1,22 @@
+{
+  "torch": "2.12.0+git6bbd260",
+  "hip": "7.2.53211",
+  "vllm": "0.30.0+rocm723",
+  "triton": "3.7.1",
+  "target": "GPUTarget(backend='hip', arch='gfx1100', warp_size=32)",
+  "device_count": 2,
+  "devices": [
+    {
+      "name": "AMD Radeon Graphics",
+      "memory_bytes": 25753026560,
+      "gcn_arch": "gfx1100"
+    },
+    {
+      "name": "AMD Radeon Graphics",
+      "memory_bytes": 25753026560,
+      "gcn_arch": "gfx1100"
+    }
+  ],
+  "runtime_environment": "isolated plugin venv; pinned preinstalled ROCm packages consumed read-only",
+  "source_fixture": "owned CT9210 via loopback-only TCP forwarders"
+}

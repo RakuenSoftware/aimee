@@ -4,6 +4,9 @@ Date: 2026-10-06. Host: `.253`. Current artifacts: **0.3.2 build 4**.
 
 Both adapters passed qualification on the tested CUDA Q8_0 text-serving profile
 and are ready for the larger-model smoke stage. Their wheels are in PR #3013.
+Additional [ROCm qualification](../rocm-qualification/README.md) found and corrected
+a shared-runtime vendor-version check; its replacement build-3 runtime is being
+validated separately. The CUDA results below use the original build-2 runtime.
 They remain unsigned candidates: release signing, inclusion in the final manifest
 and installation from a published release are still required.
 
