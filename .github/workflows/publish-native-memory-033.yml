@@ -1,30 +1,16 @@
-name: Publish native-memory 0.3.3
+name: Delete native-memory 0.3.3 release
 on:
   push:
     branches: [release/native-memory-0.3.3-publish]
-    paths:
-      - '.github/workflows/publish-native-memory-033.yml'
-      - 'docs/releases/native-memory-v0.3.3/**'
+    paths: ['.github/workflows/publish-native-memory-033.yml']
 permissions:
   contents: write
-concurrency:
-  group: native-memory-v0.3.3-publication
-  cancel-in-progress: false
 jobs:
-  publish:
+  delete:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Assemble and verify the signed reviewed payload
-        run: |
-          assets="$RUNNER_TEMP/native-memory-v0.3.3"
-          mkdir -p "$assets"
-          cp docs/releases/native-memory-v0.3.3/wheels/*.whl "$assets/"
-          cp docs/releases/native-memory-v0.3.3/{manifest.json,SHA256SUMS,*.sig} "$assets/"
-          python3 docs/releases/native-memory-v0.3.3/verify_assets.py "$assets"
-      - name: Publish all eighteen verified assets
+      - name: Delete the requested release and its publication tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          docs/releases/native-memory-v0.3.3/create_draft_release.sh "$RUNNER_TEMP/native-memory-v0.3.3" "$GITHUB_SHA"
-          gh release edit native-memory-v0.3.3 --repo RakuenSoftware/aimee --draft=false --prerelease --latest=false
+          gh release delete native-memory-v0.3.3 --repo RakuenSoftware/aimee --yes --cleanup-tag
