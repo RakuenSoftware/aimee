@@ -21,10 +21,6 @@ calls. You take on a server, its backups and its upgrades in exchange for contro
 
 **We guarantee that every action an LLM takes on your system through Aimee can be fully
 and completely tracked, at any time, back to the responsible run, identity and authorization.**
-This is the reason for the container architecture: delegates run in unprivileged containers
-with no direct network access. Their single outward channel connects to Aimee, where governed
-operations follow the standard authorization and audit paths. If isolation cannot be verified,
-the runtime refuses to run the delegate.
 
 We assume a model, a prompt, retrieved text and a tool argument can all be hostile. Aimee puts
 access checks in the services that own the data and the backends that execute the action. A model
