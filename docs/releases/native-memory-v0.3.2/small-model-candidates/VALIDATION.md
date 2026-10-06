@@ -121,10 +121,36 @@ runs. The build-2 wheels have been replaced in this PR; historical build-2 repor
 retain their original hashes. Build 3 is installed in the separate clean
 environments and actual E2B vLLM serving qualification has resumed.
 
-| Plugin | Current build-3 wheel SHA-256 |
+| Plugin | Earlier build-3 wheel SHA-256 |
 |---|---|
 | gemma4-e2b | `fce3936772353eed603b5c4e34bd953cd9da2e813a71e65fc709c96b04699986` |
 | gemma4-e4b | `5ef67b2d20ffcd3dadb711e2aa227c5ddca17996702c44b0fbde54722e955b07` |
 
 The mapping audit checks metadata; it does not establish successful model loading,
 quantized kernel execution or native recall. Those remain required release gates.
+
+## Build 4: replicated per-layer projections
+
+Actual E2B vLLM loading reached the mapped per-layer gate and failed: vLLM's
+`ReplicatedLinear` loader cannot receive packed GGUF lazy parameters. Build 4
+materializes only the per-layer gate and projection matrices as BF16 before
+loading; embeddings and other weights retain the existing GGUF path. This is
+implemented in the two model plugins, with no shared runtime change.
+
+All 70 E2B and 84 E4B real quantized projection matrices passed conversion,
+finite-value and shape checks, then loaded through the actual vLLM
+`ReplicatedLinear.weight_loader` into CPU parameters with exact equality.
+This checks the loading function without a GPU model execution. The first test
+attempt tried constructing a full linear layer without initializing vLLM's
+parallel process group; the test was corrected to call its real loading function
+with a parameter directly.
+
+Both build-4 wheels passed the wheel audit and are installed in the independent
+environments. Their Rust libraries remain byte-identical to the CPU-qualified
+libraries. The build-3 files are replaced; their reports retain original hashes.
+Actual E2B GPU serving is being retried. Neither plugin is release-qualified yet.
+
+| Plugin | Current build-4 wheel SHA-256 |
+|---|---|
+| gemma4-e2b | `3f9370f8a0c00b0f3b0c64b393fa896acd3c38fd0670152872d966255514731e` |
+| gemma4-e4b | `4f0f7292559e21138e120c4b435dac632a0e8dd19d511193008d9591640d58d0` |

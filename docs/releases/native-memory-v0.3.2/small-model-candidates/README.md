@@ -4,7 +4,8 @@ These two additional model plugins use the existing `aimee-native-runtime==0.3.2
 The opaque wheels are included here for review at the user's request. Private
 source, build inputs, model weights and credentials are excluded.
 
-The current build-3 wheels include the dedicated small-model GGUF mapping.
+The current build-4 wheels include the dedicated small-model GGUF mapping
+and BF16 loading for the small replicated per-layer projections.
 Build 2 was replaced after its mapper omitted per-layer embedding weights.
 The underlying Rust libraries are unchanged and passed CPU model/adapter
 lifecycle checks, 42 per model. The installed
