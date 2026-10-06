@@ -1,0 +1,46 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "name": "gemma4-e2b shared K/V sources captured across two prefix chunks",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects partial tensors",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects nonshared missing tensors",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects out of range layer",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e2b rejects repeated source chunk",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b shared K/V sources captured across two prefix chunks",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects partial tensors",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects nonshared missing tensors",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects out of range layer",
+      "passed": true
+    },
+    {
+      "name": "gemma4-e4b rejects repeated source chunk",
+      "passed": true
+    }
+  ],
+  "scope": "Model-centric shared-K/V observation binding; CPU tensor structural tests, not GPU kernel execution"
+}

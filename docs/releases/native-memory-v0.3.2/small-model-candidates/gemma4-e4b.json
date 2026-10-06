@@ -1,0 +1,229 @@
+{
+  "status": "passed",
+  "model": "gemma4-e4b",
+  "scope": "Installed dedicated Rust adapter, existing Transformers CPU native attention harness, latest published Aimee enrolled mTLS source",
+  "vllm_serving_backend_tested": false,
+  "checks": [
+    {
+      "name": "installed model plugin loads through shared ABI",
+      "passed": true
+    },
+    {
+      "name": "existing shared client enrollment binding succeeds",
+      "passed": true
+    },
+    {
+      "name": "empty enrolled native source",
+      "passed": true
+    },
+    {
+      "name": "all model parameters remain on CPU",
+      "passed": true
+    },
+    {
+      "name": "authorized canary stored",
+      "passed": true
+    },
+    {
+      "name": "native bank published and admitted through dedicated Rust adapter 0",
+      "passed": true
+    },
+    {
+      "name": "cold memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "cold main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "cold actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "cold native recall",
+      "passed": true
+    },
+    {
+      "name": "warm memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "warm main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "warm actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "warm native recall",
+      "passed": true
+    },
+    {
+      "name": "warm native bank reused",
+      "passed": true
+    },
+    {
+      "name": "conditional correction committed",
+      "passed": true
+    },
+    {
+      "name": "native bank published and admitted through dedicated Rust adapter 1",
+      "passed": true
+    },
+    {
+      "name": "corrected memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "corrected main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "corrected actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "corrected native recall",
+      "passed": true
+    },
+    {
+      "name": "correction changes version and native bank",
+      "passed": true
+    },
+    {
+      "name": "conditional retirement succeeds",
+      "passed": true
+    },
+    {
+      "name": "native bank published and admitted through dedicated Rust adapter 2",
+      "passed": true
+    },
+    {
+      "name": "retired memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "retired main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "retired actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "retired native recall",
+      "passed": true
+    },
+    {
+      "name": "retired source removed",
+      "passed": true
+    },
+    {
+      "name": "native bank published and admitted through dedicated Rust adapter 3",
+      "passed": true
+    },
+    {
+      "name": "restored memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "restored main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "restored actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "restored native recall",
+      "passed": true
+    },
+    {
+      "name": "changed recipient blocked before model decode",
+      "passed": true
+    },
+    {
+      "name": "native bank published and admitted through dedicated Rust adapter 4",
+      "passed": true
+    },
+    {
+      "name": "identity restored memory stays outside main conversation",
+      "passed": true
+    },
+    {
+      "name": "identity restored main conversation cache remains unchanged",
+      "passed": true
+    },
+    {
+      "name": "identity restored actual CPU native attention reads",
+      "passed": true
+    },
+    {
+      "name": "identity restored native recall",
+      "passed": true
+    },
+    {
+      "name": "actual server revocation blocks source and CPU decode",
+      "passed": true
+    },
+    {
+      "name": "stock model parameters remain unchanged",
+      "passed": true
+    }
+  ],
+  "runtime": {
+    "model_path": "/opt/aimee-plugin-validation-20261006/models/gemma4-e4b",
+    "family": "gemma",
+    "device": "cpu",
+    "dtype": "float32",
+    "parameters": 7941100832,
+    "load_seconds": 16.506510734558105,
+    "torch": "2.13.0+cu130",
+    "threads": 8,
+    "config_sha256": "33b10c02df3c2e8536cf323d29d53262aaa2f4d11dbe19bc729373fbe90295d4",
+    "session_source_sha256": "bc7712027b58e267b4ce77d09708aea42f87ee732280946f9eebbad26f4940fd"
+  },
+  "responses": [
+    {
+      "label": "cold",
+      "answer": "753752",
+      "seconds": 9.43877363204956,
+      "attention_reads": 294
+    },
+    {
+      "label": "warm",
+      "answer": "753752",
+      "seconds": 7.5927348136901855,
+      "attention_reads": 294
+    },
+    {
+      "label": "corrected",
+      "answer": "833019",
+      "seconds": 9.390503644943237,
+      "attention_reads": 294
+    },
+    {
+      "label": "retired",
+      "answer": "unknown",
+      "seconds": 5.455255508422852,
+      "attention_reads": 84
+    },
+    {
+      "label": "restored",
+      "answer": "753752",
+      "seconds": 10.311047077178955,
+      "attention_reads": 294
+    },
+    {
+      "label": "identity restored",
+      "answer": "753752",
+      "seconds": 9.738743782043457,
+      "attention_reads": 294
+    }
+  ],
+  "fixture_cleanup_passed": true,
+  "queries": 6,
+  "bank_preparations": 5
+}

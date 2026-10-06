@@ -89,3 +89,10 @@ python3 docs/releases/native-memory-v0.3.2/verify_assets.py /path/to/release-ass
 The verifier requires all seven signatures. Optional `--hashes-only` mode checks identity alone
 and cannot satisfy the draft-release script. Retain the trust-key review if the signing
 pipeline changes keys; a key bundled with downloaded bytes alone does not establish their origin.
+
+## Additional small-model candidates
+
+[E2B and E4B candidates](small-model-candidates/README.md) add two dedicated model
+plugins on the same shared runtime. Their wheels and bounded CPU evidence are
+included for review. Serving qualification is in progress; they are not signed
+members of the existing three-model release manifest.

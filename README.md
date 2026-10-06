@@ -17,7 +17,7 @@ calls. You take on a server, its backups and its upgrades in exchange for contro
 
 ![Aimee overview: enrolled tools and browser use a personal Server; shared knowledge and Cognee retrieval are optional](docs/images/architecture/overview.svg)
 
-## Security is part of the runtime
+## Security and Governance are the core of the runtime
 
 We assume a model, a prompt, retrieved text and a tool argument can all be hostile. Aimee puts
 access checks in the services that own the data and the backends that execute the action. A model
