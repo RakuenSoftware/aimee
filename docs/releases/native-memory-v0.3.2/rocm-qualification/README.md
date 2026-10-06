@@ -2,9 +2,15 @@
 
 Date: 2026-10-06. Host: `.253`, two RX 7900 XTX cards (`gfx1100`).
 
-E2B passed the 18-check native-memory lifecycle on one card. E4B's extended
-27-check multi-chunk matrix and the larger-model smoke tests are in progress.
-This is not completed ROCm release qualification.
+E2B and E4B each passed all 27 checks in the extended multi-chunk native-memory
+matrix, including source outage/recovery, streaming, concurrent requests,
+frozen-recipient rejection and real server-side revocation. Both publish a
+240-token native bank spanning two 128-token GPU prefill chunks. E2B also passed
+a separate 18-check short-prefix lifecycle. The larger-model smoke tests are
+in progress.
+
+Loaded-model memory was 4.81 GiB for E2B and 7.68 GiB for E4B. These values
+exclude other allocations and are not peak-memory measurements.
 
 The first run exposed a shared-runtime version-check defect: the release rejected
 `vllm==0.30.0+rocm723` although its public version is the pinned `0.30.0`.
@@ -12,7 +18,7 @@ The corrected check compares public versions. Eight installed compiled-module
 checks accept 0.30.0 with vendor suffixes and reject other releases, prereleases
 and postreleases. The rebuilt wheel's RECORD hashes and installed executable
 permissions passed verification. Only the compiled compatibility module and
-wheel build/RECORD metadata changed; model adapters and other runtime members
+RECORD contents changed; the filename carries the new build tag, and model adapters and other runtime members
 retain their original bytes.
 
 The unsigned replacement runtime candidate is
@@ -32,5 +38,6 @@ prefill chunks. A standard enrolled mTLS client reads from the owned CT9210
 Aimee fixture through loopback-only forwards.
 
 `runtime-profile.json`, `runtime-build3.json`, `installed-runtime-contract.json`
-and `gemma4-e2b-rocm-lifecycle.json` record the current evidence. Model weights,
+`runtime-member-audit.json`, `gemma4-e2b-rocm-lifecycle.json` and
+`gemma4-e2b-rocm-multichunk.json` and `gemma4-e4b-rocm-multichunk.json` record the current evidence. Model weights,
 private implementation source and authority credentials are excluded.

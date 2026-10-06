@@ -4,10 +4,10 @@
   "status": "unsigned candidate",
   "change": "accept vLLM 0.30.0 vendor local-version suffix; reject other public versions",
   "changed_members": [
-    "aimee_native_runtime/compatibility.cpython-312-x86_64-linux-gnu.so",
-    "aimee_native_runtime-0.3.2.dist-info/WHEEL",
-    "aimee_native_runtime-0.3.2.dist-info/RECORD"
+    "aimee_native_runtime-0.3.2.dist-info/RECORD",
+    "aimee_native_runtime/compatibility.cpython-312-x86_64-linux-gnu.so"
   ],
   "source_contract_checks": 8,
-  "preserves_original_member_permissions": true
+  "preserves_original_member_permissions": true,
+  "build_tag_change": "wheel filename only; optional WHEEL Build header absent in original"
 }

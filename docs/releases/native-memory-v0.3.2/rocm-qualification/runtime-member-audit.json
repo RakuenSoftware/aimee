@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "changed_members": [
+    "aimee_native_runtime-0.3.2.dist-info/RECORD",
+    "aimee_native_runtime/compatibility.cpython-312-x86_64-linux-gnu.so"
+  ],
+  "unchanged_members": 33,
+  "all_member_permissions_preserved": true,
+  "compatibility_module_glibc_max": "2.14",
+  "wheel_sha256": "1684ee2e5aa40ca9c0ed2818658de445bd112f440871372789e80709f9757bd2"
+}
