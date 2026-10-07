@@ -1,0 +1,8 @@
+# Local deployment of the updated built-in memory module on the 1.0.0 base.
+FROM ghcr.io/rakuensoftware/aimee:1.0.0 AS build
+WORKDIR /work/server-go
+COPY server-go/ ./
+RUN PATH=/usr/local/go/bin:$PATH CGO_ENABLED=0 go build -trimpath -o /work/aimee-module-memory ./cmd/aimee-module
+
+FROM ghcr.io/rakuensoftware/aimee:1.0.0
+COPY --from=build /work/aimee-module-memory /usr/local/libexec/aimee-modules/aimee-module-memory

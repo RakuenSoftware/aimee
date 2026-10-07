@@ -1,9 +1,10 @@
 # Discord webhook and Gemma4 E2B chatbot
 
 This optional channel bridge posts through a configured Discord incoming webhook and receives
-bot mentions through a Discord application. Gemma4 E2B supplies the reply; its enrolled native-memory
-plugin fetches approved records from Aimee. The bot uses a dedicated Aimee identity and does not
-run agent tools. One serving instance is one memory recipient boundary.
+bot mentions through a Discord application. Gemma4 E2B supplies the reply. The CPU
+bridge archives exchanges and captures human statements through Aimee’s durable
+fact pipeline; the separate GPU setup below uses the enrolled native-memory plugin.
+The bot uses a dedicated Aimee environment and does not run agent tools.
 
 An incoming webhook can post messages but cannot read channel chat. Two-way chat therefore needs
 a Discord application bot token as well as the webhook. The bridge requests guild message events,
@@ -122,23 +123,81 @@ Use `docker volume inspect` to confirm this location. The HTTP endpoint can rema
 `http://127.0.0.1:19852/v1/chat/completions`: the Unix connector selects the actual
 transport and makes no TCP connection to this placeholder address.
 
-Before every turn, the bridge calls the dedicated Aimee instance's public
-`POST /v1/memory/search` route with fixed `store=user`, at most sixteen query keywords
-and four results. It then sends bounded memory context through Aimee's
-`POST /v1/chat/completions` route, which calls CPU E2B. Unix peer ownership identifies
-the bot; Discord message authors cannot override the store or caller principal.
-A memory outage stops the turn before inference. Memory content is labeled as data,
-and the bridge supplies no tools. Records that exceed the small context allocation
-are omitted rather than partly quoted.
+For durable conversation memory, add a dedicated KB Compose project with fresh volumes
+and the synthesis worker enabled. Do not connect a personal knowledge collection.
+Use [compose.knowledge.cpu.yaml](compose.knowledge.cpu.yaml) with `compose.kb.yaml`;
+the knowledge worker uses two CPU threads, zero GPU layers and an 8192-token extraction
+context. The reply model remains the ten-thread, 2048-token CPU E2B instance above.
 
-This dedicated instance's user store is shared bot knowledge for the configured
-channel and threads. Keep only channel-approved records there. Add knowledge through
-Aimee's memory UI or local memory store API. The bridge retrieves persistent knowledge;
-it does not automatically save Discord messages or model answers as facts. Conversation history is shared by everyone in the same channel or thread and stays
-in bounded RAM. With retrieval enabled, chat input
-is capped at at most 600 UTF-8 bytes, reduced further for the system instruction;
-384 bytes are reserved for the memory block. The CPU override disables hidden thinking
-so the reply's bounded token budget produces visible text.
+Build the bridge and updated memory module from this checkout:
+
+```sh
+docker build -f integrations/discord/Dockerfile -t aimee-discord-bridge:local .
+docker build -f integrations/discord/Dockerfile.memory -t aimee-discord-memory:local .
+```
+
+In the private KB environment file, set `AIMEE_DISCORD_BRIDGE_IMAGE`,
+`AIMEE_DISCORD_MEMORY_IMAGE`, `AIMEE_DISCORD_CONFIG_DIR` and
+`AIMEE_DISCORD_SERVER_HOME_VOLUME` to these images, the private bridge configuration
+directory and the dedicated chat server’s home volume. Use the standard Vault/Compose
+bootstrap for the new project. For a 1.0.0 base, apply [height-ontology.sql](height-ontology.sql)
+out of band through the deployment’s migration account before starting the bridge;
+new source builds include this row in the generated schema. The migration preserves
+existing operator definitions and relation IDs.
+
+Use [config.knowledge.example.json](config.knowledge.example.json). The bridge runs as
+UID/GID 1000 with all capabilities dropped, a read-only filesystem and read-only mounts.
+Give its configuration directory mode 0700 and its five configuration/credential files
+mode 0600, owned by UID/GID 1000. `knowledge.token` contains this dedicated KB’s bearer
+credential. Only the bridge’s explicit files are mounted; its PostgreSQL credentials
+remain outside the bridge. Stop the host bridge service before starting the sidecar
+so two gateway clients do not answer the same mention.
+
+The bridge shares the KB’s network namespace and uses authenticated loopback on port
+8741. A published Docker port is a remote peer to the KB and does not establish user
+write authority. Keep this distinction: do not weaken the KB’s authority checks.
+The read-only chat server home mount supplies the Aimee Unix socket; model inference
+still uses Aimee’s existing mTLS synthesis identity.
+
+```sh
+scripts/compose-local.sh --env-file ~/.config/aimee-discord/knowledge.env \
+  -f compose.kb.yaml -f integrations/discord/compose.knowledge.cpu.yaml \
+  --profile synthesis up -d
+```
+
+Each admitted turn follows this path:
+
+1. Retrieve current typed assertions with up to four bounded keyword queries to `memory.search_assertions`,
+   scoped to the fixed `discord:<guild>:<channel>` project. Deduplicate and fit complete
+   assertions into the context budget, then generate an admission reply.
+2. Archive the human statement and generated admission reply in the dedicated Aimee
+   user store. An explicit rejection such as “That information is incorrect” withholds
+   the statement from fact capture; it still remains in the archive. This is a bounded
+   rejection detector, not a complete truth verifier.
+3. Submit admitted human text to `memory.store` with stable Discord event idempotency
+   and source metadata. Aimee captures the authenticated connector’s authority and
+   queues its existing grounded fact compiler. Model-generated inferences retain
+   model authority and normal review/promotion rules. Bot answers are never used as
+   independent evidence of their own claims.
+4. Exact named height statements commit synchronously through the normal ontology,
+   entity identity, evidence, contradiction and audit gates. Full qualified names stay
+   distinct; `has_height` is functional, so a correction supersedes the same subject’s
+   prior height. Worker replay deduplicates the original source evidence.
+5. Generate the final answer after capture, archive that generated response and deliver
+   it. Append the recent shared chat cache only after successful Discord delivery.
+
+Both archives and typed facts survive process restart. Every human in the public
+channel uses the same fact scope; threads have separate scopes. Retrieval excludes
+historical, candidate and superseded assertions. Authentication, capture or retrieval
+failure stops delivery and logs only failure metadata. Lexical typed retrieval remains
+available when a vector generation is unavailable; that degraded mode does not claim
+vector qualification. Complete facts exceeding the context allowance are omitted.
+
+Configurations without a knowledge endpoint retain the earlier read-only
+`store=user` memory search path. They do not enable conversation fact capture.
+With Aimee retrieval enabled, input is capped at at most 600 UTF-8 bytes, reduced
+for system instructions; 384 bytes are reserved for the memory block. The CPU
+override disables hidden thinking so the reply budget produces visible text.
 
 ## Prepare a separate Aimee environment and E2B
 
@@ -212,7 +271,8 @@ systemctl --user start aimee-discord.service
 
 Mention the bot in the configured channel. Everyone in the same channel shares one conversation history. Each thread has its own
 shared history, separate from the parent channel and other threads; servers stay separate. Four recent turn pairs are retained in memory for up to 24 hours, with at most 128
-conversations; restart clears them. The native-memory account remains the shared bot identity,
+conversations; restart clears this recent cache. Durable capture remains in Aimee when the
+knowledge endpoint is configured. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
 For the bounded 2048-token E2B configuration, prompts use a conservative UTF-8 byte budget
 (at most 1000 bytes, reduced to account for system instructions) and trim older turn pairs to fit;
@@ -228,7 +288,8 @@ python3 -m venv .venv-discord
 ```
 
 Tests exercise the real HTTP model wire against a local fake endpoint, key rotation, redirect refusal,
-native admission failure, channel admission, shared channel history across users, thread/server isolation, webhook payloads, mention suppression, Unicode
+native admission failure, durable capture, rejected-claim archival, capture failure, same-turn
+post-commit replies, typed recall, channel admission, shared channel history across users, thread/server isolation, webhook payloads, mention suppression, Unicode
 splitting, loop prevention, queue bounds and history retention. Actual E2B inference and Discord
 conversation validation require the configured GPU host, bot application token and dedicated
 Aimee enrollment. A webhook-only check does not establish end-to-end chatbot readiness.

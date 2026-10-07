@@ -4,6 +4,7 @@
 #include <string.h>
 
 static const kb_store_rel_seed_def_t KB_STORE_SEED_ONTOLOGY[] = {
+    {"has_height", {99, 0, 0, 0, 0, 0, 0, 0}, 1, {16, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "measurement", 0, 0, 0},
     {"works_for", {10, 0, 0, 0, 0, 0, 0, 0}, 1, {14, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "work", 0, 0, 0},
     {"member_of", {10, 0, 0, 0, 0, 0, 0, 0}, 1, {14, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "work", 0, 0, 0},
     {"has_role", {10, 0, 0, 0, 0, 0, 0, 0}, 1, {16, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "work", 0, 0, 0},

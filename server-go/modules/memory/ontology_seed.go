@@ -8,6 +8,7 @@ package memory
 // write gate allows at each end, and the sensitivity tier the recall gate
 // reads. NodeOther in a kind list is the ANY wildcard.
 var seedOntology = []relTypeDef{
+	{RelType: "has_height", HeadKinds: []NodeKind{NodeOther}, TailKinds: []NodeKind{NodeScalar}, Sensitivity: SensNormal, Correction: "supersede", Category: "measurement"},
 	{RelType: "works_for", HeadKinds: []NodeKind{NodePerson}, TailKinds: []NodeKind{NodeOrg}, Sensitivity: SensNormal, Correction: "supersede", Category: "work"},
 	{RelType: "member_of", HeadKinds: []NodeKind{NodePerson}, TailKinds: []NodeKind{NodeOrg}, Sensitivity: SensNormal, Correction: "supersede", Category: "work"},
 	{RelType: "has_role", HeadKinds: []NodeKind{NodePerson}, TailKinds: []NodeKind{NodeScalar}, Sensitivity: SensNormal, Correction: "supersede", Category: "work"},

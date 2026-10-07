@@ -81,6 +81,7 @@ type memoryFactEnvelope struct {
 }
 
 var relationAliases = map[string]string{
+	"height": "has_height", "is_tall": "has_height",
 	"has_ip": "device_has_ip", "ip": "device_has_ip", "ip_address": "device_has_ip",
 	"hostname": "has_hostname", "has_host": "has_hostname", "host_name": "has_hostname",
 	"works_at": "works_for", "employed_by": "works_for", "employer": "works_for",
@@ -135,6 +136,7 @@ func memoryFactPrompt() string {
 		"triple grounded strictly in the note. For relation, choose the single nearest fit from these canonical predicates " +
 		"when one reasonably applies: " + strings.Join(relations, ", ") + ". If NONE fits, emit a concise snake_case " +
 		"predicate of your own (e.g. drives, founded, mentors) - NEVER a generic catch-all such as other/unknown/misc. " +
+		"Keep full entity names distinct, including qualifying nouns. Height in feet/metres is has_height, never age. " +
 		"subject is the entity the fact is about (use user for the note's author when it is first-person). confidence is " +
 		"0..1. Extract only durable, generalizable facts; skip transient state, feelings, plans, and one-off events. If the " +
 		"note RETRACTS or DENIES something (no longer, did not, never, is not, has left, was removed), do NOT emit the " +
@@ -254,7 +256,7 @@ func memoryFactProviderUnavailable(reason string) bool {
 func patternFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	triples := ExtractPatterns(content, memoryFactMaxTriples)
 	evidence := memoryFactEvidence(content, 0, int64(len(content)), actor, observedAt, memoryID, jobID)
-	out := make([]FactCandidate, 0, len(triples))
+	out := heightFactCandidates(content, observedAt, memoryID, jobID, actor)
 	for _, triple := range triples {
 		relation := canonicalRelation(triple.RelType)
 		subjectKind, objectKind := memoryFactKinds(relation, triple.SubjectKind, triple.ObjectKind)
@@ -262,7 +264,7 @@ func patternFactCandidates(content, observedAt string, memoryID, jobID int64, ac
 			SubjectKind: subjectKind, ObjectKind: objectKind, Actor: actor, Evidence: evidence,
 			AssertionKind: "world_fact", ValidFrom: observedAt})
 	}
-	return out
+	return out[:min(len(out), memoryFactMaxTriples)]
 }
 
 func parseModelFactCandidates(response, content, observedAt string, memoryID, jobID int64, sourceActor FactActor) ([]FactCandidate, error) {

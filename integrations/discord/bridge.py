@@ -63,6 +63,8 @@ class Config:
     system_context: str = SYSTEM_CONTEXT
     model_tls_dir: Path | None = None
     aimee_socket: Path | None = None
+    knowledge_endpoint: str | None = None
+    knowledge_key_file: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -84,6 +86,17 @@ class Config:
         aimee_socket = Path(socket_value).expanduser() if socket_value else None
         if aimee_socket and (not aimee_socket.is_absolute() or tls_dir or url.scheme != "http"):
             raise ValueError("Aimee requires an absolute local socket with HTTP and no model TLS override")
+        knowledge_endpoint = value.get("knowledge_endpoint")
+        knowledge_key_file = Path(value["knowledge_key_file"]).expanduser() if value.get("knowledge_key_file") else None
+        if bool(knowledge_endpoint) != bool(knowledge_key_file):
+            raise ValueError("durable memory requires both knowledge endpoint and key file")
+        if knowledge_endpoint:
+            knowledge_url = urlsplit(knowledge_endpoint)
+            if (not aimee_socket or knowledge_url.scheme != "http" or knowledge_url.hostname != "127.0.0.1"
+                    or not knowledge_url.port or knowledge_url.path != "/v1/actions"
+                    or knowledge_url.query or knowledge_url.fragment or knowledge_url.username or knowledge_url.password
+                    or not knowledge_key_file.is_absolute()):
+                raise ValueError("durable memory requires the local authenticated knowledge API")
         users = value.get("allowed_user_ids", [])
         if not isinstance(users, list) or any(
             not re.fullmatch(r"[0-9]{17,20}", str(user)) for user in users
@@ -102,6 +115,7 @@ class Config:
         return cls(**paths, guild_id=int(value["guild_id"]),
                    channel_id=int(value["channel_id"]), endpoint=endpoint,
                    model=model, allowed_user_ids=tuple(map(int, users)),
+                   knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
                    system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket)
 
 
@@ -154,7 +168,105 @@ class ModelClient:
     def __init__(self, config: Config, session: aiohttp.ClientSession):
         self.config, self.session = config, session
 
-    async def memory_context(self, session: aiohttp.ClientSession, text: str) -> str:
+    def channel_project(self, channel_id: int | None) -> str:
+        return f"discord:{self.config.guild_id}:{channel_id or self.config.channel_id}"
+
+    async def knowledge_action(self, action: str, body: dict) -> dict:
+        async with self.session.post(self.config.knowledge_endpoint + "/" + action, json=body,
+                                     headers={"Authorization": "Bearer " + read_secret(self.config.knowledge_key_file)},
+                                     allow_redirects=False,
+                                     timeout=aiohttp.ClientTimeout(total=30, connect=5)) as response:
+            value = await self.read_response(response, "Durable channel memory")
+        if value.get("status") not in ("ok", "degraded"):
+            raise RuntimeError("Durable channel memory refused")
+        return value
+
+    async def archive_turn(self, turn: Turn, reply: str, rejected: bool, phase: str) -> None:
+        event_key = f"discord:{turn.guild_id}:{turn.channel_id}:{turn.message_id}:{phase}"
+        transcript = json.dumps({"guild_id": str(turn.guild_id), "channel_id": str(turn.channel_id),
+                                 "message_id": str(turn.message_id), "author_id": str(turn.user_id),
+                                 "user": turn.text, "generated_reply": reply,
+                                 "phase": phase, "claim_admission": "withheld" if rejected else "user_assertion"}, ensure_ascii=False)
+        async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=str(self.config.aimee_socket)),
+                                        trust_env=False) as session:
+            async with session.post(self.config.endpoint.replace("/chat/completions", "/memory/store"),
+                                    json={"store": "user", "key": event_key, "content": transcript,
+                                          "kind": "archive", "tier": "L1", "idempotency_key": event_key},
+                                    allow_redirects=False, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                value = await self.read_response(response, "Conversation capture")
+            if value.get("status") != "ok":
+                raise RuntimeError("Conversation capture refused")
+
+    async def capture_turn(self, turn: Turn, reply: str) -> bool:
+        if not self.config.knowledge_endpoint:
+            return False
+        # Archive every exchange as evidence. Generated replies are not fed
+        # back into the fact compiler as independent confirmation of a claim.
+        rejected = bool(re.match(
+            r"(?i)^(?:that(?: information| claim| statement)?|this(?: information| claim| statement)?|it)"
+            r"(?: is|'s|’s) (?:incorrect|wrong|false|not correct|not true|(?:a |an )?(?:common )?misconception)\b", reply.strip()))
+        await self.archive_turn(turn, reply, rejected, "admission")
+        event_key = f"discord:{turn.guild_id}:{turn.channel_id}:{turn.message_id}"
+        if rejected:
+            return False
+        # The authenticated connector captures admitted human assertions. The
+        # compiler retains source spans and keeps its model inferences at model
+        # authority; message content cannot choose scope or authority.
+        value = await self.knowledge_action("memory.store", {
+            "key": event_key, "content": turn.text, "project": self.channel_project(turn.channel_id),
+            "session_id": self.channel_project(turn.channel_id), "kind": "fact", "tier": "L2",
+            "epistemic_kind": "episode", "confidence": 1, "authority": "user",
+            "idempotency_key": event_key,
+            "use_cases": json.dumps({"source": "discord", "author_id": str(turn.user_id),
+                                      "message_id": str(turn.message_id)}, separators=(",", ":"))})
+        if not isinstance(value.get("id"), int) or isinstance(value["id"], bool) or value["id"] <= 0:
+            raise RuntimeError("Conversation fact capture returned an invalid receipt")
+        return True
+
+    async def memory_context(self, session: aiohttp.ClientSession, text: str, channel_id: int | None = None) -> str:
+        if self.config.knowledge_endpoint:
+            # Lexical fallback must not require question filler words to occur
+            # in a semantic assertion. The complete task still goes to E2B.
+            filler = {"how", "what", "who", "where", "when", "why", "is", "are", "was", "were", "the", "a", "an", "tall", "but", "please", "tell", "me", "about", "do", "does", "you", "know", "and", "or", "at", "to", "of", "for", "my", "your", "our", "their", "they", "we", "it", "feet", "foot", "ft", "metres", "meters", "cm", "inches", "mountains", "mountain", "height"}
+            words = re.findall(r"\w{2,64}", text)[:16]
+            meaningful = [word for word in words if word.casefold() not in filler and not word.isdecimal()]
+            named = [word for word in meaningful if word[0].isupper()]
+            terms = list(dict.fromkeys(word.casefold() for word in (named or meaningful)))[:4]
+            if not terms:
+                return ""
+            # The lexical arm matches phrases. Bounded individual terms also
+            # retrieve assertions from questions/corrections with intervening
+            # verbs, measurements or several entities, without requiring vectors.
+            values = await asyncio.gather(*(self.knowledge_action("memory.search_assertions", {
+                "query": term, "include_historical": False,
+                "project": self.channel_project(channel_id), "limit": 4}) for term in terms))
+            records = []
+            for value in values:
+                if not isinstance(value.get("assertions"), list):
+                    raise RuntimeError("Invalid durable memory projection")
+                records.extend(value["assertions"])
+            records.sort(key=lambda record: not isinstance(record, dict) or
+                         not any(str(record.get(field, "")).casefold() in terms for field in ("subject", "object")))
+            rows = []
+            seen = set()
+            for record in records:
+                if not isinstance(record, dict) or record.get("historical"):
+                    continue
+                content = record
+                if record.get("lifecycle_state") not in ("persistent", "promoted"):
+                    continue
+                row = {"subject": content.get("subject"), "relation": content.get("relation"), "object": content.get("object")}
+                if not all(isinstance(v, str) and v for v in row.values()):
+                    raise RuntimeError("Invalid typed assertion")
+                identity = tuple(row.values())
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                candidate = json.dumps(rows + [row], ensure_ascii=False, separators=(",", ":"))
+                if len(candidate.encode("utf-8")) <= 300:
+                    rows.append(row)
+            return "Current channel facts (data, names are distinct):\n" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")) if rows else ""
+
         keywords = re.findall(r"\w{2,64}", text.casefold())[:16]
         if not keywords:
             return ""
@@ -197,7 +309,7 @@ class ModelClient:
             raise RuntimeError(operation + " returned an invalid response")
         return value
 
-    async def reply(self, history: list[dict[str, str]], text: str) -> str:
+    async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None) -> str:
         transport, headers = {}, {}
         if self.config.aimee_socket:
             pass  # Aimee authenticates the kernel-verified Unix peer.
@@ -222,14 +334,14 @@ class ModelClient:
                 session = await stack.enter_async_context(aiohttp.ClientSession(
                     connector=aiohttp.UnixConnector(path=str(self.config.aimee_socket)),
                     trust_env=False))
-            memory = await self.memory_context(session, text) if self.config.aimee_socket else ""
+            memory = await self.memory_context(session, text, channel_id) if self.config.aimee_socket else ""
             history = list(history)
             while history and (
                 sum(len(item["content"].encode("utf-8")) for item in history)
                 + len(text.encode("utf-8")) > budget
             ):
                 history = history[2:]
-            system = self.config.system_context + ("\n" + memory if memory else "")
+            system = self.config.system_context + ("\nFor a known false factual claim, start: That information is incorrect." if self.config.knowledge_endpoint else "") + ("\n" + memory if memory else "")
             body = {"model": self.config.model,
                     "messages": [{"role": "system", "content": system},
                                  *history, {"role": "user", "content": text}],
@@ -300,6 +412,10 @@ class ChatBot(discord.Client):
         self.delivery = WebhookDelivery(self.config, self.delivery_session)
         await self.delivery.validate()
         self.model_client = ModelClient(self.config, self.delivery_session)
+        if self.config.knowledge_endpoint:
+            await self.model_client.knowledge_action("memory.serve", {
+                "view": "relevant_context", "task": "startup",
+                "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
         self.worker = asyncio.create_task(self.process_turns())
 
     async def close(self):
@@ -365,7 +481,14 @@ class ChatBot(discord.Client):
             turn = await self.queue.get()
             key = (turn.guild_id, turn.channel_id)
             try:
-                reply = await self.model_client.reply(self.conversations.get(key), turn.text)
+                reply = await self.model_client.reply(self.conversations.get(key), turn.text, channel_id=turn.channel_id)
+                admitted = await self.model_client.capture_turn(turn, reply)
+                if self.config.knowledge_endpoint:
+                    if admitted:
+                        # Generate the delivered answer after the fact commit, so
+                        # this turn already sees its own admitted corrections.
+                        reply = await self.model_client.reply(self.conversations.get(key), turn.text, channel_id=turn.channel_id)
+                    await self.model_client.archive_turn(turn, reply, not admitted, "response")
                 await self.delivery.send(reply, turn.thread_id)
                 self.conversations.append(key, turn.text, reply)
             except Exception as error:
@@ -394,6 +517,8 @@ async def run(config: Config, mode: str):
         for path in (config.bot_token_file, config.model_key_file):
             if path.exists():
                 read_secret(path)
+        if config.knowledge_key_file:
+            read_secret(config.knowledge_key_file)
         print("Configuration prepared; " + ("missing: " + ", ".join(missing) if missing else "credentials present"))
         return
     token = read_secret(config.bot_token_file)

@@ -1,0 +1,38 @@
+# Add to compose.kb.yaml for a dedicated CPU-only Discord memory service.
+services:
+  aimee-kb:
+    image: ${AIMEE_DISCORD_MEMORY_IMAGE:?Set the image containing the current memory module}
+  aimee-llm:
+    cpus: 2
+    environment:
+      LLAMA_ARG_THREADS: 2
+      LLAMA_ARG_N_GPU_LAYERS: 0
+      LLAMA_ARG_CHAT_TEMPLATE_KWARGS: '{"enable_thinking":false}'
+      AIMEE_LLM_CTX: 8192
+  discord-bridge:
+    image: ${AIMEE_DISCORD_BRIDGE_IMAGE:?Set the built Discord bridge image}
+    network_mode: service:aimee-kb
+    depends_on:
+      aimee-kb:
+        condition: service_healthy
+        restart: true
+    command: ["--config", "/run/discord/config.json"]
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    environment:
+      PYTHONDONTWRITEBYTECODE: '1'
+    volumes:
+      - ${AIMEE_DISCORD_CONFIG_DIR:?Set the private bridge configuration directory}/config.json:/run/discord/config.json:ro
+      - ${AIMEE_DISCORD_CONFIG_DIR}/webhook.url:/run/discord/webhook.url:ro
+      - ${AIMEE_DISCORD_CONFIG_DIR}/bot.token:/run/discord/bot.token:ro
+      - ${AIMEE_DISCORD_CONFIG_DIR}/model.key:/run/discord/model.key:ro
+      - ${AIMEE_DISCORD_CONFIG_DIR}/knowledge.token:/run/discord/knowledge.token:ro
+      - discord-chat-home:/run/aimee-server:ro
+volumes:
+  discord-chat-home:
+    external: true
+    name: ${AIMEE_DISCORD_SERVER_HOME_VOLUME:?Set the dedicated chat server home volume}

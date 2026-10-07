@@ -14,7 +14,7 @@ from aiohttp import web
 import aiohttp
 import discord
 
-from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery
+from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn
 
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
@@ -74,6 +74,66 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             path.write_text(json.dumps({**value, "endpoint": endpoint}))
             with self.assertRaises(ValueError):
                 Config.load(path)
+
+    def test_durable_memory_configuration_requires_local_api_and_private_key(self):
+        value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
+                 "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
+                 "aimee_socket": str(self.root / "aimee.sock"),
+                 "endpoint": "http://127.0.0.1:18743/v1/chat/completions",
+                 "knowledge_key_file": str(self.key)}
+        path = self.root / "config.json"
+        for endpoint in ("http://example.com:18741/v1/actions", "https://127.0.0.1:18741/v1/actions",
+                         "http://127.0.0.1:18741/other", "http://127.0.0.1:18741/v1/actions?token=x", None):
+            path.write_text(json.dumps({**value, "knowledge_endpoint": endpoint}))
+            with self.assertRaises(ValueError):
+                Config.load(path)
+        path.write_text(json.dumps({**value, "knowledge_endpoint": "http://127.0.0.1:18741/v1/actions"}))
+        self.assertEqual(Config.load(path).knowledge_key_file, self.key)
+
+    async def test_delivered_answer_uses_newly_committed_channel_facts(self):
+        bot = self.bot(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions",
+                               knowledge_key_file=self.key))
+        events = []
+        async def reply(*args, **kwargs):
+            events.append("draft" if not events else "final")
+            return "old draft" if len(events) == 1 else "corrected answer"
+        async def capture(*args):
+            events.append("capture")
+            return True
+        async def archive(*args): events.append("archive")
+        async def delivery(*args): events.append("delivery")
+        bot.model_client = SimpleNamespace(reply=AsyncMock(side_effect=reply),
+                                          capture_turn=AsyncMock(side_effect=capture),
+                                          archive_turn=AsyncMock(side_effect=archive))
+        bot.delivery = SimpleNamespace(send=AsyncMock(side_effect=delivery))
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.on_message(self.message())
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(events, ["draft", "capture", "final", "archive", "delivery"])
+            bot.delivery.send.assert_awaited_once_with("corrected answer", None)
+            self.assertEqual(bot.conversations.get((GUILD, CHANNEL))[-1]["content"], "corrected answer")
+            self.assertEqual(bot.model_client.archive_turn.await_args.args[1:], ("corrected answer", False, "response"))
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+            await bot.close()
+
+    async def test_capture_failure_prevents_delivery_and_history_commit(self):
+        bot = self.bot()
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="answer"),
+                                          capture_turn=AsyncMock(side_effect=OSError("memory unavailable")))
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.on_message(self.message())
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.delivery.send.assert_not_awaited()
+            self.assertEqual(bot.conversations.get((GUILD, CHANNEL)), [])
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+            await bot.close()
 
     async def test_admission_blocks_unapproved_sources_and_loops(self):
         bot = self.bot()
@@ -265,6 +325,68 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("large", system)
         self.assertNotIn("tools", requests[1][1])
 
+    async def test_durable_capture_uses_fixed_channel_scope_and_archives_rejected_claims(self):
+        archives, facts, projections = [], [], []
+        async def archive(request):
+            archives.append(await request.json())
+            return web.json_response({"status": "ok", "id": 1})
+        async def store(request):
+            self.assertEqual(request.headers["Authorization"], "Bearer test-model-key")
+            facts.append(await request.json())
+            return web.json_response({"status": "ok", "id": 2})
+        async def serve(request):
+            projections.append(await request.json())
+            return web.json_response({"status": "ok", "assertions": [
+                {"lifecycle_state": "persistent", "historical": False,
+                 "subject": "Kibukx", "relation": "has_height", "object": "6 feet"},
+                {"lifecycle_state": "persistent", "historical": False,
+                 "subject": "Kibukx mountains", "relation": "has_height", "object": "69 feet"},
+                {"lifecycle_state": "superseded", "historical": True,
+                 "subject": "Kibukx", "relation": "has_height", "object": "old value"}]})
+        app = web.Application()
+        app.router.add_post("/v1/memory/store", archive)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        self.addAsyncCleanup(runner.cleanup)
+        socket = self.root / "capture.sock"
+        await web.UnixSite(runner, str(socket)).start()
+        kb = web.Application()
+        kb.router.add_post("/v1/actions/memory.store", store)
+        kb.router.add_post("/v1/actions/memory.search_assertions", serve)
+        kb_runner = web.AppRunner(kb)
+        await kb_runner.setup()
+        self.addAsyncCleanup(kb_runner.cleanup)
+        site = web.TCPSite(kb_runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        config = replace(self.config, aimee_socket=socket, knowledge_key_file=self.key,
+                         knowledge_endpoint=f"http://127.0.0.1:{port}/v1/actions")
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            await client.capture_turn(Turn(10, GUILD, CHANNEL, USER, "Kibukx is 6 feet tall."), "Understood.")
+            await client.capture_turn(Turn(11, GUILD, CHANNEL, USER + 1, "The Andes are 69 feet tall."),
+                                      "That information is incorrect. The Andes are much taller.")
+            await client.capture_turn(Turn(12, GUILD, CHANNEL, USER, "The Himalayas are 69 feet tall."),
+                                      "That’s a common misconception. Their peaks are much taller.")
+            context = await client.memory_context(session, "How tall is Kibukx?", CHANNEL)
+            thread = CHANNEL + 1
+            await client.memory_context(session, "How tall is Kibukx?", thread)
+            correction = await client.memory_context(session, "But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.", CHANNEL)
+            self.assertEqual(correction, context)
+            self.assertEqual({p["query"] for p in projections[2:]}, {"kibukx"})
+        self.assertEqual(len(archives), 3)
+        self.assertEqual(json.loads(archives[1]["content"])["claim_admission"], "withheld")
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["content"], "Kibukx is 6 feet tall.")
+        self.assertEqual(facts[0]["project"], f"discord:{GUILD}:{CHANNEL}")
+        self.assertEqual(facts[0]["idempotency_key"], facts[0]["key"])
+        self.assertEqual(projections[0]["project"], facts[0]["project"])
+        self.assertEqual(projections[1]["project"], f"discord:{GUILD}:{thread}")
+        self.assertIn('"subject":"Kibukx"', context)
+        self.assertIn('"subject":"Kibukx mountains"', context)
+        self.assertNotIn("old value", context)
+        self.assertLess(len(context.encode()), 384)
+
     async def test_aimee_memory_outage_never_calls_model(self):
         chat = AsyncMock()
         app = web.Application()
@@ -307,7 +429,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_channel_history_is_shared_across_users_and_committed_after_delivery(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
-        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="An E2B answer"))
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="An E2B answer"), capture_turn=AsyncMock())
         worker = asyncio.create_task(bot.process_turns())
         try:
             await bot.on_message(self.message())
@@ -320,7 +442,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 id=123, author=SimpleNamespace(id=USER + 1, bot=False),
                 content=f"<@{BOT}> What did we just discuss?"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with(shared_history, "What did we just discuss?")
+            bot.model_client.reply.assert_awaited_with(shared_history, "What did we just discuss?", channel_id=CHANNEL)
             self.assertEqual(len(bot.conversations.get(key)), 4)
 
             thread_id = 888888888888888888
@@ -328,7 +450,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 id=124, channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
                 content=f"<@{BOT}> New thread"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with([], "New thread")
+            bot.model_client.reply.assert_awaited_with([], "New thread", channel_id=thread_id)
             bot.delivery.send.assert_awaited_with("An E2B answer", thread_id)
             thread_history = bot.conversations.get((GUILD, thread_id))
             await bot.on_message(self.message(
@@ -336,7 +458,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
                 content=f"<@{BOT}> Continue this thread"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with(thread_history, "Continue this thread")
+            bot.model_client.reply.assert_awaited_with(thread_history, "Continue this thread", channel_id=thread_id)
             self.assertEqual(len(bot.conversations.get(key)), 4)
             self.assertEqual(bot.conversations.get((GUILD + 1, CHANNEL)), [])
             bot.delivery.send.side_effect = RuntimeError("delivery failed")
