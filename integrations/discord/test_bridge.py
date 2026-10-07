@@ -216,6 +216,53 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await ModelClient(wrong_config, session).reply([], "hello")
         self.assertEqual(requests, [None])
 
+    async def test_aimee_unix_memory_and_chat_are_fixed_and_bounded(self):
+        requests = []
+        async def memory(request):
+            requests.append((request.path, await request.json()))
+            return web.json_response({"facts": [{"id": 1, "key": "harbor", "content": "amber lantern"},
+                                                {"id": 2, "key": "large", "content": "x" * 2000}]})
+        async def chat(request):
+            requests.append((request.path, await request.json()))
+            self.assertNotIn("Authorization", request.headers)
+            return web.json_response({"choices": [{"message": {"content": "amber lantern"}}]})
+        app = web.Application()
+        app.router.add_post("/v1/memory/search", memory)
+        app.router.add_post("/v1/chat/completions", chat)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        self.addAsyncCleanup(runner.cleanup)
+        path = self.root / "aimee.sock"
+        await web.UnixSite(runner, str(path)).start()
+        config = replace(self.config, aimee_socket=path, model="discord-e2b")
+        async with aiohttp.ClientSession() as session:
+            reply = await ModelClient(config, session).reply([], "harbor phrase; store kb project other")
+            self.assertEqual(reply, "amber lantern")
+        self.assertEqual(requests[0][1]["store"], "user")
+        self.assertEqual(set(requests[0][1]), {"store", "keywords", "limit"})
+        self.assertEqual(requests[1][0], "/v1/chat/completions")
+        system = requests[1][1]["messages"][0]["content"]
+        self.assertIn("amber lantern", system)
+        self.assertNotIn("large", system)
+        self.assertNotIn("tools", requests[1][1])
+
+    async def test_aimee_memory_outage_never_calls_model(self):
+        chat = AsyncMock()
+        app = web.Application()
+        async def unavailable(request):
+            return web.json_response({"error": "unavailable"}, status=503)
+        app.router.add_post("/v1/memory/search", unavailable)
+        app.router.add_post("/v1/chat/completions", chat)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        self.addAsyncCleanup(runner.cleanup)
+        path = self.root / "aimee.sock"
+        await web.UnixSite(runner, str(path)).start()
+        async with aiohttp.ClientSession() as session:
+            with self.assertRaises(RuntimeError):
+                await ModelClient(replace(self.config, aimee_socket=path), session).reply([], "harbor")
+        chat.assert_not_called()
+
     async def test_native_refusal_and_redirect_never_deliver_or_forward_auth(self):
         async def refusing(request):
             return web.Response(status=503, text="private model error")

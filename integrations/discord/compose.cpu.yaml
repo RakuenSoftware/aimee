@@ -8,6 +8,7 @@ services:
     environment:
       LLAMA_ARG_THREADS: 10
       LLAMA_ARG_N_GPU_LAYERS: 0
+      LLAMA_ARG_CHAT_TEMPLATE_KWARGS: '{"enable_thinking":false}'
       AIMEE_LLM_CTX: 2048
 
 networks:

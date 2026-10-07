@@ -89,8 +89,51 @@ to the dedicated project's `aimee-model-tls` volume's `synthesis/client` directo
 model certificate against that CA with server name `aimee-llm` and presents its
 client certificate. Keep the live volume path, rather than copying expiring identities.
 CPU inference uses this mTLS identity instead of the vLLM API key.
-The CPU model supplies inference and conversational history; it does not perform
-the native memory fetch described for the GPU vLLM integration below.
+The CPU model supplies inference; the next section connects Aimee retrieval. It does
+not perform the native memory capture described for the GPU vLLM integration below.
+
+## Connect CPU chat to the dedicated Aimee store
+
+Register a tools-disabled model named `discord-e2b` in the dedicated Aimee instance,
+with endpoint `https://aimee-llm:8761/v1`, the CPU model's exact served ID, a 2048-token
+context and a 384-token output limit. Use the instance's model settings or its local
+`POST /v1/model/add` route. Its typed `args` array is:
+
+```json
+["discord-e2b", "https://aimee-llm:8761/v1",
+ "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+ "--provider", "openai", "--auth-type", "none", "--context-window", "2048",
+ "--max-parallel", "1", "--max-tokens", "384", "--max-output", "384", "--tools", "off"]
+```
+
+Wrap this array as `{"args": [...]}` when calling the route. Aimee authenticates
+its CPU model calls using its existing synthesis client certificate.
+
+Set the bridge's `model` to `discord-e2b`, remove `model_tls_dir`, and set
+`aimee_socket` to the `aimee-server-home` volume's `aimee-http.sock`. For the default
+project the socket is:
+`/var/lib/docker/volumes/aimee-discord-bot_aimee-server-home/_data/aimee-http.sock`.
+Use `docker volume inspect` to confirm this location. The HTTP endpoint can remain
+`http://127.0.0.1:19852/v1/chat/completions`: the Unix connector selects the actual
+transport and makes no TCP connection to this placeholder address.
+
+Before every turn, the bridge calls the dedicated Aimee instance's public
+`POST /v1/memory/search` route with fixed `store=user`, at most sixteen query keywords
+and four results. It then sends bounded memory context through Aimee's
+`POST /v1/chat/completions` route, which calls CPU E2B. Unix peer ownership identifies
+the bot; Discord message authors cannot override the store or caller principal.
+A memory outage stops the turn before inference. Memory content is labeled as data,
+and the bridge supplies no tools. Records that exceed the small context allocation
+are omitted rather than partly quoted.
+
+This dedicated instance's user store is shared bot knowledge for the configured
+channel and threads. Keep only channel-approved records there. Add knowledge through
+Aimee's memory UI or local memory store API. The bridge retrieves persistent knowledge;
+it does not automatically save Discord messages or model answers as facts. Per-user
+conversation history still stays in bounded RAM. With retrieval enabled, chat input
+is capped at at most 600 UTF-8 bytes, reduced further for the system instruction;
+384 bytes are reserved for the memory block. The CPU override disables hidden thinking
+so the reply's bounded token budget produces visible text.
 
 ## Prepare a separate Aimee environment and E2B
 
