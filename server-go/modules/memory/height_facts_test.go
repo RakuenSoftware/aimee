@@ -53,7 +53,7 @@ func exerciseHeightCaptureReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true),set_config('aimee.principal','test:height-caller',true),set_config('aimee.authority','operator',true),set_config('aimee.transport_identity','height-transport',true),set_config('aimee.correlation_id','height-parent',true)`)
 	caller := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "test:height-source", TransportIdentity: "height-source-transport"}
 	var sourceID int64
-	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','height-initial','Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall.','global','_global') RETURNING id`).Scan(&sourceID); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','height-initial','Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall; Kibukx can lift 500 pounds.','global','_global') RETURNING id`).Scan(&sourceID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.captureStoredFactActor(ctx, sourceID, AuthorityUser, caller); err != nil {
@@ -67,11 +67,11 @@ func exerciseHeightCaptureReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s
 		t.Fatal(err)
 	}
 	var count int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM fact_evidence WHERE source_kind='memory' AND source_id=$1`, fmt.Sprintf("memory:%d", sourceID)).Scan(&count); err != nil || count != 2 {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM fact_evidence WHERE source_kind='memory' AND source_id=$1`, fmt.Sprintf("memory:%d", sourceID)).Scan(&count); err != nil || count != 3 {
 		t.Fatal("source replay duplicated evidence", count, err)
 	}
 	var correctionID int64
-	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','height-correction','But Kibukx is 8 feet tall.','global','_global') RETURNING id`).Scan(&correctionID); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','height-correction','But Kibukx is 8 feet tall; Kibukx can lift 600 pounds.','global','_global') RETURNING id`).Scan(&correctionID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.captureStoredFactActor(ctx, correctionID, AuthorityUser, caller); err != nil {
@@ -84,6 +84,12 @@ func exerciseHeightCaptureReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	for _, expected := range [][3]string{{"Kibukx", "6 feet", "superseded"}, {"Kibukx", "8 feet", "persistent"}, {"Kibukx mountains", "69 feet", "persistent"}} {
 		var state string
 		if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM entity_edges WHERE edge_class='semantic' AND source=$1 AND relation='has_height' AND target=$2`, expected[0], expected[1]).Scan(&state); err != nil || state != expected[2] {
+			t.Fatal(expected, state, err)
+		}
+	}
+	for _, expected := range [][2]string{{"500 pounds", "superseded"}, {"600 pounds", "persistent"}} {
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM entity_edges WHERE edge_class='semantic' AND source='Kibukx' AND relation='can_lift' AND target=$1`, expected[0]).Scan(&state); err != nil || state != expected[1] {
 			t.Fatal(expected, state, err)
 		}
 	}

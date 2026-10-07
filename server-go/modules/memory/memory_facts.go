@@ -81,6 +81,7 @@ type memoryFactEnvelope struct {
 }
 
 var relationAliases = map[string]string{
+	"lifting_capacity": "can_lift", "can_lift_weight": "can_lift",
 	"height": "has_height", "is_tall": "has_height",
 	"has_ip": "device_has_ip", "ip": "device_has_ip", "ip_address": "device_has_ip",
 	"hostname": "has_hostname", "has_host": "has_hostname", "host_name": "has_hostname",
@@ -136,7 +137,7 @@ func memoryFactPrompt() string {
 		"triple grounded strictly in the note. For relation, choose the single nearest fit from these canonical predicates " +
 		"when one reasonably applies: " + strings.Join(relations, ", ") + ". If NONE fits, emit a concise snake_case " +
 		"predicate of your own (e.g. drives, founded, mentors) - NEVER a generic catch-all such as other/unknown/misc. " +
-		"Keep full entity names distinct, including qualifying nouns. Height in feet/metres is has_height, never age. " +
+		"Keep full entity names distinct, including qualifying nouns. Height in feet/metres is has_height, never age. Lifting capacity in pounds/kilograms is can_lift. " +
 		"subject is the entity the fact is about (use user for the note's author when it is first-person). confidence is " +
 		"0..1. Extract only durable, generalizable facts; skip transient state, feelings, plans, and one-off events. If the " +
 		"note RETRACTS or DENIES something (no longer, did not, never, is not, has left, was removed), do NOT emit the " +
@@ -256,7 +257,7 @@ func memoryFactProviderUnavailable(reason string) bool {
 func patternFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	triples := ExtractPatterns(content, memoryFactMaxTriples)
 	evidence := memoryFactEvidence(content, 0, int64(len(content)), actor, observedAt, memoryID, jobID)
-	out := heightFactCandidates(content, observedAt, memoryID, jobID, actor)
+	out := measurementFactCandidates(content, observedAt, memoryID, jobID, actor)
 	for _, triple := range triples {
 		relation := canonicalRelation(triple.RelType)
 		subjectKind, objectKind := memoryFactKinds(relation, triple.SubjectKind, triple.ObjectKind)

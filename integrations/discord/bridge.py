@@ -227,7 +227,7 @@ class ModelClient:
         if self.config.knowledge_endpoint:
             # Lexical fallback must not require question filler words to occur
             # in a semantic assertion. The complete task still goes to E2B.
-            filler = {"how", "what", "who", "where", "when", "why", "is", "are", "was", "were", "the", "a", "an", "tall", "but", "please", "tell", "me", "about", "do", "does", "you", "know", "and", "or", "at", "to", "of", "for", "my", "your", "our", "their", "they", "we", "it", "feet", "foot", "ft", "metres", "meters", "cm", "inches", "mountains", "mountain", "height", "so", "did", "get", "got", "that", "this", "information", "from", "told", "said", "source", "sources", "those", "these", "facts", "fact", "provided", "learn", "learned"}
+            filler = {"how", "what", "who", "where", "when", "why", "is", "are", "was", "were", "the", "a", "an", "tall", "but", "please", "tell", "me", "about", "do", "does", "you", "know", "and", "or", "at", "to", "of", "for", "my", "your", "our", "their", "they", "we", "it", "feet", "foot", "ft", "metres", "meters", "cm", "inches", "mountains", "mountain", "height", "can", "lift", "much", "lifting", "capacity", "pounds", "pound", "lbs", "lb", "kilograms", "kg", "so", "did", "get", "got", "that", "this", "information", "from", "told", "said", "source", "sources", "those", "these", "facts", "fact", "provided", "learn", "learned"}
             words = re.findall(r"\w{2,64}", text)[:16]
             meaningful = [word for word in words if word.casefold() not in filler and not word.isdecimal()]
             named = [word for word in meaningful if word[0].isupper()]
@@ -245,8 +245,10 @@ class ModelClient:
                 if not isinstance(value.get("assertions"), list):
                     raise RuntimeError("Invalid durable memory projection")
                 records.extend(value["assertions"])
-            records.sort(key=lambda record: not isinstance(record, dict) or
-                         not any(str(record.get(field, "")).casefold() in terms for field in ("subject", "object")))
+            wanted_relation = "can_lift" if re.search(r"(?i)\b(?:lift|lifting)\b", text) else "has_height" if re.search(r"(?i)\b(?:tall|height)\b", text) else None
+            records.sort(key=lambda record: (
+                not isinstance(record, dict) or bool(wanted_relation and record.get("relation") != wanted_relation),
+                not isinstance(record, dict) or not any(str(record.get(field, "")).casefold() in terms for field in ("subject", "object"))))
             rows = []
             seen = set()
             for record in records:
@@ -396,9 +398,19 @@ class ModelClient:
             return None
         normalized = " ".join(text.split())
         for fact in records:
-            if fact.get("relation") != "has_height":
+            if fact.get("relation") not in ("has_height", "can_lift"):
                 continue
             subject, value = fact["subject"], fact["object"]
+            if fact["relation"] == "can_lift":
+                pattern = (r"(?:(?:I'm|I am) telling you,\s*)?(?:But\s+)?(?:The\s+)?" + re.escape(subject)
+                           + r"\s+can\s+lift\s+" + re.escape(value) + r"[.!]?")
+                if re.fullmatch(pattern, normalized, re.IGNORECASE):
+                    return f"Recorded lifting capacity for {subject}: {value}."
+                question = r"(?:How much|What weight) can (?:the )?" + re.escape(subject) + r" lift[?]?"
+                if re.fullmatch(question, normalized, re.IGNORECASE):
+                    authors = ", ".join(fact.get("authors", []))
+                    return f"{subject} can lift {value}." + (f" The recorded source is {authors}." if authors else " This is recorded in channel memory.")
+                continue
             pattern = (r"(?:But\s+)?(?:The\s+)?" + re.escape(subject)
                        + r"\s+(?:is|are)\s+" + re.escape(value) + r"\s+tall[.!]?")
             if re.fullmatch(pattern, normalized, re.IGNORECASE):

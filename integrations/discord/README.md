@@ -172,9 +172,10 @@ Each admitted turn follows this path:
 1. Retrieve current typed assertions with up to four bounded keyword queries to `memory.search_assertions`,
    scoped to the fixed `discord:<guild>:<channel>` project. Deduplicate and fit complete
    assertions into the context budget, then generate an admission reply. Exact
-   height statements matching an approved typed fact receive a direct confirmation;
+   height or lifting statements matching an approved typed fact receive a direct confirmation;
    full subjects and values must match. Questions, negations, differing values and
-   compound claims do not use this confirmation path. Earlier assistant mistakes
+   compound claims do not use this confirmation path. Lifting questions prioritize
+   capacity assertions so height facts cannot crowd the relevant fact out. Earlier assistant mistakes
    cannot turn a matching current fact into a rejection.
 2. Archive the human statement and generated admission reply in the dedicated Aimee
    user store. An explicit rejection such as “That information is incorrect” withholds
@@ -185,10 +186,13 @@ Each admitted turn follows this path:
    queues its existing grounded fact compiler. Model-generated inferences retain
    model authority and normal review/promotion rules. Bot answers are never used as
    independent evidence of their own claims.
-4. Exact named height statements commit synchronously through the normal ontology,
+4. Exact named height and lifting-capacity statements commit synchronously through the normal ontology,
    entity identity, evidence, contradiction and audit gates. Full qualified names stay
    distinct; `has_height` is functional, so a correction supersedes the same subject’s
-   prior height. Worker replay deduplicates the original source evidence.
+   prior height. `can_lift` similarly stores explicit named capacities in pounds or kilograms
+   and supersedes prior capacities for the same subject. Questions, negation,
+   pronouns, speculative claims and reported speech abstain from this synchronous
+   path. Worker replay deduplicates the original source evidence.
 5. Generate the final answer after capture, archive that generated response and deliver
    it. Append the recent shared chat cache only after successful Discord delivery.
 

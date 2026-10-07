@@ -148,6 +148,29 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(ModelClient.confirmed_statement(memory, statement))
         self.assertIsNone(ModelClient.confirmed_statement("", "Kibukx is 6 feet tall"))
 
+    async def test_lifting_recall_prioritizes_capacity_over_height_and_keeps_source(self):
+        client = ModelClient(replace(self.config, aimee_socket=self.root / "unused.sock",
+                                    knowledge_endpoint="http://127.0.0.1:8741/v1/actions"), None)
+        async def action(name, body):
+            self.assertEqual(name, "memory.search_assertions")
+            self.assertEqual(body["query"], "kibukx")
+            return {"assertions": [
+                {"subject": subject, "relation": relation, "object": value,
+                 "lifecycle_state": "persistent", "historical": False}
+                for subject, relation, value in (("Kibukx", "has_height", "6 feet"),
+                    ("Kibukx mountains", "has_height", "69 feet"), ("Kibukx", "can_lift", "500 pounds"))]}
+        client.knowledge_action = AsyncMock(side_effect=action)
+        client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER}>", "url": "https://discord.com/channels/1/2/3"}])
+        answer = await client.reply([], "How much can Kibukx lift?", CHANNEL)
+        self.assertIn("Kibukx can lift 500 pounds", answer)
+        self.assertIn(str(USER), answer)
+        for statement in ("Kibukx can lift 500 pounds.", "I'm telling you, Kibukx can lift 500 pounds."):
+            answer = await client.reply([], statement, CHANNEL)
+            self.assertIn("Recorded lifting capacity for Kibukx: 500 pounds", answer)
+        memory = await client.memory_context(None, "How much can Kibukx lift?", CHANNEL)
+        for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
+            self.assertIsNone(client.confirmed_statement(memory, text))
+
     async def test_admission_blocks_unapproved_sources_and_loops(self):
         bot = self.bot()
         valid = bot.admitted_turn(self.message())

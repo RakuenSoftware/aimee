@@ -34,7 +34,7 @@ VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,docu
 	if err != nil {
 		return err
 	}
-	// Publish exact, high-precision height assertions in the same transaction.
+	// Publish exact, high-precision measurement assertions in the same transaction.
 	// The async worker uses identical source/job evidence, so its later replay
 	// deduplicates rather than creating a second supporting observation.
 	var jobID int64
@@ -45,7 +45,7 @@ VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,docu
 	if err != nil {
 		return err
 	}
-	candidates := heightFactCandidates(content, observed, id, jobID, captured)
+	candidates := measurementFactCandidates(content, observed, id, jobID, captured)
 	if len(candidates) == 0 {
 		return nil
 	}

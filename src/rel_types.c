@@ -10,6 +10,7 @@
 /* BEGIN GO MEMORY ONTOLOGY SEED */
 // clang-format off
 static const rel_type_def_t SEED_ONTOLOGY[] = {
+    {"can_lift", {99, 0, 0, 0, 0, 0, 0, 0}, 1, {16, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "measurement", 0, 0, 0},
     {"has_height", {99, 0, 0, 0, 0, 0, 0, 0}, 1, {16, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "measurement", 0, 0, 0},
     {"works_for", {10, 0, 0, 0, 0, 0, 0, 0}, 1, {14, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "work", 0, 0, 0},
     {"member_of", {10, 0, 0, 0, 0, 0, 0, 0}, 1, {14, 0, 0, 0, 0, 0, 0, 0}, 1, 0, NULL, 0, "work", 0, 0, 0},
