@@ -304,7 +304,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await client.reply([], "hello")
         self.assertEqual(forwarded, [])
 
-    async def test_completed_turn_delivers_then_commits_separate_user_history(self):
+    async def test_channel_history_is_shared_across_users_and_committed_after_delivery(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
         bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="An E2B answer"))
@@ -313,13 +313,36 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             bot.delivery.send.assert_awaited_once_with("An E2B answer", None)
-            key = (GUILD, CHANNEL, USER)
+            key = (GUILD, CHANNEL)
             self.assertEqual(bot.conversations.get(key)[-1]["content"], "An E2B answer")
-            self.assertEqual(bot.conversations.get((GUILD, CHANNEL, BOT)), [])
-            bot.delivery.send.side_effect = RuntimeError("delivery failed")
-            await bot.on_message(self.message(id=123, content=f"<@{BOT}> second turn"))
+            shared_history = bot.conversations.get(key)
+            await bot.on_message(self.message(
+                id=123, author=SimpleNamespace(id=USER + 1, bot=False),
+                content=f"<@{BOT}> What did we just discuss?"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            self.assertEqual(len(bot.conversations.get(key)), 2)
+            bot.model_client.reply.assert_awaited_with(shared_history, "What did we just discuss?")
+            self.assertEqual(len(bot.conversations.get(key)), 4)
+
+            thread_id = 888888888888888888
+            await bot.on_message(self.message(
+                id=124, channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
+                content=f"<@{BOT}> New thread"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.model_client.reply.assert_awaited_with([], "New thread")
+            bot.delivery.send.assert_awaited_with("An E2B answer", thread_id)
+            thread_history = bot.conversations.get((GUILD, thread_id))
+            await bot.on_message(self.message(
+                id=125, author=SimpleNamespace(id=USER + 1, bot=False),
+                channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
+                content=f"<@{BOT}> Continue this thread"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.model_client.reply.assert_awaited_with(thread_history, "Continue this thread")
+            self.assertEqual(len(bot.conversations.get(key)), 4)
+            self.assertEqual(bot.conversations.get((GUILD + 1, CHANNEL)), [])
+            bot.delivery.send.side_effect = RuntimeError("delivery failed")
+            await bot.on_message(self.message(id=126, content=f"<@{BOT}> failed turn"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(len(bot.conversations.get(key)), 4)
         finally:
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)

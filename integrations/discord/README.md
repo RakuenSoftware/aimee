@@ -134,8 +134,8 @@ are omitted rather than partly quoted.
 This dedicated instance's user store is shared bot knowledge for the configured
 channel and threads. Keep only channel-approved records there. Add knowledge through
 Aimee's memory UI or local memory store API. The bridge retrieves persistent knowledge;
-it does not automatically save Discord messages or model answers as facts. Per-user
-conversation history still stays in bounded RAM. With retrieval enabled, chat input
+it does not automatically save Discord messages or model answers as facts. Conversation history is shared by everyone in the same channel or thread and stays
+in bounded RAM. With retrieval enabled, chat input
 is capped at at most 600 UTF-8 bytes, reduced further for the system instruction;
 384 bytes are reserved for the memory block. The CPU override disables hidden thinking
 so the reply's bounded token budget produces visible text.
@@ -210,8 +210,8 @@ systemctl --user start aimee-discord-e2b.service
 systemctl --user start aimee-discord.service
 ```
 
-Mention the bot in the configured channel. Conversations are separate for each server, channel/thread
-and user. Four recent turn pairs are retained in memory for up to 24 hours, with at most 128
+Mention the bot in the configured channel. Everyone in the same channel shares one conversation history. Each thread has its own
+shared history, separate from the parent channel and other threads; servers stay separate. Four recent turn pairs are retained in memory for up to 24 hours, with at most 128
 conversations; restart clears them. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
 For the bounded 2048-token E2B configuration, prompts use a conservative UTF-8 byte budget
@@ -228,7 +228,7 @@ python3 -m venv .venv-discord
 ```
 
 Tests exercise the real HTTP model wire against a local fake endpoint, key rotation, redirect refusal,
-native admission failure, channel and user isolation, webhook payloads, mention suppression, Unicode
+native admission failure, channel admission, shared channel history across users, thread/server isolation, webhook payloads, mention suppression, Unicode
 splitting, loop prevention, queue bounds and history retention. Actual E2B inference and Discord
 conversation validation require the configured GPU host, bot application token and dedicated
 Aimee enrollment. A webhook-only check does not establish end-to-end chatbot readiness.

@@ -360,10 +360,10 @@ class ChatBot(discord.Client):
             self.seen.popitem(last=False)
 
     async def process_turns(self):
-        # One request at a time matches the qualified synchronous single-GPU profile.
+        # Serialize turns so everyone in a channel sees the same delivered history.
         while True:
             turn = await self.queue.get()
-            key = (turn.guild_id, turn.channel_id, turn.user_id)
+            key = (turn.guild_id, turn.channel_id)
             try:
                 reply = await self.model_client.reply(self.conversations.get(key), turn.text)
                 await self.delivery.send(reply, turn.thread_id)
