@@ -192,6 +192,16 @@ Each admitted turn follows this path:
 5. Generate the final answer after capture, archive that generated response and deliver
    it. Append the recent shared chat cache only after successful Discord delivery.
 
+Fact capture retains the Discord author ID, display name and message ID with the
+original human source. Typed retrieval resolves supporting evidence through scoped
+`memory.get` reads and includes recorded authors in chat context when space permits.
+“Who told you?” and “Where did you get that information from?” reuse the latest
+substantive human turn in the shared recent history as a query anchor, then render
+recorded authors and original Discord message links directly from current evidence.
+Author mentions do not send notifications. Connector ownership is never substituted
+for the speaker; imported excerpts without author metadata are reported as unknown.
+Without a recent subject or a matching stored fact, the bot asks which fact is meant.
+
 Both archives and typed facts survive process restart. Every human in the public
 channel uses the same fact scope; threads have separate scopes. Retrieval excludes
 historical, candidate and superseded assertions. Authentication, capture or retrieval

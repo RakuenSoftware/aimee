@@ -400,6 +400,63 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("old value", context)
         self.assertLess(len(context.encode()), 384)
 
+    async def test_provenance_followup_resolves_durable_authors_without_model_or_new_author_guess(self):
+        config = replace(self.config, aimee_socket=self.root / "unused.sock",
+                         knowledge_endpoint="http://127.0.0.1:8741/v1/actions", knowledge_key_file=self.key)
+        client = ModelClient(config, None)
+        project = client.channel_project(CHANNEL)
+        message_ids = ["777777777777777777", "888888888888888888"]
+        async def action(name, body):
+            self.assertEqual(body["project"], project)
+            if name == "memory.search_assertions":
+                self.assertEqual(body["query"], "kibukx")
+                return {"assertions": [
+                    {"subject": subject, "relation": "has_height", "object": height,
+                     "lifecycle_state": "persistent", "historical": False,
+                     "evidence": [{"source_kind": "memory", "source_id": f"memory:{i+1}", "stance": "supports"},
+                                  {"source_kind": "memory", "source_id": "memory:999", "stance": "contradicts"}]}
+                    for i, (subject, height) in enumerate((("Kibukx", "6 feet"), ("Kibukx mountains", "69 feet")))]}
+            self.assertEqual(name, "memory.get")
+            i = body["id"] - 1
+            self.assertIn(i, (0, 1))
+            return {"memory": {"key": f"{project}:{message_ids[i]}", "source_session": project,
+                               "use_cases": json.dumps({"source": "discord", "author_id": str(USER+i), "message_id": message_ids[i]})}}
+        client.knowledge_action = AsyncMock(side_effect=action)
+        history = [{"role": "user", "content": "So how tall is Kibukx? How tall are the Kibukx Mountains?"},
+                   {"role": "assistant", "content": "Kibukx is 6 feet tall, and the mountains are 69 feet tall."}]
+        for question in ("Where did you get that information from?", "Who did you get that information from?", "Who told you?"):
+            answer = await client.reply(history, question, CHANNEL)
+            self.assertIn(f"Kibukx: 6 feet — from <@{USER}>", answer)
+            self.assertIn(f"Kibukx mountains: 69 feet — from <@{USER+1}>", answer)
+            self.assertIn(f"https://discord.com/channels/{GUILD}/{CHANNEL}/{message_ids[0]}", answer)
+            history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+        context = await client.memory_context(None, "How tall is Kibukx?", CHANNEL)
+        self.assertIn(str(USER), context)
+        self.assertIn(str(USER+1), context)
+        self.assertLess(len(context.encode()), 384)
+
+    async def test_provenance_never_invents_author_for_transcript_or_mismatched_channel(self):
+        client = ModelClient(self.config, None)
+        project = client.channel_project(CHANNEL)
+        record = {"evidence": [{"source_kind": "memory", "source_id": "memory:1", "stance": "supports"}]}
+        for memory in ({"use_cases": json.dumps({"source": "operator-provided conversation excerpt"})},
+                       {"key": f"discord:{GUILD}:{CHANNEL+1}:777777777777777777", "source_session": project,
+                        "use_cases": json.dumps({"source": "discord", "author_id": str(USER), "message_id": "777777777777777777"})}):
+            client.knowledge_action = AsyncMock(return_value={"memory": memory})
+            sources = await client.fact_sources(record, CHANNEL)
+            self.assertNotIn("author", sources[0])
+            answer = client.provenance_reply("Facts:\n" + json.dumps([{"subject": "Kibukx", "object": "6 feet", "sources": sources}]))
+            self.assertIn("original author was not recorded", answer)
+            self.assertNotIn(str(USER), answer)
+            client.knowledge_action.assert_awaited_once_with("memory.get", {"id": 1, "project": project})
+        self.assertEqual(client.provenance_query([], "Who told you?"), "")
+        self.assertIn("Which fact", client.provenance_reply(""))
+
+    def test_admitted_turn_retains_authenticated_discord_author_name(self):
+        bot = self.bot()
+        turn = bot.admitted_turn(self.message(author=SimpleNamespace(id=USER, bot=False, display_name="Virant")))
+        self.assertEqual((turn.user_id, turn.author_name), (USER, "Virant"))
+
     async def test_aimee_memory_outage_never_calls_model(self):
         chat = AsyncMock()
         app = web.Application()
