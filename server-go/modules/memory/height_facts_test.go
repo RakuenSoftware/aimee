@@ -93,6 +93,39 @@ func exerciseHeightCaptureReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s
 			t.Fatal(expected, state, err)
 		}
 	}
+	var spatialID int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','spatial-initial','The car wash is 200 meters from Alex house, and is located in Kansas City, Kansas.','global','_global') RETURNING id`).Scan(&spatialID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.captureStoredFactActor(ctx, spatialID, AuthorityUser, caller); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.captureStoredFactActor(ctx, spatialID, AuthorityUser, caller); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM fact_evidence WHERE source_id=$1`, fmt.Sprintf("memory:%d", spatialID)).Scan(&count); err != nil || count != 2 {
+		t.Fatal("spatial replay", count, err)
+	}
+	var correctionSpatial int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','spatial-correction','Alex house is 250 meters from the car wash.','global','_global') RETURNING id`).Scan(&correctionSpatial); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.captureStoredFactActor(ctx, correctionSpatial, AuthorityUser, caller); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.captureStoredFactActor(ctx, spatialID, AuthorityUser, caller); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range [][2]string{{"200 meters", "superseded"}, {"250 meters", "persistent"}} {
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM entity_edges WHERE source='Distance between Alex house and car wash' AND relation='has_distance' AND target=$1`, expected[0]).Scan(&state); err != nil || state != expected[1] {
+			t.Fatal("spatial correction", state, err)
+		}
+	}
+	var invented int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM entity_edges WHERE edge_class='semantic' AND ((source='Alex house' AND relation='located_in') OR (relation='has_distance' AND source ILIKE '%Himalayas%'))`).Scan(&invented); err != nil || invented != 0 {
+		t.Fatal("invented spatial fact", invented, err)
+	}
 	exec(`SET CONSTRAINTS ALL IMMEDIATE`)
 }
 

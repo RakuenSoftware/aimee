@@ -227,11 +227,11 @@ class ModelClient:
         if self.config.knowledge_endpoint:
             # Lexical fallback must not require question filler words to occur
             # in a semantic assertion. The complete task still goes to E2B.
-            filler = {"how", "what", "who", "where", "when", "why", "is", "are", "was", "were", "the", "a", "an", "tall", "but", "please", "tell", "me", "about", "do", "does", "you", "know", "and", "or", "at", "to", "of", "for", "my", "your", "our", "their", "they", "we", "it", "feet", "foot", "ft", "metres", "meters", "cm", "inches", "mountains", "mountain", "height", "can", "lift", "much", "lifting", "capacity", "pounds", "pound", "lbs", "lb", "kilograms", "kg", "so", "did", "get", "got", "that", "this", "information", "from", "told", "said", "source", "sources", "those", "these", "facts", "fact", "provided", "learn", "learned"}
+            filler = {"how", "what", "who", "where", "when", "why", "is", "are", "was", "were", "the", "a", "an", "tall", "but", "please", "tell", "me", "about", "do", "does", "you", "know", "and", "or", "at", "to", "of", "for", "my", "your", "our", "their", "they", "we", "it", "feet", "foot", "ft", "metres", "meters", "cm", "inches", "mountains", "mountain", "height", "can", "lift", "much", "lifting", "capacity", "pounds", "pound", "lbs", "lb", "kilograms", "kg", "so", "did", "get", "got", "that", "this", "information", "from", "told", "said", "source", "sources", "those", "these", "facts", "fact", "provided", "learn", "learned", "telling", "am", "far", "away", "should", "could", "would", "cool", "story", "okay", "hmm"}
             words = re.findall(r"\w{2,64}", text)[:16]
             meaningful = [word for word in words if word.casefold() not in filler and not word.isdecimal()]
             named = [word for word in meaningful if word[0].isupper()]
-            terms = list(dict.fromkeys(word.casefold() for word in (named or meaningful)))[:4]
+            terms = list(dict.fromkeys(word.casefold() for word in (named + meaningful)))[:4]
             if not terms:
                 return ""
             # The lexical arm matches phrases. Bounded individual terms also

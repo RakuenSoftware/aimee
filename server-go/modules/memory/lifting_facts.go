@@ -10,7 +10,7 @@ import (
 var liftingStatement = regexp.MustCompile(`(?i)^(?:but\s+)?(?:the\s+)?([\p{L}][\p{L}\p{N} '\-]{0,159}?)\s+can\s+lift\s+([0-9]+(?:\.[0-9]+)?)\s+(pounds|pound|lbs|lb|kilograms|kilogram|kgs|kg)!?$`)
 
 func measurementFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
-	result := heightFactCandidates(content, observedAt, memoryID, jobID, actor)
+	result := append(heightFactCandidates(content, observedAt, memoryID, jobID, actor), spatialFactCandidates(content, observedAt, memoryID, jobID, actor)...)
 	offset := 0
 	spans := heightClauseBreak.FindAllStringIndex(content, -1)
 	spans = append(spans, []int{len(content), len(content)})

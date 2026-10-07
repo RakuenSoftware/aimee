@@ -2,6 +2,7 @@
 -- memory module. New source builds include these measurement relations.
 -- Preserve operator definitions and stable relation IDs.
 INSERT INTO rel_types(rel_type,head_kinds,tail_kinds,is_symmetric,inverse_rel_type,correction_behavior,category,sensitivity,is_hierarchy_rel,status)
-VALUES('can_lift','other','scalar',0,'','supersede','measurement','normal',0,'active'),
+VALUES('has_distance','other','scalar',0,'','supersede','measurement','normal',0,'active'),
+('can_lift','other','scalar',0,'','supersede','measurement','normal',0,'active'),
 ('has_height','other','scalar',0,'','supersede','measurement','normal',0,'active')
 ON CONFLICT(rel_type) DO NOTHING;

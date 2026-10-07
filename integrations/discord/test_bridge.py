@@ -480,6 +480,27 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         turn = bot.admitted_turn(self.message(author=SimpleNamespace(id=USER, bot=False, display_name="Virant")))
         self.assertEqual((turn.user_id, turn.author_name), (USER, "Virant"))
 
+    async def test_spatial_retrieval_keeps_lowercase_subjects_beside_named_reference(self):
+        client = ModelClient(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"), None)
+        queries = []
+        async def action(name, body):
+            self.assertEqual(name, "memory.search_assertions")
+            queries.append(body["query"])
+            return {"assertions": [
+                {"subject": "Distance between <@806611630124564562>'s house and car wash", "relation": "has_distance", "object": "200 meters", "lifecycle_state": "persistent", "historical": False},
+                {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]}
+        client.knowledge_action = AsyncMock(side_effect=action)
+        context = await client.memory_context(None, "Where is <@806611630124564562>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
+        self.assertIn("himalayas", queries)
+        self.assertIn("car", queries)
+        self.assertIn("house", queries)
+        self.assertIn("Kansas City, Kansas", context)
+        rows = json.loads(context.split("\n", 1)[1])
+        distance = next(row for row in rows if row["relation"] == "has_distance")
+        self.assertIn("806611630124564562", distance["subject"])
+        self.assertNotIn("Himalayas", distance["subject"])
+        self.assertLess(len(context.encode()), 384)
+
     async def test_aimee_memory_outage_never_calls_model(self):
         chat = AsyncMock()
         app = web.Application()

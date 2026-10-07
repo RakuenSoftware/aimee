@@ -190,7 +190,15 @@ Each admitted turn follows this path:
    entity identity, evidence, contradiction and audit gates. Full qualified names stay
    distinct; `has_height` is functional, so a correction supersedes the same subject’s
    prior height. `can_lift` similarly stores explicit named capacities in pounds or kilograms
-   and supersedes prior capacities for the same subject. Questions, negation,
+   and supersedes prior capacities for the same subject. Explicit anchored spatial statements
+   also retain `located_in` places (including comma-qualified names) and a functional
+   `has_distance` measurement whose subject names both endpoints. Endpoint ordering
+   is canonical, so reversed references identify the same pair; distances to other
+   places remain separate. Unanchored “away” statements do not produce a distance
+   assertion. Compound distance/location statements retain their common source span.
+   Capture preserves these explicit premises without asserting an inferred address,
+   exact house location or distance to an unmentioned third place. Recall presents
+   the linked premises together so city-level proximity can be reasoned from them. Questions, negation,
    pronouns, speculative claims and reported speech abstain from this synchronous
    path. Worker replay deduplicates the original source evidence.
 5. Generate the final answer after capture, archive that generated response and deliver
@@ -208,7 +216,8 @@ Without a recent subject or a matching stored fact, the bot asks which fact is m
 
 Both archives and typed facts survive process restart. Every human in the public
 channel uses the same fact scope; threads have separate scopes. Retrieval excludes
-historical, candidate and superseded assertions. Authentication, capture or retrieval
+historical, candidate and superseded assertions. Capitalized names augment other
+query terms rather than suppressing lowercase entities in the same question. Authentication, capture or retrieval
 failure stops delivery and logs only failure metadata. Lexical typed retrieval remains
 available when a vector generation is unavailable; that degraded mode does not claim
 vector qualification. Complete facts exceeding the context allowance are omitted.

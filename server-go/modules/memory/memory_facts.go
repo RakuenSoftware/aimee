@@ -137,7 +137,7 @@ func memoryFactPrompt() string {
 		"triple grounded strictly in the note. For relation, choose the single nearest fit from these canonical predicates " +
 		"when one reasonably applies: " + strings.Join(relations, ", ") + ". If NONE fits, emit a concise snake_case " +
 		"predicate of your own (e.g. drives, founded, mentors) - NEVER a generic catch-all such as other/unknown/misc. " +
-		"Keep full entity names distinct, including qualifying nouns. Height in feet/metres is has_height, never age. Lifting capacity in pounds/kilograms is can_lift. " +
+		"Keep full entity names distinct, including qualifying nouns. A has_distance subject must explicitly name both endpoints; never invent a reference point for away/nearby. Height in feet/metres is has_height, never age. Lifting capacity in pounds/kilograms is can_lift. " +
 		"subject is the entity the fact is about (use user for the note's author when it is first-person). confidence is " +
 		"0..1. Extract only durable, generalizable facts; skip transient state, feelings, plans, and one-off events. If the " +
 		"note RETRACTS or DENIES something (no longer, did not, never, is not, has left, was removed), do NOT emit the " +
