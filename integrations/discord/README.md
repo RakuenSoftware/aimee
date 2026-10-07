@@ -58,6 +58,32 @@ For outbound-only delivery, feed an operator-selected message through stdin with
 All webhook messages disable user, role and everyone mentions, even when model output contains
 Discord mention markup. Long replies are split within Discord's message limit.
 
+## CPU-only Aimee and E2B deployment
+
+For CPU inference, use the published `aimee-llm-e2b:1.0.0` image, which includes
+portable llama.cpp and its baked E2B QAT checkpoint. This is the standard Aimee
+synthesis service. It does not use the GPU-qualified native-memory vLLM plugin.
+A CPU deployment does not establish native-memory plugin qualification.
+
+On an unprivileged Debian 13 LXC, enable Docker nesting, allocate 12 CPU cores,
+24 GiB RAM and 64 GiB storage, and pass through no GPU devices. Install Docker,
+Compose and Python 3 with venv support. Use a fresh Aimee Compose project and
+private credentials as below; also set `AIMEE_LLM_VARIANT=e2b`,
+`SYNTHESIS_MODEL=gemma-4-E2B-it` and
+`SYNTHESIS_ENDPOINT=https://aimee-llm:8761` in its private environment file.
+
+```sh
+scripts/compose-local.sh --env-file ~/.config/aimee-discord/application.env \
+  -f compose.yaml -f integrations/discord/compose.cpu.yaml --profile synthesis up -d
+```
+
+The override caps inference at ten CPU cores, selects ten generation threads,
+sets GPU layers to zero and uses a 2048-token context. The standard model service
+requires the dedicated Server's mTLS identity and remains on the private model
+network. Configure the Discord model connection separately before starting the
+bridge: its default loopback endpoint is for the enrolled vLLM deployment below.
+Starting the CPU Compose stack alone does not connect Discord to memory or inference.
+
 ## Prepare a separate Aimee environment and E2B
 
 Create a dedicated Aimee Server instance using the standard [installation](../../docs/QUICKSTART.md)

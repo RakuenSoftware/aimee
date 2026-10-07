@@ -1,0 +1,9 @@
+# Optional override for the standard Aimee Compose stack's synthesis profile.
+# The published E2B image contains the portable llama.cpp CPU runtime and weights.
+services:
+  aimee-llm:
+    cpus: 10
+    environment:
+      LLAMA_ARG_THREADS: 10
+      LLAMA_ARG_N_GPU_LAYERS: 0
+      AIMEE_LLM_CTX: 2048
