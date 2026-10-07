@@ -325,3 +325,24 @@ post-commit replies, typed recall, channel admission, shared channel history acr
 splitting, loop prevention, queue bounds and history retention. Actual E2B inference and Discord
 conversation validation require the configured GPU host, bot application token and dedicated
 Aimee enrollment. A webhook-only check does not establish end-to-end chatbot readiness.
+
+### Discord identities and peer conversations
+
+Discord supplies the current speaker and mentioned users as structured identity
+metadata. The model receives those IDs/display names separately from message text;
+known raw `@ID` and `@Name#discriminator` output is rendered as `<@ID>`. Ordinary
+replies keep user, role and everyone notifications disabled.
+
+Other bots remain ignored unless their Discord bot IDs appear in `peer_bot_ids`
+(default empty) and a human explicitly requests conversation with a mentioned peer,
+for example mentioning both bots and saying “Talk to each other.” This opens a
+channel/thread-specific three-minute session with at most two incoming peer turns.
+Only the selected peer can be pinged in those replies. Unknown bots, webhook
+imitations, self messages, expired sessions and duplicate events are rejected.
+Peer exchanges are archived as agent messages and never admitted as human facts.
+
+The peer must use the actual `<@AIMEE_BOT_ID>` mention. Plain `@Aimee#5282` text is
+not a Discord mention; Discord redacts its message content without Message Content
+intent. This bridge keeps privileged intents disabled and does not treat unavailable
+content as a message addressed to Aimee. Both bot implementations must support
+bot messages for an interactive exchange.

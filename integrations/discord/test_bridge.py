@@ -14,7 +14,7 @@ from aiohttp import web
 import aiohttp
 import discord
 
-from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn
+from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions
 
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
@@ -170,6 +170,89 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         memory = await client.memory_context(None, "How much can Kibukx lift?", CHANNEL)
         for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
             self.assertIsNone(client.confirmed_statement(memory, text))
+
+    def test_identity_rendering_uses_trusted_ids_and_display_names(self):
+        identities = {USER: "Virant", BOT: "Aimee", USER+1: "Samy"}
+        text = render_mentions(f"@{USER} Hello @Samy and @Aimee#5282! @999999999999999999", identities)
+        self.assertIn(f"<@{USER}>", text)
+        self.assertIn(f"<@{USER+1}>", text)
+        self.assertIn(f"<@{BOT}>", text)
+        self.assertNotIn("999999999999999999", text)
+        self.assertEqual(render_mentions(f"<@{USER}>", identities), f"<@{USER}>")
+
+    async def test_peer_routing_requires_human_session_actual_mention_and_preserves_model_authority(self):
+        peer = USER+1
+        bot = self.bot(replace(self.config, peer_bot_ids=(peer,)))
+        author = SimpleNamespace(id=peer, bot=True, display_name="Samy")
+        message = self.message(author=author)
+        self.assertIsNone(bot.admitted_turn(message))
+        bot.peer_sessions[(CHANNEL, peer)] = (float("inf"), 2)
+        self.assertTrue(bot.admitted_turn(message).is_bot)
+        self.assertEqual(bot.admitted_turn(message).peer_target, peer)
+        self.assertIsNone(bot.admitted_turn(self.message(author=author, mentions=[], content="Hello @Aimee#5282")))
+        self.assertIsNone(bot.admitted_turn(self.message(author=author, webhook_id=peer)))
+        self.assertIsNone(bot.admitted_turn(self.message(author=SimpleNamespace(id=BOT, bot=True))))
+        request = self.message(content=f"<@{BOT}> <@{peer}> Talk to each other.",
+                               mentions=[SimpleNamespace(id=BOT), author])
+        self.assertEqual(bot.admitted_turn(request).peer_target, peer)
+        self.assertIsNone(bot.admitted_turn(self.message(content=f"<@{BOT}> How tall is <@{peer}>?", mentions=request.mentions)).peer_target)
+        client = ModelClient(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"), None)
+        client.archive_turn = AsyncMock()
+        client.knowledge_action = AsyncMock()
+        self.assertFalse(await client.capture_turn(bot.admitted_turn(message), "A reply"))
+        client.archive_turn.assert_awaited_once()
+        client.knowledge_action.assert_not_called()
+        # Admission consumes the finite budget exactly once, even on duplicates.
+        await bot.on_message(message)
+        await bot.on_message(message)
+        self.assertEqual(bot.peer_sessions[(CHANNEL,peer)][1], 1)
+        await bot.on_message(self.message(id=message.id+1, author=author))
+        self.assertEqual(bot.peer_sessions[(CHANNEL,peer)][1], 0)
+        self.assertIsNone(bot.admitted_turn(self.message(id=message.id+2, author=author)))
+        await bot.close()
+
+    async def test_peer_delivery_only_enables_configured_bot_mentions(self):
+        peer = USER+1
+        webhook = SimpleNamespace(send=AsyncMock())
+        config = replace(self.config, peer_bot_ids=(peer,))
+        with patch("discord.Webhook.from_url", return_value=webhook):
+            async with aiohttp.ClientSession() as session:
+                delivery = WebhookDelivery(config,session)
+                await delivery.send(f"<@{peer}> Hello",peer_id=peer)
+                mentions = webhook.send.call_args.kwargs["allowed_mentions"]
+                self.assertEqual([user.id for user in mentions.users], [peer])
+                self.assertFalse(mentions.roles)
+                self.assertFalse(mentions.everyone)
+                with self.assertRaises(ValueError):
+                    await delivery.send("Hello",peer_id=USER)
+                await delivery.send(f"<@{USER}> Hello")
+                self.assertFalse(webhook.send.call_args.kwargs["allowed_mentions"].users)
+
+    async def test_human_peer_request_creates_bounded_session_and_addresses_correct_partner(self):
+        peer = USER+1
+        bot = self.bot(replace(self.config, peer_bot_ids=(peer,)))
+        partner = SimpleNamespace(id=peer, bot=True, display_name="Samy")
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=f"@{peer} Hello! @999999999999999999"),
+                                          capture_turn=AsyncMock(return_value=False))
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.on_message(self.message(content=f"<@{BOT}> <@{peer}> Say hello to each other.",
+                                              mentions=[SimpleNamespace(id=BOT),partner]))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.delivery.send.assert_awaited_once_with(f"<@{peer}> Hello!", None, peer_id=peer)
+            self.assertEqual(bot.peer_sessions[(CHANNEL,peer)][1],2)
+            turn = bot.model_client.reply.call_args.kwargs["turn"]
+            self.assertEqual(turn.user_id,USER)
+            self.assertEqual(turn.mentions,((peer,"Samy"),))
+            await bot.on_message(self.message(id=999, author=partner, content=f"<@{BOT}> Hi!"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertTrue(bot.model_client.reply.call_args.kwargs["turn"].is_bot)
+            self.assertEqual(bot.peer_sessions[(CHANNEL,peer)][1],1)
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker,return_exceptions=True)
+            await bot.close()
 
     async def test_admission_blocks_unapproved_sources_and_loops(self):
         bot = self.bot()
@@ -487,21 +570,21 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(name, "memory.search_assertions")
             queries.append(body["query"])
             assertions = [
-                {"subject": "Distance between <@806611630124564562>'s house and car wash", "relation": "has_distance", "object": "200 meters", "lifecycle_state": "persistent", "historical": False},
+                {"subject": "Distance between <@333333333333333333>'s house and car wash", "relation": "has_distance", "object": "200 meters", "lifecycle_state": "persistent", "historical": False},
                 {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]
             return {"assertions": assertions if body["query"] in ("car", "wash", "car wash") else assertions[:1] if "house" in body["query"] else []}
         client.knowledge_action = AsyncMock(side_effect=action)
-        context = await client.memory_context(None, "Where is <@806611630124564562>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
+        context = await client.memory_context(None, "Where is <@333333333333333333>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
         self.assertIn("himalayas", queries)
         self.assertIn("car", queries)
         self.assertIn("house", queries)
         self.assertIn("Kansas City, Kansas", context)
         rows = json.loads(context.split("\n", 1)[1])
         distance = next(row for row in rows if row["relation"] == "has_distance")
-        self.assertIn("806611630124564562", distance["subject"])
+        self.assertIn("333333333333333333", distance["subject"])
         self.assertNotIn("Himalayas", distance["subject"])
         self.assertLess(len(context.encode()), 384)
-        house_context = await client.memory_context(None, "Where is <@806611630124564562>'s house?", CHANNEL)
+        house_context = await client.memory_context(None, "Where is <@333333333333333333>'s house?", CHANNEL)
         self.assertIn("Kansas City, Kansas", house_context)
         self.assertIn("car wash", queries)
 
@@ -560,7 +643,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 id=123, author=SimpleNamespace(id=USER + 1, bot=False),
                 content=f"<@{BOT}> What did we just discuss?"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with(shared_history, "What did we just discuss?", channel_id=CHANNEL)
+            bot.model_client.reply.assert_awaited_with(shared_history, "What did we just discuss?", channel_id=CHANNEL,
+                                                      turn=Turn(123, GUILD, CHANNEL, USER+1, "What did we just discuss?"))
             self.assertEqual(len(bot.conversations.get(key)), 4)
 
             thread_id = 888888888888888888
@@ -568,7 +652,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 id=124, channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
                 content=f"<@{BOT}> New thread"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with([], "New thread", channel_id=thread_id)
+            bot.model_client.reply.assert_awaited_with([], "New thread", channel_id=thread_id,
+                                                      turn=Turn(124, GUILD, thread_id, USER, "New thread", thread_id))
             bot.delivery.send.assert_awaited_with("An E2B answer", thread_id)
             thread_history = bot.conversations.get((GUILD, thread_id))
             await bot.on_message(self.message(
@@ -576,7 +661,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 channel=SimpleNamespace(id=thread_id, parent_id=CHANNEL),
                 content=f"<@{BOT}> Continue this thread"))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.model_client.reply.assert_awaited_with(thread_history, "Continue this thread", channel_id=thread_id)
+            bot.model_client.reply.assert_awaited_with(thread_history, "Continue this thread", channel_id=thread_id,
+                                                      turn=Turn(125, GUILD, thread_id, USER+1, "Continue this thread", thread_id))
             self.assertEqual(len(bot.conversations.get(key)), 4)
             self.assertEqual(bot.conversations.get((GUILD + 1, CHANNEL)), [])
             bot.delivery.send.side_effect = RuntimeError("delivery failed")

@@ -4,9 +4,9 @@ import "testing"
 
 func TestSpatialFactsRetainDistanceEndpointsAndCompoundPlace(t *testing.T) {
 	actor := FactActor{Principal: "connector", Role: "user", Rank: 30, Authenticated: 1}
-	text := "But the car wash is 200 meters from <@806611630124564562> 's house, and is located in Kansas City, Kansas."
+	text := "But the car wash is 200 meters from <@333333333333333333> 's house, and is located in Kansas City, Kansas."
 	facts := measurementFactCandidates(text, "now", 1, 2, actor)
-	if len(facts) != 2 || facts[0].Subject != "Distance between <@806611630124564562>'s house and car wash" || facts[0].Relation != "has_distance" || facts[0].Object != "200 meters" || facts[1].Subject != "car wash" || facts[1].Relation != "located_in" || facts[1].Object != "Kansas City, Kansas" || facts[0].Actor != actor {
+	if len(facts) != 2 || facts[0].Subject != "Distance between <@333333333333333333>'s house and car wash" || facts[0].Relation != "has_distance" || facts[0].Object != "200 meters" || facts[1].Subject != "car wash" || facts[1].Relation != "located_in" || facts[1].Object != "Kansas City, Kansas" || facts[0].Actor != actor {
 		t.Fatalf("%+v", facts)
 	}
 	reversed := spatialFactCandidates("Alex's house is 0.2 km from the car wash.", "now", 1, 2, modelFactActor())

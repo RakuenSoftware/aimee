@@ -6,5 +6,6 @@
   "channel_id": "REPLACE_WITH_DISCORD_CHANNEL_ID",
   "endpoint": "http://127.0.0.1:19852/v1/chat/completions",
   "model": "REPLACE_WITH_VLLM_SERVED_MODEL_NAME",
-  "allowed_user_ids": []
+  "allowed_user_ids": [],
+  "peer_bot_ids": []
 }
