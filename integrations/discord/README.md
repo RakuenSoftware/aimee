@@ -217,7 +217,10 @@ Without a recent subject or a matching stored fact, the bot asks which fact is m
 Both archives and typed facts survive process restart. Every human in the public
 channel uses the same fact scope; threads have separate scopes. Retrieval excludes
 historical, candidate and superseded assertions. Capitalized names augment other
-query terms rather than suppressing lowercase entities in the same question. Authentication, capture or retrieval
+query terms rather than suppressing lowercase entities in the same question.
+A bounded spatial join retrieves explicit locations for up to four distance-pair
+endpoints through the same scoped assertion API, keeping the location and distance
+premises available together even when a follow-up names only the house. Authentication, capture or retrieval
 failure stops delivery and logs only failure metadata. Lexical typed retrieval remains
 available when a vector generation is unavailable; that degraded mode does not claim
 vector qualification. Complete facts exceeding the context allowance are omitted.

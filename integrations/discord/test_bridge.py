@@ -486,9 +486,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         async def action(name, body):
             self.assertEqual(name, "memory.search_assertions")
             queries.append(body["query"])
-            return {"assertions": [
+            assertions = [
                 {"subject": "Distance between <@806611630124564562>'s house and car wash", "relation": "has_distance", "object": "200 meters", "lifecycle_state": "persistent", "historical": False},
-                {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]}
+                {"subject": "car wash", "relation": "located_in", "object": "Kansas City, Kansas", "lifecycle_state": "persistent", "historical": False}]
+            return {"assertions": assertions if body["query"] in ("car", "wash", "car wash") else assertions[:1] if "house" in body["query"] else []}
         client.knowledge_action = AsyncMock(side_effect=action)
         context = await client.memory_context(None, "Where is <@806611630124564562>'s house? How far away is the car wash from the Himalayas?", CHANNEL)
         self.assertIn("himalayas", queries)
@@ -500,6 +501,9 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("806611630124564562", distance["subject"])
         self.assertNotIn("Himalayas", distance["subject"])
         self.assertLess(len(context.encode()), 384)
+        house_context = await client.memory_context(None, "Where is <@806611630124564562>'s house?", CHANNEL)
+        self.assertIn("Kansas City, Kansas", house_context)
+        self.assertIn("car wash", queries)
 
     async def test_aimee_memory_outage_never_calls_model(self):
         chat = AsyncMock()

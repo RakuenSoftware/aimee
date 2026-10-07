@@ -245,6 +245,26 @@ class ModelClient:
                 if not isinstance(value.get("assertions"), list):
                     raise RuntimeError("Invalid durable memory projection")
                 records.extend(value["assertions"])
+            # One bounded spatial join supplies the other endpoint's location.
+            # This retrieves explicit premises; it does not assert a new address.
+            endpoints = []
+            for record in records:
+                if (not isinstance(record, dict) or record.get("relation") != "has_distance"
+                        or record.get("historical") or record.get("lifecycle_state") not in ("persistent", "promoted")):
+                    continue
+                pair = re.fullmatch(r"Distance between (.{1,200}) and (.{1,200})", str(record.get("subject", "")))
+                if pair:
+                    endpoints.extend(pair.groups())
+            endpoints = list(dict.fromkeys(endpoints))[:4]
+            linked = await asyncio.gather(*(self.knowledge_action("memory.search_assertions", {
+                "query": endpoint, "project": self.channel_project(channel_id),
+                "include_historical": False, "limit": 4}) for endpoint in endpoints))
+            for endpoint, value in zip(endpoints, linked):
+                if not isinstance(value.get("assertions"), list):
+                    raise RuntimeError("Invalid linked memory projection")
+                records.extend(record for record in value["assertions"] if isinstance(record, dict)
+                               and record.get("relation") == "located_in"
+                               and str(record.get("subject", "")).casefold() == endpoint.casefold())
             wanted_relation = "can_lift" if re.search(r"(?i)\b(?:lift|lifting)\b", text) else "has_height" if re.search(r"(?i)\b(?:tall|height)\b", text) else None
             records.sort(key=lambda record: (
                 not isinstance(record, dict) or bool(wanted_relation and record.get("relation") != wanted_relation),
