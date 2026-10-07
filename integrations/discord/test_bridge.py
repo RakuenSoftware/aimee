@@ -95,6 +95,25 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         await bot.close()
         await restricted.close()
 
+    async def test_startup_announcement_runs_once_across_ready_events(self):
+        bot = self.bot()
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        await asyncio.gather(bot.on_ready(), bot.on_ready())
+        await bot.on_ready()
+        bot.delivery.send.assert_awaited_once()
+        announcement = bot.delivery.send.await_args.args[0]
+        self.assertIn("Systems initializing", announcement)
+        self.assertIn("Aimee is online", announcement)
+        await bot.close()
+
+    async def test_startup_delivery_failure_does_not_break_or_repeat_on_ready(self):
+        bot = self.bot()
+        bot.delivery = SimpleNamespace(send=AsyncMock(side_effect=OSError("response lost")))
+        await bot.on_ready()
+        await bot.on_ready()
+        bot.delivery.send.assert_awaited_once()
+        await bot.close()
+
     async def test_queue_is_bounded_and_duplicate_messages_are_not_requeued(self):
         bot = self.bot()
         await bot.on_message(self.message())

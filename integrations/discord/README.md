@@ -55,6 +55,11 @@ Check configuration and the webhook without posting a message:
 
 For outbound-only delivery, feed an operator-selected message through stdin with
 `--mode send-stdin`. That mode posts to the configured channel; configuration checks do not post.
+On its first Discord ready event after each process start, the bot posts a short
+“Systems initializing… Aimee is online” announcement in the configured webhook channel.
+Gateway reconnects do not repeat it. A failed delivery is logged without stopping the chatbot
+and is not automatically retried, to avoid duplicate announcements.
+
 All webhook messages disable user, role and everyone mentions, even when model output contains
 Discord mention markup. Long replies are split within Discord's message limit.
 

@@ -23,6 +23,11 @@ import discord
 LOG = logging.getLogger("aimee.discord")
 WEBHOOK_URL = re.compile(r"https://discord\.com/api(?:/v10)?/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{40,200}\Z")
 MAX_RESPONSE = 1024 * 1024
+STARTUP_MESSAGE = (
+    "`Systems initializing…`\n"
+    "`Memory banks linked. Thought engines warming. Discord uplink established.`\n\n"
+    "**Aimee is online.** Ready when you are — mention me to chat."
+)
 SYSTEM_CONTEXT = (
     "You are Aimee, a helpful chatbot in this Discord channel. Reply concisely. "
     "Use only the approved external memory available to this bot. Do not claim to "
@@ -288,6 +293,7 @@ class ChatBot(discord.Client):
         self.seen: OrderedDict[int, None] = OrderedDict()
         self.worker = None
         self.delivery_session = None
+        self.startup_announced = False
 
     async def setup_hook(self):
         self.delivery_session = aiohttp.ClientSession(trust_env=False)
@@ -306,6 +312,16 @@ class ChatBot(discord.Client):
 
     async def on_ready(self):
         LOG.info("Discord chatbot connected; mention-only channel routing active")
+        if self.startup_announced:
+            return
+        # Mark before awaiting: reconnects must not duplicate an announcement,
+        # including when a delivery response is lost after Discord accepts it.
+        self.startup_announced = True
+        try:
+            await self.delivery.send(STARTUP_MESSAGE)
+            LOG.info("Startup announcement delivered")
+        except Exception as exc:
+            LOG.warning("Startup announcement failed (%s)", type(exc).__name__)
 
     async def on_error(self, event, *args, **kwargs):
         # Discord's default handler prints arbitrary event data and tracebacks.
