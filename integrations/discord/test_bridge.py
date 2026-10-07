@@ -171,7 +171,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 "-subj", "/CN=Test CA", "-keyout", "ca.key", "-out", "ca.pem",
                 "-addext", "keyUsage=critical,keyCertSign,cRLSign")
         for name, subject, purpose in (("server", "aimee-llm", "serverAuth"),
-                                      ("client", "discord-cpu", "clientAuth")):
+                                      ("client", "discord-cpu", "clientAuth"),
+                                      ("wrong-server", "other-model", "serverAuth")):
             openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=" + subject,
                     "-keyout", name + ".key", "-out", name + ".csr")
             ext = self.root / (name + ".ext")
@@ -202,6 +203,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await ModelClient(config, session).reply([], "hello"), "CPU reply")
             with self.assertRaises(aiohttp.ClientConnectorCertificateError):
                 await session.post(config.endpoint, json={}, ssl=ssl.create_default_context())
+        wrong_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        wrong_context.load_cert_chain(self.root / "wrong-server.pem", self.root / "wrong-server.key")
+        wrong_context.load_verify_locations(self.root / "ca.pem")
+        wrong_context.verify_mode = ssl.CERT_REQUIRED
+        wrong_site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=wrong_context)
+        await wrong_site.start()
+        wrong_port = wrong_site._server.sockets[0].getsockname()[1]
+        async with aiohttp.ClientSession() as session:
+            wrong_config = replace(config, endpoint=f"https://127.0.0.1:{wrong_port}/v1/chat/completions")
+            with self.assertRaises(aiohttp.ClientConnectorCertificateError):
+                await ModelClient(wrong_config, session).reply([], "hello")
         self.assertEqual(requests, [None])
 
     async def test_native_refusal_and_redirect_never_deliver_or_forward_auth(self):

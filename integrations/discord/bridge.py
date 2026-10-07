@@ -149,6 +149,10 @@ class ModelClient:
         if self.config.model_tls_dir:
             identity = self.config.model_tls_dir
             context = ssl.create_default_context(cafile=str(identity / "ca.pem"))
+            # Aimee's issued leaf certificates omit Authority Key Identifier.
+            # Match its OpenSSL chain verifier and Python 3.12 defaults while
+            # retaining CERT_REQUIRED, the pinned CA and hostname verification.
+            context.verify_flags &= ~ssl.VERIFY_X509_STRICT
             context.minimum_version = ssl.TLSVersion.TLSv1_3
             context.load_cert_chain(str(identity / "client.pem"), str(identity / "client.key"))
             transport = {"ssl": context, "server_hostname": "aimee-llm"}

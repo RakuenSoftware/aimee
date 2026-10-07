@@ -66,7 +66,8 @@ synthesis service. It does not use the GPU-qualified native-memory vLLM plugin.
 A CPU deployment does not establish native-memory plugin qualification.
 
 On an unprivileged Debian 13 LXC, enable Docker nesting, allocate 12 CPU cores,
-24 GiB RAM and 64 GiB storage, and pass through no GPU devices. Install Docker,
+24 GiB RAM and 64 GiB storage, and pass through no GPU devices. Set the LXC memory-lock limit to 1 GiB
+(`lxc.prlimit.memlock: 1073741824`) to match the application container. Install Docker,
 Compose and Python 3 with venv support. Use a fresh Aimee Compose project and
 private credentials as below; also set `AIMEE_LLM_VARIANT=e2b`,
 `SYNTHESIS_MODEL=gemma-4-E2B-it` and

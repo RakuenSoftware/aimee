@@ -3,8 +3,13 @@
 services:
   aimee-llm:
     cpus: 10
+    networks: [models, discord-model-loopback]
     ports: ["127.0.0.1:19852:8761"]
     environment:
       LLAMA_ARG_THREADS: 10
       LLAMA_ARG_N_GPU_LAYERS: 0
       AIMEE_LLM_CTX: 2048
+
+networks:
+  # Docker needs a regular bridge to publish a port on LXC loopback.
+  discord-model-loopback: {}
