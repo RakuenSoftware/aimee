@@ -241,7 +241,8 @@ class ModelClient:
             words = re.findall(r"\w{2,64}", text)[:16]
             meaningful = [word for word in words if word.casefold() not in filler and not word.isdecimal()]
             named = [word for word in meaningful if word[0].isupper()]
-            terms = list(dict.fromkeys(word.casefold() for word in (named + meaningful)))[:4]
+            mentions = re.findall(r"<@!?([0-9]{17,20})>", text)
+            terms = list(dict.fromkeys(["<@" + uid + ">" for uid in mentions] + [word.casefold() for word in (named + meaningful)]))[:4]
             if not terms:
                 return ""
             # The lexical arm matches phrases. Bounded individual terms also
@@ -426,7 +427,7 @@ class ModelClient:
             records = json.loads(memory.split("\n", 1)[1])
         except (ValueError, IndexError):
             return None
-        normalized = " ".join(text.split())
+        normalized = re.sub(r"^Remember that\s+", "", " ".join(text.split()), flags=re.IGNORECASE)
         for fact in records:
             if fact.get("relation") not in ("has_height", "can_lift"):
                 continue
@@ -441,11 +442,21 @@ class ModelClient:
                     authors = ", ".join(fact.get("authors", []))
                     return f"{subject} can lift {value}." + (f" The recorded source is {authors}." if authors else " This is recorded in channel memory.")
                 continue
+            if re.fullmatch(r"<@[0-9]{17,20}>", subject) and re.fullmatch(r"How tall (?:is|am) " + re.escape(subject) + r"[?]?", normalized, re.IGNORECASE):
+                authors = ", ".join(fact.get("authors", []))
+                return f"{subject} is {value} tall, according to channel memory." + (f" The recorded source is {authors}." if authors else "")
             pattern = (r"(?:But\s+)?(?:The\s+)?" + re.escape(subject)
                        + r"\s+(?:is|are)\s+" + re.escape(value) + r"\s+tall[.!]?")
             if re.fullmatch(pattern, normalized, re.IGNORECASE):
                 return f"Confirmed height for {subject}: {value}."
         return None
+
+    @staticmethod
+    def is_social_request(text: str) -> bool:
+        # An entity mention in a greeting is not a request for its stored facts.
+        communication = re.search(r"\b(?:say hello|say hi|greet|talk to|chat with|speak to|tell\s+<@!?[0-9]{17,20}>|tell\s+@[\w]+)(?=\s|[.!?]|$)", text, re.IGNORECASE)
+        factual = re.search(r"\b(?:how|what|where|who|when|why|height|tall|lifting|distance|located|remember|information|facts?)\b", text, re.IGNORECASE)
+        return bool(communication and not factual)
 
     async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None, *, turn: Turn | None = None) -> str:
         transport, headers = {}, {}
@@ -474,10 +485,16 @@ class ModelClient:
                     trust_env=False))
             provenance = bool(self.config.knowledge_endpoint and self.asks_provenance(text))
             query = self.provenance_query(history, text) if provenance else text
-            memory = await self.memory_context(session, query, channel_id, provenance=provenance) if self.config.aimee_socket else ""
+            # Resolve only the authenticated speaker, never a guessed nickname.
+            self_height = re.fullmatch(r"(?:how tall (?:am I|do you (?:think|remember|know) I am)|what is my height)[?]?", text.strip(), re.IGNORECASE)
+            resolved = f"How tall is <@{turn.user_id}>?" if turn and self_height else text
+            if not provenance:
+                query = resolved
+            social = self.is_social_request(text) and not provenance
+            memory = await self.memory_context(session, query, channel_id, provenance=provenance) if self.config.aimee_socket and not social else ""
             if provenance:
                 return self.provenance_reply(memory)
-            confirmed = self.confirmed_statement(memory, text)
+            confirmed = self.confirmed_statement(memory, resolved)
             if confirmed:
                 return confirmed
             history = list(history)
@@ -486,7 +503,7 @@ class ModelClient:
                 + len(text.encode("utf-8")) > budget
             ):
                 history = history[2:]
-            system = self.config.system_context + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims." if self.config.knowledge_endpoint else "") + ("\n" + memory if memory else "")
+            system = self.config.system_context + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims." if self.config.knowledge_endpoint and not social else "") + ("\n" + memory if memory else "")
             if turn:
                 identity = {"speaker": {"id": str(turn.user_id), "name": turn.author_name},
                             "mentioned": [{"id": str(uid), "name": name} for uid, name in turn.mentions]}
@@ -671,13 +688,20 @@ class ChatBot(discord.Client):
                         # this turn already sees its own admitted corrections.
                         reply = await self.model_client.reply(self.conversations.get(key), turn.text, channel_id=turn.channel_id, turn=turn)
                 identities = {turn.user_id: turn.author_name, self.user.id: getattr(self.user, "name", "Aimee"), **dict(turn.mentions)}
+                if ModelClient.is_social_request(turn.text):
+                    # Render only recipients explicitly supplied by Discord.
+                    for uid, name in sorted(turn.mentions, key=lambda item: len(item[1]), reverse=True):
+                        if name:
+                            reply = re.sub(r"(?<![\w@])" + re.escape(name) + r"(?![\w])", lambda match: f"<@{uid}>", reply, flags=re.IGNORECASE)
                 reply = render_mentions(reply, identities)
                 if turn.peer_target:
                     if not turn.is_bot:
                         self.peer_sessions[(turn.channel_id, turn.peer_target)] = (time.monotonic() + 180, 2)
-                    # Address only the explicitly selected partner; stale numeric
-                    # names from history cannot redirect this conversation.
-                    reply = re.sub(r"<@!?[0-9]{17,20}>\s*", "", reply).strip()
+                    # Keep other explicitly mentioned recipients while removing
+                    # stale or invented tags and the duplicate partner prefix.
+                    recipients = dict(turn.mentions)
+                    reply = re.sub(r"<@!?([0-9]{17,20})>\s*",
+                                   lambda match: match.group(0) if int(match.group(1)) in recipients and int(match.group(1)) != turn.peer_target else "", reply).strip()
                     reply = f"<@{turn.peer_target}> " + reply
                 if self.config.knowledge_endpoint:
                     await self.model_client.archive_turn(turn, reply, not admitted, "response")

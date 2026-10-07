@@ -21,6 +21,20 @@ func TestHeightFactsKeepDistinctQualifiedNamesAndSourceSpans(t *testing.T) {
 	}
 }
 
+func TestHeightFactsCaptureExplicitDiscordIdentityWithoutGuessingAlias(t *testing.T) {
+	source := "Remember that <@!333333333333333333> is 6 feet tall"
+	actor := FactActor{Principal: "connector", Role: "user", Rank: 30, Authenticated: 1}
+	got := heightFactCandidates(source, "now", 1, 2, actor)
+	if len(got) != 1 || got[0].Subject != "<@333333333333333333>" || got[0].Object != "6 feet" || got[0].Actor != actor {
+		t.Fatalf("%+v", got)
+	}
+	for _, text := range []string{"Remember that he is 6 feet tall", "Someone said <@333333333333333333> is 6 feet tall", "Remember that <@123> is 6 feet tall", "<@333333333333333333> is 6 feet tall?"} {
+		if got := heightFactCandidates(text, "now", 1, 2, actor); len(got) != 0 {
+			t.Fatalf("%q: %+v", text, got)
+		}
+	}
+}
+
 func TestHeightFactsAbstainOnQuestionsNegationAndAmbiguousSpeakers(t *testing.T) {
 	for _, text := range []string{"How tall is Kibukx?", "Is Kibukx 6 feet tall?", "Kibukx is not 6 feet tall", "Kibukx is 6 feet tall?", "He is 6 feet tall", "My brother is 6 feet tall", `Someone said Kibukx is 6 feet tall`, `"Kibukx is 6 feet tall"`} {
 		if got := heightFactCandidates(text, "now", 1, 2, modelFactActor()); len(got) != 0 {

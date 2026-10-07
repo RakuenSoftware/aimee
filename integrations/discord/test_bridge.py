@@ -171,6 +171,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
             self.assertIsNone(client.confirmed_statement(memory, text))
 
+    async def test_personal_height_uses_authenticated_speaker_and_public_source(self):
+        client = ModelClient(replace(self.config, aimee_socket=self.root / "unused.sock", knowledge_endpoint="http://127.0.0.1:8741/v1/actions"), None)
+        fact = {"subject": f"<@{USER}>", "relation": "has_height", "object": "6 feet", "lifecycle_state": "persistent", "historical": False}
+        client.knowledge_action = AsyncMock(return_value={"assertions": [fact]})
+        client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER+1}>"}])
+        turn = Turn(1, GUILD, CHANNEL, USER, "How tall am I?", author_name="Kibukx")
+        answer = await client.reply([], turn.text, CHANNEL, turn=turn)
+        self.assertIn(f"<@{USER}> is 6 feet tall", answer)
+        self.assertIn(f"<@{USER+1}>", answer)
+        client.knowledge_action.assert_awaited_once_with("memory.search_assertions", {"query": f"<@{USER}>", "project": client.channel_project(CHANNEL), "include_historical": False, "limit": 4})
+        for question in ("how tall do you think I am?", "What is my height?"):
+            answer = await client.reply([], question, CHANNEL, turn=replace(turn, text=question))
+            self.assertIn(f"<@{USER}> is 6 feet tall", answer)
+        memory = "Facts:\n" + json.dumps([fact])
+        self.assertIn("Confirmed height", client.confirmed_statement(memory, f"Remember that <@{USER}> is 6 feet tall"))
+        self.assertIsNone(client.confirmed_statement(memory, f"How tall is <@{USER+2}>?"))
+
     def test_config_load_retains_and_validates_peer_bot_ids(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
                  "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
@@ -352,6 +369,40 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(runner.cleanup)
         port = site._server.sockets[0].getsockname()[1]
         return f"http://127.0.0.1:{port}/v1/chat/completions"
+
+    async def test_social_message_does_not_retrieve_entity_facts(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "Hello Samy! Kibukx smells."}}]})
+        endpoint = await self.serve(model)
+        config = replace(self.config, endpoint=endpoint, aimee_socket=self.root / "unused.sock", knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            client.memory_context = AsyncMock(side_effect=AssertionError("irrelevant fact lookup"))
+            text = f"Say hello to <@{USER+1}> and tell <@{USER+2}> he smells."
+            with patch("bridge.aiohttp.UnixConnector", side_effect=lambda **kwargs: aiohttp.TCPConnector()):
+                await client.reply([], text, CHANNEL)
+            client.memory_context.assert_not_awaited()
+        self.assertEqual(requests[0]["messages"][-1]["content"], text)
+        self.assertTrue(ModelClient.is_social_request(text))
+        self.assertFalse(ModelClient.is_social_request("Say hello to Samy and tell him how tall Kibukx is."))
+        self.assertFalse(ModelClient.is_social_request("Tell me how much Kibukx can lift?"))
+
+    async def test_peer_message_preserves_second_explicit_recipient(self):
+        peer, recipient = USER+1, USER+2
+        bot = self.bot(replace(self.config, peer_bot_ids=(peer,)))
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value=f"Samy Hello! Kibukx smells."), capture_turn=AsyncMock(return_value=False))
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        task = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "Say hello", mentions=((peer,"Samy"),(recipient,"Kibukx")), peer_target=peer))
+            await bot.queue.join()
+            bot.delivery.send.assert_awaited_once_with(f"<@{peer}> Hello! <@{recipient}> smells.", None, peer_id=peer)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
     async def test_model_wire_auth_rotation_history_budget_and_bound_response(self):
         requests = []

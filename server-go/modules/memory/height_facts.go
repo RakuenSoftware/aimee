@@ -9,7 +9,7 @@ import (
 // A narrow, grounded statement template; questions, pronouns, quoted text and
 // negation are left to model extraction at model authority.
 var heightClauseBreak = regexp.MustCompile(`[,;\n]|\.(?:\s|$)`)
-var heightStatement = regexp.MustCompile(`(?i)^(?:but\s+)?(?:the\s+)?([\p{L}][\p{L}\p{N} '\-]{0,159}?)\s+(?:is|are)\s+([0-9]+(?:\.[0-9]+)?)\s+(feet|foot|ft|metres|meters|m|inches|inch|in|centimetres|centimeters|cm)\s+tall!?$`)
+var heightStatement = regexp.MustCompile(`(?i)^(?:remember\s+that\s+)?(?:but\s+)?(?:the\s+)?(<@!?[0-9]{17,20}>|[\p{L}][\p{L}\p{N} '\-]{0,159}?)\s+(?:is|are)\s+([0-9]+(?:\.[0-9]+)?)\s+(feet|foot|ft|metres|meters|m|inches|inch|in|centimetres|centimeters|cm)\s+tall!?$`)
 
 func heightFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	var result []FactCandidate
@@ -31,7 +31,7 @@ func heightClauseCandidate(content string, start, end int, observedAt string, me
 	if match == nil {
 		return nil
 	}
-	subject := strings.TrimSpace(match[1])
+	subject := strings.ReplaceAll(strings.TrimSpace(match[1]), "<@!", "<@")
 	words := strings.Fields(strings.ToLower(subject))
 	for _, w := range words {
 		switch w {
@@ -39,7 +39,7 @@ func heightClauseCandidate(content string, start, end int, observedAt string, me
 			return nil
 		}
 	}
-	if len(subject) == 0 || !unicode.IsLetter([]rune(subject)[0]) {
+	if len(subject) == 0 || (!strings.HasPrefix(subject, "<@") && !unicode.IsLetter([]rune(subject)[0])) {
 		return nil
 	}
 	value := match[2] + " " + strings.ToLower(match[3])
