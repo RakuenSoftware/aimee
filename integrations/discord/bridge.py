@@ -256,6 +256,29 @@ class ModelClient:
                 if not isinstance(value.get("assertions"), list):
                     raise RuntimeError("Invalid durable memory projection")
                 records.extend(value["assertions"])
+            # Only persistent, explicit identity assertions extend the query.
+            # Never equate a mutable Discord nickname with a stored person.
+            alias_links = []
+            for record in records:
+                if (isinstance(record, dict) and record.get("relation") == "also_known_as"
+                        and not record.get("historical") and record.get("lifecycle_state") in ("persistent", "promoted")
+                        and re.fullmatch(r"<@[0-9]{17,20}>", str(record.get("subject", "")))
+                        and (record["subject"] in terms or str(record.get("object", "")).casefold() in terms)):
+                    alias_links.append((record["subject"], record["object"]))
+            alias_links = list(dict.fromkeys(alias_links))[:2]
+            for uid, name in alias_links:
+                other = name if uid in terms else uid
+                value = await self.knowledge_action("memory.search_assertions", {
+                    "query": other, "project": self.channel_project(channel_id),
+                    "include_historical": False, "limit": 4})
+                if not isinstance(value.get("assertions"), list):
+                    raise RuntimeError("Invalid identity projection")
+                for record in value["assertions"]:
+                    if isinstance(record, dict) and str(record.get("subject", "")).casefold() == other.casefold():
+                        # The projection resolves the name; its evidence still
+                        # refers to the original fact and original author.
+                        records.append({**record, "subject": uid if uid in terms else name})
+            records = [record for record in records if not isinstance(record, dict) or record.get("relation") != "also_known_as"]
             # One bounded spatial join supplies the other endpoint's location.
             # This retrieves explicit premises; it does not assert a new address.
             endpoints = []
@@ -442,7 +465,7 @@ class ModelClient:
                     authors = ", ".join(fact.get("authors", []))
                     return f"{subject} can lift {value}." + (f" The recorded source is {authors}." if authors else " This is recorded in channel memory.")
                 continue
-            if re.fullmatch(r"<@[0-9]{17,20}>", subject) and re.fullmatch(r"How tall (?:is|am) " + re.escape(subject) + r"[?]?", normalized, re.IGNORECASE):
+            if re.fullmatch(r"<@[0-9]{17,20}>", subject) and re.fullmatch(r"How tall (?:is|am) " + re.escape(subject) + r"\s*[?]?", normalized, re.IGNORECASE):
                 authors = ", ".join(fact.get("authors", []))
                 return f"{subject} is {value} tall, according to channel memory." + (f" The recorded source is {authors}." if authors else "")
             pattern = (r"(?:But\s+)?(?:The\s+)?" + re.escape(subject)

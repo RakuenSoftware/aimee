@@ -11,6 +11,7 @@ var liftingStatement = regexp.MustCompile(`(?i)^(?:but\s+)?(?:the\s+)?([\p{L}][\
 
 func measurementFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	result := append(heightFactCandidates(content, observedAt, memoryID, jobID, actor), spatialFactCandidates(content, observedAt, memoryID, jobID, actor)...)
+	result = append(result, discordAliasFactCandidates(content, observedAt, memoryID, jobID, actor)...)
 	offset := 0
 	spans := heightClauseBreak.FindAllStringIndex(content, -1)
 	spans = append(spans, []int{len(content), len(content)})

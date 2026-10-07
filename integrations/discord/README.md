@@ -336,6 +336,11 @@ Aimee enrollment. A webhook-only check does not establish end-to-end chatbot rea
 
 ### Discord identities and peer conversations
 
+Explicit “<@ID> is also known as Name” statements persist a scoped identity link
+through the normal fact/evidence gates. Retrieval follows up to two approved links
+to retrieve the same facts for the tag or name while preserving original attribution.
+A display name alone never creates an identity link.
+
 Discord supplies the current speaker and mentioned users as structured identity
 metadata. The model receives those IDs/display names separately from message text;
 known raw `@ID` and `@Name#discriminator` output is rendered as `<@ID>`. Ordinary

@@ -188,6 +188,24 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Confirmed height", client.confirmed_statement(memory, f"Remember that <@{USER}> is 6 feet tall"))
         self.assertIsNone(client.confirmed_statement(memory, f"How tall is <@{USER+2}>?"))
 
+    async def test_explicit_durable_alias_resolves_tagged_facts_without_guessing_nickname(self):
+        client = ModelClient(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"), None)
+        async def action(name, body):
+            self.assertEqual(body["project"], client.channel_project(CHANNEL))
+            if body["query"] == f"<@{USER}>":
+                return {"assertions": [{"subject": f"<@{USER}>", "relation": "also_known_as", "object": "Kibukx", "lifecycle_state": "persistent"}]}
+            if body["query"] == "Kibukx":
+                return {"assertions": [{"subject": "Kibukx", "relation": "can_lift", "object": "500 pounds", "lifecycle_state": "persistent"}, {"subject": "Kibukx mountains", "relation": "has_height", "object": "69 feet", "lifecycle_state": "persistent"}]}
+            return {"assertions": []}
+        client.knowledge_action = AsyncMock(side_effect=action)
+        client.fact_sources = AsyncMock(return_value=[{"author": f"<@{USER+1}>"}])
+        context = await client.memory_context(None, f"How much can <@{USER}> lift?", CHANNEL)
+        self.assertIn("500 pounds", context)
+        self.assertIn(str(USER+1), context)
+        self.assertNotIn("69 feet", context)
+        self.assertIn(f"<@{USER}>", context)
+        self.assertEqual(await client.memory_context(None, f"How much can <@{USER+2}> lift?", CHANNEL), "")
+
     def test_config_load_retains_and_validates_peer_bot_ids(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
                  "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
