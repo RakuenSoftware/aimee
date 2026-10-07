@@ -121,7 +121,8 @@ class Config:
                    channel_id=int(value["channel_id"]), endpoint=endpoint,
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
-                   system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket)
+                   system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket,
+                   peer_bot_ids=tuple(int(peer) for peer in peers))
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:

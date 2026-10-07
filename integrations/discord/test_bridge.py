@@ -171,6 +171,18 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Can Kibukx lift 500 pounds?", "Kibukx can lift 600 pounds", "Kibukx cannot lift 500 pounds", "Kibukx mountains can lift 500 pounds"):
             self.assertIsNone(client.confirmed_statement(memory, text))
 
+    def test_config_load_retains_and_validates_peer_bot_ids(self):
+        value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
+                 "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),
+                 "peer_bot_ids": [str(USER+1)]}
+        path = self.root / "peers.json"
+        path.write_text(json.dumps(value))
+        self.assertEqual(Config.load(path).peer_bot_ids, (USER+1,))
+        for peers in (["not-an-id"], str(USER+1), [str(USER+1)]*9):
+            path.write_text(json.dumps({**value, "peer_bot_ids": peers}))
+            with self.assertRaises(ValueError):
+                Config.load(path)
+
     def test_identity_rendering_uses_trusted_ids_and_display_names(self):
         identities = {USER: "Virant", BOT: "Aimee", USER+1: "Samy"}
         text = render_mentions(f"@{USER} Hello @Samy and @Aimee#5282! @999999999999999999", identities)
