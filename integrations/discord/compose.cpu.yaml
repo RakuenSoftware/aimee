@@ -3,6 +3,7 @@
 services:
   aimee-llm:
     cpus: 10
+    ports: ["127.0.0.1:19852:8761"]
     environment:
       LLAMA_ARG_THREADS: 10
       LLAMA_ARG_N_GPU_LAYERS: 0

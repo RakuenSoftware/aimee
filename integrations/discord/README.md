@@ -80,9 +80,16 @@ scripts/compose-local.sh --env-file ~/.config/aimee-discord/application.env \
 The override caps inference at ten CPU cores, selects ten generation threads,
 sets GPU layers to zero and uses a 2048-token context. The standard model service
 requires the dedicated Server's mTLS identity and remains on the private model
-network. Configure the Discord model connection separately before starting the
-bridge: its default loopback endpoint is for the enrolled vLLM deployment below.
-Starting the CPU Compose stack alone does not connect Discord to memory or inference.
+network, with its authenticated TLS port published only on LXC loopback at 19852.
+For the bridge set `endpoint` to `https://127.0.0.1:19852/v1/chat/completions`,
+`model` to the ID returned by the model's `/v1/models` route, and `model_tls_dir`
+to the dedicated project's `aimee-model-tls` volume's `synthesis/client` directory
+(use `docker volume inspect` to obtain the mountpoint). The bridge verifies the
+model certificate against that CA with server name `aimee-llm` and presents its
+client certificate. Keep the live volume path, rather than copying expiring identities.
+CPU inference uses this mTLS identity instead of the vLLM API key.
+The CPU model supplies inference and conversational history; it does not perform
+the native memory fetch described for the GPU vLLM integration below.
 
 ## Prepare a separate Aimee environment and E2B
 

@@ -2,6 +2,8 @@ import asyncio
 from dataclasses import replace
 import json
 import os
+import ssl
+import subprocess
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -160,6 +162,47 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0][1]["messages"], [
             {"role": "system", "content": config.system_context}, {"role": "user", "content": "hello"}])
         self.assertEqual(requests[0][1]["max_tokens"], 384)
+
+    async def test_cpu_model_requires_trusted_mtls_and_fixed_server_name(self):
+        def openssl(*args):
+            subprocess.run(["openssl", *args], cwd=self.root, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                "-subj", "/CN=Test CA", "-keyout", "ca.key", "-out", "ca.pem",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+        for name, subject, purpose in (("server", "aimee-llm", "serverAuth"),
+                                      ("client", "discord-cpu", "clientAuth")):
+            openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=" + subject,
+                    "-keyout", name + ".key", "-out", name + ".csr")
+            ext = self.root / (name + ".ext")
+            ext.write_text("extendedKeyUsage=" + purpose + "\nsubjectAltName=DNS:" + subject + "\n")
+            openssl("x509", "-req", "-in", name + ".csr", "-CA", "ca.pem",
+                    "-CAkey", "ca.key", "-CAcreateserial", "-days", "1", "-extfile",
+                    name + ".ext", "-out", name + ".pem")
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain(self.root / "server.pem", self.root / "server.key")
+        context.load_verify_locations(self.root / "ca.pem")
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        requests = []
+        async def model(request):
+            requests.append(request.headers.get("Authorization"))
+            return web.json_response({"choices": [{"message": {"content": "CPU reply"}}]})
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", model)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        self.addAsyncCleanup(runner.cleanup)
+        site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=context)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        config = replace(self.config, endpoint=f"https://127.0.0.1:{port}/v1/chat/completions",
+                         model_tls_dir=self.root)
+        async with aiohttp.ClientSession() as session:
+            self.assertEqual(await ModelClient(config, session).reply([], "hello"), "CPU reply")
+            with self.assertRaises(aiohttp.ClientConnectorCertificateError):
+                await session.post(config.endpoint, json={}, ssl=ssl.create_default_context())
+        self.assertEqual(requests, [None])
 
     async def test_native_refusal_and_redirect_never_deliver_or_forward_auth(self):
         async def refusing(request):

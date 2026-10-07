@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import ssl
 import sys
 import time
 from urllib.parse import urlsplit
@@ -54,6 +55,7 @@ class Config:
     model: str = "gemma4-e2b"
     allowed_user_ids: tuple[int, ...] = ()
     system_context: str = SYSTEM_CONTEXT
+    model_tls_dir: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -63,10 +65,14 @@ class Config:
                 raise ValueError("Discord guild and channel IDs are required")
         endpoint = value.get("endpoint", cls.endpoint)
         url = urlsplit(endpoint)
-        if (url.scheme != "http" or url.hostname != "127.0.0.1"
+        if (url.scheme not in ("http", "https") or url.hostname != "127.0.0.1"
                 or not url.port or url.path != "/v1/chat/completions"
                 or url.query or url.fragment or url.username or url.password):
             raise ValueError("model endpoint must be the loopback E2B chat endpoint")
+        tls_value = value.get("model_tls_dir")
+        tls_dir = Path(tls_value).expanduser() if tls_value else None
+        if (url.scheme == "https") != bool(tls_dir) or (tls_dir and not tls_dir.is_absolute()):
+            raise ValueError("HTTPS requires an absolute model_tls_dir; HTTP must not configure TLS")
         users = value.get("allowed_user_ids", [])
         if not isinstance(users, list) or any(
             not re.fullmatch(r"[0-9]{17,20}", str(user)) for user in users
@@ -85,7 +91,7 @@ class Config:
         return cls(**paths, guild_id=int(value["guild_id"]),
                    channel_id=int(value["channel_id"]), endpoint=endpoint,
                    model=model, allowed_user_ids=tuple(map(int, users)),
-                   system_context=system)
+                   system_context=system, model_tls_dir=tls_dir)
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -138,7 +144,16 @@ class ModelClient:
 
     async def reply(self, history: list[dict[str, str]], text: str) -> str:
         # Re-read on each admitted request so rotating the key affects the next turn.
-        key = read_secret(self.config.model_key_file)
+        transport = {}
+        headers = {}
+        if self.config.model_tls_dir:
+            identity = self.config.model_tls_dir
+            context = ssl.create_default_context(cafile=str(identity / "ca.pem"))
+            context.minimum_version = ssl.TLSVersion.TLSv1_3
+            context.load_cert_chain(str(identity / "client.pem"), str(identity / "client.key"))
+            transport = {"ssl": context, "server_hostname": "aimee-llm"}
+        else:
+            headers = {"Authorization": "Bearer " + read_secret(self.config.model_key_file)}
         budget = message_budget(self.config)
         if len(text.encode("utf-8")) > budget:
             raise ValueError("message exceeds the tested E2B context budget")
@@ -153,7 +168,7 @@ class ModelClient:
                              *history, {"role": "user", "content": text}],
                 "max_tokens": 384, "temperature": 0.5, "stream": False}
         async with self.session.post(
-            self.config.endpoint, json=body, headers={"Authorization": "Bearer " + key},
+            self.config.endpoint, json=body, headers=headers, **transport,
             allow_redirects=False, timeout=aiohttp.ClientTimeout(total=120, connect=5)
         ) as response:
             if response.status != 200:
