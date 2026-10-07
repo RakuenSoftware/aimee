@@ -167,13 +167,18 @@ scripts/compose-local.sh --env-file ~/.config/aimee-discord/knowledge.env \
   --profile synthesis up -d
 ```
 
+Explicit greetings and requests to compose a message skip factual recall: a mentioned
+recipient alone is not a reason to insert their height or other stored properties.
+Requests that also ask for facts continue through normal retrieval.
+
 Each admitted turn follows this path:
 
 1. Retrieve current typed assertions with up to four bounded keyword queries to `memory.search_assertions`,
    scoped to the fixed `discord:<guild>:<channel>` project. Deduplicate and fit complete
    assertions into the context budget, then generate an admission reply. Exact
    height or lifting statements matching an approved typed fact receive a direct confirmation;
-   full subjects and values must match. Questions, negations, differing values and
+   full subjects and values must match. Exact lifting queries and authenticated-speaker
+   height queries render approved records and their recorded authors directly. Other questions, negations, differing values and
    compound claims do not use this confirmation path. Lifting questions prioritize
    capacity assertions so height facts cannot crowd the relevant fact out. Earlier assistant mistakes
    cannot turn a matching current fact into a rejection.
@@ -189,7 +194,10 @@ Each admitted turn follows this path:
 4. Exact named height and lifting-capacity statements commit synchronously through the normal ontology,
    entity identity, evidence, contradiction and audit gates. Full qualified names stay
    distinct; `has_height` is functional, so a correction supersedes the same subject’s
-   prior height. `can_lift` similarly stores explicit named capacities in pounds or kilograms
+   prior height. Explicit Discord subjects, including “Remember that <@ID> is 6 feet tall,”
+   retain the canonical ID without guessing nickname aliases. “How tall am I?” and
+   “How tall do you think I am?” retrieve that authenticated speaker’s recorded height;
+   they do not access a personal profile or infer an unrecorded measurement. `can_lift` similarly stores explicit named capacities in pounds or kilograms
    and supersedes prior capacities for the same subject. Explicit anchored spatial statements
    also retain `located_in` places (including comma-qualified names) and a functional
    `has_distance` measurement whose subject names both endpoints. Endpoint ordering
@@ -331,7 +339,10 @@ Aimee enrollment. A webhook-only check does not establish end-to-end chatbot rea
 Discord supplies the current speaker and mentioned users as structured identity
 metadata. The model receives those IDs/display names separately from message text;
 known raw `@ID` and `@Name#discriminator` output is rendered as `<@ID>`. Ordinary
-replies keep user, role and everyone notifications disabled.
+replies keep user, role and everyone notifications disabled. Explicit social-message
+recipients also render as tags when the model emits their supplied display names.
+Selecting a bot peer preserves other explicitly mentioned recipients in the message,
+with notification permission limited to the selected peer.
 
 Other bots remain ignored unless their Discord bot IDs appear in `peer_bot_ids`
 (default empty) and a human explicitly requests conversation with a mentioned peer,
