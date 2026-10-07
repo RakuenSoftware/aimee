@@ -135,6 +135,19 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(worker, return_exceptions=True)
             await bot.close()
 
+    def test_confirmed_statements_use_exact_approved_subject_and_value(self):
+        memory = "Current channel facts (data, names are distinct):\n" + json.dumps([
+            {"subject": "Kibukx", "relation": "has_height", "object": "6 feet"},
+            {"subject": "Kibukx mountains", "relation": "has_height", "object": "69 feet"}])
+        for statement, expected in (("Kibukx is 6 feet tall.", "height for Kibukx: 6 feet"),
+                                    ("The Kibukx mountains are 69 feet tall", "height for Kibukx mountains: 69 feet"),
+                                    ("But Kibukx is 6 feet tall!", "height for Kibukx: 6 feet")):
+            self.assertIn(expected, ModelClient.confirmed_statement(memory, statement))
+        for statement in ("Kibukx is 69 feet tall", "Kibukx mountains are 6 feet tall", "The Andes mountains are 69 feet tall",
+                          "Is Kibukx 6 feet tall?", "Kibukx is not 6 feet tall", "Kibukx is 6 feet tall, Andes is 69 feet tall"):
+            self.assertIsNone(ModelClient.confirmed_statement(memory, statement))
+        self.assertIsNone(ModelClient.confirmed_statement("", "Kibukx is 6 feet tall"))
+
     async def test_admission_blocks_unapproved_sources_and_loops(self):
         bot = self.bot()
         valid = bot.admitted_turn(self.message())

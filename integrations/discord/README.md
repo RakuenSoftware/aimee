@@ -10,7 +10,9 @@ An incoming webhook can post messages but cannot read channel chat. Two-way chat
 a Discord application bot token as well as the webhook. The bridge requests guild message events,
 responds only to explicit mentions in the configured channel or its threads, and ignores bots,
 webhooks and DMs. It does not request privileged Message Content, member or presence intents.
-Discord supplies the content of messages that mention the bot.
+Discord supplies the content of messages that mention the bot account. A role
+mention with the same display name does not mention that account; Discord withholds
+the content and the bridge ignores the message. Select the bot user in the mention picker.
 
 Official references: [Discord webhooks](https://docs.discord.com/developers/platform/webhooks),
 [message content access](https://docs.discord.com/developers/events/gateway#message-content-intent),
@@ -169,7 +171,11 @@ Each admitted turn follows this path:
 
 1. Retrieve current typed assertions with up to four bounded keyword queries to `memory.search_assertions`,
    scoped to the fixed `discord:<guild>:<channel>` project. Deduplicate and fit complete
-   assertions into the context budget, then generate an admission reply.
+   assertions into the context budget, then generate an admission reply. Exact
+   height statements matching an approved typed fact receive a direct confirmation;
+   full subjects and values must match. Questions, negations, differing values and
+   compound claims do not use this confirmation path. Earlier assistant mistakes
+   cannot turn a matching current fact into a rejection.
 2. Archive the human statement and generated admission reply in the dedicated Aimee
    user store. An explicit rejection such as “That information is incorrect” withholds
    the statement from fact capture; it still remains in the archive. This is a bounded

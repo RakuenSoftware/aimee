@@ -309,6 +309,27 @@ class ModelClient:
             raise RuntimeError(operation + " returned an invalid response")
         return value
 
+    @staticmethod
+    def confirmed_statement(memory: str, text: str) -> str | None:
+        # Match the human statement against complete, approved typed records;
+        # this renders an existing fact, rather than inferring a new one.
+        if not memory:
+            return None
+        try:
+            records = json.loads(memory.split("\n", 1)[1])
+        except (ValueError, IndexError):
+            return None
+        normalized = " ".join(text.split())
+        for fact in records:
+            if fact.get("relation") != "has_height":
+                continue
+            subject, value = fact["subject"], fact["object"]
+            pattern = (r"(?:But\s+)?(?:The\s+)?" + re.escape(subject)
+                       + r"\s+(?:is|are)\s+" + re.escape(value) + r"\s+tall[.!]?")
+            if re.fullmatch(pattern, normalized, re.IGNORECASE):
+                return f"Confirmed height for {subject}: {value}."
+        return None
+
     async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None) -> str:
         transport, headers = {}, {}
         if self.config.aimee_socket:
@@ -335,13 +356,16 @@ class ModelClient:
                     connector=aiohttp.UnixConnector(path=str(self.config.aimee_socket)),
                     trust_env=False))
             memory = await self.memory_context(session, text, channel_id) if self.config.aimee_socket else ""
+            confirmed = self.confirmed_statement(memory, text)
+            if confirmed:
+                return confirmed
             history = list(history)
             while history and (
                 sum(len(item["content"].encode("utf-8")) for item in history)
                 + len(text.encode("utf-8")) > budget
             ):
                 history = history[2:]
-            system = self.config.system_context + ("\nFor a known false factual claim, start: That information is incorrect." if self.config.knowledge_endpoint else "") + ("\n" + memory if memory else "")
+            system = self.config.system_context + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims." if self.config.knowledge_endpoint else "") + ("\n" + memory if memory else "")
             body = {"model": self.config.model,
                     "messages": [{"role": "system", "content": system},
                                  *history, {"role": "user", "content": text}],
