@@ -723,9 +723,19 @@ class ChatBot(discord.Client):
                     # Keep other explicitly mentioned recipients while removing
                     # stale or invented tags and the duplicate partner prefix.
                     recipients = dict(turn.mentions)
-                    reply = re.sub(r"<@!?([0-9]{17,20})>\s*",
-                                   lambda match: match.group(0) if int(match.group(1)) in recipients and int(match.group(1)) != turn.peer_target else "", reply).strip()
-                    reply = f"<@{turn.peer_target}> " + reply
+                    partner_seen = False
+                    def keep_recipient(match):
+                        nonlocal partner_seen
+                        uid = int(match.group(1))
+                        if uid == turn.peer_target:
+                            if partner_seen:
+                                return ""
+                            partner_seen = True
+                            return match.group(0)
+                        return match.group(0) if uid in recipients else ""
+                    reply = re.sub(r"<@!?([0-9]{17,20})>\s*", keep_recipient, reply).strip()
+                    if not partner_seen:
+                        reply = f"<@{turn.peer_target}> " + reply
                 if self.config.knowledge_endpoint:
                     await self.model_client.archive_turn(turn, reply, not admitted, "response")
                 if turn.peer_target:
