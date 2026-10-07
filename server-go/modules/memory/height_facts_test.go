@@ -35,6 +35,28 @@ func TestHeightFactsCaptureExplicitDiscordIdentityWithoutGuessingAlias(t *testin
 	}
 }
 
+func TestHeightCorrectionsBindFirstPersonToVerifiedDiscordSource(t *testing.T) {
+	actor := FactActor{Principal: "connector", Role: "user", Rank: 30, Authenticated: 1, DiscordSubject: "<@333333333333333333>"}
+	for _, text := range []string{"I’m 4 feet tall not 5 ok.", "but I’m 4 feet I told you already", "I'm 4feet tall"} {
+		got := heightFactCandidates(text, "now", 1, 2, actor)
+		if len(got) != 1 || got[0].Subject != actor.DiscordSubject || got[0].Object != "4 feet" {
+			t.Fatalf("%q: %+v", text, got)
+		}
+		if got := heightFactCandidates(text, "now", 1, 2, modelFactActor()); len(got) != 0 {
+			t.Fatalf("unbound speaker: %+v", got)
+		}
+	}
+	for _, text := range []string{"I am not 4 feet tall", "I’m 4 feet tall?", "I’m 4 feet tall if you believe Samy", "He is 4 feet tall"} {
+		if got := heightFactCandidates(text, "now", 1, 2, actor); len(got) != 0 {
+			t.Fatalf("%q: %+v", text, got)
+		}
+	}
+	got := heightFactCandidates("But <@333333333333333333> is really 69cm tall.", "now", 1, 2, actor)
+	if len(got) != 1 || got[0].Object != "69 cm" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestHeightFactsAbstainOnQuestionsNegationAndAmbiguousSpeakers(t *testing.T) {
 	for _, text := range []string{"How tall is Kibukx?", "Is Kibukx 6 feet tall?", "Kibukx is not 6 feet tall", "Kibukx is 6 feet tall?", "He is 6 feet tall", "My brother is 6 feet tall", `Someone said Kibukx is 6 feet tall`, `"Kibukx is 6 feet tall"`} {
 		if got := heightFactCandidates(text, "now", 1, 2, modelFactActor()); len(got) != 0 {

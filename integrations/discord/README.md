@@ -171,6 +171,15 @@ Explicit greetings and requests to compose a message skip factual recall: a ment
 recipient alone is not a reason to insert their height or other stored properties.
 Requests that also ask for facts continue through normal retrieval.
 
+Explicit tagged/self height updates commit before reply inference, so the old
+measurement cannot cause the model to reject a correction. Compact units and
+“really” are accepted; first-person forms such as “I’m 4 feet tall not 5 ok” bind
+to the captured Discord author after validating the source key, project and
+metadata. The original text and byte spans remain intact. Negated measurements,
+questions and unbound first-person sources abstain. Recalling functional
+measurements through an explicit identity link selects the highest-authority,
+newest supported observation across its tag/name forms and preserves its author.
+
 Each admitted turn follows this path:
 
 1. Retrieve current typed assertions with up to four bounded keyword queries to `memory.search_assertions`,

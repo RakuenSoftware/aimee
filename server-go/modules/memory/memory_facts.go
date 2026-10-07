@@ -29,6 +29,7 @@ type FactActor struct {
 	Role              string `json:"role"`
 	Rank              int    `json:"rank"`
 	Authenticated     int    `json:"authenticated"`
+	DiscordSubject    string `json:"discord_subject,omitempty"`
 }
 
 type FactEvidence struct {
@@ -310,13 +311,24 @@ func parseModelFactCandidates(response, content, observedAt string, memoryID, jo
 }
 
 func (s *postgresDataStore) memoryFactSource(ctx context.Context, jobID int64) (content, observedAt string, memoryID int64, actor FactActor, err error) {
-	err = s.db.QueryRow(ctx, `SELECT m.content,m.created_at,m.id,
+	var sourceMeta, sourceKey, scopeType, scopeValue string
+	err = s.db.QueryRow(ctx, `SELECT m.content,m.created_at,m.id,COALESCE(m.use_cases,''),m.key,m.scope_type,m.scope_value,
  COALESCE(a.actor_principal,'system:model-inference'),COALESCE(a.transport_identity,'internal'),
  COALESCE(a.actor_role,'model'),COALESCE(a.authority_rank,10),COALESCE(a.authenticated,0)
 FROM kb_async_jobs j JOIN memories m ON m.id=j.document_id
 LEFT JOIN memory_fact_actors a ON a.memory_id=m.id
-WHERE j.id=$1 AND j.kind='memory_facts'`, jobID).Scan(&content, &observedAt, &memoryID,
+WHERE j.id=$1 AND j.kind='memory_facts'`, jobID).Scan(&content, &observedAt, &memoryID, &sourceMeta, &sourceKey, &scopeType, &scopeValue,
 		&actor.Principal, &actor.TransportIdentity, &actor.Role, &actor.Rank, &actor.Authenticated)
+	if err == nil && actor.Role == "user" && actor.Rank == 30 && actor.Authenticated == 1 {
+		var meta struct {
+			Source  string `json:"source"`
+			Author  string `json:"author_id"`
+			Message string `json:"message_id"`
+		}
+		if json.Unmarshal([]byte(sourceMeta), &meta) == nil && meta.Source == "discord" && scopeType == "project" && strings.HasPrefix(scopeValue, "discord:") && sourceKey == scopeValue+":"+meta.Message && discordNumericID.MatchString(meta.Author) && discordNumericID.MatchString(meta.Message) {
+			actor.DiscordSubject = "<@" + meta.Author + ">"
+		}
+	}
 	return
 }
 

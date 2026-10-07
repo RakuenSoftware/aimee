@@ -206,6 +206,48 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"<@{USER}>", context)
         self.assertEqual(await client.memory_context(None, f"How much can <@{USER+2}> lift?", CHANNEL), "")
 
+    async def test_personal_correction_commits_before_model_can_reject_old_memory(self):
+        bot = self.bot(replace(self.config, knowledge_endpoint="http://127.0.0.1:8741/v1/actions"))
+        order=[]
+        async def capture(turn,reply):
+            order.append("commit")
+            self.assertEqual(reply, "")
+            return True
+        async def reply(*args,**kwargs):
+            self.assertEqual(order, ["commit"])
+            return "Recorded height: 4 feet."
+        bot.model_client=SimpleNamespace(capture_turn=capture, reply=reply, archive_turn=AsyncMock())
+        bot.delivery=SimpleNamespace(send=AsyncMock())
+        task=asyncio.create_task(bot.process_turns())
+        try:
+            text="I’m 4 feet tall not 5 ok."
+            await bot.queue.put(Turn(1,GUILD,CHANNEL,USER,text))
+            await bot.queue.join()
+            bot.delivery.send.assert_awaited_once_with("Recorded height: 4 feet.",None)
+            self.assertEqual(ModelClient.personal_height_statement(Turn(1,GUILD,CHANNEL,USER,text)),f"<@{USER}> is 4 feet tall")
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+
+    async def test_alias_recall_selects_latest_supported_functional_correction(self):
+        client=ModelClient(replace(self.config,aimee_socket=self.root/"unused.sock",knowledge_endpoint="http://127.0.0.1:8741/v1/actions"),None)
+        def fact(subject,value,when):
+            return {"subject":subject,"relation":"has_height","object":value,"valid_from":when,"authority_rank":30,"lifecycle_state":"persistent"}
+        async def action(name,body):
+            if body["query"]==f"<@{USER}>":
+                return {"assertions":[{"subject":f"<@{USER}>","relation":"also_known_as","object":"Kibukx","lifecycle_state":"persistent"},fact(f"<@{USER}>","4 feet","2026-10-07T16:45:00Z")]}
+            return {"assertions":[fact("Kibukx","6 feet","2026-10-07T12:00:00Z"),{"subject":f"<@{USER}>","relation":"also_known_as","object":"Kibukx","lifecycle_state":"persistent"}]}
+        client.knowledge_action=AsyncMock(side_effect=action)
+        client.fact_sources=AsyncMock(return_value=[{"author":f"<@{USER}>"}])
+        for question in (f"How tall is <@{USER}> ?","How tall is Kibukx?"):
+            context=await client.memory_context(None,question,CHANNEL)
+            self.assertIn("4 feet",context)
+            self.assertNotIn("6 feet",context)
+            answer=await client.reply([{"role":"assistant","content":"Source is benchmarks/fake.py"}],question,CHANNEL)
+            self.assertIn("4 feet",answer)
+            self.assertIn(str(USER),answer)
+            self.assertNotIn("benchmarks",answer)
+
     def test_config_load_retains_and_validates_peer_bot_ids(self):
         value = {"webhook_file": str(self.webhook), "bot_token_file": str(self.root / "bot.token"),
                  "model_key_file": str(self.key), "guild_id": str(GUILD), "channel_id": str(CHANNEL),

@@ -9,7 +9,11 @@ import (
 // A narrow, grounded statement template; questions, pronouns, quoted text and
 // negation are left to model extraction at model authority.
 var heightClauseBreak = regexp.MustCompile(`[,;\n]|\.(?:\s|$)`)
-var heightStatement = regexp.MustCompile(`(?i)^(?:remember\s+that\s+)?(?:but\s+)?(?:the\s+)?(<@!?[0-9]{17,20}>|[\p{L}][\p{L}\p{N} '\-]{0,159}?)\s+(?:is|are)\s+([0-9]+(?:\.[0-9]+)?)\s+(feet|foot|ft|metres|meters|m|inches|inch|in|centimetres|centimeters|cm)\s+tall!?$`)
+var heightStatement = regexp.MustCompile(`(?i)^(?:remember\s+that\s+)?(?:but\s+)?(?:the\s+)?(<@!?[0-9]{17,20}>|[\p{L}][\p{L}\p{N} '\-]{0,159}?)\s+(?:is|are)\s+(?:really\s+)?([0-9]+(?:\.[0-9]+)?)\s*(feet|foot|ft|metres|meters|m|inches|inch|in|centimetres|centimeters|cm)\s+tall!?$`)
+
+var discordSubjectID = regexp.MustCompile(`^<@[0-9]{17,20}>$`)
+var discordNumericID = regexp.MustCompile(`^[0-9]{17,20}$`)
+var selfHeightStatement = regexp.MustCompile(`(?i)^(?:but\s+)?I(?:\s+am|['’]m)\s+(?:really\s+)?([0-9]+(?:\.[0-9]+)?)\s*(feet|foot|ft|metres|meters|m|inches|inch|in|centimetres|centimeters|cm)(?:\s+tall)?(?:\s+not\s+[0-9]+(?:\.[0-9]+)?(?:\s*(?:feet|foot|ft|cm|meters|metres))?(?:\s+ok)?)?(?:\s+I\s+told\s+you\s+already)?!?$`)
 
 func heightFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	var result []FactCandidate
@@ -28,6 +32,11 @@ func heightFactCandidates(content, observedAt string, memoryID, jobID int64, act
 func heightClauseCandidate(content string, start, end int, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	clause := strings.TrimSpace(content[start:end])
 	match := heightStatement.FindStringSubmatch(clause)
+	if match == nil && actor.Role == "user" && actor.Rank == 30 && actor.Authenticated == 1 && discordSubjectID.MatchString(actor.DiscordSubject) {
+		if self := selfHeightStatement.FindStringSubmatch(clause); self != nil {
+			match = []string{self[0], actor.DiscordSubject, self[1], self[2]}
+		}
+	}
 	if match == nil {
 		return nil
 	}
