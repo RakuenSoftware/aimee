@@ -9,6 +9,25 @@ import (
 	"testing"
 )
 
+func TestPossessiveHeightCorrectionsPreserveSubjectUnitsAndEvidence(t *testing.T) {
+	actor := FactActor{Principal: "connector", Role: "user", Rank: 30, Authenticated: 1}
+	for _, tc := range []struct{ text, subject string }{
+		{"Kibukx's height is really 69cm.", "Kibukx"},
+		{"<@!333333333333333333>'s real height is 69cm.", "<@333333333333333333>"},
+		{"Kibukx mountains’\u0073 height is 69 cm.", "Kibukx mountains"},
+	} {
+		got := heightFactCandidates(tc.text, "now", 1, 2, actor)
+		if len(got) != 1 || got[0].Subject != tc.subject || got[0].Object != "69 cm" || got[0].Actor != actor || got[0].Evidence.SourceSpan == "" {
+			t.Fatalf("%q: %+v", tc.text, got)
+		}
+	}
+	for _, text := range []string{"Kibukx's height is not 69cm.", "Kibukx's height is 69cm?", "He’s height is 69cm.", "Someone said Kibukx's height is 69cm."} {
+		if got := heightFactCandidates(text, "now", 1, 2, actor); len(got) != 0 {
+			t.Fatalf("%q: %+v", text, got)
+		}
+	}
+}
+
 func TestHeightFactsKeepDistinctQualifiedNamesAndSourceSpans(t *testing.T) {
 	actor := FactActor{Principal: "connector", Role: "user", Rank: 30, Authenticated: 1}
 	source := "But Kibukx is 6 feet tall, the Kibukx mountains are 69 feet tall."

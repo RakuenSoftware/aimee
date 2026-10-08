@@ -171,7 +171,7 @@ Explicit greetings and requests to compose a message skip factual recall: a ment
 recipient alone is not a reason to insert their height or other stored properties.
 Requests that also ask for facts continue through normal retrieval.
 
-Explicit tagged/self height updates commit before reply inference, so the old
+Explicit tagged/self and named possessive height updates (including “Kibukx’s height is really 69cm”) commit before reply inference, so the old
 measurement cannot cause the model to reject a correction. Compact units and
 “really” are accepted; first-person forms such as “I’m 4 feet tall not 5 ok” bind
 to the captured Discord author after validating the source key, project and
@@ -244,8 +244,9 @@ vector qualification. Complete facts exceeding the context allowance are omitted
 
 Configurations without a knowledge endpoint retain the earlier read-only
 `store=user` memory search path. They do not enable conversation fact capture.
-With Aimee retrieval enabled, input is capped at at most 600 UTF-8 bytes, reduced
-for system instructions; 384 bytes are reserved for the memory block. The CPU
+Incoming Discord text is accepted up to 8000 UTF-8 bytes. Recent history is
+trimmed separately with space reserved for system instructions, identity data,
+retrieved facts and the reply. The CPU
 override disables hidden thinking so the reply budget produces visible text.
 
 ## Prepare a separate Aimee environment and E2B
@@ -323,8 +324,8 @@ shared history, separate from the parent channel and other threads; servers stay
 conversations; restart clears this recent cache. Durable capture remains in Aimee when the
 knowledge endpoint is configured. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
-For the bounded 2048-token E2B configuration, prompts use a conservative UTF-8 byte budget
-(at most 1000 bytes, reduced to account for system instructions) and trim older turn pairs to fit;
+For the 2048-token E2B configuration, recent history uses a UTF-8 byte estimate
+and trims older turn pairs to fit alongside the latest message;
 replies request at most 384 tokens. Queue overflow and failed inference
 are logged as metadata, without message content. The bridge does not receive attachments or audio.
 
@@ -356,18 +357,23 @@ known raw `@ID` and `@Name#discriminator` output is rendered as `<@ID>`. Ordinar
 replies keep user, role and everyone notifications disabled. Explicit social-message
 recipients also render as tags when the model emits their supplied display names.
 Selecting a bot peer preserves other explicitly mentioned recipients in the message,
-with notification permission limited to the selected peer.
+with notification permission enabled for the observed bot peers.
 
-Other bots remain ignored unless their Discord bot IDs appear in `peer_bot_ids`
-(default empty) and a human explicitly requests conversation with a mentioned peer,
-for example mentioning both bots and saying “Talk to each other.” This opens a
-channel/thread-specific three-minute session with at most two incoming peer turns.
-Only the selected peer can be pinged in those replies. Unknown bots, webhook
-imitations, self messages, expired sessions and duplicate events are rejected.
+Real bot accounts in the configured channel or its threads can address Aimee
+without an allowlist, a human-opened session, a timeout, or a turn limit. Human
+requests mentioning several bots address every mentioned bot regardless of wording.
+Full Discord-sized incoming messages are admitted; the reply model’s recent-history
+budget does not discard longer peer replies. Peer replies are
+sent through Aimee’s bot account rather than its webhook, so the author identity
+matches the account that peers mention. Notifications are enabled for those bot
+recipients. Self messages, webhook imitations and duplicate events are ignored.
 Peer exchanges are archived as agent messages and never admitted as human facts.
+`peer_bot_ids` remains accepted for compatibility but does not gate bot admission.
 
 The peer must use the actual `<@AIMEE_BOT_ID>` mention. Plain `@Aimee#5282` text is
 not a Discord mention; Discord redacts its message content without Message Content
 intent. This bridge keeps privileged intents disabled and does not treat unavailable
 content as a message addressed to Aimee. Both bot implementations must support
 bot messages for an interactive exchange.
+
+Height source questions select the complete subject and `has_height` relation, so a person’s source answer excludes similarly named mountains and lifting capacities. Requests such as “have a conversation with each other” address the mentioned bot peers, as does “talk to”; the initial reply tags all of them and lets them respond.
