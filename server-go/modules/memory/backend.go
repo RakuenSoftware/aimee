@@ -6,6 +6,7 @@ import (
 	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/memory/cognee"
+	"github.com/JBailes/aimee/server-go/modules/memory/hillock"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
 	"os"
 	"strings"
@@ -14,6 +15,9 @@ import (
 
 // BackendFactory receives the request-bound source contract, so adapters do not
 // import native SQL types, caller admission or module implementation details.
+// Both external retrieval profiles explicitly bound the admitted snapshot.
+const backendCandidateLimit = 256
+
 type BackendFactory func(memorycontract.Store) (memorycontract.Backend, error)
 
 func configuredMemoryBackend(executor egress.Executor) (BackendFactory, error) {
@@ -21,10 +25,14 @@ func configuredMemoryBackend(executor egress.Executor) (BackendFactory, error) {
 	switch name {
 	case "", "native", "aimee-native":
 		return nil, nil
-	case "cognee":
+	case "cognee", "hillock":
 		endpoint := os.Getenv("AIMEE_MEMORY_BACKEND_URL")
 		if endpoint == "" {
-			endpoint = os.Getenv("AIMEE_COGNEE_URL")
+			if name == "hillock" {
+				endpoint = os.Getenv("AIMEE_HILLOCK_URL")
+			} else {
+				endpoint = os.Getenv("AIMEE_COGNEE_URL")
+			}
 		}
 		node, err := identity.Read(os.Getenv("AIMEE_HOME"))
 		if err != nil {
@@ -35,10 +43,10 @@ func configuredMemoryBackend(executor egress.Executor) (BackendFactory, error) {
 		if auth == "" {
 			auth = "bearer"
 		}
-		if auth != "bearer" && auth != "none" {
+		if auth != "bearer" && auth != "none" && auth != "api-key" {
 			return nil, errors.New("memory: unsupported backend authentication")
 		}
-		credential := auth == "bearer"
+		credential := auth != "none"
 		transport := func(ctx context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
 			if executor == nil {
 				return 0, nil, memorycontract.ErrUnavailable
@@ -60,6 +68,14 @@ func configuredMemoryBackend(executor egress.Executor) (BackendFactory, error) {
 			}
 			response, err := executor.Do(ctx, 0, egress.HTTPRequest{CredentialHandle: handle, Request: egress.Request{TargetURL: target, Purpose: "memory-backend", Method: method, CredentialPresent: credential, RequestSHA256: egress.RequestDigest(method, target, body, credential)}, Headers: headers, Body: body, MaxResponseBytes: cognee.MaxBody, TimeoutMS: max(1, timeout.Milliseconds())})
 			return response.Status, response.Body, err
+		}
+		if name == "hillock" {
+			if _, err := hillock.New(NativeStore{}, transport, endpoint); err != nil {
+				return nil, err
+			}
+			return func(source memorycontract.Store) (memorycontract.Backend, error) {
+				return hillock.New(source, transport, endpoint)
+			}, nil
 		}
 		// Validate configuration before serving; no silent native fallback.
 		if _, err := cognee.New(NativeStore{}, transport, endpoint, namespace); err != nil {
@@ -168,12 +184,12 @@ func (s *postgresDataStore) searchVisibleBackend(ctx context.Context, request Da
 	basis.Query = ""
 	basis.Kind = ""
 	basis.Tier = ""
-	basis.Limit = cognee.MaxRecords + 1
+	basis.Limit = backendCandidateLimit + 1
 	records, err := source.SearchVisible(ctx, basis)
 	if err != nil {
 		return nil, err
 	}
-	if len(records) > cognee.MaxRecords {
+	if len(records) > backendCandidateLimit {
 		return nil, memorycontract.ErrCapacity
 	}
 	scopes := []Scope{}
@@ -220,6 +236,8 @@ func (s *postgresDataStore) forgetBackend(ctx context.Context, scope Scope, id i
 func resetDerivedBackend(ctx context.Context, data DataStore) error {
 	var backend memorycontract.Store
 	switch source := data.(type) {
+	case *externalDataStore:
+		backend = source.backend
 	case *postgresDataStore:
 		if source.backendFactory == nil {
 			return nil
@@ -245,6 +263,8 @@ func resetDerivedBackend(ctx context.Context, data DataStore) error {
 
 func hasSelectedBackend(data DataStore) bool {
 	switch source := data.(type) {
+	case *externalDataStore:
+		return true
 	case *postgresDataStore:
 		return source.backendFactory != nil
 	case ContractDataStore:

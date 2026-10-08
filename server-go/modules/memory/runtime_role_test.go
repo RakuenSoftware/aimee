@@ -86,7 +86,10 @@ func TestMemoryRuntimeRoleReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `DO $$ BEGIN
+	// Raw fixture SQL shares the outer transaction with nested request handlers.
+	// Match the production owner's transaction-local setting for bounded reads;
+	// administrator queries must not introduce JIT latency outside that boundary.
+	_, err = tx.Exec(ctx, `SET LOCAL jit=off; DO $$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
 CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS;
 END IF;

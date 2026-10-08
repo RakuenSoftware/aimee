@@ -1,0 +1,32 @@
+{
+  "checks": [
+    {
+      "name": "cognee independent catalog retains exact IDs/revisions/history/authorship/metadata",
+      "status": "passed"
+    },
+    {
+      "name": "hillock independent catalog retains exact IDs/revisions/history/authorship/metadata",
+      "status": "passed"
+    },
+    {
+      "name": "native import preserves exact canonical content, IDs, revisions and retained history",
+      "status": "passed"
+    },
+    {
+      "name": "occupied native target refuses replacement",
+      "status": "passed"
+    },
+    {
+      "name": "native target retains portable erasure controls",
+      "status": "passed"
+    },
+    {
+      "name": "native target refuses restoration of portable erased ID",
+      "status": "passed"
+    }
+  ],
+  "status": "passed",
+  "source_sha256": "3d036b5c6d428d48f4b4a504409e9e161030577840a80962a3da7f5609ed5b31",
+  "records": 2,
+  "retained_history": 2
+}

@@ -361,9 +361,11 @@ func publicIP(ip net.IP) bool {
 		!ip.IsLinkLocalMulticast() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
-// Memory adapters reuse governed egress; these are Cognee's documented API
-// routes, not arbitrary backend-supplied destinations or administrative APIs.
+// Memory adapters reuse governed egress with provider-specific route admission.
 func memoryBackendTargetAllowed(method, path string) bool {
+	if strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND")) == "hillock" {
+		return (method == "POST" && path == "/v1/rank") || (method == "GET" && path == "/v1/health")
+	}
 	switch path {
 	case "/api/v1/add", "/api/v1/cognify", "/api/v1/search":
 		return method == "POST"
@@ -392,7 +394,11 @@ func memoryBackendTargetAllowed(method, path string) bool {
 func memoryBackendOriginAllowed(target *url.URL) bool {
 	endpoint := os.Getenv("AIMEE_MEMORY_BACKEND_URL")
 	if endpoint == "" {
-		endpoint = os.Getenv("AIMEE_COGNEE_URL")
+		if strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND")) == "hillock" {
+			endpoint = os.Getenv("AIMEE_HILLOCK_URL")
+		} else {
+			endpoint = os.Getenv("AIMEE_COGNEE_URL")
+		}
 	}
 	allowed, err := url.Parse(endpoint)
 	return err == nil && allowed.Host != "" && allowed.User == nil && (allowed.Path == "" || allowed.Path == "/") && allowed.RawQuery == "" && allowed.Fragment == "" && target.RawQuery == "" && target.Fragment == "" && target.Scheme == allowed.Scheme && strings.EqualFold(target.Host, allowed.Host)

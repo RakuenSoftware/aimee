@@ -1,0 +1,14 @@
+{
+  "checks": [
+    {
+      "name": "recovery-deadline-five-runs",
+      "exit": 0,
+      "seconds": 5.09
+    },
+    {
+      "name": "utf8-isolated-database",
+      "exit": 0,
+      "seconds": 17.14
+    }
+  ]
+}

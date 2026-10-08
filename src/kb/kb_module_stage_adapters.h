@@ -18,4 +18,6 @@ cJSON *kb_module_memory_data(const cJSON *request);
 
 int kb_module_memory_reset_derived(void);
 
+int kb_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions);
+
 #endif

@@ -413,10 +413,11 @@ provider requests before opening source snapshots, preventing old in-flight
 indexing from recreating erased copies after cleanup.
 
 Startup completes canonical restore replay and configured derived cleanup before
-publishing the memory handler. A failed cleanup prevents readiness. No additional
-binding process, subject ledger, erasure coordinator or audit owner is introduced.
+publishing the memory handler. A failed cleanup prevents readiness. The existing erasure coordinator and audit owner remain authoritative; external catalogs retain their own erasure replay metadata.
 
 ### Memory backend contract
+
+Contract compliance is required for external integrations (Cognee, Hillock and future adapters). Native memory may use its own implementation, APIs and optimizations; its correctness is verified by native regression tests, not by forcing it to implement the external adapter contract.
 
 This contract and the Cognee adapter are implemented in
 [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005), after published 0.4.6.
@@ -425,13 +426,12 @@ Use a build containing that change for the configuration below.
 ```mermaid
 flowchart LR
     Request[Admitted scoped request] --> Owner[Existing Aimee memory owner]
-    Owner --> Source[Canonical records through PostgreSQL provider]
     Owner --> Contract[Generic Store contract]
-    Contract --> Native[Native engine using existing modules]
-    Contract --> Adapter[Cognee adapter]
+    Contract --> Native[Native PostgreSQL memory]
+    Contract --> Adapter[Cognee or Hillock adapter]
+    Adapter --> Catalog[Independent durable compatibility catalog]
     Adapter --> Egress[Existing egress and Vault]
-    Egress --> Cognee[Cognee derived datasets]
-    Adapter --> Source
+    Egress --> Engine[Selected retrieval engine]
 ```
 
 The public Go contract is `github.com/JBailes/aimee/server-go/memory`. It contains scopes, public record types, the existing event/stage IDs and client framing. It imports no native memory implementation. The existing memory descriptor, bus admission and supervisor remain the host infrastructure.
@@ -497,13 +497,13 @@ Keep credentials out of contract arguments, records, errors and logs. Transport 
 ### Add a backend to Aimee
 
 1. Add a provider package under `server-go/modules/memory/<provider>/` which imports the public `server-go/memory` contract. Implement `Backend` using the supplied canonical `Store` and an injected transport/client. Avoid native SQL, bus admission and credential resolution inside this package.
-2. Keep canonical storage and native extended APIs in the existing owner. For derived indexing, implement both `DerivedStore` and `DerivedResetter`, including cleanup verification and retries after unknown outcomes. Providers without derived copies need neither.
+2. Supply an independently durable backend-owned catalog for a replacement backend. Native extended APIs require explicit equivalent capabilities; do not silently fall back to native storage. For derived indexing, implement both `DerivedStore` and `DerivedResetter`, including cleanup verification and retries after unknown outcomes. Providers without derived copies need neither.
 3. Add compile-time interface assertions and behavioral tests. Cover exact scope, IDs above 2^53, source revision changes, empty queries, filters, limits, cancellation, unavailable storage, deletion retries and derived reset isolation. The native bridge tests are in `store_adapter_test.go`; Cognee's adapter and live tests provide the first working integration example.
 4. Register the factory in `configuredMemoryBackend` (or inject it with `WithMemoryBackend` in another host composition). Construct it from the request-bound source passed to the factory. Validate provider configuration before readiness; unknown names must fail rather than silently select native. Add any outbound origin/credential policy to the existing egress and Vault contracts.
 5. Add provider files and tests to the existing memory descriptor `src/modules/memory/module.yaml`. If host transport changes, update that existing module's descriptor too. Reuse the current runtime manifest, principal grants and restart infrastructure; do not create another binding registry or supervisor.
 6. Run the contract/bridge tests, a real-provider test, existing PostgreSQL replay and source/export checks. Add the provider's real test to CI and to the required aggregate. Document provider-specific bounds and operational configuration. Build and install the existing module executable and generated grants, then restart the memory owner.
 
-For a full replacement of the baseline canonical Store, `ContractDataStore` is the host bridge. Such an implementation must preserve the source guarantees and does not inherit native graph, learning, authority or lifecycle support merely by implementing four methods. Prefer the supplied source plus a derived engine when replacing retrieval algorithms.
+For a full replacement of the baseline canonical Store, `ContractDataStore` is the host bridge. Such an implementation must preserve the source guarantees and does not inherit native graph, learning, authority or lifecycle support merely by implementing four methods. The selected Cognee/Hillock production composition now supplies an independent backend-owned compatibility catalog.
 
 The smallest adapter with no derived storage can delegate the existing source. This example establishes the exact package boundary; replace its Search implementation with your engine's retrieval and canonical revalidation:
 
@@ -563,15 +563,15 @@ Set `AIMEE_MEMORY_BACKEND=cognee` and `AIMEE_MEMORY_BACKEND_URL=https://your-cog
 
 Authentication defaults to bearer. Import `AIMEE_MEMORY_BACKEND_TOKEN` through the existing Vault credential mechanism. The memory process supplies only its credential handle; egress resolves the token and binds the request to the configured origin. `AIMEE_MEMORY_BACKEND_AUTH=none` is available for a server configured to accept unauthenticated requests. The existing egress allowlist admits only add, cognify, search, dataset listing and individual dataset deletion.
 
-Run the server and KB with their own `AIMEE_HOME`, immutable node identity, module policy directory and canonical storage namespace, as the existing deployment topology requires. Provision PostgreSQL 18 and the existing owner/runtime role split before boot; apply schema and runtime/default grants through the existing PostgreSQL migration path. Install the generated module executables at the grant-pinned paths, including the canonical egress/PostgreSQL helpers, and start the existing role supervisor. A one-shot module launcher cannot recover from dependencies which attach later during startup.
+Run the server and KB with their own `AIMEE_HOME`, immutable node identity, module policy directory and canonical storage namespace, as the existing deployment topology requires. Native memory requires PostgreSQL 18 and the existing owner/runtime role split; unrelated Aimee control services retain their infrastructure. Selected Cognee/Hillock memory record owners do not open native PostgreSQL storage; apply schema and runtime/default grants through the existing PostgreSQL migration path. Install the generated module executables at the grant-pinned paths, including the canonical egress/PostgreSQL helpers, and start the existing role supervisor. A one-shot module launcher cannot recover from dependencies which attach later during startup.
 
 Cognee authentication is also provider configuration. Aimee forwards the configured bearer and fails closed on 401; it does not silently renew credentials or fall back to native retrieval. Cognee 1.6.2 generates a process-local JWT signing secret when `FASTAPI_USERS_JWT_SECRET` is unset, which invalidates prior session tokens on restart. Persist that secret securely in Cognee when using session tokens, account for their expiration, and rotate the Aimee credential through its existing Vault mechanism. Use a provider-supported durable API credential for unattended service operation. The validation fixtures use synthetic credentials only.
 
 Cognee retains derived retrieval state; Aimee retains canonical identities, admission, audit and lifecycle. Search reconciles exact revision-specific datasets, waits for completed cognification, queries CHUNKS, sorts distances within this backend and re-reads canonical records. It never converts generated prose into records. Cognee 1.6.2 was verified with a real local API, SQLite/LanceDB/Ladybug and deterministic model/embedding fixtures. `only_context` is false: CHUNKS itself is non-generative, while context-only mode returns text and loses scores.
 
-The first adapter has explicit limits: 256 eligible records per scope snapshot and 1 MiB response bodies. Larger inputs return `ErrCapacity`, never silent truncation. Cognification is synchronous and follows the existing two-minute data/egress deadline, clamped by the caller. Existing public command bridges have their own deadline (currently 60 seconds for private memory commands); large cold indexing can exhaust that budget and return an unavailable/cancelled outcome. Retries reconcile already-created derived datasets against the canonical source. This is an initial adapter, not a large-corpus indexing implementation. Empty queries use the authorized source listing without external indexing.
+The first adapter has explicit limits: 256 candidates per provider request and 1 MiB response bodies. Larger inputs return `ErrCapacity`, never silent truncation. Cognification is synchronous and follows the existing two-minute data/egress deadline, clamped by the caller. Existing public command bridges have their own deadline (currently 60 seconds for private memory commands); large cold indexing can exhaust that budget and return an unavailable/cancelled outcome. Retries reconcile already-created derived datasets against the canonical source. This is an initial adapter, not a large-corpus indexing implementation. Empty queries use the authorized source listing without external indexing.
 
-Existing extended native graph, learning, history and code-index APIs remain owned by native memory; selecting Cognee replaces the baseline retrieval path, not those algorithms.
+Selected Cognee/Hillock owners support independent durable baseline records, revisions/history, scoped CRUD and retrieval. Advanced native graph, learning, served views and code-index operations return capability-absent until equivalent contracts are implemented.
 
 Subject-wide erasure now includes the configured Cognee node namespace. Cleanup conservatively removes this node's complete derived index, including retired revisions and records already erased from the source. Retained canonical records are reindexed on subsequent retrieval. This avoids duplicating subject/provenance tracking inside the adapter, and cleanup is independent of the 256-record retrieval limit. The memory handler serializes provider calls before opening source snapshots, so an older in-flight indexing request finishes before cleanup acknowledges success. Waiting requests retain cancellation/deadline handling.
 
@@ -618,3 +618,19 @@ Subject-wide erasure can already have committed canonical removal when provider 
 The failure prevents completion coverage and retries with the existing journal/request ID; it is
 not a distributed transaction. Ordinary admitted record deletion separately calls `Forget` before
 its source mutation. Startup replays canonical erasure and resets selected derived state before readiness.
+
+### Hillock proof of concept
+
+Native, Cognee and Hillock are selectable durable baseline backends. Cognee/Hillock use independent adapter-owned catalogs under `$AIMEE_HOME/memory-backends/<engine>/<placement>`; `AIMEE_MEMORY_BACKEND_DIR` overrides the root. Their production constructor returns before constructing native PostgreSQL storage. Catalogs persist records, scopes, authorship, exact versions, correction history, retry receipts and retained erasure markers with private permissions, process locking, atomic writes and fsync. Subject erasure removes history and receipt payloads; retained `erasures.json` prevents stale record restoration. [Completed baseline](../proposals/done/independent-durable-memory-backends.md) records evidence. [Remaining parity/qualification](../proposals/pending/external-memory-engine-scale-and-quality.md) remains pending.
+
+External owners expose scoped `backend_capabilities`, `backend_list` (stable `after_id` paging), `backend_export` and `backend_import` commands. Export/import requires verified human authority and an empty destination catalog; exports preserve scope, IDs, history and erasure controls. Native PostgreSQL migration is not yet this format. Advanced unsupported APIs do not execute native SQL. Discovery lists only supported baseline commands. The ordinary public CRUD command paths are tested with PostgreSQL absent.
+
+`AIMEE_MEMORY_BACKEND=hillock` selects a third retrieval backend using the pinned upstream Hillock HDC encoder and HYDRA scorer. Configure `AIMEE_MEMORY_BACKEND_URL` (fallback `AIMEE_HILLOCK_URL`) and the same governed bearer/Vault mechanism as Cognee. The supplied sidecar is a stateless `hdc-subword` profile: it ranks an authorized request snapshot, returns canonical IDs/revision hashes, and retains no records or learned state between requests. Aimee rehydrates and rechecks results. Startup verifies the exact upstream revision and stateless protocol before readiness. Native remains the default.
+
+The rank API has explicit 256-candidate and 1 MiB bounds, with additional token/vocabulary limits; overload returns capacity, not truncated success. It does not implement upstream chat generation, extraction, graph or Hebbian learning. See [run/configuration and real-engine tests](../../integrations/hillock/README.md) and [the specific APIs required for full support](../../integrations/hillock/FULL_SUPPORT_CONTRACT.md). The `memory-backends` CI job requires the pinned real Hillock contract to execute across a restart, alongside existing native/Cognee coverage.
+
+## External conversation profile
+
+Cognee and Hillock implement [the reusable conversation v2 contract](../../integrations/memory/CONTRACT.md) through independent durable catalogs and provider ranking. It includes recall/composition/briefing, exact history, authenticated export, source revalidation/send barriers, and idempotent erasure with fresh host-admitted writes. Native is exempt. [Support validation](../validation/external-memory-support-2026-10-08.md) distinguishes completed integration from remaining answer/scale qualification.
+
+The catalog is bounded at 64 MiB; 16 for Cognee and 256 for Hillock are the per-request provider candidate counts, not the corpus size. Aimee scans eligible records and selects a lexical pool; retrieval is explicitly non-exhaustive. Cognee supports `AIMEE_MEMORY_BACKEND_AUTH=api-key` for Vault-backed service keys, alongside bearer and explicit development `none`.

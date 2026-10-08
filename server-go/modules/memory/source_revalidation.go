@@ -213,6 +213,9 @@ func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvoc
 	if json.Unmarshal(result, &response) != nil || len(response.Payload) == 0 {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
+	}
 	return commandResult(response.Payload)
 }
 

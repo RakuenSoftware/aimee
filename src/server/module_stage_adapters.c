@@ -1143,3 +1143,23 @@ int server_module_memory_reset_derived(void)
    cJSON_Delete(reply);
    return ok ? 0 : -1;
 }
+
+/* Called only by the existing authenticated erasure coordinator. */
+int server_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions)
+{
+   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   if (!backend || !backend[0] || strcmp(backend, "native") == 0 || strcmp(backend, "aimee-native") == 0)
+      return 0;
+   if (!subject || !subject[0]) return -1;
+   cJSON *request = cJSON_CreateObject();
+   if (!request) return -1;
+   cJSON_AddStringToObject(request, "operation", "erase-backend");
+   cJSON_AddStringToObject(request, "backend_subject", subject);
+   cJSON_AddStringToObject(request, "backend_erasure_id", request_id);
+   if (sessions) cJSON_AddItemToObject(request, "backend_sessions", cJSON_Duplicate(sessions, 1));
+   cJSON *reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   int ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "deleted"));
+   cJSON_Delete(reply);
+   return ok ? 0 : -1;
+}

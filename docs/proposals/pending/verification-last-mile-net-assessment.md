@@ -8,7 +8,7 @@
   maintainers for their respective slices
 - **Related:**
   [Aimee development lifecycle](../done/aimee-dev-lifecycle-workflow.md),
-  [recursive self-improvement](recursive-self-improvement-closing-the-loops.md),
+  [recursive self-improvement](../done/recursive-self-improvement-closing-the-loops.md),
   [local-first memory and trust patterns](local-first-memory-and-trust-patterns.md),
   [structured PDF ingestion](../done/structured-pdf-ingestion-and-evidence-layer.md),
   [document lifecycle contract](../done/evidence-lifecycle-p3-document-lifecycle-contract.md),

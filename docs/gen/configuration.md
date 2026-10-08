@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 301 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 303 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -460,9 +460,11 @@ The binaries read 301 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_COGNEE_URL` | Cognee API base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset. |
 | `AIMEE_CONTEXT_NO_KB` | Skip KB lookups during context assembly. |
 | `AIMEE_GRAPH_FUSION` | Native memory graph-fusion switch; accepted on/off values are validated by the Go owner. |
-| `AIMEE_MEMORY_BACKEND` | Select the generic memory engine: `native` (default), `aimee-native`, or `cognee`. Unknown selections fail startup. See the memory module contract. |
-| `AIMEE_MEMORY_BACKEND_AUTH` | Alternative memory authentication mode: `bearer` by default, or explicit `none` for an isolated development endpoint. |
-| `AIMEE_MEMORY_BACKEND_TOKEN` | First-boot bearer transport for the alternative memory service; sealed into Vault and removed from the environment before runtime. |
+| `AIMEE_HILLOCK_URL` | Hillock HDC sidecar base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset and Hillock is selected. |
+| `AIMEE_MEMORY_BACKEND` | Select the generic memory engine: `native` (default), `aimee-native`, `cognee`, or `hillock`. Unknown selections fail startup. See the memory module contract. |
+| `AIMEE_MEMORY_BACKEND_AUTH` | Alternative memory authentication mode: `bearer` by default, `api-key` for Cognee service keys, or explicit `none` for an isolated development endpoint. |
+| `AIMEE_MEMORY_BACKEND_DIR` | Optional durable compatibility catalog root for Cognee/Hillock. Defaults to `$AIMEE_HOME/memory-backends`; each engine and placement has a separate private catalog. |
+| `AIMEE_MEMORY_BACKEND_TOKEN` | First-boot credential transport for the alternative memory service; sealed into Vault and removed from the environment before runtime. |
 | `AIMEE_MEMORY_BACKEND_URL` | Selected alternative memory API base URL. Requests use the existing egress owner. |
 | `AIMEE_MEMORY_CITATIONS_MODE` | Citation rendering mode for memory recall. |
 | `AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED` | Strip unverified citations from recall output. |

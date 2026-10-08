@@ -479,12 +479,16 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Contract, native bridge, Cognee adapter and egress race tests
+      - name: Contract, native bridge, external adapters and egress race tests
         working-directory: server-go
-        run: go test -race ./memory ./modules/memory ./modules/memory/cognee ./modules/egress
+        run: go test -race ./memory ./modules/memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
+      - name: Portable transfer build and syntax
+        run: |
+          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./cmd/aimee-memory-transfer)
+          python3 -m py_compile scripts/validation/memory/native-transfer.py scripts/validation/memory/lxc/*.py
       - name: Install pinned real Cognee API
         run: |
           python3 -m venv "$RUNNER_TEMP/cognee-venv"
@@ -494,15 +498,24 @@ jobs:
           python3 scripts/validation/memory/run-cognee-contract.py \
             --python "$RUNNER_TEMP/cognee-venv/bin/python" \
             --artifacts "$RUNNER_TEMP/cognee-contract"
-      - name: Retain Cognee diagnostics
+      - name: Real pinned Hillock HDC contract (required, no skip)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hillock-venv"
+          "$RUNNER_TEMP/hillock-venv/bin/pip" install -r integrations/hillock/requirements.txt
+          "$RUNNER_TEMP/hillock-venv/bin/python" scripts/validation/memory/run-hillock-contract.py \
+            --artifacts "$RUNNER_TEMP/hillock-contract"
+      - name: Retain external memory diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cognee-memory-contract
+          name: external-memory-contract
           path: |
             ${{ runner.temp }}/cognee-contract/contract.log
             ${{ runner.temp }}/cognee-contract/server.log
             ${{ runner.temp }}/cognee-contract/summary.json
+            ${{ runner.temp }}/hillock-contract/contract.log
+            ${{ runner.temp }}/hillock-contract/server.log
+            ${{ runner.temp }}/hillock-contract/summary.json
           if-no-files-found: warn
           retention-days: 7
 

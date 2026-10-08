@@ -1,0 +1,58 @@
+[
+  {
+    "stage": "recovery-deadline-five-runs",
+    "tests": [
+      {
+        "status": "pass",
+        "test": "TestEvidenceRecoveryDurableRoundPostgres",
+        "seconds": 0.57
+      },
+      {
+        "status": "pass",
+        "test": "TestEvidenceRecoveryDurableRoundPostgres",
+        "seconds": 0.47
+      },
+      {
+        "status": "pass",
+        "test": "TestEvidenceRecoveryDurableRoundPostgres",
+        "seconds": 0.56
+      },
+      {
+        "status": "pass",
+        "test": "TestEvidenceRecoveryDurableRoundPostgres",
+        "seconds": 0.61
+      },
+      {
+        "status": "pass",
+        "test": "TestEvidenceRecoveryDurableRoundPostgres",
+        "seconds": 0.45
+      }
+    ],
+    "packages": [
+      "ok  \tgithub.com/JBailes/aimee/server-go/modules/memory\t3.696s"
+    ]
+  },
+  {
+    "stage": "utf8-isolated-database",
+    "tests": [
+      {
+        "status": "pass",
+        "test": "TestEvaluationRequiresExplicitDisposableURL",
+        "seconds": 0.0
+      },
+      {
+        "status": "pass",
+        "test": "TestEvaluationIsolationAndAbandonedTransactionCleanup",
+        "seconds": 6.41
+      },
+      {
+        "status": "pass",
+        "test": "TestEvaluationCancellationAndFailedBootstrapCleanup",
+        "seconds": 7.4
+      }
+    ],
+    "packages": [
+      "ok  \tgithub.com/JBailes/aimee/server-go/modules/postgres\t14.863s"
+    ]
+  }
+]

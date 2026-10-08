@@ -7,7 +7,7 @@
 - **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived delivered scope (2026-07-26).** Instrumentation and unit coverage are shipped;
-> the committed empirical baseline remains in [`compaction-quality-baseline.md`](../pending/compaction-quality-baseline.md).
+> the committed empirical baseline remains in [`compaction-quality-baseline.md`](../pending/context-paging-not-compaction.md).
 
 ## Why
 

@@ -1835,9 +1835,15 @@
       "disposition": "host-transport",
       "symbols": [
         "server_module_memory_data",
+        "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "4c077fb9e23e39da55b11c517a26719f38e01b1207a25a640c716354bdee462f"
+      "sha256": "96aa7f907d21172f622095e7f7914e7f82f3d13d5b7060b821ab046fafa90fcf",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/headers/rel_types.h": {
       "disposition": "storage-protocol",
@@ -1869,17 +1875,29 @@
         "AIMEE_MEMORY_STAGE_DATA",
         "AIMEE_MEMORY_STAGE_EMBED",
         "kb_module_memory_data",
+        "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "fe1f725317e2d8bc3947367ba83245749a2c15039e52f90a1c14260102dbb026"
+      "sha256": "bc68aec3dd02ac7f829ea0e5abc7fdee2625a0fa8bef5f4730961b5c918c0162",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
       "symbols": [
         "kb_module_memory_data",
+        "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "15ab1bf713e42b4076dff320b73d0ac5ba6a4f67870b856f459d0388c384044d"
+      "sha256": "bc6456e7e9efadd539a478745d86fdefc551fa3df3a6500457d831484986ffca",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/kb/kb_service.c": {
       "disposition": "protocol-catalog",
@@ -2122,9 +2140,15 @@
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_STAGE_DATA",
         "server_module_memory_data",
+        "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "4996b3af65a1ef36a65045eeaa3dec46c0c0441f1d240d7f60db05b0e72b0537"
+      "sha256": "32dc9217d3983bf3e24cb9786177297b8de1b4bf3ed4c7eeb7ab2c0a2d19f07c",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2592,9 +2616,15 @@
     "src/kb/http/kb_http_governance.c": {
       "disposition": "host-transport",
       "symbols": [
+        "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "a058a6d3ca0e27fb5925dc2be10001b56f63169795db47462c2cbccfc5edaf65"
+      "sha256": "329f95e8db6d4635fe0d3c3fafc55792fa5140fddb03d8b3a1d710afc73f1d6b",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/modules/vault/vault_env_bootstrap.c": {
       "disposition": "credential-custody",
@@ -2606,23 +2636,41 @@
     "src/server/server_state_vectors.c": {
       "disposition": "host-transport",
       "symbols": [
+        "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "254d5b8c0892d9e4ad1ec9738dd0ff690011e16faafd655b34b11265d96255ae"
+      "sha256": "89f7196b969f4d4b0ff4b9e3725b08e4b953fbba01fbc6ea53c03432566a2fc5",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/tests/test_kb_http_routes.c": {
       "disposition": "host-fixture",
       "symbols": [
+        "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "708f086a90888b6223543b2b1f92fc912c6689ff624f8bfc0f3cd8c62daf6472"
+      "sha256": "b0bed34776dc9b54417667ae1973a3ea973ffaabe64f2e0f3ac8c59354b1a2d6",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     },
     "src/tests/test_server_erasure_protocol.c": {
       "disposition": "host-fixture",
       "symbols": [
+        "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "01b4465d868b7f995fb3fcb7d3290e1a603b9438455aea915cbe5c1b5b8b7cb0"
+      "sha256": "8015ff7ce1ba205af59c75df75c84ece970753840286ff5363a914ccb3784925",
+      "evidence": [
+        "server-go/modules/memory/external_store_test.go",
+        "server-go/modules/memory/backendstore/store_test.go"
+      ],
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
     }
   },
   "generated_files": {
@@ -2632,10 +2680,10 @@
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "8a2622549007093a55bc6ae4d683bdaa65ac822606b3082c6773443fac68867a",
+      "sha256": "e0dfef2c7a9e5acfd38612a23cbf38156ce2a4dc19f1e92feee388cba25318e0",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
-        "src/modules/kb/c/schema.sql": "5426a7f572a8968194c7a777ede9ee9cde8e2511e50af537143e5bcbe6c1ca90",
+        "src/modules/kb/c/schema.sql": "f12c86e637d1134fb7c27d5b94f98a7c532d3e5ea31396c69ba9037f08f47cb5",
         "src/modules/kb/c/schema_sqlite.sql": "bcf16ace981d42b9b79729994b3f59c3e9bba1036b8c9be14eca3f964e7e2ed5"
       }
     },

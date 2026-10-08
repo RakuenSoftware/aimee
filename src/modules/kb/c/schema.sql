@@ -7792,12 +7792,15 @@ BEGIN
     FROM jsonb_array_elements_text(p_session_ids);
   -- Freeze canonical writers before traversing; late queued producers also
   -- encounter the durable dependency guard after these locks are released.
-  LOCK TABLE memories,memory_lineage,memory_units,derived_memory_dependencies,
+  LOCK TABLE memories,memory_fact_actors,memory_lineage,memory_units,derived_memory_dependencies,
     artifacts,artifact_citations IN SHARE ROW EXCLUSIVE MODE;
   UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
   INSERT INTO memory_erasure_sessions(session_digest) SELECT unnest(v_sessions) ON CONFLICT DO NOTHING;
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_memories FROM memories
-    WHERE owner_principal=p_subject OR encode(sha256(convert_to(COALESCE(source_session,''),'UTF8')),'hex')=ANY(v_sessions);
+    WHERE owner_principal=p_subject
+      OR EXISTS (SELECT 1 FROM memory_fact_actors a
+                 WHERE a.memory_id=memories.id AND a.actor_principal=p_subject)
+      OR encode(sha256(convert_to(COALESCE(source_session,''),'UTF8')),'hex')=ANY(v_sessions);
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_documents FROM kb_documents
     WHERE owner_principal=p_subject;
   -- Follow declared derivation, never generic related links. UNION terminates
