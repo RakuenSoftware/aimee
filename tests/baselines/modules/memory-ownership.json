@@ -2100,7 +2100,7 @@
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "e453b08038729ddab07a175827cc7e2b72be978c9f58cefe2fe4445a5d698e8f"
+      "sha256": "a0680fa1bd6678cd6fc20605524c778e49120ff6f05abe820ebd5dfd18882c66"
     },
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
@@ -2680,11 +2680,11 @@
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "e0dfef2c7a9e5acfd38612a23cbf38156ce2a4dc19f1e92feee388cba25318e0",
+      "sha256": "2bb8f5bfa9b34989275b361a33069aa41efd3758f738d8c99826e438502ec3dc",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
-        "src/modules/kb/c/schema.sql": "f12c86e637d1134fb7c27d5b94f98a7c532d3e5ea31396c69ba9037f08f47cb5",
-        "src/modules/kb/c/schema_sqlite.sql": "bcf16ace981d42b9b79729994b3f59c3e9bba1036b8c9be14eca3f964e7e2ed5"
+        "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",
+        "src/modules/kb/c/schema_sqlite.sql": "432e5ef11ecc0b7db4e2216b5b6412ff806f59f8d885017dc39e18d3ce5f4fd3"
       }
     },
     "src/server/openapi_server_data.h": {
