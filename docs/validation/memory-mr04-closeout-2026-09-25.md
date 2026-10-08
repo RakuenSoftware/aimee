@@ -19,7 +19,7 @@ inference record actual producer observations. Readers check required ancestors,
 versions, audience and validity before release. Episode-card selection also
 checks new session inputs; style inference pins the rules collection. Generated
 rules reach native consumers through the Go owner. Historical outputs without
-observations remain unavailable as current guidance. The [producer inventory](../proposals/pending/memory-reliability-04-producer-inventory.md)
+observations remain unavailable as current guidance. The [producer inventory](../proposals/done/memory-reliability-04-producer-inventory.md)
 records each managed output's dependency and erasure contract.
 
 The existing dependency registry follows transitive inputs and remains diagnostic;

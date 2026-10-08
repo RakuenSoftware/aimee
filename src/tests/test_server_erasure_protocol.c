@@ -130,3 +130,8 @@ int main(void)
    cJSON_Delete(request);
    return 0;
 }
+
+int server_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions)
+{
+   (void)request_id; (void)subject; (void)sessions; return 0;
+}

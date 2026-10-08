@@ -99,6 +99,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
+	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
@@ -162,6 +165,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
 	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)

@@ -1,0 +1,26 @@
+{
+  "backend": "cognee",
+  "checks": [
+    {
+      "name": "shipping source revalidation, send guard, mutation refusal/release and stale collection",
+      "status": "passed",
+      "seconds": 3.548
+    },
+    {
+      "name": "shipping external shared exact historical revision",
+      "status": "passed",
+      "seconds": 0.261
+    },
+    {
+      "name": "shipping KB briefing contains corrected evidence",
+      "status": "passed",
+      "seconds": 0.024
+    },
+    {
+      "name": "shipping capabilities advertise profile and bounded non-exhaustive retrieval",
+      "status": "passed",
+      "seconds": 0.034
+    }
+  ],
+  "status": "passed"
+}

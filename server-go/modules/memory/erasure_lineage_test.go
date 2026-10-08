@@ -65,13 +65,17 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 	for i, key := range []string{"erased source", "copied child", "copied grandchild", "unrelated survivor"} {
 		owner := "mr04-unrelated"
 		if i == 0 {
-			owner = "mr04-erasure-subject"
+			// Shipping memory.store captures its author in memory_fact_actors
+			// while legacy owner_principal can be empty.
+			owner = ""
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,owner_principal,scope_type,scope_value)
  VALUES('L2','fact',$1,$1,$2,'project',$3) RETURNING id`, key, owner, key).Scan(&ids[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
+	exec(`INSERT INTO memory_fact_actors(memory_id,actor_principal,actor_role,authority_rank,authenticated)
+ VALUES($1,'mr04-erasure-subject','user',30,1),($2,'mr04-unrelated','user',30,1)`, ids[0], ids[3])
 	for i := 1; i < 3; i++ {
 		exec(`INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
  VALUES('memory',$1,'memory-cognify-input-v1',jsonb_build_object('record_id',$2::bigint::text)::text)`, ids[i], ids[i-1])

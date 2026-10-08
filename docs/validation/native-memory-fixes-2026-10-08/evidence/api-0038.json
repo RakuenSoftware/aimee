@@ -1,0 +1,21 @@
+{
+  "route": "memory/get",
+  "http": 200,
+  "response": {
+    "memory": {
+      "id": 11,
+      "scope": {
+        "type": "user",
+        "value": "_user"
+      },
+      "tier": "L2",
+      "kind": "fact",
+      "key": "user-Kibukx height-1791465671280807376",
+      "content": "needle user: Kibukx corrected height is 170cm; human correction. fixture=1791465671280807376",
+      "confidence": 1
+    },
+    "status": "ok",
+    "store": "user"
+  },
+  "elapsed_seconds": 0.06
+}

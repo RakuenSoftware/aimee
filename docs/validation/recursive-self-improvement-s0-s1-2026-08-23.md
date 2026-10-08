@@ -1,7 +1,7 @@
 # Validation: recursive self-improvement S0 + S1
 
 Proves the S0 (endogeneity gate) and S1 (regression synthesis) slices of
-[`recursive-self-improvement-closing-the-loops`](../proposals/pending/recursive-self-improvement-closing-the-loops.md).
+[`recursive-self-improvement-closing-the-loops`](../proposals/done/recursive-self-improvement-closing-the-loops.md).
 
 - **Commit:** `7f49f2f88b`. "feat: grow the eval suite from live failure, and bound the recursion",
   on `worktree-recursive-self-improvement`, branched from `origin/testing` at `a2fac47caa`.

@@ -190,6 +190,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
+	}
 	result := map[string]any{"status": "ok"}
 	if response.RetrievalCapabilities != nil {
 		result["retrieval_capabilities"] = response.RetrievalCapabilities

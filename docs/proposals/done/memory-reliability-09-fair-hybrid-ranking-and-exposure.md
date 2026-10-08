@@ -1,0 +1,102 @@
+# MR-09: Fair hybrid candidates, bounded priors and exposure-aware selection
+
+- **State:** done.
+- **Archive notice — 2026-10-08:** The MR-01–18 implementation and deterministic acceptance are complete within the operator-approved modes documented in [the frozen release closeout](../../validation/memory-mr18-release-2026-09-27.md); adaptive promotion remains unqualified. Implementation completion is limited to that scope. Historical planning and earlier checkpoints below are retained as evidence, not an active backlog.
+- **Remaining work:** [memory-reliability-promotion-and-adapter-residuals.md](../pending/memory-reliability-promotion-and-adapter-residuals.md).
+
+
+**Historical state:** retained below; see the dated archive notice.
+- **Priority:** P1 for candidate parity; P2 for fitted routing and exposure control
+- **Owner:** Go memory retrieval and context selection
+- **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate with [MR-08](memory-reliability-08-retrieval-health-telemetry.md)/[MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
+- **Delivery:** Four independently gated slices
+
+## Problem and intended result
+
+Different memory endpoints provide different retrieval arms. In a shared array, lexical hits can consume all candidate slots before semantic-only or graph-only evidence competes. Non-query boosts and repeated-serving feedback can then dominate selection without revealing why.
+
+Provide bounded independent arm pools, explicit fusion, limited prior influence and optional final-selection diversity. Preserve personal/shared ownership and hard eligibility.
+
+## Integration points
+
+Implement collection/fusion in `server-go/modules/memory/{data.go,visibility_search.go,personal_vectors.go,fusion.go}`. Migrate the memory semantics of `kbs_semantic_assertion_hybrid` from the typed context backend to that Go owner and replace its C memory callers with Go callers of the shared contract. Publish capabilities per endpoint and placement: lexical, dense, graph, code, temporal mode, index readiness and fallback. An unavailable arm must not silently satisfy an endpoint's semantic-retrieval promise.
+
+## Candidate collection and fusion
+
+Reserve bounded per-arm candidate quotas under an overall work/latency budget. Retrieve eligible candidates independently, union by stable record/version, revalidate and fuse before applying the final top-k. Retain native score semantics and rank contributions. RRF is a valid baseline; its score is not a probability and raw scores from different arms must not be added without normalization.
+
+Graph traversal validates every hop and has node/depth/deadline limits. Query routing may skip an arm with an explicit reason, but early stopping requires evidence that the current plan can satisfy its requirements. It cannot be based solely on “enough hits”. Missing embeddings do not route private memory into shared infrastructure.
+
+## Bounded prior rule
+
+Define a versioned base relevance scale for a query class. Scope authorization and validity are hard gates, not priors. Optional recency, usage, local relevance and trust-ranking adjustments must each have a cap and a joint cap.
+
+One concrete policy is `final_score = base_score + clamp(sum(delta_j), −B, B)`, with every `delta_j` also bounded. Under that contract, priors alone cannot reverse a base-score gap greater than `2B`. The scale and B must be fitted/validated for the actual fusion scores; do not copy an arbitrary 0–1 bound onto RRF. Record base rank, every adjustment and final rank. If rank-only fusion is retained, define and test an equivalent maximum rank displacement instead.
+
+No exposure count directly increases authority or truth confidence. Distinguish explicit successful use from automatic serving; only [MR-15](memory-reliability-15-procedure-outcomes-and-task-cost.md) outcome evidence may justify an outcome-based ranking feature.
+
+## Final-selection diversity
+
+After hard gates and fusion, optionally choose among near-equivalent candidates to reduce duplicate text, same-family concentration and needless repeated exposure. Define a query-class relevance tolerance before tuning. Preserve active constraints, authoritative corrections, the strongest required hit and sole independent support for an unsatisfied requirement.
+
+Type floors are desired reservations, not permission to exceed caller/token limits. If floors conflict, protect mandatory content first, satisfy task requirements next, then apply discretionary diversity. Record unsatisfied floors and displaced evidence. An exposure penalty never hides the only available useful record. Coverage is recomputed after final packing.
+
+## Implementation slices
+
+1. Restore declared hybrid capability parity and fair arm admission with distractor fixtures. No learned weight changes.
+2. Add versioned fusion/prior policy artifacts and actual contribution traces; constrain each prior and aggregate influence.
+3. Test deterministic duplicate/source-family/type selection at equal final budgets. Keep exposure adaptation disabled.
+4. Fit query routing and exposure policy on held-out data; enable only if paired outcome and latency/cost gates pass.
+
+## Acceptance gates
+
+- A full lexical pool cannot exclude a semantic-only candidate from fusion; duplicate-heavy and graph-only cases also compete.
+- Unsupported/unavailable arms report explicit state and bounded fallback.
+- Each prior and their combination obey the declared maximum overturn; stable ties are deterministic.
+- Thirty copies cannot displace required independent evidence; frequent authoritative corrections and constraints survive exposure controls.
+- Floors cannot exceed hard item, byte or token limits. Missing requirements remain visible.
+- A disabled experiment returns the baseline selection policy while retaining eligibility, truthful traces and fair admission.
+
+## Rollout and rollback
+
+Canary each slice separately. Freeze evaluation before tuning and record model/index/policy versions. Keep a last-known-good policy artifact for atomic rollback. Do not use health concentration alone as the optimization objective.
+
+[Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+[Fair semantic-assertion candidate admission](../../validation/memory-fair-assertion-arms-2026-09-23.md)
+removes pre-fusion lexical capacity vetoes on dense and graph-only evidence,
+bounds graph expansion independently and records truthful graph-arm votes.
+Restricted-role adversarial replay covers the reproduced failure and hidden
+parents. Prior caps, lineage diversity, exposure and quality gates were still open
+at that checkpoint; the final implementation evidence follows.
+
+## Final implementation and gated outcome — 2026-09-26
+
+[Final validation report](../../validation/memory-mr09-ranking-2026-09-26.md) and
+[frozen evidence](../../validation/memory-mr09-evidence-2026-09-26/README.md)
+cover the final deployed candidate `44c6e8a50`:
+
+1. Independent native pools, cross-version conflict handling and explicit
+   placement/endpoint arm observations pass full-pool PostgreSQL adversaries.
+2. Frozen native rank and assertion/graph score artifacts enforce stage-specific
+   individual/joint bounds and deterministic ties, with actual contribution proofs.
+3. Optional selector v2 preserves constraints, corrections, required evidence and
+   bounded representatives of distinct canonical origins under unchanged hard
+   budgets. Thirty copies cannot crowd out the distinct potential source in the
+   canonical lineage fixture; independence still remains unavailable without a
+   certificate. Disabled mode keeps baseline selection. Final repacking and
+   dispatch receipts preserve policy/priority commitments and missing-type reports.
+4. The frozen controlled routing/exposure pilot fits six tasks and measures six
+   separate held-out tasks with real model answers, latency and explicitly
+   estimated token-rate cost. It selects all arms and zero exposure penalty and
+   is **ineligible for promotion**: no strict improvement, insufficient size and
+   no representative native workload. No adaptive policy is enabled. This is an
+   implementation closeout, not a claim that MR-18/S3 release-quality gates pass.
+
+The full PostgreSQL race suite, exported owner build, all 77 lint checks and all
+41 deployed checks pass. The quiet 32-request comparison and separate final audit
+leave optional selection and health collection unset on both canary owners.
+The last-known-good baseline artifact remains available for atomic request-level
+rollback; CT100 production stays on healthy 0.4.5.

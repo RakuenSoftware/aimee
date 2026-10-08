@@ -1,0 +1,6 @@
+?   	github.com/JBailes/aimee/server-go/memory	[no test files]
+ok  	github.com/JBailes/aimee/server-go/modules/memory	19.645s
+ok  	github.com/JBailes/aimee/server-go/modules/memory/backendstore	1.137s
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cognee	1.207s
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	1.011s
+ok  	github.com/JBailes/aimee/server-go/modules/egress	(cached)

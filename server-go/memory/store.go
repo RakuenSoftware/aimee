@@ -14,6 +14,10 @@ var ErrCapacity = errors.New("memory: backend candidate capacity exceeded")
 // Record is the existing public memory record. Provider-specific or optional
 // authority fields retain their JSON representations rather than native types.
 type Record struct {
+	Metadata       json.RawMessage      `json:"metadata,omitempty"`
+	ValidFrom      string               `json:"valid_from,omitempty"`
+	ValidUntil     string               `json:"valid_until,omitempty"`
+	Sensitivity    string               `json:"sensitivity,omitempty"`
 	ID             int64                `json:"id"`
 	Scope          Scope                `json:"scope"`
 	Tier           string               `json:"tier"`
@@ -42,10 +46,23 @@ type Store interface {
 	Delete(context.Context, Scope, int64) (bool, error)
 }
 
+type Limits struct {
+	MaxCandidates   int `json:"max_candidates,omitempty"`
+	MaxQueryBytes   int `json:"max_query_bytes,omitempty"`
+	MaxBodyBytes    int `json:"max_body_bytes,omitempty"`
+	MaxCatalogBytes int `json:"max_catalog_bytes,omitempty"`
+}
+
 type Capability struct {
-	Name       string   `json:"name"`
-	Version    int      `json:"version"`
-	Operations []string `json:"operations"`
+	Profile            string   `json:"profile,omitempty"`
+	CanonicalOwner     string   `json:"canonical_owner,omitempty"`
+	CandidateSelection string   `json:"candidate_selection,omitempty"`
+	RetrievalComplete  bool     `json:"retrieval_complete"`
+	Limits             Limits   `json:"limits"`
+	Optional           []string `json:"optional,omitempty"`
+	Name               string   `json:"name"`
+	Version            int      `json:"version"`
+	Operations         []string `json:"operations"`
 }
 
 type Backend interface {
@@ -72,4 +89,24 @@ type DerivedStore interface {
 // Implementations verify cleanup, report unknown outcomes, and allow retries.
 type DerivedResetter interface {
 	ResetDerived(context.Context) error
+}
+
+// CandidateStore selects a bounded retrieval pool from the entire eligible
+// scope. Selection may be lexical; it is not a completeness guarantee for
+// semantic search. Providers must revalidate the selected canonical revisions.
+type CandidateStore interface {
+	Candidates(context.Context, Scope, string, string, string, int) ([]Record, error)
+}
+
+// RetrievalCandidates preserves the fail-closed legacy snapshot contract for
+// stores that have not implemented bounded candidate selection.
+func RetrievalCandidates(ctx context.Context, store Store, scope Scope, query, kind, tier string, limit int) ([]Record, error) {
+	if candidates, ok := store.(CandidateStore); ok {
+		return candidates.Candidates(ctx, scope, query, kind, tier, limit)
+	}
+	records, err := store.Search(ctx, scope, "", kind, tier, limit+1)
+	if err == nil && len(records) > limit {
+		return nil, ErrCapacity
+	}
+	return records, err
 }

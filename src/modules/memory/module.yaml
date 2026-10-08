@@ -238,7 +238,13 @@
     "server-go/modules/memory/fidelity.go",
     "server-go/modules/memory/store_adapter.go",
     "server-go/modules/memory/backend.go",
-    "server-go/modules/memory/cognee/cognee.go"
+    "server-go/modules/memory/cognee/cognee.go",
+    "server-go/modules/memory/external_store.go",
+    "server-go/modules/memory/external_recall.go",
+    "server-go/modules/memory/public_backends.go",
+    "server-go/modules/memory/hillock/hillock.go",
+    "server-go/modules/memory/backendstore/store.go",
+    "server-go/cmd/aimee-memory-transfer/main.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -427,7 +433,12 @@
     "server-go/modules/memory/cognee/cognee_test.go",
     "server-go/modules/memory/store_adapter_test.go",
     "server-go/modules/memory/cognee/live_test.go",
-    "server-go/modules/memory/backend_erasure_test.go"
+    "server-go/modules/memory/backend_erasure_test.go",
+    "server-go/modules/memory/external_recall_test.go",
+    "server-go/modules/memory/external_store_test.go",
+    "server-go/modules/memory/hillock/hillock_test.go",
+    "server-go/modules/memory/backendstore/store_test.go",
+    "server-go/modules/memory/backendstore/support_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

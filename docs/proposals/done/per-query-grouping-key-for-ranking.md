@@ -8,7 +8,7 @@
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
-> [`per-query-feature-persistence-residual.md`](../pending/per-query-feature-persistence-residual.md).
+> [`per-query-feature-persistence-residual.md`](../pending/retrieval-ranking-feedback-and-promotion.md).
 
 *Filed as a precondition record for
 [surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md).

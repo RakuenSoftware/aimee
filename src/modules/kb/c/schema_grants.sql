@@ -476,7 +476,7 @@ BEGIN
   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_privacy_erasure;
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_privacy_erasure;
   GRANT USAGE ON SCHEMA public TO aimee_kb_privacy_erasure;
-  GRANT SELECT,DELETE ON memories,memory_units,memory_embeddings,
+  GRANT SELECT,DELETE ON memories,memory_fact_actors,memory_units,memory_embeddings,
     derived_rederivation_queue,derived_memory_dependencies,derived_memory_registry,
     report_enrichments,memory_evidence_events,prospective_memories,
     epistemic_directives,learning_signals,artifacts,artifact_citations,

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	memory "github.com/JBailes/aimee/server-go/memory"
+	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +64,18 @@ func TestCogneeLiveContract(t *testing.T) {
 		return response.StatusCode, raw, err
 	}
 	scope := memory.Scope{Type: memory.ScopeProject, Value: "contract-live"}
-	records := &catalog{records: map[int64]memory.Record{1: {ID: 1, Scope: scope, Kind: "fact", Tier: "L2", Key: "needle", Content: "needle canonical", Confidence: .8}}}
+	dir := filepath.Join(t.TempDir(), "catalog")
+	records, err := backendstore.New(dir, "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = records.Put(ctx, scope, memory.Record{Kind: "fact", Tier: "L2", Key: "needle", Content: "needle canonical", Confidence: .8}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = backendstore.New(dir, "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend, err := New(records, transport, endpoint, "contract-live-"+time.Now().UTC().Format("20060102T150405.000000000"))
 	if err != nil {
 		t.Fatal(err)
@@ -85,17 +98,17 @@ func TestCogneeLiveContract(t *testing.T) {
 	// Reproduce subject erasure outside Store.Delete: the existing canonical
 	// owner has already removed the source row while Cognee retains revisions.
 	private := memory.Scope{Type: memory.ScopeUser, Value: "_user"}
-	subject := memory.Record{ID: 1, Scope: private, Kind: "fact", Tier: "L2", Key: "subject", Content: "needle private subject", Confidence: .8}
+	subject := memory.Record{Scope: private, Kind: "fact", Tier: "L2", Key: "subject", Content: "needle private subject", Confidence: .8}
 	if _, err := records.Put(ctx, private, subject); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := backend.Search(ctx, private, "needle", "", "", 1); err != nil {
 		t.Fatal("index private subject", err)
 	}
-	if _, err := records.Delete(ctx, private, 1); err != nil {
+	if _, err := records.Delete(ctx, private, 2); err != nil {
 		t.Fatal(err)
 	}
-	retained := memory.Record{ID: 2, Scope: scope, Kind: "fact", Tier: "L2", Key: "retained", Content: "needle retained canonical", Confidence: .8}
+	retained := memory.Record{Scope: scope, Kind: "fact", Tier: "L2", Key: "retained", Content: "needle retained canonical", Confidence: .8}
 	if _, err := records.Put(ctx, scope, retained); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +118,7 @@ func TestCogneeLiveContract(t *testing.T) {
 	if err := backend.ResetDerived(ctx); err != nil {
 		t.Fatal("subject cleanup", err)
 	}
-	if _, err := records.Get(ctx, scope, 2); err != nil {
+	if _, err := records.Get(ctx, scope, 3); err != nil {
 		t.Fatal("cleanup erased unrelated canonical record", err)
 	}
 	if err := backend.ResetDerived(ctx); err != nil {

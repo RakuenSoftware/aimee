@@ -1,0 +1,83 @@
+[
+  {
+    "query": "Kibukx real height",
+    "result": {
+      "hits": [
+        {
+          "id": 1,
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "score": 0.6756000000000001
+        },
+        {
+          "id": 2,
+          "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "score": 0.36413333333333336
+        }
+      ]
+    }
+  },
+  {
+    "query": "Who told you Kibukx height?",
+    "result": {
+      "hits": [
+        {
+          "id": 1,
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "score": 0.50765
+        },
+        {
+          "id": 2,
+          "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "score": 0.2619
+        }
+      ]
+    }
+  },
+  {
+    "query": "How tall is the person?",
+    "result": {
+      "hits": [
+        {
+          "id": 1,
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "score": 0.5223
+        }
+      ]
+    }
+  },
+  {
+    "query": "Kibukx is not 69cm tall",
+    "result": {
+      "hits": [
+        {
+          "id": 1,
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "score": 0.5155
+        },
+        {
+          "id": 2,
+          "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "score": 0.28985000000000005
+        }
+      ]
+    }
+  },
+  {
+    "query": "The mountain elevation",
+    "result": {
+      "hits": [
+        {
+          "id": 2,
+          "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "score": 0.8180000000000001
+        }
+      ]
+    }
+  },
+  {
+    "query": "Which colored light helps ships locate the dock after dark?",
+    "result": {
+      "hits": []
+    }
+  }
+]

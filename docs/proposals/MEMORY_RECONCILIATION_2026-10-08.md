@@ -1,0 +1,11 @@
+# Memory proposal reconciliation — 2026-10-08
+
+User-directed review: archive implemented slices, retain real residuals and consolidate overlapping pending proposals. The MR-01–18 archive is grounded in [the frozen release report](../validation/memory-mr18-release-2026-09-27.md), not inferred from proposal titles. Operator-approved observe scope, default-off options, missing adaptive qualification and unsupported adapters remain explicit.
+
+Completed whole-token query sweep and paging S2c/S2d/S5a are archived with original evidence; ranking residuals are consolidated into [ranking/feedback](pending/retrieval-ranking-feedback-and-promotion.md), and paging/compaction measurement into [paging](pending/context-paging-not-compaction.md). Recursive self-improvement and replaceable-memory implementation are archived with their unfinished extensions retained separately. Historical text and frozen source hashes retain their original provenance. The new audit snapshot preserves old row identities and records the current destinations.
+
+The highest-impact conversational gap is production wiring of existing served views/projections and claim lineage, rather than another isolated retrieval mechanism. [The conversational proposal](pending/conversational-memory-and-human-interaction.md) specifies durable episodes, source-aware claims/corrections, useful context, independent capture and human feedback, with answer-level trajectory acceptance. Live bot-chat fixes do not satisfy those acceptance criteria. No turn limit is introduced.
+
+Hillock is implemented as the third selectable backend's bounded stateless HDC profile; larger scale and full graph/extraction/semantic features remain [pending](pending/external-memory-engine-scale-and-quality.md). Qualification of MR optional policies and external adapters remains [pending](pending/memory-reliability-promotion-and-adapter-residuals.md).
+
+The independent durable Cognee/Hillock baseline is now [done](done/independent-durable-memory-backends.md): catalogs, public CRUD, scoped external migration, versions/history/retries and erasure restore controls. [Native migration, extended feature parity and workload qualification](pending/external-memory-engine-scale-and-quality.md) remain pending.
