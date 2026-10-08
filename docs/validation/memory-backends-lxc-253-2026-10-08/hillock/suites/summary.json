@@ -1,0 +1,25 @@
+{
+  "backend": "hillock",
+  "checks": [
+    {
+      "name": "race-backend-contract",
+      "exit": 1,
+      "elapsed_seconds": 394.23
+    },
+    {
+      "name": "required-owner-replay",
+      "exit": 2,
+      "elapsed_seconds": 366.14
+    },
+    {
+      "name": "real-hillock",
+      "exit": 0,
+      "elapsed_seconds": 22.31
+    },
+    {
+      "name": "boundaries",
+      "exit": 0,
+      "elapsed_seconds": 20.6
+    }
+  ]
+}

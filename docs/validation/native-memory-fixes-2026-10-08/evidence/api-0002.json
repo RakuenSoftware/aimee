@@ -1,0 +1,11 @@
+{
+  "route": "memory/list",
+  "http": 200,
+  "response": {
+    "active_context_missing": false,
+    "memories": [],
+    "status": "ok",
+    "store": "kb"
+  },
+  "elapsed_seconds": 0.099
+}

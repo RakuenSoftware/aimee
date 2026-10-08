@@ -1,0 +1,22 @@
+{
+  "backend": "native",
+  "postgres": "postgres (PostgreSQL) 18.6 (Debian 18.6-1.pgdg13+2)",
+  "go": "go version go1.26.7 linux/amd64",
+  "os": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.6\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "aimee_source_base": "0b298d23c plus working tree and recorded patches",
+  "source_sha256": {
+    "server-go/modules/memory/external_store.go": "b5335932b1f0d73c350fa4e5177388fa3e6c72df2235d234464839610aff3396",
+    "server-go/modules/memory/external_store_test.go": "658d30747d99bcbf5843beb36a24279af0a649e7f5cb7d5be82f13926ff92068",
+    "server-go/modules/postgres/evaluation.go": "5c53d3e89c3d4b715df166318aece17775a70fe94619ca9b29731a4e037f8165",
+    "server-go/modules/postgres/evaluation_test.go": "25dff82b3921339479425d99e27cead3781e03935a533a124877be5114b67637",
+    "integrations/hillock/service.py": "e99d766ac4bbd908297b306d54b78bf300b91136e6019cd0e56499abf09de9e7"
+  },
+  "binaries_sha256": {
+    "aimee": "8fa360646295d25278254b551d030bf9ffc84bfbc21ae4cc85d3cb376ddabffb",
+    "aimee-server": "b6953b8a1fa85fdecb581f1b312f30e812b44e168c17d424b25a23e8c1997f12",
+    "aimee-kb": "610bac85fcbe565aa38e0c7fad36570bbf869a8878f1cbc59011e24e04ae703f",
+    "src/build/obj/aimee-module": "769c8fbaba6575781e7fa472fdac25e42c0dfe5d201a45dda8a6f33b67c05921"
+  },
+  "run_root": "/tmp/tmp.EOfCrDZ2RI",
+  "service": "ExecMainStatus=0\nActiveState=active"
+}

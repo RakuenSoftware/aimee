@@ -133,8 +133,8 @@ configuration and limits.
 
 The separate [native-memory vLLM plugin](docs/NATIVE_MEMORY_PLUGIN.md) lets supported local models
 consume selected Aimee records as native attention memory. That model-side delivery mechanism and
-a replaceable retrieval engine solve different parts of the memory path. The 0.3.3 candidate provides
-separate Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B plugins on one shared runtime.
+a replaceable retrieval engine solve different parts of the memory path. The 1.0.1 release preparation includes [five signed model bundles](docs/releases/v1.0.1/README.md):
+Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B. Each includes plugin 0.3.3 and its required runtime.
 All five passed [native-memory smokes](docs/releases/native-memory-v0.3.3/qualification/README.md)
 on a 7900 XTX with existing NAS GGUFs and no CPU weight offload. The server prerequisite,
 signing status and publication gates are in the
@@ -156,21 +156,18 @@ shared knowledge is needed.
 socket. Use the standard composition when you want to manage those containers yourself.
 Back up each instance's home, Vault, database and audit evidence together before upgrading.
 
-## 1.0.0 is the release target
+## 1.0.1 is the release target
 
-This tree prepares **1.0.0**. The declared application series is `1.0`; release approval and
-artifact publication remain separate from merging code. The memory contract, Cognee integration
-and native-memory delivery described here belong to that release work.
+This tree prepares **1.0.1** with five signed native-memory model bundles and installation docs.
+[1.0.0](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.0) is published. The declared
+application series remains `1.0`; the regular release process resolves the next patch from tags.
+Plugin versions remain independent: these model bundles carry plugin **0.3.3**, shared-runtime
+build 5 and their verified signatures.
 
-The previous published application release is **0.4.6**, dated 2026-09-27. It does not contain
-all of these changes. **0.3.0 was an intended release**, published on 2026-08-04. The later 0.4
-series changed deployment and runtime boundaries; it did not invalidate that release.
-
-Use [What's new](docs/WHATS_NEW.md) for the 1.0.0 scope and release history,
+Use [What's new](docs/WHATS_NEW.md) for the release scope and history,
 [Feature status](docs/STATUS.md) for implementation and qualification, and
 [Upgrading](docs/UPGRADING.md) before reusing an older store. Current database startup refreshes
-credentials but does not repair an obsolete database/role layout. The separate native-memory
-plugin keeps its own version and publication status.
+credentials but does not repair an obsolete database/role layout.
 
 ## Read further
 

@@ -18,9 +18,10 @@ func (c ClientStore) Capabilities() Capability {
 }
 
 type storeReply struct {
+	Failure *Failure `json:"failure,omitempty"`
 	Records []Record `json:"records"`
 	Deleted bool     `json:"deleted"`
-	Code    *uint32  `json:"code"`
+	Code    *int32   `json:"code"`
 }
 
 func (c ClientStore) call(ctx context.Context, request any) (storeReply, error) {
@@ -36,8 +37,11 @@ func (c ClientStore) call(ctx context.Context, request any) (storeReply, error) 
 	if json.Unmarshal(raw, &result) != nil {
 		return storeReply{}, ErrClientResponse
 	}
+	if result.Failure != nil {
+		return storeReply{}, result.Failure
+	}
 	if result.Code != nil {
-		return storeReply{}, &RefusalError{Code: *result.Code}
+		return storeReply{}, &RefusalError{Code: uint32(*result.Code)}
 	}
 	return result, nil
 }

@@ -1,0 +1,25 @@
+{
+  "route": "runs/oprun_g6ac797b01f6cf55_1791465394_4",
+  "http": 200,
+  "response": {
+    "id": "oprun_g6ac797b01f6cf55_1791465394_4",
+    "object": "op.run",
+    "method": "kb.erase-subject",
+    "status": "completed",
+    "created": 1791465394,
+    "result": {
+      "status": "ok",
+      "request_id": "actual-lxc-native-1791465394213906449-4c1029697e",
+      "subject": "owner",
+      "session_count": 0,
+      "memory_count": 8,
+      "document_count": 0,
+      "event_created": true,
+      "coverage_complete": true,
+      "erasure_state": "completed",
+      "coverage_scope": "managed_application_stores",
+      "pending_owners": 0
+    }
+  },
+  "elapsed_seconds": 0.041
+}

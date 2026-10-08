@@ -1,0 +1,12 @@
+{
+  "route": "runs/oprun_g6ac797b01f6cf55_1791465394_4",
+  "http": 200,
+  "response": {
+    "id": "oprun_g6ac797b01f6cf55_1791465394_4",
+    "object": "op.run",
+    "method": "kb.erase-subject",
+    "status": "in_progress",
+    "created": 1791465394
+  },
+  "elapsed_seconds": 0.04
+}

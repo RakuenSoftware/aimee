@@ -1,0 +1,10 @@
+{
+  "route": "memory/store",
+  "http": 200,
+  "response": {
+    "id": 12,
+    "status": "ok",
+    "store": "user"
+  },
+  "elapsed_seconds": 0.081
+}

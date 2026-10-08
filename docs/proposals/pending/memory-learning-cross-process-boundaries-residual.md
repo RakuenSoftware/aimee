@@ -11,7 +11,7 @@ descriptors, with working storage, recall, ranking, learning, and composition pr
 
 ## Remaining deliverables
 
-- Run memory as a separate dependency-sink program with only its narrow ingest/recall event surface.
+- Memory process isolation and its canonical-change/provenance/readiness/restart baseline are implemented; see [the archived G0 closeout](../done/memory-reliability-g0-closeout.md). Remaining scope is the learning/skills/response-composition boundary and measured production effects, not a second memory-process migration.
 - Route learning, skills, and response-composition through their declared cross-process contracts.
 - Prove canonical-change, provenance, readiness, and failure semantics across the bus boundary.
 - Preserve memory-crossing latency through batching/streaming and publish the measured budget.

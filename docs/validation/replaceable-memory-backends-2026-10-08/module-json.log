@@ -1,0 +1,14 @@
+  ok    deadline arithmetic
+  ok    round trip parses and forwards the body
+  ok    unattached module short-circuits and is named
+  ok    transport failure keeps its own outcome
+  ok    oversized request never reaches the bus
+  ok    invalid arguments refused
+  ok    unparseable reply is distinguishable from a failed call
+  ok    raw variant borrows the caller's body
+  ok    personal recall receives a bounded database budget and user scope
+  ok    expired or unavailable memory does not fabricate success
+  ok    erasure requires verified provider cleanup and preserves native behavior
+  ok    code publication and retrieval have separate bounded budgets
+  ok    shared command framing preserves stages and rejects truncated replies
+module_json_call: all tests passed

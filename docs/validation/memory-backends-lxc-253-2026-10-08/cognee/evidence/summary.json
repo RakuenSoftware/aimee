@@ -1,0 +1,96 @@
+{
+  "backend": "cognee",
+  "hostname": "aimee-cognee-memory-20261008",
+  "binary_sha256": {
+    "aimee": "8fa360646295d25278254b551d030bf9ffc84bfbc21ae4cc85d3cb376ddabffb",
+    "aimee-server": "feed9beb3d91f2dafab3444c4a3e3571dbaa4423a6c5bb887d3dd95201a069a3",
+    "aimee-kb": "610bac85fcbe565aa38e0c7fad36570bbf869a8878f1cbc59011e24e04ae703f",
+    "src/build/obj/aimee-module": "769c8fbaba6575781e7fa472fdac25e42c0dfe5d201a45dda8a6f33b67c05921"
+  },
+  "postgres": "postgres (PostgreSQL) 18.6 (Debian 18.6-1.pgdg13+2)",
+  "checks": [
+    {
+      "name": "private CRUD/source-unit retention/retry/retrieval/isolation",
+      "status": "passed",
+      "seconds": 4.512
+    },
+    {
+      "name": "shared CRUD/source-unit retention/retry/retrieval/isolation",
+      "status": "passed",
+      "seconds": 2.579
+    },
+    {
+      "name": "user correction and stale-version refusal",
+      "status": "passed",
+      "seconds": 0.272
+    },
+    {
+      "name": "personal exact historical version",
+      "status": "passed",
+      "seconds": 0.053
+    },
+    {
+      "name": "kb correction and stale-version refusal",
+      "status": "passed",
+      "seconds": 0.257
+    },
+    {
+      "name": "shared project isolation",
+      "status": "passed",
+      "seconds": 0.104
+    },
+    {
+      "name": "user record deletion/current exclusion",
+      "status": "passed",
+      "seconds": 0.255
+    },
+    {
+      "name": "kb record deletion/current exclusion",
+      "status": "passed",
+      "seconds": 0.27
+    },
+    {
+      "name": "both supervised memory children restart with durable records",
+      "status": "passed",
+      "seconds": 8.272
+    },
+    {
+      "name": "chatbot memory/recall",
+      "status": "failed",
+      "error": "{'kind': 'unavailable', 'message': 'memory recall unavailable', 'status': 'error'}",
+      "seconds": 0.058
+    },
+    {
+      "name": "operator backend_capabilities",
+      "status": "passed",
+      "seconds": 0.048
+    },
+    {
+      "name": "operator backend_list",
+      "status": "passed",
+      "seconds": 0.049
+    },
+    {
+      "name": "operator backend_export",
+      "status": "failed",
+      "error": "{'error': 'command handler failed'}",
+      "seconds": 0.062
+    },
+    {
+      "name": "subject erasure completion/retry/retained records",
+      "status": "passed",
+      "seconds": 1.236
+    },
+    {
+      "name": "shipping shared context assembly",
+      "status": "passed",
+      "seconds": 0.072
+    },
+    {
+      "name": "provider outage reports failure; durable exact reads survive; recovery",
+      "status": "passed",
+      "seconds": 16.367
+    }
+  ],
+  "status": "failed"
+}

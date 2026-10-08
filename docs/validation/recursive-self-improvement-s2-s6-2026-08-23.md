@@ -1,7 +1,7 @@
 # Validation: recursive self-improvement S2 to S6
 
 Proves the S2–S6 slices of
-[`recursive-self-improvement-closing-the-loops`](../proposals/pending/recursive-self-improvement-closing-the-loops.md).
+[`recursive-self-improvement-closing-the-loops`](../proposals/done/recursive-self-improvement-closing-the-loops.md).
 S0 and S1 were validated separately in
 [the earlier report](recursive-self-improvement-s0-s1-2026-08-23.md).
 

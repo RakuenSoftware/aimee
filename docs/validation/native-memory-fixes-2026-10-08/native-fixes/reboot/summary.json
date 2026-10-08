@@ -1,0 +1,20 @@
+{
+  "checks": [
+    {
+      "name": "kb exact corrected payload retained after full guest reboot",
+      "status": "passed",
+      "seconds": 0.113
+    },
+    {
+      "name": "user exact corrected payload retained after full guest reboot",
+      "status": "passed",
+      "seconds": 0.077
+    },
+    {
+      "name": "native SQL erasure intents retained after full guest reboot",
+      "status": "passed",
+      "seconds": 0.03
+    }
+  ],
+  "status": "passed"
+}

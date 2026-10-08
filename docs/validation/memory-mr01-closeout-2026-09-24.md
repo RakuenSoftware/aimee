@@ -63,8 +63,8 @@ cover lifecycle, scope and historical exclusions.
 
 ## Gate traceability and released installation
 
-The [seven-gate checklist](../proposals/pending/memory-reliability-01-closeout.md)
-and [serving inventory](../proposals/pending/memory-reliability-01-serving-inventory.md)
+The [seven-gate checklist](../proposals/done/memory-reliability-01-closeout.md)
+and [serving inventory](../proposals/done/memory-reliability-01-serving-inventory.md)
 map the final process fixtures and dedicated adversarial regressions to the
 original contract. All draft application/schema validation ran on disposable
 CT109. [CT100 health](memory-mr01-final-evidence-2026-09-24/production-045-health.txt)

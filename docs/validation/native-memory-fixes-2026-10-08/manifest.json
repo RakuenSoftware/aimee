@@ -1,0 +1,20 @@
+{
+  "guest": 9212,
+  "source_sha256": {
+    "src/modules/kb/c/schema.sql": "f12c86e637d1134fb7c27d5b94f98a7c532d3e5ea31396c69ba9037f08f47cb5",
+    "src/modules/kb/c/schema_grants.sql": "fcbbcaf60fd7651607cd9eeb5118a9c9412ea56e28b6fb85e25878c7586e0557",
+    "server-go/modules/memory/erasure_lineage_test.go": "b956afa92d23f42a016ba9364ac500dbe3fca93e6e3b0c487a8bd4975af88725",
+    "server-go/modules/memory/evidence_recovery_execution.go": "136f9783e2a22f5362b06b79fb5dea1fc9324e5f222077fa9d6a8069ecedff64",
+    "server-go/modules/memory/evidence_recovery_execution_test.go": "1fed4102abc0efcbfe1f743ccbb2fef9a08fe9a8f434b2e1ab51edabef488834",
+    "server-go/modules/memory/runtime_role_test.go": "8b7e718bbe1a3a7e7d8976b4bb722a67d241af6f586ef378ff23c93164b7fe61",
+    "server-go/modules/postgres/evaluation.go": "1a5a7e373c2e9d482b037164dad3ba62f17a62629e8fdf4e162e03f973f293a0",
+    "server-go/modules/postgres/evaluation_test.go": "c596346dc5d88967d8450abd5942c702702e20034b6108eb7b6a88428ea4ec9a"
+  },
+  "binary_sha256": {
+    "aimee": "8fa360646295d25278254b551d030bf9ffc84bfbc21ae4cc85d3cb376ddabffb",
+    "aimee-server": "b6953b8a1fa85fdecb581f1b312f30e812b44e168c17d424b25a23e8c1997f12",
+    "aimee-kb": "b5c2b377b9d3cf5b78a3972ed818009861e04836b5ec3989a7856910a1fb2952",
+    "src/build/obj/aimee-module": "67f2dac489d03ad5cf8b5688ccb86d50978de68238435dc041e1393a940a483e"
+  },
+  "service": "ExecMainStatus=0\nActiveState=active"
+}

@@ -2,9 +2,11 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	store "github.com/JBailes/aimee/server-go/db"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,5 +155,133 @@ func TestEvidenceRecoveryDurableRoundPostgres(t *testing.T) {
 	}
 	if admissions != 1 {
 		t.Fatal("concurrent budget reset", admissions)
+	}
+}
+
+// Model a saturated admission pool and a committed reservation whose reply is
+// lost. Neither case may turn the exhausted work budget into canonical reads.
+type recoveryAdmissionDB struct {
+	store.DB
+	delayBegin bool
+	loseCommit bool
+	pending    bool
+	failure    error
+}
+
+func (d *recoveryAdmissionDB) Begin(ctx context.Context) (store.Tx, error) {
+	if d.delayBegin {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if d.failure != nil {
+		return nil, d.failure
+	}
+	return &recoveryAdmissionTx{owner: d}, nil
+}
+
+type recoveryAdmissionTx struct {
+	store.Queryer
+	owner *recoveryAdmissionDB
+}
+
+func (t *recoveryAdmissionTx) Exec(_ context.Context, sql string, _ ...any) (store.Tag, error) {
+	if strings.HasPrefix(sql, "INSERT INTO memory_evidence_recovery") && t.owner.pending {
+		return store.RowsAffected(0), nil
+	}
+	return store.RowsAffected(1), nil
+}
+func (t *recoveryAdmissionTx) Commit(ctx context.Context) error {
+	t.owner.pending = true
+	if t.owner.loseCommit {
+		t.owner.loseCommit = false
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+func (*recoveryAdmissionTx) Rollback(context.Context) error { return nil }
+
+func TestEvidenceRecoveryAdmissionDeadline(t *testing.T) {
+	for _, mode := range []string{"pool_wait", "lost_commit_receipt", "outer_cancellation", "ledger_failure"} {
+		t.Run(mode, func(t *testing.T) {
+			db := &recoveryAdmissionDB{delayBegin: mode == "pool_wait" || mode == "outer_cancellation", loseCommit: mode == "lost_commit_receipt"}
+			failed := errors.New("admission permission refused")
+			if mode == "ledger_failure" {
+				db.failure = failed
+			}
+			backend := &postgresDataStore{recoveryDB: db}
+			build := func() (DataRequest, *typedContextResult) {
+				r := recoveryFixture(t)
+				r.Requirements.Recovery.MaxElapsedMS = 25
+				if err := r.finish(); err != nil {
+					t.Fatal(err)
+				}
+				return DataRequest{recoveryActor: "test:admission", TypedContext: &typedContextOptions{Requirements: r.Requirements}, Assertions: &assertionSearchRequest{}}, r
+			}
+			req, r := build()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "outer_cancellation" {
+				cancel()
+			}
+			err := backend.executeEvidenceRecovery(ctx, req, Scope{}, r)
+			if mode == "outer_cancellation" {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if mode == "ledger_failure" {
+				if !errors.Is(err, failed) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err != nil || r.Recovery.Execution == nil || r.Recovery.Execution.State != "time_exhausted" || r.Recovery.Execution.NewItems != 0 || r.Recovery.Execution.Rounds != 0 || r.Recovery.State != "exhausted" || r.Sufficiency == "complete" {
+				t.Fatal(err, r.Recovery)
+			}
+			if mode == "lost_commit_receipt" {
+				req, retry := build()
+				if err := backend.executeEvidenceRecovery(context.Background(), req, Scope{}, retry); err != nil || retry.Recovery.Execution.State != "duplicate_blocked" {
+					t.Fatal("unknown commit allowed new reads", err, retry.Recovery)
+				}
+			}
+		})
+	}
+}
+
+func TestEvidenceRecoveryAdmissionBlockedPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_KB_STORE_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_KB_STORE_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	blocker, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(ctx)
+	if _, err = blocker.Exec(ctx, `LOCK TABLE memory_evidence_recovery IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	r := recoveryFixture(t)
+	r.Requirements.Recovery.MaxElapsedMS = 25
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	backend := &postgresDataStore{recoveryDB: scopePoolStore{pool: pool}}
+	req := DataRequest{recoveryActor: fmt.Sprintf("test:blocked:%d", time.Now().UnixNano()), TypedContext: &typedContextOptions{Requirements: r.Requirements}, Assertions: &assertionSearchRequest{}}
+	if err := backend.executeEvidenceRecovery(ctx, req, Scope{}, r); err != nil || r.Recovery.Execution == nil || r.Recovery.Execution.State != "time_exhausted" || r.Recovery.Execution.NewItems != 0 {
+		t.Fatal("blocked admission was not bounded", err, r.Recovery)
 	}
 }
