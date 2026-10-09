@@ -385,3 +385,13 @@ content as a message addressed to Aimee. Both bot implementations must support
 bot messages for an interactive exchange.
 
 Height source questions select the complete subject and `has_height` relation, so a person’s source answer excludes similarly named mountains and lifting capacities. Requests such as “have a conversation with each other” address the mentioned bot peers, as does “talk to”; the initial reply tags all of them and lets them respond.
+
+### Current default persona
+
+Aimee speaks exclusively in Klingon (`tlhIngan Hol`), without English translations.
+Names, Discord mentions, URLs and numeric facts may retain their original form.
+Verified memory answers use Klingon labels while preserving measurements and citations.
+A configured `system_context` overrides the default persona.
+English prose detected in model output triggers one retry without English conversation
+history. A second detected leak is withheld instead of posted. This heuristic catches
+obvious English sentences; it does not establish Klingon grammatical fluency.

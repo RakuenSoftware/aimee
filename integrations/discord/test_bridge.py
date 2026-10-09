@@ -14,7 +14,7 @@ from aiohttp import web
 import aiohttp
 import discord
 
-from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions, CHAT_BEHAVIOR
+from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions, CHAT_BEHAVIOR, SYSTEM_CONTEXT
 
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
@@ -30,7 +30,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for path, value in ((self.webhook, FAKE_WEBHOOK), (self.key, "test-model-key")):
             path.write_text(value)
             path.chmod(0o600)
-        self.config = Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL)
+        self.config = Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL,
+                             system_context="You are Aimee. Answer directly using approved memory.")
 
     def message(self, **changes):
         value = SimpleNamespace(
@@ -608,6 +609,27 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
 
+    async def test_klingon_persona_keeps_verified_memory_and_sources_out_of_english(self):
+        config = replace(self.config, system_context=SYSTEM_CONTEXT,
+                         knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
+        self.assertEqual(Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL).system_context,
+                         SYSTEM_CONTEXT)
+        memory = "facts\n" + json.dumps([{"subject": "Kibukx", "relation": "has_height",
+                  "object": "69 cm", "authors": ["Virant"],
+                  "sources": [{"author": "Virant", "url": "https://discord.com/channels/1/2/3"}]}])
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            answer = client.confirmed_statement(memory, "How tall is Kibukx?", klingon=True)
+            self.assertEqual(answer, "De' qawlu': Kibukx: 69 cm. De' nobwI': Virant.")
+            provenance = client.provenance_reply(memory, klingon=True)
+            self.assertIn("69 cm", provenance)
+            self.assertIn("Virant ([QIn](https://discord.com/channels/1/2/3))", provenance)
+            self.assertNotIn("from", provenance)
+            self.assertNotIn("recorded", client.provenance_reply("", klingon=True))
+            self.assertEqual(await client.reply([], "Who told you Kibukx's height?"),
+                             "De' nobwI' Sovbe'lu'. nuq De'?")
+        self.assertIn("Speak exclusively in Klingon", config.system_context)
+
     async def test_model_wire_auth_rotation_history_budget_and_bound_response(self):
         requests = []
         async def model(request):
@@ -628,6 +650,33 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             {"role": "system", "content": config.system_context + "\n" + CHAT_BEHAVIOR}, {"role": "user", "content": "hello"}])
         self.assertEqual(requests[0][1]["max_tokens"], 384)
         self.assertIn(CHAT_BEHAVIOR, requests[1][1]["messages"][0]["content"])
+
+    async def test_klingon_prefix_does_not_allow_english_prose(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            answer = "Qapla'. The scaffolding of the dream is indeed fragile." if len(requests) == 1 else "Qapla'. jIjang."
+            return web.json_response({"choices": [{"message": {"content": answer}}]})
+        config = replace(self.config, endpoint=await self.serve(model), system_context=SYSTEM_CONTEXT)
+        async with aiohttp.ClientSession() as session:
+            answer = await ModelClient(config, session).reply(
+                [{"role": "assistant", "content": "An old English answer."}], "Discuss dreams.")
+        self.assertEqual(answer, "Qapla'. jIjang.")
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests[1]["messages"]), 2)
+        self.assertIn("contained English", requests[1]["messages"][0]["content"])
+        self.assertFalse(ModelClient.contains_english_prose("De' qawlu': Kibukx: 69 cm. Qapla'."))
+
+    async def test_klingon_english_repair_failure_is_not_delivered(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "Qapla'. The Federation will issue a memo."}}]})
+        config = replace(self.config, endpoint=await self.serve(model), system_context=SYSTEM_CONTEXT)
+        async with aiohttp.ClientSession() as session:
+            with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
+                await ModelClient(config, session).reply([], "Talk to Samy.")
+        self.assertEqual(len(requests), 2)
 
     async def test_repeated_persona_reply_is_repaired_once(self):
         requests = []
