@@ -46,7 +46,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     def bot(self, config=None):
         client = ChatBot(config or self.config)
         client._connection.user = SimpleNamespace(id=BOT)
-        client.send_peer_reply = AsyncMock()
+        client.send_chat_reply = AsyncMock()
         return client
 
     async def test_reported_possessive_corrections_commit_before_inference(self):
@@ -112,7 +112,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(message)
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}>, what would you like to discuss?", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}>, what would you like to discuss?", (peer,))
             response = self.message(id=2, author=SimpleNamespace(id=peer, bot=True), content=f"<@{BOT}> Let's talk.")
             self.assertIsNotNone(bot.admitted_turn(response))
         finally:
@@ -177,13 +177,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         bot.model_client = SimpleNamespace(reply=AsyncMock(side_effect=reply),
                                           capture_turn=AsyncMock(side_effect=capture),
                                           archive_turn=AsyncMock(side_effect=archive))
-        bot.delivery = SimpleNamespace(send=AsyncMock(side_effect=delivery))
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        bot.send_chat_reply.side_effect = delivery
         worker = asyncio.create_task(bot.process_turns())
         try:
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             self.assertEqual(events, ["draft", "capture", "final", "archive", "delivery"])
-            bot.delivery.send.assert_awaited_once_with("corrected answer", None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "corrected answer", ())
+            bot.delivery.send.assert_not_awaited()
             self.assertEqual(bot.conversations.get((GUILD, CHANNEL))[-1]["content"], "corrected answer")
             self.assertEqual(bot.model_client.archive_turn.await_args.args[1:], ("corrected answer", False, "response"))
         finally:
@@ -201,6 +203,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             bot.delivery.send.assert_not_awaited()
+            bot.send_chat_reply.assert_not_awaited()
             self.assertEqual(bot.conversations.get((GUILD, CHANNEL)), [])
         finally:
             worker.cancel()
@@ -295,7 +298,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             text="I’m 4 feet tall not 5 ok."
             await bot.queue.put(Turn(1,GUILD,CHANNEL,USER,text))
             await bot.queue.join()
-            bot.delivery.send.assert_awaited_once_with("Recorded height: 4 feet.",None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "Recorded height: 4 feet.", ())
             self.assertEqual(ModelClient.personal_height_statement(Turn(1,GUILD,CHANNEL,USER,text)),f"<@{USER}> is 4 feet tall")
         finally:
             task.cancel()
@@ -387,13 +390,35 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.peer_target, peer.id)
         await bot.close()
 
+    async def test_human_reply_uses_bot_transport_in_thread_without_notifications(self):
+        bot = self.bot()
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        channel = SimpleNamespace(send=AsyncMock())
+        bot.get_channel = lambda channel_id: None
+        bot.fetch_channel = AsyncMock(return_value=channel)
+        thread_id = CHANNEL + 1
+        text = f"<@{USER}> <@&{USER}> @everyone " + "Hello! " * 700
+        await ChatBot.send_chat_reply(bot, thread_id, text)
+        bot.fetch_channel.assert_awaited_once_with(thread_id)
+        self.assertGreater(channel.send.await_count, 1)
+        self.assertEqual("".join(call.args[0] for call in channel.send.await_args_list), text)
+        for call in channel.send.await_args_list:
+            mentions = call.kwargs["allowed_mentions"]
+            self.assertEqual(mentions.users, [])
+            self.assertFalse(mentions.roles)
+            self.assertFalse(mentions.everyone)
+            self.assertFalse(mentions.replied_user)
+            self.assertLessEqual(len(call.args[0]), 2000)
+        bot.delivery.send.assert_not_awaited()
+        await bot.close()
+
     async def test_peer_reply_uses_bot_channel_transport_and_all_observed_bot_recipients(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
         channel = SimpleNamespace(send=AsyncMock())
         bot.get_channel = lambda channel_id: channel
         peers = (USER+1, USER+2)
-        await ChatBot.send_peer_reply(bot, CHANNEL, "Hello bots", peers)
+        await ChatBot.send_chat_reply(bot, CHANNEL, "Hello bots", peers)
         channel.send.assert_awaited_once()
         mentions = channel.send.call_args.kwargs["allowed_mentions"]
         self.assertEqual([u.id for u in mentions.users], list(peers))
@@ -411,7 +436,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(message)
             await asyncio.wait_for(bot.queue.join(), 1)
-            call = bot.send_peer_reply.call_args
+            call = bot.send_chat_reply.call_args
             self.assertEqual(call.args[0], CHANNEL)
             self.assertEqual(call.args[2], peers)
             for uid in peers: self.assertIn(f"<@{uid}>", call.args[1])
@@ -450,7 +475,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(self.message(content=f"<@{BOT}> <@{peer}> Say hello to each other.",
                                               mentions=[SimpleNamespace(id=BOT),partner]))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello!", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello!", (peer,))
             turn = bot.model_client.reply.call_args.kwargs["turn"]
             self.assertEqual(turn.user_id,USER)
             self.assertEqual(turn.mentions,((peer,"Samy"),))
@@ -577,7 +602,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "Say hello", mentions=((peer,"Samy"),(recipient,"Kibukx")), peer_target=peer))
             await bot.queue.join()
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello! <@{recipient}> smells.", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello! <@{recipient}> smells.", (peer,))
         finally:
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -913,7 +938,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.delivery.send.assert_awaited_once_with("An E2B answer", None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "An E2B answer", ())
+            bot.delivery.send.assert_not_awaited()
             key = (GUILD, CHANNEL)
             self.assertEqual(bot.conversations.get(key)[-1]["content"], "An E2B answer")
             shared_history = bot.conversations.get(key)
@@ -932,7 +958,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(bot.queue.join(), 1)
             bot.model_client.reply.assert_awaited_with([], "New thread", channel_id=thread_id,
                                                       turn=Turn(124, GUILD, thread_id, USER, "New thread", thread_id))
-            bot.delivery.send.assert_awaited_with("An E2B answer", thread_id)
+            bot.send_chat_reply.assert_awaited_with(thread_id, "An E2B answer", ())
             thread_history = bot.conversations.get((GUILD, thread_id))
             await bot.on_message(self.message(
                 id=125, author=SimpleNamespace(id=USER + 1, bot=False),
@@ -943,7 +969,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                                                       turn=Turn(125, GUILD, thread_id, USER+1, "Continue this thread", thread_id))
             self.assertEqual(len(bot.conversations.get(key)), 4)
             self.assertEqual(bot.conversations.get((GUILD + 1, CHANNEL)), [])
-            bot.delivery.send.side_effect = RuntimeError("delivery failed")
+            bot.send_chat_reply.side_effect = RuntimeError("delivery failed")
             await bot.on_message(self.message(id=126, content=f"<@{BOT}> failed turn"))
             await asyncio.wait_for(bot.queue.join(), 1)
             self.assertEqual(len(bot.conversations.get(key)), 4)

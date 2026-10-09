@@ -808,17 +808,15 @@ class ChatBot(discord.Client):
         while len(self.seen) > 2048:
             self.seen.popitem(last=False)
 
-    async def send_peer_reply(self, channel_id: int, text: str, peers: tuple[int, ...]) -> None:
-        # Peer replies must come from the bot account: webhook authors have a
-        # different identity and are commonly ignored by other bot bridges.
-        if not peers:
-            raise ValueError("peer reply requires a recipient")
+    async def send_chat_reply(self, channel_id: int, text: str, peers: tuple[int, ...] = ()) -> None:
+        # Every conversational reply uses the same authenticated bot identity.
+        # Only observed bot recipients may receive mention notifications.
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         mentions = discord.AllowedMentions(everyone=False, roles=False, replied_user=False,
                                           users=[discord.Object(id=uid) for uid in peers])
         for chunk in split_message(text):
             await channel.send(chunk, allowed_mentions=mentions)
-        LOG.info("Bot-account peer reply delivered (channel=%s peers=%s)", channel_id, peers)
+        LOG.info("Bot-account chat reply delivered (channel=%s peers=%s)", channel_id, peers)
 
     async def process_turns(self):
         # Serialize turns so everyone in a channel sees the same delivered history.
@@ -868,10 +866,7 @@ class ChatBot(discord.Client):
                             reply = f"<@{uid}> " + reply
                 if self.config.knowledge_endpoint:
                     await self.model_client.archive_turn(turn, reply, not admitted, "response")
-                if peers:
-                    await self.send_peer_reply(turn.channel_id, reply, peers)
-                else:
-                    await self.delivery.send(reply, turn.thread_id)
+                await self.send_chat_reply(turn.channel_id, reply, peers)
                 self.conversations.append(key, turn.text, reply)
             except Exception as error:
                 # Library exceptions can include credential URLs or response content.

@@ -1,15 +1,16 @@
 # Discord webhook and Gemma4 E2B chatbot
 
-This optional channel bridge posts through a configured Discord incoming webhook and receives
-bot mentions through a Discord application. Gemma4 E2B supplies the reply. The CPU
+This optional channel bridge receives mentions and sends every conversational reply through
+the authenticated Discord application bot account. A configured incoming webhook delivers
+startup announcements and operator-selected outbound messages. Gemma4 E2B supplies the reply. The CPU
 bridge archives exchanges and captures human statements through Aimee’s durable
 fact pipeline; the separate GPU setup below uses the enrolled native-memory plugin.
 The bot uses a dedicated Aimee environment and does not run agent tools.
 
 An incoming webhook can post messages but cannot read channel chat. Two-way chat therefore needs
 a Discord application bot token as well as the webhook. The bridge requests guild message events,
-responds only to explicit mentions in the configured channel or its threads, and ignores bots,
-webhooks and DMs. It does not request privileged Message Content, member or presence intents.
+responds to explicit human and bot mentions in the configured channel or its threads, and ignores
+webhook messages and DMs. It does not request privileged Message Content, member or presence intents.
 Discord supplies the content of messages that mention the bot account. A role
 mention with the same display name does not mention that account; Discord withholds
 the content and the bridge ignores the message. Select the bot user in the mention picker.
@@ -26,9 +27,9 @@ webhook URL in `~/.config/aimee-discord/webhook.url` and the application bot tok
 must have mode `0700`. The bridge never logs these values or raw Discord/API exceptions.
 
 Create the Discord application and invite its bot to the intended server with View Channel
-permission in the selected channel. Reply delivery uses the supplied webhook. No Administrator,
-Manage Server, member-list or privileged message-content permission is needed. Threads require
-access to the intended thread. Do not enable unrelated bot permissions.
+and Send Messages permissions in the selected channel. Conversational replies use the bot account.
+No Administrator, Manage Server, member-list or privileged message-content permission is needed.
+Threads require access to the intended thread and Send Messages in Threads permission. Do not enable unrelated bot permissions.
 
 ```sh
 mkdir -p ~/.local/share/aimee-discord ~/.config/aimee-discord
@@ -370,8 +371,8 @@ Real bot accounts in the configured channel or its threads can address Aimee
 without an allowlist, a human-opened session, a timeout, or a turn limit. Human
 requests mentioning several bots address every mentioned bot regardless of wording.
 Full Discord-sized incoming messages are admitted; the reply model’s recent-history
-budget does not discard longer peer replies. Peer replies are
-sent through Aimee’s bot account rather than its webhook, so the author identity
+budget does not discard longer peer replies. All conversational replies, including human
+chat and thread responses, are sent through Aimee’s bot account rather than its webhook, so the author identity
 matches the account that peers mention. Notifications are enabled for those bot
 recipients. Self messages, webhook imitations and duplicate events are ignored.
 Peer exchanges are archived as agent messages and never admitted as human facts.
