@@ -303,7 +303,14 @@ an identity, start inference or overwrite an existing serving configuration.
 
 Set `config.json`'s `model` to the exact `model` path in `serving.json`; vLLM uses this as the default
 served model name. Keep `system_context` and `native_system_context` identical. The default instruction
-is shared by both preparation and chat. Serving binds to loopback port 19852 with a generated API
+is shared by both preparation and chat. Aimee's default voice is sharp, warm and playful;
+character performances are requested modes. The bridge adds a separate conversation
+behavior instruction even when `system_context` is customized. It guides topical replies,
+varied phrasing and useful questions. It detects exact/near-duplicate recent replies and
+makes at most one regeneration attempt within the existing 120-second model deadline.
+An unsuccessful repair reports an inference failure instead of posting the duplicate.
+Explicit repeat/quote requests and short acknowledgements remain eligible. This bounds
+regeneration attempts, not bot conversation turns. Serving binds to loopback port 19852 with a generated API
 key, synchronous eager V1, prefix caching disabled, one GPU and zero CPU weight offload.
 The memory recipient and catalog are derived by the installed plugin from the enrolled identity.
 They are never supplied by Discord message authors.

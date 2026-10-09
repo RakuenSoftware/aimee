@@ -14,7 +14,7 @@ from aiohttp import web
 import aiohttp
 import discord
 
-from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions
+from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions, CHAT_BEHAVIOR
 
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
@@ -600,8 +600,43 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0][0], "Bearer test-model-key")
         self.assertEqual(requests[1][0], "Bearer rotated-test-key")
         self.assertEqual(requests[0][1]["messages"], [
-            {"role": "system", "content": config.system_context}, {"role": "user", "content": "hello"}])
+            {"role": "system", "content": config.system_context + "\n" + CHAT_BEHAVIOR}, {"role": "user", "content": "hello"}])
         self.assertEqual(requests[0][1]["max_tokens"], 384)
+        self.assertIn(CHAT_BEHAVIOR, requests[1][1]["messages"][0]["content"])
+
+    async def test_repeated_persona_reply_is_repaired_once(self):
+        requests = []
+        canned = "Whoa, hold the phone! Groovy! What's the scoop?"
+        async def model(request):
+            requests.append(await request.json())
+            answer = canned if len(requests) == 1 else "Your cat has promoted the laundry basket to executive housing."
+            return web.json_response({"choices": [{"message": {"content": answer}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        history = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": canned}]
+        async with aiohttp.ClientSession() as session:
+            answer = await ModelClient(config, session).reply(history, "Found my cat in the laundry basket.")
+        self.assertIn("laundry basket", answer)
+        self.assertEqual(len(requests), 2)
+        self.assertIn("fresh, topic-specific", requests[1]["messages"][0]["content"])
+        self.assertEqual(history[-1]["content"], canned)
+
+    async def test_repetition_repair_is_bounded(self):
+        requests = []
+        canned = "Whoa, hold the phone! Groovy! What's the scoop?"
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": canned}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        async with aiohttp.ClientSession() as session:
+            with self.assertRaisesRegex(RuntimeError, "repeated recent dialogue"):
+                await ModelClient(config, session).reply([{"role": "assistant", "content": canned}], "My hamster escaped.")
+        self.assertEqual(len(requests), 2)
+
+    def test_repetition_detection_preserves_requested_and_factual_repeats(self):
+        previous = [{"role": "assistant", "content": "The cat is hiding under the bed near the closet."}]
+        self.assertFalse(ModelClient.repeats_recent_reply(previous[0]["content"], previous, "Repeat that verbatim."))
+        self.assertFalse(ModelClient.repeats_recent_reply("The cat is hiding under the sofa next to the window.", previous, "Where else?"))
+        self.assertFalse(ModelClient.repeats_recent_reply("Yes.", [{"role": "assistant", "content": "Yes."}], "Are you sure?"))
 
     async def test_cpu_model_requires_trusted_mtls_and_fixed_server_name(self):
         def openssl(*args):

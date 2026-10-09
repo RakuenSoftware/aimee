@@ -1,0 +1,25 @@
+{
+  "baseline": {
+    "turns": 6,
+    "whoa_openings": 6,
+    "identical_replies": 1
+  },
+  "deployed": {
+    "turns": 6,
+    "whoa_openings": 0,
+    "identical_replies": 0
+  },
+  "bridge_tests": 48,
+  "bridge_tests_status": "passed",
+  "deployment": "CT9211",
+  "image": "aimee-discord-bridge:personality-20261009",
+  "persona_override_removed": true,
+  "model": "live E2B CPU service",
+  "discord_probe_messages": 0,
+  "memory_capture": "bypassed for synthetic inference probes",
+  "seeded_recovery": {
+    "turns": 3,
+    "whoa_openings": 0,
+    "identical_replies": 0
+  }
+}
