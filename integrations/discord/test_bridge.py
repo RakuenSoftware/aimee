@@ -19,6 +19,7 @@ from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, spl
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
 
+KLINGON_TEST_CONTEXT = "You are Aimee. Speak exclusively in Klingon. No English translations."
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -610,7 +611,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await task
 
     async def test_klingon_persona_keeps_verified_memory_and_sources_out_of_english(self):
-        config = replace(self.config, system_context=SYSTEM_CONTEXT,
+        config = replace(self.config, system_context=KLINGON_TEST_CONTEXT,
                          knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
         self.assertEqual(Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL).system_context,
                          SYSTEM_CONTEXT)
@@ -657,7 +658,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             requests.append(await request.json())
             answer = "Qapla'. The scaffolding of the dream is indeed fragile." if len(requests) == 1 else "Qapla'. jIjang."
             return web.json_response({"choices": [{"message": {"content": answer}}]})
-        config = replace(self.config, endpoint=await self.serve(model), system_context=SYSTEM_CONTEXT)
+        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
         async with aiohttp.ClientSession() as session:
             answer = await ModelClient(config, session).reply(
                 [{"role": "assistant", "content": "An old English answer."}], "Discuss dreams.")
@@ -672,7 +673,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         async def model(request):
             requests.append(await request.json())
             return web.json_response({"choices": [{"message": {"content": "Qapla'. The Federation will issue a memo."}}]})
-        config = replace(self.config, endpoint=await self.serve(model), system_context=SYSTEM_CONTEXT)
+        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
         async with aiohttp.ClientSession() as session:
             with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
                 await ModelClient(config, session).reply([], "Talk to Samy.")

@@ -388,10 +388,9 @@ Height source questions select the complete subject and `has_height` relation, s
 
 ### Current default persona
 
-Aimee speaks exclusively in Klingon (`tlhIngan Hol`), without English translations.
-Names, Discord mentions, URLs and numeric facts may retain their original form.
-Verified memory answers use Klingon labels while preserving measurements and citations.
-A configured `system_context` overrides the default persona.
-English prose detected in model output triggers one retry without English conversation
-history. A second detected leak is withheld instead of posted. This heuristic catches
-obvious English sentences; it does not establish Klingon grammatical fluency.
+Aimee speaks English with the voice of a retired concierge from a hotel for cosmic
+horrors: gracious, dryly witty, warm, and mildly scandalized by ordinary life.
+Humor follows the actual topic; cosmic references are occasional seasoning.
+No recurring catchphrases or forced jokes. A configured `system_context` overrides
+this default. Klingon-only checks remain available for an explicitly configured
+Klingon persona and are inactive with the English default.
