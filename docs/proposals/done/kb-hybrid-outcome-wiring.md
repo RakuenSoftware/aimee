@@ -6,7 +6,7 @@
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
-> [`kb-hybrid-outcome-wiring-residual.md`](../pending/kb-hybrid-outcome-wiring-residual.md).
+> [`kb-hybrid-outcome-wiring-residual.md`](../pending/retrieval-ranking-feedback-and-promotion.md).
 
 - **State:** DONE. Delivered scope archived 2026-07-26.
   first outcome source (a dogfood-autolabel → retrieval-outcome bridge) is

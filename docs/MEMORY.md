@@ -33,10 +33,12 @@ legacy `as_of` inspection.
 
 ## Replaceable retrieval engine
 
-The generic contract in `server-go/memory` supports Get, Search, Put and Delete. Native memory
-adapts the existing implementation; the Cognee adapter consumes that contract and uses the
-existing egress/Vault transport. Aimee retains canonical records and their admitted identity,
-versions, audit and lifecycle. Advanced native operations are separate capabilities.
+The external integration contract in `server-go/memory` supports Get, Search, Put and Delete.
+Cognee and Hillock must comply with their declared external contract and use independent
+adapter-owned durable catalogs, with retrieval over existing egress/Vault transport. Native
+may retain its own storage model, APIs and optimizations; it is not required to comply with
+the external contract. Aimee retains policy/admission and reply composition. Advanced native
+operations remain separate capabilities.
 
 ![Memory owner and canonical source with selectable native or Cognee retrieval](images/architecture/memory-backends.svg)
 
@@ -87,7 +89,7 @@ Go renders live session context, agent search text, MCP diagnostic text and full
 record envelopes, preserving exact int64 IDs, complete content and explicit owner
 refusals. Native adapters retain host authorization and transport duties.
 
-The [G0 closeout](proposals/pending/memory-reliability-g0-closeout.md) records
+The [G0 closeout](proposals/done/memory-reliability-g0-closeout.md) records
 file/API dispositions and validation. [Database](DB.md#postgresql-provider-ownership) describes the
 completed PostgreSQL-provider cutover for both roles. Remaining C knowledge algorithms call that
 provider; they do not restore the retired native driver.
@@ -378,7 +380,7 @@ count matches. Baselines retain the case receipts; failed runs cannot overwrite
 them or publish partial scores. The checked-in 105-case input is frozen by
 `tests/eval/memory_retrieval_manifest_v1.json` and a required unit assertion.
 
-The [retrieval compatibility decisions](proposals/pending/memory-reliability-retrieval-compatibility.md)
+The [retrieval compatibility decisions](proposals/done/memory-reliability-retrieval-compatibility.md)
 state what is retained and retired. This first manifest does not certify real-model
 quality, historical C ranking parity, temporal reproducibility or the full release
 matrix. Existing aggregate-only baselines require explicit regeneration.
@@ -390,7 +392,7 @@ matrix. Existing aggregate-only baselines require explicit regeneration.
 [Earlier implementation checkpoints](validation/memory-migration-history.md) retain the
 chronological record. Counts and pending statements there describe their original
 checkpoint, not the current inventory. Current scope and validation limits appear
-above; the [delivery tracker](proposals/pending/memory-reliability-delivery.md)
+above; the [delivery tracker](proposals/done/memory-reliability-delivery.md)
 tracks remaining program work.
 
 
@@ -541,3 +543,9 @@ In Memory Center, select **Personal (local)** or **Knowledge base**, then
 and metadata before approving or rejecting. Requests always carry the selected store,
 proposal digest, and exact version. A changed revision disables review; the backend also
 checks the version transactionally. Terminal entries retain reviewer and decision IDs.
+
+## External conversation profile
+
+Cognee and Hillock implement [the reusable conversation v2 contract](../integrations/memory/CONTRACT.md) through independent durable catalogs and provider ranking. It includes recall/composition/briefing, exact history, authenticated export, source revalidation/send barriers, and idempotent erasure with fresh host-admitted writes. Native is exempt. [Support validation](validation/external-memory-support-2026-10-08.md) distinguishes completed integration from remaining answer/scale qualification.
+
+The catalog is bounded at 64 MiB; 16 for Cognee and 256 for Hillock are the per-request provider candidate counts, not the corpus size. Aimee scans eligible records and selects a lexical pool; retrieval is explicitly non-exhaustive. Cognee supports `AIMEE_MEMORY_BACKEND_AUTH=api-key` for Vault-backed service keys, alongside bearer and explicit development `none`.

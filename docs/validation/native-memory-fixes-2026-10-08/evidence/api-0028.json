@@ -1,0 +1,11 @@
+{
+  "route": "memory/get",
+  "http": 404,
+  "response": {
+    "http_status": 404,
+    "kind": "not_found",
+    "message": "memory not found",
+    "status": "error"
+  },
+  "elapsed_seconds": 0.072
+}

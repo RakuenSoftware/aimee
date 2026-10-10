@@ -1,0 +1,11 @@
+{
+  "route": "memory/search",
+  "http": 503,
+  "response": {
+    "http_status": 503,
+    "kind": "unavailable",
+    "message": "memory module unavailable",
+    "status": "error"
+  },
+  "elapsed_seconds": 0.086
+}

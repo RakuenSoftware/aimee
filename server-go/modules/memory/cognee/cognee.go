@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	memory "github.com/JBailes/aimee/server-go/memory"
 	"math"
 	"mime/multipart"
@@ -18,6 +19,10 @@ import (
 )
 
 const MaxRecords = 256
+
+// MaxCandidates bounds synchronous cold indexing within the shipping deadline.
+// This is a provider pool limit, not a canonical catalog size limit.
+const MaxCandidates = 16
 const MaxBody = 1 << 20
 
 // Transport is supplied by the host. Aimee supplies its existing governed
@@ -191,7 +196,11 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 	if limit <= 0 || limit > MaxRecords || len(query) > 16384 {
 		return nil, memory.ErrCapacity
 	}
-	source, err := b.records.Search(ctx, scope, "", "", "", MaxRecords+1)
+	candidateLimit := MaxRecords
+	if _, ok := b.records.(memory.CandidateStore); ok {
+		candidateLimit = MaxCandidates
+	}
+	source, err := memory.RetrievalCandidates(ctx, b.records, scope, query, kind, tier, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +229,21 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 			continue
 		}
 		if _, ok := wanted[d.Name]; !ok {
+			// Keep valid previously indexed records outside this query's pool.
+			// Search names remain restricted to the admitted current candidates.
+			parts := strings.Split(strings.TrimPrefix(d.Name, prefix), "_")
+			if len(parts) == 2 {
+				id, parseErr := strconv.ParseInt(parts[0], 10, 64)
+				if parseErr == nil {
+					current, getErr := b.records.Get(ctx, scope, id)
+					if getErr == nil && b.name(current) == d.Name {
+						continue
+					}
+					if getErr != nil && !errors.Is(getErr, memory.ErrNotFound) {
+						return nil, getErr
+					}
+				}
+			}
 			if err = b.remove(ctx, d.ID); err != nil {
 				return nil, err
 			}

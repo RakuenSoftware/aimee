@@ -1,0 +1,25 @@
+{
+  "backend": "cognee",
+  "phase": "guest-reboot",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after guest-reboot",
+      "status": "passed",
+      "seconds": 0.035
+    },
+    {
+      "name": "user selected-backend list after guest-reboot",
+      "status": "passed",
+      "seconds": 0.043
+    },
+    {
+      "name": "kb selected-backend list after guest-reboot",
+      "status": "passed",
+      "seconds": 0.061
+    },
+    {
+      "name": "guest reboot retains erasure controls",
+      "status": "passed"
+    }
+  ]
+}

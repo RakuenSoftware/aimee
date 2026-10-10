@@ -31,7 +31,7 @@ record the component evidence. The final full race suite passes in 234.086 secon
 the new regression file missing from the explicit module source manifest; after
 registering it, the exported owner builds and its tests pass in 5.517 seconds.
 The workspace export adapter also now includes primary-scope workspace rows.
-Final process validation passed; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
+Final process validation passed; the [eight-gate checklist](../proposals/done/memory-reliability-02-closeout.md)
 tracks MR-02 completion. The original 123-clause acceptance inventory is unchanged.
 
 

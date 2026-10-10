@@ -1,0 +1,12 @@
+{
+  "route": "memory/supersede",
+  "http": 409,
+  "response": {
+    "http_status": 409,
+    "kind": "conflict",
+    "message": "memory: expected version is no longer current; read the current record before correcting it",
+    "reason": "expected_version_conflict",
+    "status": "error"
+  },
+  "elapsed_seconds": 0.064
+}

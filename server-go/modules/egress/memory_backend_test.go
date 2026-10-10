@@ -58,3 +58,59 @@ func TestMemoryBackendEgressUsesConfiguredOriginAndVault(t *testing.T) {
 		t.Fatal("backend read provider credential")
 	}
 }
+
+func TestHillockEgressRoutesAreProviderSpecific(t *testing.T) {
+	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
+	t.Setenv("AIMEE_HILLOCK_URL", "http://127.0.0.1:8097")
+	t.Setenv("AIMEE_MEMORY_BACKEND_URL", "")
+	for _, tc := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{"GET", "/v1/health", true}, {"POST", "/v1/rank", true},
+		{"GET", "/v1/rank", false}, {"POST", "/v1/chat/completions", false},
+		{"POST", "/api/v1/add", false}, {"POST", "/v1/rank?all=true", false},
+	} {
+		target, _ := url.Parse("http://127.0.0.1:8097" + tc.path)
+		got := callerPurposeAllowed(MemoryClientRef, Request{Purpose: "memory-backend", Method: tc.method}, target)
+		if got != tc.allowed {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, got)
+		}
+		if callerPurposeAllowed(ProvidersClientRef, Request{Purpose: "memory-backend", Method: tc.method}, target) {
+			t.Fatal("foreign caller admitted")
+		}
+	}
+	t.Setenv("AIMEE_MEMORY_BACKEND", "cognee")
+	if memoryBackendTargetAllowed("POST", "/v1/rank") {
+		t.Fatal("Hillock route admitted for Cognee")
+	}
+}
+
+func TestMemoryBackendAPIKeyIsInjectedOnlyByEgress(t *testing.T) {
+	t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "api-key")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "service-key" || r.Header.Get("Authorization") != "" {
+			t.Error("wrong credential transport")
+			w.WriteHeader(403)
+			return
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer upstream.Close()
+	t.Setenv("AIMEE_MEMORY_BACKEND_URL", upstream.URL)
+	resolver := &vaultCredentialResolver{run: func(context.Context, string) ([]byte, error) { return []byte("service-key"), nil }}
+	p := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, backendCredentials: resolver}
+	target := upstream.URL + "/api/v1/datasets"
+	request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "memory-backend", Method: "GET", CredentialPresent: true, RequestSHA256: RequestDigest("GET", target, nil, true)}, CredentialHandle: "memory-backend", MaxResponseBytes: 1024, TimeoutMS: 1000}
+	raw, _ := json.Marshal(request)
+	reply, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw)
+	out, err := decodeHTTPResponse(reply)
+	if status != bus.ModuleStatusOK || err != nil || out.Status != 200 {
+		t.Fatal(status, out, err)
+	}
+	request.Headers = map[string]string{"X-Api-Key": "untrusted"}
+	raw, _ = json.Marshal(request)
+	if _, status = p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("caller credential header admitted", status)
+	}
+}

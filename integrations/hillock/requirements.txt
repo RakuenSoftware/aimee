@@ -1,0 +1,2 @@
+# The pinned upstream HDC profile needs no torch, spaCy, extractor or LLM.
+numpy==2.2.6

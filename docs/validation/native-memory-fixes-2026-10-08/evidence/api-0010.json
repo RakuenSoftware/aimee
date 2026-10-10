@@ -1,0 +1,100 @@
+{
+  "route": "memory/search",
+  "http": 200,
+  "response": {
+    "active_context_missing": false,
+    "facts": [
+      {
+        "id": 15,
+        "tier": "L2",
+        "kind": "fact",
+        "key": "kb-Kibukx height-1791465671280807376",
+        "headline": "",
+        "content": "needle kb: Kibukx real height is 69cm; originally reported by Virant. fixture=1791465671280807376",
+        "use_cases": "",
+        "confidence": 1,
+        "use_count": 0,
+        "last_used_at": "",
+        "created_at": "2026-10-08 13:21:11",
+        "updated_at": "2026-10-08 13:21:11",
+        "source_session": "",
+        "provenance_category": "user_stated",
+        "retrieval_score": 0,
+        "hybrid_rank": 0
+      }
+    ],
+    "retrieval_capabilities": {
+      "policy_digest": "sha256:f10b43a4fa5b0c3e9652a13adf14f58dec4807e1d294823770f48a28aec959c8",
+      "schema_version": 1,
+      "endpoint": "server-search",
+      "placement": "kb",
+      "temporal_mode": "current",
+      "fusion_policy": "staged-rrf60-independent-pools-v1",
+      "fallback": "eligible_available_arms_only; no_cross_placement_fallback",
+      "declared_arms": {
+        "code": true,
+        "dense": true,
+        "graph": true,
+        "lexical": true
+      },
+      "arm_observations": {
+        "code": [
+          {
+            "state": "not_executed",
+            "reason": "no_code_query_or_host_code_points",
+            "candidates": 0,
+            "candidate_quota": 0,
+            "index_readiness": "unknown",
+            "calls": 1
+          }
+        ],
+        "dense": [
+          {
+            "state": "unavailable",
+            "reason": "bounded_embedding_or_index_fallback",
+            "candidates": 0,
+            "candidate_quota": 10,
+            "index_readiness": "unavailable",
+            "calls": 1
+          }
+        ],
+        "graph": [
+          {
+            "state": "available",
+            "reason": "no_eligible_graph_seeds",
+            "candidates": 0,
+            "candidate_quota": 10,
+            "index_readiness": "query_executed",
+            "calls": 1
+          }
+        ],
+        "lexical": [
+          {
+            "state": "available",
+            "reason": "owner_eligible_sql",
+            "candidates": 1,
+            "candidate_quota": 10,
+            "index_readiness": "query_executed",
+            "calls": 1
+          }
+        ]
+      },
+      "observations_truncated": false
+    },
+    "status": "ok",
+    "store": "kb",
+    "windows": [
+      {
+        "session_id": "",
+        "seq": 0,
+        "file_path": "",
+        "start_line": 0,
+        "end_line": 0,
+        "summary": "needle kb: Kibukx real height is 69cm; originally reported by Virant. fixture=1791465671280807376",
+        "score": 1,
+        "files": []
+      }
+    ]
+  },
+  "elapsed_seconds": 0.134
+}

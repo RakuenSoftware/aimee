@@ -25,7 +25,7 @@ non-owner, without BYPASSRLS; administrative schema bootstrap is separate.
 | Compatibility APIs | Existing external C ABI/HTTP adapters marshal to Go | Documented retained interfaces; no parallel policy implementation | Advertised supported fields forwarded; owner rejects unsupported semantics | Compatibility response, not provider receipt | Frozen native ownership ledger, negative C/cgo fixtures and MR-01 serving inventory. Full DB2 retirement remains a separate proposal. |
 | Actions and clean retries | DB1 durable root journal + current Go memory evidence check + native exact-resource adapter | Supported action adapters; failed retry starts fresh memory plan after corrected input | Shared parent/child root reservations; exact provider bytes and operator byte-cost estimate | Effect-confirmed only for verified adapters; unknown mutation blocks conflicting retry | MR-16 42 and MR-17 20 deployed checks. Retry token-cap enforcement is unsupported and refused; in-flight cancellation/physical TTL erasure are not claimed. |
 
-The [MR-01 detailed route inventory](../proposals/pending/memory-reliability-01-serving-inventory.md)
+The [MR-01 detailed route inventory](../proposals/done/memory-reliability-01-serving-inventory.md)
 expands the grouped read surfaces. [MR-16](memory-mr16-actions-2026-09-27.md) and
 [MR-17](memory-mr17-retries-2026-09-27.md) document exact adapter and retry limits.
 The immutable native inventory and reviewed external-owner ledger remain in

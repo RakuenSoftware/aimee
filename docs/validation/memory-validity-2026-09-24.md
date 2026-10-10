@@ -32,7 +32,7 @@ boundary, route, API and documentation checks are required before publication.
 Fresh HTTP and CLI checks now compare diagnostic revisions with ordinary reads
 in both placements. Execution against a fresh application image remains pending.
 The seven MR-01 acceptance gates remain tracked in the
-[closeout checklist](../proposals/pending/memory-reliability-01-closeout.md).
+[closeout checklist](../proposals/done/memory-reliability-01-closeout.md).
 This change does not close MR-01 or advance work to MR-02.
 
 Review before deployment also caught a compatibility error: a verified

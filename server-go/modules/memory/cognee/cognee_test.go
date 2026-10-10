@@ -1,6 +1,7 @@
 package cognee
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -661,5 +662,60 @@ func TestCogneeValidationInterruptedTransportAndResetVerification(t *testing.T) 
 	}
 	if validUUID("000000000000-0000-0000-000000000001") {
 		t.Fatal("misplaced UUID separator admitted")
+	}
+}
+
+type candidateCatalog struct {
+	*catalog
+	requested int
+	offset    int
+}
+
+func (c *candidateCatalog) Candidates(ctx context.Context, s memory.Scope, q, k, tier string, limit int) ([]memory.Record, error) {
+	c.requested = limit
+	all, err := c.catalog.Search(ctx, s, q, k, tier, MaxRecords+100)
+	if len(all) > c.offset {
+		all = all[c.offset:]
+	} else {
+		all = nil
+	}
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, err
+}
+func TestBoundedCandidatesRetainPriorValidIndexes(t *testing.T) {
+	scope := memory.Scope{Type: memory.ScopeProject, Value: "bulk"}
+	source := &candidateCatalog{catalog: &catalog{records: map[int64]memory.Record{}}}
+	for i := int64(1); i <= 300; i++ {
+		source.records[i] = memory.Record{ID: i, Scope: scope, Key: fmt.Sprint(i), Content: "needle", Kind: "fact", Tier: "L2"}
+	}
+	fixture := &cogneeFixture{datasets: map[string]dataset{}, contents: map[string]string{}}
+	server := httptest.NewServer(fixture)
+	defer server.Close()
+	transport := func(ctx context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
+		req, _ := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		response, err := server.Client().Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		return response.StatusCode, raw, err
+	}
+	backend, _ := New(source, transport, server.URL, "bounded")
+	if _, err := backend.Search(context.Background(), scope, "needle", "fact", "L2", 1); err != nil {
+		t.Fatal(err)
+	}
+	if source.requested != MaxCandidates || len(fixture.datasets) != MaxCandidates {
+		t.Fatalf("unbounded cold pool: %d/%d", source.requested, len(fixture.datasets))
+	}
+	source.offset = 1
+	if _, err := backend.Search(context.Background(), scope, "needle", "fact", "L2", 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.datasets) != MaxCandidates+1 {
+		t.Fatal("valid prior index was discarded on candidate-pool change")
 	}
 }

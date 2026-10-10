@@ -1,0 +1,68 @@
+{
+  "route": "memory/read",
+  "http": 200,
+  "response": {
+    "active_context_missing": false,
+    "context": "# Memory Context\n\n- [#16] kb-Kibukx height-1791465671280807376: needle kb: Kibukx corrected height is 170cm; human correction. fixture=1791465671280807376\n",
+    "retrieval_capabilities": {
+      "policy_digest": "sha256:f10b43a4fa5b0c3e9652a13adf14f58dec4807e1d294823770f48a28aec959c8",
+      "schema_version": 1,
+      "endpoint": "assemble-context",
+      "placement": "kb",
+      "temporal_mode": "current",
+      "fusion_policy": "staged-rrf60-independent-pools-v1",
+      "fallback": "eligible_available_arms_only; no_cross_placement_fallback",
+      "declared_arms": {
+        "code": true,
+        "dense": true,
+        "graph": true,
+        "lexical": true
+      },
+      "arm_observations": {
+        "code": [
+          {
+            "state": "not_executed",
+            "reason": "endpoint_did_not_execute_arm",
+            "candidates": 0,
+            "candidate_quota": 0,
+            "index_readiness": "unknown",
+            "calls": 0
+          }
+        ],
+        "dense": [
+          {
+            "state": "not_executed",
+            "reason": "endpoint_did_not_execute_arm",
+            "candidates": 0,
+            "candidate_quota": 0,
+            "index_readiness": "unknown",
+            "calls": 0
+          }
+        ],
+        "graph": [
+          {
+            "state": "not_executed",
+            "reason": "empty_query",
+            "candidates": 0,
+            "candidate_quota": 0,
+            "index_readiness": "unknown",
+            "calls": 1
+          }
+        ],
+        "lexical": [
+          {
+            "state": "available",
+            "reason": "owner_eligible_sql",
+            "candidates": 1,
+            "candidate_quota": 12,
+            "index_readiness": "query_executed",
+            "calls": 1
+          }
+        ]
+      },
+      "observations_truncated": false
+    },
+    "status": "ok"
+  },
+  "elapsed_seconds": 0.089
+}

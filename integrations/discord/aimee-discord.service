@@ -1,0 +1,20 @@
+[Unit]
+Description=Aimee Discord chatbot with Gemma4 E2B
+After=network-online.target aimee-discord-e2b.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/aimee-discord
+ExecStart=%h/.local/share/aimee-discord/venv/bin/python bridge.py --config %h/.config/aimee-discord/config.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+LimitCORE=0
+
+[Install]
+WantedBy=default.target

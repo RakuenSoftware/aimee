@@ -1,0 +1,33 @@
+{
+  "route": "memory/get",
+  "http": 200,
+  "response": {
+    "memory": {
+      "authorship": {
+        "category": "user_stated",
+        "principal": "local-stack-e2e",
+        "transport": "webuser:local-stack-e2e"
+      },
+      "version": {
+        "schema_version": 1,
+        "owner_id": "c55b5c13-8ae5-4034-a68e-e4bebf5e75ed",
+        "record_id": "11",
+        "record_revision": "1"
+      },
+      "historical": true,
+      "id": 11,
+      "scope": {
+        "type": "user",
+        "value": "_user"
+      },
+      "tier": "L2",
+      "kind": "fact",
+      "key": "user-Kibukx height-1791465671280807376",
+      "content": "needle user: Kibukx real height is 69cm; originally reported by Virant. fixture=1791465671280807376",
+      "confidence": 1
+    },
+    "status": "ok",
+    "store": "user"
+  },
+  "elapsed_seconds": 0.052
+}

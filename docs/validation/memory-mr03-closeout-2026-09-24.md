@@ -65,7 +65,7 @@ and [all 77 final lint checks](memory-mr03-final-evidence-2026-09-24/lint.txt) p
 Earlier red reproductions and implementation details are in the
 [component report](memory-mr03-protected-2026-09-24.md).
 
-The [six-gate checklist](../proposals/pending/memory-reliability-03-closeout.md)
+The [six-gate checklist](../proposals/done/memory-reliability-03-closeout.md)
 maps unchanged acceptance clauses to this evidence. These are isolated/local
 validation results; they do not assert GitHub CI or completion of later proposals.
 

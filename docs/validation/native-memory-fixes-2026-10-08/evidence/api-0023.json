@@ -1,0 +1,23 @@
+{
+  "route": "memory/delete",
+  "http": 200,
+  "response": {
+    "deleted": true,
+    "destroyed": false,
+    "id": 12,
+    "mutation_receipt": {
+      "schema_version": 1,
+      "commit_id": "fa09ba55-9fbf-4875-975c-3e88f04b2209",
+      "version": {
+        "schema_version": 1,
+        "owner_id": "c55b5c13-8ae5-4034-a68e-e4bebf5e75ed",
+        "record_id": "12",
+        "record_revision": "2"
+      },
+      "replayed": false
+    },
+    "status": "ok",
+    "store": "user"
+  },
+  "elapsed_seconds": 0.088
+}

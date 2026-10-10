@@ -151,6 +151,21 @@ func TestMemoryBackendConfiguration(t *testing.T) {
 	if err != nil || record.ID != 42 || record.Scope != scope {
 		t.Fatal(record, err)
 	}
+	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
+	factory, err = configuredMemoryBackend(nil)
+	if err != nil || factory == nil {
+		t.Fatal(err)
+	}
+	provider, err = factory(NativeStore{Data: &recordingDataStore{}})
+	if err != nil || provider.Capabilities().Name != "hillock" {
+		t.Fatal(provider, err)
+	}
+	record, err = provider.Get(context.Background(), scope, 42)
+	if err != nil || record.ID != 42 {
+		t.Fatal(record, err)
+	}
+	t.Setenv("AIMEE_MEMORY_BACKEND", "cognee")
+
 	t.Setenv("AIMEE_MEMORY_BACKEND_URL", "https://cognee.example/admin")
 	if _, err := configuredMemoryBackend(nil); err == nil {
 		t.Fatal("invalid origin accepted")

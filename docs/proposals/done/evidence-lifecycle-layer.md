@@ -188,6 +188,6 @@ This charter supersedes nothing. It coordinates work downstream of
 to the pending
 [evidence provenance tiers](../pending/proposal-evidence-provenance-tiers.md),
 [operator audit activity residual](../pending/operator-audit-activity-residual.md),
-[kb_hybrid outcome residual](../pending/kb-hybrid-outcome-wiring-residual.md) and
-[per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
+[kb_hybrid outcome residual](../pending/retrieval-ranking-feedback-and-promotion.md) and
+[per-query feature persistence residual](../pending/retrieval-ranking-feedback-and-promotion.md)
 proposals, each cited by the member that touches its surface.
