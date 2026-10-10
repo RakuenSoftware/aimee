@@ -20,6 +20,13 @@ admission, leases, scheduling, lifecycle, and artifact persistence. No additiona
 bridge goal scheduler or bot turn cap was introduced. Unconfigured or unrelated
 workflows are refused by this dedicated adapter.
 
+Live discussion recovery: task inference no longer uses ordinary chat behavior.
+Four bounded source-selection tasks preserve early critique and later resolution
+across the complete durable discussion. Goal-specific follow-ups prevent unrelated
+banter from replacing unfinished requirements. The agreed-argument brief feeds
+drafting and revision. Assessment errors use typed stage failures; socket readiness
+and one-time startup transport recovery prevent deployment races.
+
 Remaining broader capabilities: selecting additional bounded workflow families,
 semantic quality checks, and sharing one objective across multiple channels. Native
 attention-bank delivery remains in its [separate pending proposal](../pending/native-attention-personas-goals.md).

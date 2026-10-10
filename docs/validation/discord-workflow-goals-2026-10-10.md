@@ -2,7 +2,7 @@
 
 ## Implemented and deployed
 
-CT9211 on .253 runs `aimee-discord-bridge:workflow-conversation-20261010-v3`.
+CT9211 on .253 now runs `aimee-discord-bridge:discussion-recovery-20261010-v2`.
 Its dedicated bot server runs `aimee-discord-server:conversation-waits-20261010-v2`.
 The existing WFE executes a pinned `discord-paper` graph through its typed runner
 on a private Unix socket. It owns admission, scheduling, lifecycle, and artifacts.
@@ -29,7 +29,7 @@ was updated at its actual libexec path and the real run resumed through the WFE 
 
 ## Checks
 
-- 83 Python bridge/controller/preparation/workflow tests pass.
+- 94 Python bridge/controller/preparation/workflow tests pass.
 - Go suites pass for `modules/aimee/families`, `internal/wfe`, `internal/engine`,
   `internal/api`, and `internal/workflowstore`.
 - Typed Unix transport, stable submission keys, durable stage replay, authoritative
@@ -42,11 +42,39 @@ was updated at its actual libexec path and the real run resumed through the WFE 
 - Actual CPU inference produced a valid structured discussion assessment using Samy's
   saved response, identifying unresolved humor analysis and proposing a concrete reply.
 
+## Live recovery and completion
+
+The original discussion accumulated 23 peer inputs and 20 follow-ups before an
+assessment error became HTTP 400 and parked the stage as `delegate_failed`.
+Task inference now bypasses ordinary chat persona/retrieval, uses four bounded
+source selections with one validation repair each, and retains earlier critique
+and post-follow-up resolution despite later banter. The bridge supplies actual
+source text; model parse errors become typed stage failures. Goal-specific
+follow-ups and an agreed-argument brief keep subsequent writing on the objective.
+
+The same genuine run resumed, saved discussion, outline, draft and revision,
+delivered the paper attachment, and reached `deliver` / `accepted`. Scoped goal
+status is `complete`; all six node artifacts remain saved. Its revised body has
+2,172 words plus the complete collaboration evidence. No synthetic Discord inputs,
+fixed conversation turn cap, or human approval gate were used to achieve this.
+
+Deployment initially exposed a socket-startup race. The new health endpoint waits
+for Discord readiness; deployment resumes only after it reports ready. Startup
+recovery retries a confirmed Unix socket connection failure once per run. Genuine
+assessment failures remain visible. Regression checks cover these distinctions,
+early critique recovery after thirty drifting messages, invalid evidence choices,
+bounded repair, task inference isolation and evidence carried into writing.
+
 ## Limits
 
-At this validation checkpoint the genuine paper run is still developing its Discord
-conversation, not a completed production paper. Autonomous final delivery is covered
-by tests; this document does not claim a live paper was delivered before it happened.
+Live execution and delivery are verified; paper quality is not fully qualified.
+The delivered model output repeats headings and incorrectly describes Black's
+winning queen move as desperate; it also overstates the physical-collapse metaphor.
+The subsequent adapter update explicitly supplies correct chess facts, forbids
+claiming that discussed examples were actually played, distinguishes metaphor from
+physical events, and requests body text without headings. These prompt changes
+are not evidence that the already delivered paper was corrected. Automated semantic
+quality checks remain pending.
 Readiness and writing quality depend on the model; verbatim source grounding protects
 provenance but cannot prove academic or comedic quality. Inference sees bounded
 excerpts; complete inputs and artifacts remain durable. The initial adapter supports

@@ -487,8 +487,13 @@ when the complete Markdown paper is saved and sent as an attachment. Incoming
 peer replies become source-linked workflow inputs rather than unrelated banter.
 The discussion can require many exchanges. Each fresh peer response is assessed
 against a specific candidate, comparison, critique, and resolution; Aimee sends a
-substantive follow-up while a requirement remains unresolved. Readiness must cite
-verbatim peer evidence, with resolution from the latest reply after a follow-up.
+substantive, goal-specific follow-up while a requirement remains unresolved. Four
+bounded selection tasks identify actual source passages across the durable history;
+the bridge supplies their verbatim text. Resolution requires evidence after a
+follow-up, and remains valid through later tangential replies. Assessment inference
+is isolated from ordinary chat persona and retrieval. Parse failures return typed
+stage failures rather than malformed-request errors. An agreed-argument brief
+carries candidate, comparison, critique and resolution into drafting and revision.
 The complete discussion and cumulative synthesis survive restart. While waiting,
 the WFE parks at `conversation_input`; a fresh response from the configured peer
 identity resumes the existing stage. There is no conversation turn limit. Ordinary human messages still receive replies.
@@ -502,6 +507,9 @@ supports only `discord-paper`; do not apply it to a shared coding WFE. The Go WF
 continues to own admission, scheduling, stage transitions, pause/resume/stop,
 recovery, and artifacts. The bridge's status watcher only mirrors state and resumes
 a stage when the requested input arrives; it does not implement another scheduler.
+`GET /workflow/health` reports readiness after Discord connects. Deployments wait
+for this before resuming a held run. After startup the watcher can retry a confirmed
+Unix socket connection failure once per run; model failures remain visible.
 
 Authorized Discord goal replacement stops the previous unfinished run. Pause,
 resume, and cancel operate on the persisted run ID. Status queries report actual

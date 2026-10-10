@@ -251,3 +251,121 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.runner.step(request)
         self.bot.send_chat_reply.assert_awaited_once()
+
+    def assessment_fixture(self):
+        contributions = [
+            {"message":"1","text":"Fool's Mate is the funniest loss. I challenge the claim that every blunder is a theatrical choice."},
+            {"message":"2","text":"The gap between grand strategy and physical collapse is funnier than ordinary resignation."},
+            {"message":"3","text":"Frame it as overconfidence rather than a deliberate sacrifice; that resolves the objection."},
+        ]
+        decision = {"summary":"Overconfidence produces the comic gap; intentionality is a limitation.","evidence":{
+            "candidate":{"message_id":"1","quote":"Fool's Mate is the funniest loss"},
+            "comparison":{"message_id":"2","quote":"funnier than ordinary resignation"},
+            "critique":{"message_id":"1","quote":"I challenge the claim"},
+            "resolution":{"message_id":"3","quote":"overconfidence rather than a deliberate sacrifice"}}}
+        return contributions, decision
+
+    def test_evidence_choice_accepts_fenced_json_and_missing_evidence(self):
+        self.assertEqual(ChatWorkflow.parse_choice('```json\n{"choice":0}\n```',3),0)
+        self.assertEqual(ChatWorkflow.parse_choice('{"choice":-1}',3),-1)
+
+    def test_evidence_choice_rejects_hallucinated_ids_and_wrong_types(self):
+        from workflow_chat import AssessmentError
+        for raw in ('{}','[]','{"choice":true}','{"choice":"0"}','{"choice":4}','{"choice":-2}','{"choice":'):
+            with self.assertRaises(AssessmentError):
+                ChatWorkflow.parse_choice(raw,3)
+
+    async def test_malformed_model_assessment_gets_one_bounded_repair(self):
+        contributions, decision = self.assessment_fixture()
+        self.runner.infer = AsyncMock(side_effect=['{"choice":','{"choice":0}','{"choice":1}','{"choice":0}','{"choice":1}'])
+        self.runner.assess_discussion = ChatWorkflow.assess_discussion.__get__(self.runner)
+        parsed = await self.runner.assess_discussion("Write the funniest chess paper", "Fool's Mate", {"exchanges":[{"after":1,"aimee":"Challenge the thesis"}]}, contributions,456)
+        self.assertTrue(parsed["ready"])
+        self.assertEqual(self.runner.infer.await_count,5)
+        self.assertIn("failed validation",self.runner.infer.call_args_list[1].args[1])
+
+    async def test_model_parse_failure_is_not_http_bad_request(self):
+        from workflow_chat import AssessmentError
+        await self.bind()
+        self.runner.step = AsyncMock(side_effect=AssessmentError("invalid_json_after_repair"))
+        response = await self.runner.handle(SimpleNamespace(json=AsyncMock(return_value=self.request("discuss"))))
+        self.assertEqual(response.status,200)
+        self.assertEqual(json.loads(response.text)["status"],"failed")
+        self.assertIn("invalid_json_after_repair",response.text)
+
+    def test_history_retrieval_recovers_early_critique_after_long_drift(self):
+        contributions,_ = self.assessment_fixture()
+        contributions += [{"message":str(i+4),"text":"An elaborate wireframe animation and a sound effect."} for i in range(30)]
+        selected=ChatWorkflow.discussion_sources(contributions,{"exchanges":[{"after":1,"aimee":"Address the objection"}]})
+        selected_ids={m["message_id"] for m in selected}
+        self.assertTrue({"1","2","3"}.issubset(selected_ids))
+        self.assertTrue(next(m for m in selected if m["message_id"]=="3")["after_followup"])
+
+    def test_followup_targets_missing_critique_and_keeps_aimee_voice(self):
+        reply=self.runner.discussion_followup("Write a paper on funniest chess loss with Samy", "Chan, wireframes, tho", {"criteria":{"candidate":"Fools Mate","comparison":"Ordinary resignation"}})
+        self.assertIn("strongest objection",reply)
+        self.assertIn("1. f3 e5 2. g4 Qh4#",reply)
+        self.assertNotIn("Chan",reply)
+        self.assertNotIn("wireframes",reply)
+
+    async def test_workflow_inference_does_not_use_ordinary_chat_or_memory(self):
+        from aiohttp import web
+        calls=[]
+        async def endpoint(request):
+            calls.append(await request.json())
+            return web.json_response({"choices":[{"message":{"content":"Task result"},"finish_reason":"stop"}]})
+        app=web.Application();app.router.add_post("/v1/chat/completions",endpoint)
+        runner=web.AppRunner(app);await runner.setup();socket=Path(self.tmp.name)/"model.sock"
+        await web.UnixSite(runner,str(socket)).start()
+        self.bot.config=SimpleNamespace(aimee_socket=socket,endpoint="http://127.0.0.1:19852/v1/chat/completions",model="fixture")
+        try:
+            self.assertEqual(await self.runner.infer("Academic writer","Write a section"),"Task result")
+            self.assertEqual(calls[0]["messages"],[{"role":"system","content":"Academic writer"},{"role":"user","content":"Write a section"}])
+            self.assertEqual(calls[0]["max_tokens"],512)
+        finally:await runner.cleanup()
+
+    async def test_paper_sections_keep_agreed_critique_when_outline_is_large(self):
+        self.runner.write=ChatWorkflow.write.__get__(self.runner)
+        self.runner.infer=AsyncMock(return_value="Academic section")
+        outline="An extended outline. "*200+"\n\n## Agreed argument\n\nCritique: Accidental blunders are not deliberate theatrical choices.\n\n## Discussion synthesis\nSummary\n\n"+"Wireframe effects. "*200
+        paper=await self.runner.write("draft","Write a chess paper",outline,456)
+        self.assertEqual(self.runner.infer.await_count,6)
+        for call in self.runner.infer.call_args_list:
+            self.assertIn("Accidental blunders are not deliberate theatrical choices",call.args[1])
+            self.assertLessEqual(len((call.args[0]+call.args[1]).encode()),4800)
+        self.assertIn(outline,paper)
+
+    async def test_resolution_does_not_have_to_be_the_last_banter_message(self):
+        await self.bind()
+        request=self.request("discuss","Candidates")
+        await self.runner.step(request)
+        self.runner.ingest(self.snapshot,SimpleNamespace(message_id=1,user_id=999,author_name="Samy",is_bot=True,text="Opening candidate argument"))
+        self.assertEqual((await self.runner.step(request))["status"],"pending")
+        resolved="The objection is resolved by distinguishing overconfidence from deliberate sacrifice."
+        self.runner.ingest(self.snapshot,SimpleNamespace(message_id=2,user_id=999,author_name="Samy",is_bot=True,text=resolved))
+        self.runner.ingest(self.snapshot,SimpleNamespace(message_id=3,user_id=999,author_name="Samy",is_bot=True,text="A later tangential animation idea"))
+        self.runner.assess_discussion.side_effect=None
+        self.runner.assess_discussion.return_value={"ready":True,"summary":"A complete argument","reply":"","evidence":{criterion:resolved for criterion in ("candidate","comparison","critique","resolution")}}
+        result=await self.runner.step(request)
+        self.assertEqual(result["status"],"advanced")
+        self.assertIn("## Agreed argument",result["artifact"])
+        self.assertIn(resolved,result["artifact"])
+
+    async def test_startup_transport_failure_recovers_once_without_hiding_model_failure(self):
+        workflow={"id":"wi_test","pause_reason":"delegate_failed"}
+        self.runner.client.call.return_value={"events":[{"kind":"pause","detail":"delegate_failed: call runner: dial unix /private/runner.sock: connection refused"}]}
+        await self.runner.recover_transport(workflow)
+        await self.runner.recover_transport(workflow)
+        self.runner.client.control.assert_awaited_once_with("wi_test","resume")
+        self.runner.transport_recoveries.clear();self.runner.client.control.reset_mock()
+        self.runner.client.call.return_value={"events":[{"kind":"pause","detail":"delegate_failed: discussion_assessment: invalid_json_after_repair"}]}
+        await self.runner.recover_transport(workflow)
+        self.runner.client.control.assert_not_awaited()
+
+    async def test_workflow_health_requires_discord_ready(self):
+        self.bot.is_ready=lambda:False
+        self.assertEqual((await self.runner.health(None)).status,503)
+        self.bot.is_ready=lambda:True
+        response=await self.runner.health(None)
+        self.assertEqual(response.status,200)
+        self.assertTrue(json.loads(response.text)["ready"])
