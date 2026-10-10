@@ -34,7 +34,7 @@ Threads require access to the intended thread and Send Messages in Threads permi
 ```sh
 mkdir -p ~/.local/share/aimee-discord ~/.config/aimee-discord
 chmod 700 ~/.local/share/aimee-discord ~/.config/aimee-discord
-cp integrations/discord/{bridge.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
+cp integrations/discord/{bridge.py,behavior.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
   ~/.local/share/aimee-discord/
 python3 -m venv ~/.local/share/aimee-discord/venv
 ~/.local/share/aimee-discord/venv/bin/python -m pip install \
@@ -394,3 +394,57 @@ Humor follows the actual topic; cosmic references are occasional seasoning.
 No recurring catchphrases or forced jokes. A configured `system_context` overrides
 this default. Klingon-only checks remain available for an explicitly configured
 Klingon persona and are inactive with the English default.
+
+### Runtime personas and conversational goals
+
+Set `behavior_db` in the bridge configuration to an absolute SQLite path on a writable,
+private persistent directory. The CPU Compose overlay provides `/var/lib/aimee-behavior`.
+The operator must initialize that volume for the bridge's UID 1000 with mode 0700.
+`behavior.py` controls live state; changes take effect on the next admitted turn without
+rebuilding or restarting. Bots and human chat cannot execute these controls.
+
+Scopes are exact `GUILD_ID:CHANNEL_ID` pairs. A thread uses its own channel ID; it does
+not inherit the parent channel's persona or goal. Different scopes can share a goal by
+operator configuration, but this first implementation does not merge their progress.
+
+Run under the bridge's service identity, with access to its persistent state directory:
+
+```sh
+python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
+  put-persona librarian examples/haunted-librarian.txt
+python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
+  --scope GUILD_ID:CHANNEL_ID persona librarian
+python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
+  --scope GUILD_ID:CHANNEL_ID goal examples/business-goal.json
+python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
+  --scope GUILD_ID:CHANNEL_ID status
+```
+
+For the deployed container, use `docker exec -i aimee-discord-knowledge-discord-bridge-1
+python /app/behavior.py ...`; copy operator-selected profile/goal files into `/tmp` first.
+The image contains the controller, not the example fixtures. `persona default` restores
+the configured default. Updating an existing profile increments its version and affects
+all scopes selecting it on their next turn.
+
+Goals have an objective and 1–8 ordered milestones. Each milestone specifies a label,
+a literal evidence phrase (`match`, case-insensitive), and `speaker`: `human` (default),
+`assistant`, or `either`. Bot input never counts as human evidence. Literal matching is
+an explicit completion signal, not a semantic judge of whether a business is actually
+viable. Progress commits only after a successful public delivery. It stores milestone
+evidence, message IDs, the next pending step, turn counts and three bounded exchanges.
+When all signals have been observed, status becomes `review` and goal conditioning stops.
+An operator confirms `complete`. The goal controller grants no tools or permissions,
+and creates no unsolicited turns.
+
+Use `pause`, `resume`, `cancel`, or `complete` in place of `status` to control the goal.
+`goal FILE` replaces it. State survives a process/container restart. A control change
+between snapshot and delivery prevents the old turn from overwriting new goal state.
+The response already in flight retains its original persona and goal snapshot.
+On a persona swap, earlier assistant voice is removed from recent history after delivery;
+human context and approved factual memory remain.
+
+The deployed transport uses textual context. `export-attention` emits a versioned
+`aimee.behavior.v1` manifest for the native plugin owner, including scope, state hash,
+operator authority and mandatory persona/active-goal slots. It is explicitly
+`manifest-only`; emitting it does not install an attention bank. See the
+[native behavior requirements](../../docs/proposals/pending/native-attention-personas-goals.md).

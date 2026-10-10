@@ -32,7 +32,9 @@ services:
       - ${AIMEE_DISCORD_CONFIG_DIR}/model.key:/run/discord/model.key:ro
       - ${AIMEE_DISCORD_CONFIG_DIR}/knowledge.token:/run/discord/knowledge.token:ro
       - discord-chat-home:/run/aimee-server:ro
+      - discord-behavior:/var/lib/aimee-behavior
 volumes:
+  discord-behavior:
   discord-chat-home:
     external: true
     name: ${AIMEE_DISCORD_SERVER_HOME_VOLUME:?Set the dedicated chat server home volume}

@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from behavior import BehaviorStore
+
 from aiohttp import web
 import aiohttp
 import discord
@@ -630,6 +632,51 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await client.reply([], "Who told you Kibukx's height?"),
                              "De' nobwI' Sovbe'lu'. nuq De'?")
         self.assertIn("Speak exclusively in Klingon", config.system_context)
+
+    async def test_runtime_persona_and_goal_are_snapshotted_and_budgeted(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "The library ghosts have reserved your printer."}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        store = BehaviorStore(self.root / "behavior.sqlite")
+        store.put_persona("librarian", "Speak English as a haunted librarian.")
+        store.edit("one", "persona", "librarian")
+        snap = store.edit("one", "goal", {"objective": "Invent a haunted library business.",
+                    "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
+        async with aiohttp.ClientSession() as session:
+            await ModelClient(config, session).reply([], "What next?", behavior=snap)
+        system = requests[0]["messages"][0]["content"]
+        self.assertIn("haunted librarian", system)
+        self.assertIn("Invent a haunted library business", system)
+        self.assertIn("never permissions", system)
+        self.assertNotIn(config.system_context, system)
+
+    async def test_runtime_switch_removes_old_voice_and_failed_delivery_does_not_advance_goal(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite")
+        bot = self.bot(config)
+        scope = f"{GUILD}:{CHANNEL}"
+        bot.behavior_store.put_persona("one", "Speak as an English haunted librarian.")
+        bot.behavior_store.edit(scope, "persona", "one")
+        bot.behavior_store.edit(scope, "goal", {"objective": "Agree a business name.",
+                  "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
+        bot.conversations.append((GUILD, CHANNEL), "Earlier user topic", "Qapla'. Old voice.")
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="New voice."), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.on_message(self.message())
+            await asyncio.wait_for(bot.queue.join(), 1)
+            history = bot.model_client.reply.await_args.args[0]
+            self.assertEqual(history, [{"role": "user", "content": "Earlier user topic"}])
+            self.assertNotIn("Qapla'", str(bot.conversations.get((GUILD, CHANNEL))))
+            bot.send_chat_reply.side_effect = OSError("delivery failed")
+            await bot.on_message(self.message(id=42, content=f"<@{BOT}> name agreed"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            goal = bot.behavior_store.snapshot(scope)["goal"]
+            self.assertEqual(goal["turns"], 1)
+            self.assertFalse(goal["milestones"][0]["done"])
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
 
     async def test_model_wire_auth_rotation_history_budget_and_bound_response(self):
         requests = []
