@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 import aiohttp
 import discord
 
-from behavior import BehaviorStore, context as behavior_context, persona_key
+from behavior import BehaviorStore, context as behavior_context, persona_key, chat_control, conversational_goal, goal_reply
 
 LOG = logging.getLogger("aimee.discord")
 WEBHOOK_URL = re.compile(r"https://discord\.com/api(?:/v10)?/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{40,200}\Z")
@@ -85,6 +85,7 @@ class Config:
     knowledge_key_file: Path | None = None
     peer_bot_ids: tuple[int, ...] = ()
     behavior_db: Path | None = None
+    behavior_operator_ids: tuple[int, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -136,6 +137,10 @@ class Config:
             raise ValueError("system_context must be a bounded nonempty string")
         if not isinstance(model, str) or not model or len(model) > 256:
             raise ValueError("model name is required")
+        operators = value.get("behavior_operator_ids", [])
+        if not isinstance(operators, list) or len(operators) > 32 or any(
+                not re.fullmatch(r"[0-9]{17,20}", str(uid)) for uid in operators):
+            raise ValueError("behavior_operator_ids must be Discord user IDs")
         behavior_db = Path(value["behavior_db"]) if value.get("behavior_db") else None
         if behavior_db and not behavior_db.is_absolute():
             raise ValueError("behavior_db must be absolute")
@@ -144,7 +149,7 @@ class Config:
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
                    system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket,
-                   peer_bot_ids=tuple(int(peer) for peer in peers), behavior_db=behavior_db)
+                   peer_bot_ids=tuple(int(peer) for peer in peers), behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)))
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -732,6 +737,7 @@ class Turn:
     is_bot: bool = False
     peer_target: int | None = None
     peer_targets: tuple[int, ...] = ()
+    can_control_behavior: bool = False
 
 
 def render_mentions(text: str, identities: dict[int, str]) -> str:
@@ -849,7 +855,8 @@ class ChatBot(discord.Client):
         return Turn(message.id, message.guild.id, message.channel.id, message.author.id, text,
                     message.channel.id if parent == config.channel_id else None,
                     str(getattr(message.author, "display_name", getattr(message.author, "name", "")))[:80],
-                    mentioned, peer, peer_target, mentioned_peers)
+                    mentioned, peer, peer_target, mentioned_peers,
+                    not peer and message.author.id in config.behavior_operator_ids)
 
     async def on_message(self, message):
         turn = self.admitted_turn(message)
@@ -894,6 +901,35 @@ class ChatBot(discord.Client):
                         # Keep user context; drop obsolete assistant voice on a swap.
                         history = [item for item in history if item["role"] != "assistant"]
                     options["behavior"] = snapshot
+                try:
+                    control = chat_control(turn.text) if self.behavior_store else None
+                except ValueError:
+                    await self.send_chat_reply(turn.channel_id, "Please keep the goal objective within 600 UTF-8 bytes.", ())
+                    continue
+                if control:
+                    action, objective = control
+                    if action != "status" and not turn.can_control_behavior:
+                        reply = "Only an authorized human goal operator can change my goal."
+                    else:
+                        if action != "status":
+                            try:
+                                snapshot = self.behavior_store.edit(
+                                    f"{turn.guild_id}:{turn.channel_id}", action,
+                                    conversational_goal(objective) if action == "goal" else None)
+                            except ValueError:
+                                reply = "That goal control does not apply to the current goal state."
+                            else:
+                                reply = goal_reply(snapshot)
+                        else:
+                            reply = goal_reply(snapshot)
+                    # Goal controls are application state, not personal factual evidence.
+                    # No model gets to replace a saved objective with a generic aspiration.
+                    control_peers = (turn.peer_target,) if action == "status" and turn.peer_target else ()
+                    if control_peers:
+                        reply = f"<@{turn.peer_target}> " + reply
+                    await self.send_chat_reply(turn.channel_id, reply, control_peers)
+                    self.conversations.append(key, turn.text, reply)
+                    continue
                 if ModelClient.personal_height_statement(turn):
                     # A public statement about a Discord person is evidence for
                     # a correction, not a model truth-verification decision.

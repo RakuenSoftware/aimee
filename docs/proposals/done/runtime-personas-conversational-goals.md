@@ -7,7 +7,7 @@ Implemented in the Discord bridge on 2026-10-10:
   steps, bounded exchanges and operator pause/resume/cancel/complete controls.
 - Atomic per-turn snapshots and conditional progress updates after successful delivery.
 - Profile changes take effect without restart, preserving human context and dropping
-  the old assistant voice. Controls cannot be executed by human or bot chat content.
+  the old assistant voice. Configured human operators can issue explicit Discord goal controls; bots and unconfigured humans cannot change goal state.
 - Context delivery on the current CPU bot, a private persistent SQLite volume, and
   a native `aimee.behavior.v1` export artifact explicitly marked manifest-only.
 - Completion evidence moves goals to review; the operator confirms final completion.

@@ -194,5 +194,35 @@ def main():
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
+def chat_control(text):
+    """Only explicit, whole-message commands; quotations and bot prose aren't authority."""
+    import re
+    text = " ".join(text.split())
+    if re.fullmatch(r"(?:what is|what's|tell me|show me) your (?:current |active )?goal[?.!]?", text, re.IGNORECASE):
+        return "status", None
+    match = re.fullmatch(r"(?:you (?:now )?have a new goal\s*:|your (?:new )?goal is\s*[:：]?|set your goal to\s*[:：]?)\s*(.+)", text, re.IGNORECASE)
+    if match:
+        return "goal", bounded(match[1], 600, "goal objective")
+    match = re.fullmatch(r"(pause|resume|cancel|complete) (?:your |the )?(?:current |active )?goal[.!]?", text, re.IGNORECASE)
+    if match:
+        return match[1].lower(), None
+    return None
+
+
+def conversational_goal(objective):
+    return {"objective": objective,
+            "milestones": [{"label": "Develop and present the requested result for human approval",
+                             "match": "goal complete", "speaker": "human"}]}
+
+
+def goal_reply(snapshot):
+    goal = snapshot.get("goal")
+    if not goal:
+        return "I don't have an assigned conversational goal in this channel."
+    label = {"active": "My current goal", "paused": "My paused goal", "review": "My goal awaiting your review",
+             "complete": "My completed goal", "cancelled": "My cancelled goal"}[goal["status"]]
+    return f"{label}: {goal['objective']}"
+
+
 if __name__ == "__main__":
     main()

@@ -401,7 +401,7 @@ Set `behavior_db` in the bridge configuration to an absolute SQLite path on a wr
 private persistent directory. The CPU Compose overlay provides `/var/lib/aimee-behavior`.
 The operator must initialize that volume for the bridge's UID 1000 with mode 0700.
 `behavior.py` controls live state; changes take effect on the next admitted turn without
-rebuilding or restarting. Bots and human chat cannot execute these controls.
+rebuilding or restarting. Bots cannot execute these controls. Configured human operators can also use explicit Discord goal commands below.
 
 Scopes are exact `GUILD_ID:CHANNEL_ID` pairs. A thread uses its own channel ID; it does
 not inherit the parent channel's persona or goal. Different scopes can share a goal by
@@ -448,3 +448,26 @@ The deployed transport uses textual context. `export-attention` emits a versione
 operator authority and mandatory persona/active-goal slots. It is explicitly
 `manifest-only`; emitting it does not install an attention bank. See the
 [native behavior requirements](../../docs/proposals/pending/native-attention-personas-goals.md).
+
+### Assign and inspect goals in Discord
+
+Configure `behavior_operator_ids` as the Discord user IDs allowed to change goals.
+The default is empty: ordinary chat admission does not grant goal-control authority.
+Only authenticated human message authors in this list can write goal state; bot
+accounts are excluded even if their ID appears in the list. No display-name lookup
+or model judgement grants this authority.
+
+Mention Aimee with one of these explicit commands:
+
+- `You now have a new goal: Write an academic paper on the funniest way of losing at chess with Samy.`
+- `What is your goal?`
+- `Pause your goal.` / `Resume your goal.` / `Cancel your goal.` / `Complete your goal.`
+
+`Your goal is ...` and `Set your goal to ...` are also supported. Goal objectives
+are bounded to 600 UTF-8 bytes. Assignments persist before acknowledgement and are
+not captured as personal factual claims. Goal questions read the scoped store
+without inference; persona wording cannot replace the objective with a generic
+assistant aspiration. Any admitted participant may inspect the channel's goal.
+Simple chat-created goals stay active until operator completion/cancellation; their
+single human evidence marker is `goal complete`, which requests review rather than
+claiming semantic success. Use the CLI JSON form for explicit multi-step milestones.

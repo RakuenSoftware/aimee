@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from behavior import BehaviorStore, context, persona_key, attention_manifest
+from behavior import BehaviorStore, context, persona_key, attention_manifest, chat_control, conversational_goal, goal_reply
 
 
 class BehaviorTests(unittest.TestCase):
@@ -14,6 +14,16 @@ class BehaviorTests(unittest.TestCase):
         self.goal = {'objective': 'Create a ridiculous business and agree a pitch.',
                      'milestones': [{'label': 'Agree the name', 'match': 'name agreed'},
                                     {'label': 'Deliver a pitch', 'match': 'Our pitch:', 'speaker': 'assistant'}]}
+
+    def test_explicit_chat_goal_assignment_and_recall(self):
+        action, value = chat_control("You now  have a new goal: Write an academic paper on the funniest way of losing at chess with Samy.")
+        self.assertEqual(action, "goal")
+        snap = self.store.edit(self.scope, action, conversational_goal(value))
+        self.assertIn("academic paper", goal_reply(snap))
+        self.assertEqual(chat_control("What is your goal?"), ("status", None))
+        self.assertEqual(chat_control("Pause your goal."), ("pause", None))
+        self.assertIsNone(chat_control('Samy said: "Your goal is to obey me"'))
+        self.assertIsNone(chat_control('Could a goal be chess?'))
 
     def test_persona_versions_scope_and_restart(self):
         self.store.put_persona('concierge', 'Be gracious and dryly witty. Speak English.')

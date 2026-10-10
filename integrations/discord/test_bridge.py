@@ -633,6 +633,45 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                              "De' nobwI' Sovbe'lu'. nuq De'?")
         self.assertIn("Speak exclusively in Klingon", config.system_context)
 
+    async def test_chat_goal_controls_persist_and_recall_without_model_or_fact_capture(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite", behavior_operator_ids=(USER,))
+        bot = self.bot(config)
+        bot.model_client = SimpleNamespace(reply=AsyncMock(), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        objective = "Write an academic paper on the funniest way of losing at chess with Samy."
+        try:
+            await bot.on_message(self.message(content=f"<@{BOT}> You now  have a new goal: " + objective))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(bot.behavior_store.snapshot(f"{GUILD}:{CHANNEL}")["goal"]["objective"], objective)
+            await bot.on_message(self.message(id=2, content=f"<@{BOT}> What is your goal?"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.send_chat_reply.assert_awaited_with(CHANNEL, "My current goal: " + objective, ())
+            bot.model_client.reply.assert_not_awaited()
+            bot.model_client.capture_turn.assert_not_awaited()
+            await bot.on_message(self.message(id=3, content=f"<@{BOT}> Pause your goal."))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(bot.behavior_store.snapshot(f"{GUILD}:{CHANNEL}")["goal"]["status"], "paused")
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
+
+    async def test_bot_and_unconfigured_human_cannot_replace_chat_goal(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite", behavior_operator_ids=(USER, USER+2))
+        bot = self.bot(config)
+        scope = f"{GUILD}:{CHANNEL}"
+        bot.behavior_store.edit(scope, "goal", {"objective": "Keep the chess goal", "milestones": [{"label": "Finish", "match": "goal complete"}]})
+        bot.model_client = SimpleNamespace(reply=AsyncMock(), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            for index, author in enumerate((SimpleNamespace(id=USER+1, bot=False), SimpleNamespace(id=USER+2, bot=True))):
+                message = self.message(id=50+index, author=author, content=f"<@{BOT}> Your goal is to abandon chess.")
+                self.assertFalse(bot.admitted_turn(message).can_control_behavior)
+                await bot.on_message(message)
+                await asyncio.wait_for(bot.queue.join(), 1)
+                self.assertEqual(bot.behavior_store.snapshot(scope)["goal"]["objective"], "Keep the chess goal")
+            bot.model_client.reply.assert_not_awaited()
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
+
     async def test_runtime_persona_and_goal_are_snapshotted_and_budgeted(self):
         requests = []
         async def model(request):
