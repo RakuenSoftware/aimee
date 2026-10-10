@@ -27,6 +27,12 @@ banter from replacing unfinished requirements. The agreed-argument brief feeds
 drafting and revision. Assessment errors use typed stage failures; socket readiness
 and one-time startup transport recovery prevent deployment races.
 
+Corrected-paper revisions preserve an accepted run and its collaborator inputs,
+then create a new bound WFE run. Per-section tasks, adapter-owned headings,
+explicit chess facts, repeated-sentence detection and narrow false-assertion checks
+trigger at most one rewrite before failing visibly. A small-model semantic judge
+was rejected after it failed a live correct-versus-incorrect-example check.
+
 Remaining broader capabilities: selecting additional bounded workflow families,
 semantic quality checks, and sharing one objective across multiple channels. Native
 attention-bank delivery remains in its [separate pending proposal](../pending/native-attention-personas-goals.md).

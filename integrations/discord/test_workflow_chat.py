@@ -327,6 +327,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_paper_sections_keep_agreed_critique_when_outline_is_large(self):
         self.runner.write=ChatWorkflow.write.__get__(self.runner)
         self.runner.infer=AsyncMock(return_value="Academic section")
+        self.runner.paper_issue=AsyncMock(return_value=None)
         outline="An extended outline. "*200+"\n\n## Agreed argument\n\nCritique: Accidental blunders are not deliberate theatrical choices.\n\n## Discussion synthesis\nSummary\n\n"+"Wireframe effects. "*200
         paper=await self.runner.write("draft","Write a chess paper",outline,456)
         self.assertEqual(self.runner.infer.await_count,6)
@@ -369,3 +370,125 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         response=await self.runner.health(None)
         self.assertEqual(response.status,200)
         self.assertTrue(json.loads(response.text)["ready"])
+
+    async def test_revision_preserves_accepted_sources_and_rejects_corruption(self):
+        await self.bind()
+        self.item["state"]="accepted"
+        root=Path(self.tmp.name)/"wfe-artifacts"/"wi_test"
+        root.mkdir(parents=True)
+        for stage in ("candidates","discuss","outline"):
+            content="Accepted " + stage
+            value=result(content)
+            (root/("node-"+stage+".json")).write_text(json.dumps({"type":"proposal","content":base64.b64encode(content.encode()).decode(),"hash":value["content_hash"]}))
+        self.bot.config.aimee_socket=Path(self.tmp.name)/"api.sock"
+        original=self.store.snapshot(self.snapshot["scope"])
+        corrupt=root/"node-discuss.json"
+        saved=corrupt.read_text()
+        corrupt.write_text(saved.replace("proposal","invalid"))
+        with self.assertRaises(ValueError):await self.runner.revise_completed(original)
+        self.assertEqual(self.store.snapshot(original["scope"]),original)
+        corrupt.write_text(saved)
+        revised=await self.runner.revise_completed(original)
+        self.assertEqual(revised["goal"]["revision_of"],"wi_test")
+        self.assertNotEqual(revised["goal"]["created_at"],original["goal"]["created_at"])
+        self.assertNotIn("workflow",revised["goal"])
+        self.item["state"]="active"
+        self.item["id"]="wi_revision"
+        self.runner.client.call.return_value={"work_item_id":"wi_revision"}
+        await self.runner.ensure(revised)
+        self.snapshot=self.store.snapshot(revised["scope"])
+        request=self.request("discuss","Candidates")
+        self.assertEqual((await self.runner.step(request))["artifact"],"Accepted discuss")
+        self.bot.send_chat_reply.assert_not_awaited()
+
+    async def test_paper_quality_repair_and_heading_normalization(self):
+        self.runner.write=ChatWorkflow.write.__get__(self.runner)
+        self.runner.infer=AsyncMock(side_effect=["## Abstract\nAbstract\nBlack loses foolishly.","## Abstract\nAbstract\nWhite loses; Black delivers correct mate."]+["## Section\nOriginal body."]*5)
+        self.runner.paper_issue=AsyncMock(side_effect=[0]+[None]*6)
+        paper=await self.runner.write("draft","Write a chess paper","Evidence",456)
+        self.assertNotIn("Black loses foolishly",paper)
+        self.assertEqual(paper.count("## Abstract"),1)
+        self.assertNotIn("## Section",paper)
+        self.assertNotIn("\n\nAbstract\n",paper)
+        self.assertIn("Black wins",self.runner.infer.call_args_list[1].args[1])
+        self.assertEqual(self.runner.infer.await_count,7)
+
+    async def test_repeated_quality_failure_never_delivers(self):
+        from workflow_chat import AssessmentError
+        await self.bind()
+        self.runner.write=ChatWorkflow.write.__get__(self.runner)
+        self.runner.infer=AsyncMock(return_value="Black's mating move loses.")
+        self.runner.paper_issue=AsyncMock(return_value=0)
+        with self.assertRaises(AssessmentError):await self.runner.step(self.request("draft","Outline"))
+        self.assertEqual(self.runner.infer.await_count,2)
+        self.bot.send_paper.assert_not_awaited()
+
+
+    async def test_factual_checker_rejects_assertions_and_allows_hypotheticals(self):
+        self.assertEqual(await self.runner.paper_issue("Analysis","Black loses after Qh4#", "", chess=True),0)
+        self.assertEqual(await self.runner.paper_issue("Analysis","White plays 1. f3 e5 2. g4 Qh4#.", "", chess=True),0)
+        self.assertEqual(await self.runner.paper_issue("Analysis","Qh4# is a desperate losing move.", "", chess=True),0)
+        self.assertIsNone(await self.runner.paper_issue("Analysis","Imagine White losing. Black correctly wins after Qh4#.", "", chess=True))
+        self.assertIsNone(await self.runner.paper_issue("Analysis","Black wins and White loses after Qh4#.", "", chess=True))
+        self.assertEqual(await self.runner.paper_issue("Analysis","Qh4# is not a calculated tactical maneuver but rather a desperate deployment of the queen.", "", chess=True),0)
+        self.assertIsNone(await self.runner.paper_issue("Analysis","Black's Qh4# is not a blunder. We have not played the example.", "", chess=True))
+        self.assertEqual(await self.runner.paper_issue("Method","We measured the audience reactions.", "", chess=False),1)
+        self.assertEqual(await self.runner.paper_issue("Analysis","The chessboard shattered into pieces.", "", chess=True),2)
+        self.assertEqual(await self.runner.paper_issue("Analysis","The physical disintegration of the chessboard is the joke.", "", chess=True),2)
+        self.assertIsNone(await self.runner.paper_issue("Analysis","Physical collapse of the board is a metaphor for a lost position.", "", chess=True))
+        self.assertEqual(await self.runner.paper_issue("Discussion",'Samy said "the victory is purple".', "", chess=True),3)
+        self.assertIsNone(await self.runner.paper_issue("Discussion",'Samy said "the boast is funniest".', "the boast is funniest", chess=True))
+
+    async def test_quality_checker_covers_long_tail(self):
+        issue=await self.runner.paper_issue("Analysis","Safe introduction. "*110+" Black incorrectly loses after Qh4#.","",chess=True)
+        self.assertEqual(issue,0)
+
+    async def test_repeated_long_sentence_gets_distinct_section_rewrite(self):
+        self.runner.write=ChatWorkflow.write.__get__(self.runner)
+        repeated="The humor arises from the enormous difference between the player's confident promise of strategic genius and the immediate result of a simple checkmate."
+        self.runner.infer=AsyncMock(side_effect=[repeated,repeated,"A fresh introduction."]+["Original body."]*4)
+        self.runner.paper_issue=AsyncMock(return_value=None)
+        paper=await self.runner.write("draft","Write a chess paper","Evidence",456)
+        self.assertEqual(paper.count(repeated),1)
+        self.assertIn("fresh wording",self.runner.infer.call_args_list[2].args[1])
+
+    async def test_failed_revision_can_retry_accepted_origin_but_active_cannot(self):
+        await self.bind()
+        original=self.store.snapshot(self.snapshot["scope"])
+        self.runner.update(original, revision_of="wi_origin")
+        source=self.store.snapshot(original["scope"])
+        with self.assertRaises(ValueError):await self.runner.revise_completed(source)
+        self.item["state"]="rejected"
+        self.runner.client.item=AsyncMock(side_effect=lambda run: {**self.item,"state":"accepted" if run=="wi_origin" else "rejected"})
+        self.bot.config.aimee_socket=Path(self.tmp.name)/"api.sock"
+        root=Path(self.tmp.name)/"wfe-artifacts"/"wi_origin";root.mkdir(parents=True)
+        for stage in ("candidates","discuss","outline"):
+            content="Accepted " + stage
+            (root/("node-"+stage+".json")).write_text(json.dumps({"type":"proposal","content":base64.b64encode(content.encode()).decode(),"hash":result(content)["content_hash"]}))
+        retry=await self.runner.revise_completed(source)
+        self.assertEqual(retry["goal"]["revision_of"],"wi_origin")
+        self.assertEqual(retry["goal"]["revision_previous"],"wi_test")
+
+    async def test_fools_mate_normalization_preserves_sources_and_other_lines(self):
+        text="White plays f3 and g4. Black responds with 2... e5 and 1... Qh4#.\n\n## Collaboration evidence\nSamy: 2... e5"
+        fixed=self.runner.normalize_chess_notation(text)
+        self.assertIn("Black responds with 1... e5 and 2... Qh4#",fixed)
+        self.assertTrue(fixed.endswith("Samy: 2... e5"))
+        other="An unrelated opening continues 2... e5."
+        self.assertEqual(self.runner.normalize_chess_notation(other),other)
+
+    async def test_notation_correction_uses_checked_accepted_paper_without_inference(self):
+        await self.bind();self.item["state"]="accepted"
+        self.bot.config.aimee_socket=Path(self.tmp.name)/"api.sock"
+        root=Path(self.tmp.name)/"wfe-artifacts"/"wi_test";root.mkdir(parents=True)
+        for stage in ("candidates","discuss","outline","draft","revise"):
+            content="Accepted " + stage if stage in ("candidates","discuss","outline") else "White f3, g4; Black 2... e5 and 2... Qh4#.\n\n## Collaboration evidence\nOriginal source"
+            (root/("node-"+stage+".json")).write_text(json.dumps({"type":"proposal","content":base64.b64encode(content.encode()).decode(),"hash":result(content)["content_hash"]}))
+        snap=await self.runner.revise_completed(self.snapshot,notation_only=True)
+        self.item.update(state="active",id="wi_corrected")
+        self.runner.client.call.return_value={"work_item_id":"wi_corrected"}
+        await self.runner.ensure(snap);self.snapshot=self.store.snapshot(snap["scope"])
+        value=await self.runner.step(self.request("revise","Draft"))
+        self.assertIn("Black 1... e5",value["artifact"])
+        self.assertIn("Original source",value["artifact"])
+        self.runner.write.assert_not_awaited()

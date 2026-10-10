@@ -494,7 +494,27 @@ follow-up, and remains valid through later tangential replies. Assessment infere
 is isolated from ordinary chat persona and retrieval. Parse failures return typed
 stage failures rather than malformed-request errors. An agreed-argument brief
 carries candidate, comparison, critique and resolution into drafting and revision.
-The complete discussion and cumulative synthesis survive restart. While waiting,
+The complete discussion and cumulative synthesis survive restart.
+Repeated long sentences require a rewrite. Paper sections have distinct writing tasks and explicit chess facts for the chess
+objective. The adapter owns headings and removes redundant model headings. Narrow assertion
+checks review each full section for incorrect winner attribution, invented games or
+experiments, literal board destruction, and invented collaborator quotations. A
+reported defect triggers one rewrite; persistent defects fail visibly
+before delivery. The small model failed a live false-positive qualification as a judge, so these
+checks use explicit assertion rules. This is not a human approval gate, and does
+not guarantee exhaustive factual or stylistic quality.
+
+`ChatWorkflow.revise_completed(snapshot)` creates a new scoped writing goal from
+an accepted run. It integrity-checks and durably preserves the candidate,
+discussion and outline artifacts in one transaction with the new goal. The new
+WFE run reuses those inputs, then writes, checks, revises and delivers a new paper;
+it does not reopen or overwrite the accepted run. Failed revisions can retry from
+their accepted origin; an active run cannot be replaced by this helper.
+`notation_only=True` derives corrected draft/revision artifacts from an accepted
+chess paper, preserving its authored prose and original evidence. Canonical move
+number normalization applies only to the known Fool's Mate example, both during
+writing and this repair. The helper is an operator API,
+not a new command available to peer bots. While waiting,
 the WFE parks at `conversation_input`; a fresh response from the configured peer
 identity resumes the existing stage. There is no conversation turn limit. Ordinary human messages still receive replies.
 
