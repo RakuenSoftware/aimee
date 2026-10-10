@@ -7,6 +7,7 @@ from collections import OrderedDict
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 import json
+import io
 import logging
 import os
 from pathlib import Path
@@ -86,6 +87,8 @@ class Config:
     peer_bot_ids: tuple[int, ...] = ()
     behavior_db: Path | None = None
     behavior_operator_ids: tuple[int, ...] = ()
+    workflow_enabled: bool = False
+    workflow_peer_bot_ids: tuple[int, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -144,12 +147,18 @@ class Config:
         behavior_db = Path(value["behavior_db"]) if value.get("behavior_db") else None
         if behavior_db and not behavior_db.is_absolute():
             raise ValueError("behavior_db must be absolute")
+        workflow_enabled = value.get("workflow_enabled", False)
+        workflow_peers = value.get("workflow_peer_bot_ids", [])
+        if not isinstance(workflow_enabled, bool) or (workflow_enabled and (not behavior_db or not aimee_socket)):
+            raise ValueError("workflows require a behavior database and authenticated Aimee socket")
+        if not isinstance(workflow_peers, list) or len(workflow_peers) > 8 or any(not re.fullmatch(r"[0-9]{17,20}", str(uid)) for uid in workflow_peers):
+            raise ValueError("workflow_peer_bot_ids must contain verified Discord bot IDs")
         return cls(**paths, guild_id=int(value["guild_id"]),
                    channel_id=int(value["channel_id"]), endpoint=endpoint,
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
                    system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket,
-                   peer_bot_ids=tuple(int(peer) for peer in peers), behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)))
+                   peer_bot_ids=tuple(int(peer) for peer in peers), behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)), workflow_enabled=workflow_enabled, workflow_peer_bot_ids=tuple(map(int, workflow_peers)))
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -790,6 +799,7 @@ class ChatBot(discord.Client):
         self.startup_announced = False
         self.behavior_store = BehaviorStore(config.behavior_db) if config.behavior_db else None
         self.persona_versions = {}
+        self.workflow = None
 
     async def setup_hook(self):
         self.delivery_session = aiohttp.ClientSession(trust_env=False)
@@ -800,9 +810,15 @@ class ChatBot(discord.Client):
             await self.model_client.knowledge_action("memory.serve", {
                 "view": "relevant_context", "task": "startup",
                 "project": self.model_client.channel_project(self.config.channel_id), "limit": 1})
+        if self.config.workflow_enabled:
+            from workflow_chat import ChatWorkflow
+            self.workflow = ChatWorkflow(self)
+            await self.workflow.start()
         self.worker = asyncio.create_task(self.process_turns())
 
     async def close(self):
+        if self.workflow:
+            await self.workflow.close()
         if self.worker:
             self.worker.cancel()
             await asyncio.gather(self.worker, return_exceptions=True)
@@ -873,15 +889,29 @@ class ChatBot(discord.Client):
         while len(self.seen) > 2048:
             self.seen.popitem(last=False)
 
-    async def send_chat_reply(self, channel_id: int, text: str, peers: tuple[int, ...] = ()) -> None:
+    async def send_chat_reply(self, channel_id: int, text: str, peers: tuple[int, ...] = (), *, before_send=None) -> None:
         # Every conversational reply uses the same authenticated bot identity.
         # Only observed bot recipients may receive mention notifications.
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         mentions = discord.AllowedMentions(everyone=False, roles=False, replied_user=False,
                                           users=[discord.Object(id=uid) for uid in peers])
         for chunk in split_message(text):
+            if before_send:
+                await before_send()
             await channel.send(chunk, allowed_mentions=mentions)
         LOG.info("Bot-account chat reply delivered (channel=%s peers=%s)", channel_id, peers)
+
+    async def send_paper(self, channel_id, paper, run, *, before_send=None):
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        # Recover a lost acknowledgement before retrying a final delivery.
+        async for message in channel.history(limit=100):
+            if message.author.id == self.user.id and f"Workflow `{run}`" in message.content and message.attachments:
+                return
+        if before_send:
+            await before_send()
+        await channel.send(f"Finished the paper. Workflow `{run}`; the full draft and collaboration evidence are attached.",
+                           file=discord.File(io.BytesIO(paper.encode()), filename="chess-paper.md"),
+                           allowed_mentions=discord.AllowedMentions.none())
 
     async def process_turns(self):
         # Serialize turns so everyone in a channel sees the same delivered history.
@@ -913,14 +943,24 @@ class ChatBot(discord.Client):
                     else:
                         if action != "status":
                             try:
-                                snapshot = self.behavior_store.edit(
-                                    f"{turn.guild_id}:{turn.channel_id}", action,
-                                    conversational_goal(objective) if action == "goal" else None)
+                                if self.workflow and action != "goal":
+                                    snapshot = await self.workflow.control(snapshot, action)
+                                else:
+                                    if self.workflow and (snapshot.get("goal") or {}).get("workflow") and snapshot["goal"]["status"] not in ("complete", "cancelled"):
+                                        await self.workflow.control(snapshot, "cancel")
+                                    snapshot = self.behavior_store.edit(
+                                        f"{turn.guild_id}:{turn.channel_id}", action,
+                                        conversational_goal(objective) if action == "goal" else None)
+                                    if self.workflow:
+                                        await self.workflow.ensure(snapshot)
+                                        snapshot = self.behavior_store.snapshot(snapshot["scope"])
                             except ValueError:
                                 reply = "That goal control does not apply to the current goal state."
                             else:
                                 reply = goal_reply(snapshot)
                         else:
+                            if self.workflow:
+                                snapshot = await self.workflow.refresh(snapshot)
                             reply = goal_reply(snapshot)
                     # Goal controls are application state, not personal factual evidence.
                     # No model gets to replace a saved objective with a generic aspiration.
@@ -929,6 +969,9 @@ class ChatBot(discord.Client):
                         reply = f"<@{turn.peer_target}> " + reply
                     await self.send_chat_reply(turn.channel_id, reply, control_peers)
                     self.conversations.append(key, turn.text, reply)
+                    continue
+                if self.workflow and self.workflow.ingest(snapshot, turn):
+                    # Contributions feed the WFE stage; no unrelated bot banter loop.
                     continue
                 if ModelClient.personal_height_statement(turn):
                     # A public statement about a Discord person is evidence for

@@ -1,0 +1,8 @@
+ARG AIMEE_SERVER_BASE_IMAGE=ghcr.io/rakuensoftware/aimee:1.0.0
+FROM golang:1.26.7 AS conversation-store
+WORKDIR /src
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-aimee ./cmd/aimee-module
+FROM ${AIMEE_SERVER_BASE_IMAGE}
+# Module descriptors launch libexec, not the convenience /usr/local/bin alias.
+COPY --from=conversation-store --chmod=755 /out/aimee-module-aimee /usr/local/libexec/aimee-modules/aimee-module-aimee

@@ -114,7 +114,7 @@ class BehaviorStore:
     def observe(self, snapshot, user, assistant, *, human=True, message_id=None):
         """Advance only after delivery. A stale turn cannot change a new goal."""
         goal = snapshot["goal"]
-        if not goal or goal["status"] != "active":
+        if not goal or goal["status"] != "active" or goal.get("workflow"):
             return False
         goal = json.loads(json.dumps(goal))
         for item in goal["milestones"]:
@@ -221,7 +221,11 @@ def goal_reply(snapshot):
         return "I don't have an assigned conversational goal in this channel."
     label = {"active": "My current goal", "paused": "My paused goal", "review": "My goal awaiting your review",
              "complete": "My completed goal", "cancelled": "My cancelled goal"}[goal["status"]]
-    return f"{label}: {goal['objective']}"
+    reply = f"{label}: {goal['objective']}"
+    workflow = goal.get("workflow")
+    if workflow:
+        reply += f"\nWorkflow {workflow['id']}: {workflow['stage']} ({workflow['state']}" + (f", {workflow['pause_reason']}" if workflow.get("pause_reason") else "") + ")."
+    return reply
 
 
 if __name__ == "__main__":

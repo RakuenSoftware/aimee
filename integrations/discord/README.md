@@ -471,3 +471,61 @@ assistant aspiration. Any admitted participant may inspect the channel's goal.
 Simple chat-created goals stay active until operator completion/cancellation; their
 single human evidence marker is `goal complete`, which requests review rather than
 claiming semantic success. Use the CLI JSON form for explicit multi-step milestones.
+
+### Executing Discord paper goals with the existing WFE
+
+Set `workflow_enabled: true` in the private bridge configuration and set
+`workflow_peer_bot_ids` to verified Discord bot identities (Samy on the deployed
+channel). The bridge requires its behavior database and authenticated Aimee Unix
+socket. Register `workflow_chat.YAML` through `/v1/workflow/save` before enabling
+execution. Paper/essay/article/report objectives explicitly select `discord-paper`;
+other goals retain conversational conditioning and do not acquire arbitrary tools.
+
+The graph is candidates → discussion → outline → draft → revision → delivery.
+There is **no human review gate**: this conversational writing goal finishes
+when the complete Markdown paper is saved and sent as an attachment. Incoming
+peer replies become source-linked workflow inputs rather than unrelated banter.
+The discussion can require many exchanges. Each fresh peer response is assessed
+against a specific candidate, comparison, critique, and resolution; Aimee sends a
+substantive follow-up while a requirement remains unresolved. Readiness must cite
+verbatim peer evidence, with resolution from the latest reply after a follow-up.
+The complete discussion and cumulative synthesis survive restart. While waiting,
+the WFE parks at `conversation_input`; a fresh response from the configured peer
+identity resumes the existing stage. There is no conversation turn limit. Ordinary human messages still receive replies.
+
+Apply `compose.workflow.yaml` to the **dedicated bot server** project, setting
+`AIMEE_DISCORD_BEHAVIOR_VOLUME` to the bridge's existing behavior volume. The WFE
+uses its typed HTTP runner over the private `runner.sock` (0600). The server must
+include the lifecycle resume support for `conversation_input` and `binding_pending`
+added by this change; older servers reject these new wait reasons. This adapter
+supports only `discord-paper`; do not apply it to a shared coding WFE. The Go WFE
+continues to own admission, scheduling, stage transitions, pause/resume/stop,
+recovery, and artifacts. The bridge's status watcher only mirrors state and resumes
+a stage when the requested input arrives; it does not implement another scheduler.
+
+Authorized Discord goal replacement stops the previous unfinished run. Pause,
+resume, and cancel operate on the persisted run ID. Status queries report actual
+WFE state. `Complete your goal` cannot bypass an executing workflow. Submitted
+goals use stable idempotency keys; stage outputs are cached durably for replay,
+including the full paper. WFE node artifacts retain complete content even though
+inference prompts use bounded excerpts. Final delivery checks recent channel
+history before retrying after a lost acknowledgement. Discord and SQLite cannot
+provide an atomic cross-service transaction; a failed discussion prompt is retried,
+and an acknowledgement lost across an exceptionally long history window can
+require operator inspection. Missing input stays visibly pending.
+
+Run tests with `python -m unittest test_bridge test_prepare_e2b test_behavior test_workflow_chat`.
+
+For a server based on the existing 1.0.0 package, build the small store-owner overlay
+from the repository root:
+
+```sh
+docker build -f integrations/discord/Dockerfile.workflow-server \
+  -t aimee-discord-server:conversation-waits .
+```
+
+Set `AIMEE_DISCORD_WORKFLOW_SERVER_IMAGE` to that image when applying the dedicated
+server override. The module descriptor launches
+`/usr/local/libexec/aimee-modules/aimee-module-aimee`; replacing only the convenience
+binary in `/usr/local/bin` does not update the running DB owner. Future server
+releases containing the wait-reason change can use their published image directly.

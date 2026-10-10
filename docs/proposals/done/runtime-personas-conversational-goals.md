@@ -20,3 +20,8 @@ Native attention-bank preparation, authenticated selection and acknowledgement r
 [pending](../pending/native-attention-personas-goals.md), as do shared progress across
 multiple scopes and semantic progress proposals. No native attention capability is
 claimed by the context delivery path or manifest exporter.
+
+Supported writing goals now execute through the [existing Go WFE](discord-goal-workflow-execution.md).
+Their progress and terminal state come from the workflow, not literal chat phrases;
+they finish autonomously after saved-artifact delivery. The evidence/review behavior
+above still describes standalone conversational goals without a workflow binding.
