@@ -79,6 +79,8 @@ object. No service is installed and no existing memories are migrated by this st
 The shared KB is configured independently. Unavailable, unknown or incompatible
 external services fail readiness without switching to native memory.
 
+[Expanded owner/setup qualification evidence](../../docs/validation/hillock-scenarios-memory-setup-2026-10-11.md) records the scenario and first-start checks.
+
 ## Release-candidate CI
 
 [Hillock prerelease qualification](../../.github/workflows/hillock-prereleases.yml) scans upstream branches matching `rc/v<major>.<minor>.<patch>` hourly (at minute 17). It discovers every matching branch, including new branches and updated tips; `rc/v0.10.0` is one example. Scheduled scans begin when the workflow is on Aimee's default branch. GitHub schedules can be delayed. Manual dispatch can select one branch or force a repeat of a previously successful qualification. Aimee pushes, pull requests and releases do not trigger this workflow. Normal Aimee CI runs the discovery/runner regression tests and the pinned production contract.

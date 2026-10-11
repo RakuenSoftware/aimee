@@ -1,0 +1,32 @@
+=== RUN   TestHillockLiveContract
+=== RUN   TestHillockLiveContract/scopes-filters-unicode-concurrency-and-cancellation
+--- PASS: TestHillockLiveContract (5.80s)
+    --- PASS: TestHillockLiveContract/scopes-filters-unicode-concurrency-and-cancellation (0.09s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	6.820s
+=== RUN   TestHillockLiveRecallScenarios
+--- PASS: TestHillockLiveRecallScenarios (0.10s)
+=== RUN   TestHillockLiveOwnerScenarios
+--- PASS: TestHillockLiveOwnerScenarios (0.17s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.323s
+=== RUN   TestHillockLiveGovernedTransport
+--- PASS: TestHillockLiveGovernedTransport (0.01s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/egress	1.024s
+=== RUN   TestHillockLiveContract
+=== RUN   TestHillockLiveContract/scopes-filters-unicode-concurrency-and-cancellation
+--- PASS: TestHillockLiveContract (6.84s)
+    --- PASS: TestHillockLiveContract/scopes-filters-unicode-concurrency-and-cancellation (0.09s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	7.855s
+=== RUN   TestHillockLiveRecallScenarios
+--- PASS: TestHillockLiveRecallScenarios (0.10s)
+=== RUN   TestHillockLiveOwnerScenarios
+--- PASS: TestHillockLiveOwnerScenarios (0.18s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.323s
+=== RUN   TestHillockLiveGovernedTransport
+--- PASS: TestHillockLiveGovernedTransport (0.01s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/egress	1.023s

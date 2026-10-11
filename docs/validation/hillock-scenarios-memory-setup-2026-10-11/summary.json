@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "upstream_repository": "https://github.com/roandejager/Hillock.git",
+  "upstream_branch": "rc/v0.10.0",
+  "upstream_revision": "78364232eab6d030e90dec3ebf77b21a0616ff46",
+  "aimee_revision": "253c50cbd14fd3bdb2dc24e29025944515de18f8",
+  "profile": "hdc-subword",
+  "real_engine": true,
+  "restart_rounds": [
+    {
+      "round": 0,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "passed": true
+    }
+  ],
+  "http_auth_validation_capacity": "passed",
+  "contract": "passed",
+  "aimee_owner_scenarios": "passed",
+  "governed_transport": "passed",
+  "scale": "passed"
+}

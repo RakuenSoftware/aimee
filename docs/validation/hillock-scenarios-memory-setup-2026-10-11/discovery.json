@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/roandejager/Hillock.git",
+  "matrix": {
+    "include": [
+      {
+        "branch": "rc/v0.10.0",
+        "revision": "78364232eab6d030e90dec3ebf77b21a0616ff46",
+        "branch_key": "f5be430fb2961bed"
+      }
+    ]
+  },
+  "count": 1
+}
