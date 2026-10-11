@@ -24,7 +24,9 @@
         "src/tests/test_server_memory_get.c",
         "src/tests/test_module_json_call.c",
         "src/tests/test_mcp_memory_answer.c",
-        "scripts/test_bus_conformance.sh"
+        "scripts/test_bus_conformance.sh",
+        "server-go/cmd/aimee-module/main_test.go",
+        "src/tests/test_module_runtime.c"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
@@ -139,7 +141,8 @@
       "reason": "The added token name is credential transport, not memory storage or retrieval logic.",
       "evidence": [
         "src/modules/vault/vault_env_bootstrap.c",
-        "server-go/modules/memory/backend_erasure_test.go"
+        "server-go/modules/memory/backend_erasure_test.go",
+        "src/tests/test_server_memory_setup.c"
       ],
       "cutover_dependency": "Vault custody precedes memory startup; egress reads the credential through its existing helper."
     }
@@ -1869,7 +1872,6 @@
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
-        "AIMEE_MEMORY_BACKEND",
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_EVENT_EMBED",
         "AIMEE_MEMORY_STAGE_DATA",
@@ -1878,12 +1880,12 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "bf27ac910c2b577669ba23b3b2c73c34d94af48bc66ffaad72da475d3e3f3cf1",
+      "sha256": "ba7f0a60514c63d5058b6e31fd7583b4ba7d06ad175682562f9a7b1b740c1c5a",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
@@ -2136,19 +2138,18 @@
     "src/server/module_stage_adapters.c": {
       "disposition": "host-transport",
       "symbols": [
-        "AIMEE_MEMORY_BACKEND",
         "AIMEE_MEMORY_EVENT_DATA",
         "AIMEE_MEMORY_STAGE_DATA",
         "server_module_memory_data",
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "b7e635b7b325848fe316a5ad0dadabf632accb265fbf6a02fbdd33c76b0bb434",
+      "sha256": "b7e404f6c4c8f1799200fbfd5d12787449aa7f4ea99ff351fc2f5ed83bca68ee",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2509,7 +2510,7 @@
         "server_module_memory_data",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "da90696ca508cc7967042fe696784fe1b96cfba4c764f539c7e8822fd15323b5"
+      "sha256": "f8076b8da80ee143adb7ffe6afb84541a8eaba855fc2589c6da6435d76a847e6"
     },
     "src/tests/test_pgvec_neardup.c": {
       "disposition": "legacy-fixture",
@@ -2671,6 +2672,34 @@
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+    },
+    "src/config_client.c": {
+      "disposition": "credential-custody",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "ae5c617ecfd2da7d308f4420faaf654899723014def3f05eb8da6818aa0c5671"
+    },
+    "src/config_client_contract.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND"
+      ],
+      "sha256": "b9275a655e5a6cae4ae333c82c138cf036c6cab30d0a008825d1f2ca3e66a370"
+    },
+    "src/tests/test_cmd_config.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "d2b0ce06070dcfcf222159f892d70786585fdac417e5754aab42dc2c963314d4"
+    },
+    "src/tests/test_server_memory_setup.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_BACKEND_TOKEN"
+      ],
+      "sha256": "a500002e711b8285158f0e1b8723fe3b1db2c24098ab6885b16b9e6e105243b8"
     }
   },
   "generated_files": {
@@ -2680,7 +2709,7 @@
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "e0dfef2c7a9e5acfd38612a23cbf38156ce2a4dc19f1e92feee388cba25318e0",
+      "sha256": "2bb8f5bfa9b34989275b361a33069aa41efd3758f738d8c99826e438502ec3dc",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
         "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",

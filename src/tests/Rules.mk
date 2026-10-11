@@ -644,6 +644,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-agent-max-turns \
                $(TESTPREFIX)/unit-test-provider-settable \
                $(TESTPREFIX)/unit-test-json-fluent \
+               $(TESTPREFIX)/unit-test-server-memory-setup \
                $(TESTPREFIX)/unit-test-cmd-config \
                $(TESTPREFIX)/unit-test-cmd-table \
                $(TESTPREFIX)/unit-test-tool-validation \
@@ -3062,6 +3063,7 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
 $(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
 $(OBJDIR)/tests/test_module_json_call.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
+                                        $(OBJDIR)/config_client_contract.o \
                                         $(OBJDIR)/server/module_stage_adapters.o \
                                         $(OBJDIR)/module_commands.o \
                                         $(OBJDIR)/module_json_call.o \
@@ -7854,3 +7856,6 @@ test-postgres-session-transport: $(TESTPREFIX)/unit-test-postgres-session-transp
 # Model-neutral projection of already authorized source rows.
 $(TESTPREFIX)/unit-test-server-native-primitive: $(OBJDIR)/tests/test_server_native_primitive.o $(OBJDIR)/server/server_native_primitive.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-memory-setup: $(OBJDIR)/tests/test_server_memory_setup.o $(OBJDIR)/server/server_config.o $(OBJDIR)/json_fluent.o $(OBJDIR)/core/connection/endpoint.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)

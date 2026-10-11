@@ -397,6 +397,13 @@ API. Existing rows and the public audit response fields remain readable.
 
 ### Replaceable backends and derived erasure
 
+The first-start Server setup wizard lets the administrator save native, Cognee or
+Hillock memory, with an external service origin and a Vault-only credential.
+Memory and egress load `memory.backend` through the config owner on restart;
+explicit deployment environment selection takes precedence. Existing installations
+keep native by default. This does not install services or migrate records. See the
+[first-start backend guide](../../integrations/hillock/README.md#first-start-backend-selection).
+
 The independent `server-go/memory` contract supplies existing wire framing, scopes,
 record types and the Store interface. Native remains the default; setting
 `AIMEE_MEMORY_BACKEND=cognee` selects the first alternative adapter through the

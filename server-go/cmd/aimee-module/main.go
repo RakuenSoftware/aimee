@@ -17,6 +17,7 @@ import (
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	aimeeprocess "github.com/JBailes/aimee/server-go/modules/aimee/process"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
@@ -168,6 +169,9 @@ func moduleConfig(executable string) (bus.ModuleProcessConfig, bool) {
 	return moduleConfigRuntime(nil, executable, "")
 }
 
+// Request-only identity declared as egress-config in process-contracts.json.
+const egressConfigPrincipalRef uint32 = 75
+
 func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string) (bus.ModuleProcessConfig, bool) {
 	name := strings.TrimPrefix(filepath.Base(executable), "aimee-module-")
 	config := bus.ModuleProcessConfig{PrincipalClass: 1}
@@ -290,6 +294,13 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		config.Handler = modulegit.NewHandler(moduleEgress(ctx, moduleBusSocket, egress.GitClientRef))
 	case "egress":
+		if ctx != nil {
+			if err := memorycontract.ConfigureBackendProcess(ctx, moduleBusSocket, egressConfigPrincipalRef); err != nil {
+				log.Printf("egress: backend configuration: %v", err)
+				config.ModuleName = name
+				return config, false
+			}
+		}
 		config.ModuleName = name
 		config.PrincipalRef = egress.PrincipalRef
 		config.Stages = []bus.ModuleStage{

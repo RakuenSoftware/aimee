@@ -1389,6 +1389,18 @@
         12295,
         4609
       ]
+    },
+    {
+      "id": "egress-config",
+      "principal_ref": 75,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-egress",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "request": [
+        4609
+      ]
     }
   ]
 }

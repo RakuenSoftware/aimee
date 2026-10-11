@@ -13,6 +13,7 @@
 #include "server_http.h"
 #include "server_http_identity.h"
 #include "runtime_secret.h"
+#include <aimee/core/connection/endpoint.h>
 #include <string.h>
 
 /* config.show: return every allowlisted field and its current value. */
@@ -113,6 +114,41 @@ int handle_config_deploy_env(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* The backend selection is one atomic non-secret config-owner document value.
+ * Admit no dotted child writes: those could leave a partial configuration or
+ * introduce a credential field outside the Vault-only token surface. */
+static int memory_backend_value_valid(const cJSON *value)
+{
+   if (!cJSON_IsObject(value) || cJSON_GetArraySize(value) != 3)
+      return 0;
+   const cJSON *engine = cJSON_GetObjectItemCaseSensitive(value, "engine");
+   const cJSON *endpoint = cJSON_GetObjectItemCaseSensitive(value, "endpoint");
+   const cJSON *auth = cJSON_GetObjectItemCaseSensitive(value, "auth");
+   if (!cJSON_IsString(engine) || !cJSON_IsString(endpoint) || !cJSON_IsString(auth))
+      return 0;
+   int native = !strcmp(engine->valuestring, "native");
+   int cognee = !strcmp(engine->valuestring, "cognee");
+   if (!native && !cognee && strcmp(engine->valuestring, "hillock"))
+      return 0;
+   if (strcmp(auth->valuestring, "bearer") && strcmp(auth->valuestring, "none") &&
+       (!cognee || strcmp(auth->valuestring, "api-key")))
+      return 0;
+   if (native)
+      return endpoint->valuestring[0] == 0;
+   const char *url = endpoint->valuestring;
+   const char *host = !strncmp(url, "http://", 7)    ? url + 7
+                      : !strncmp(url, "https://", 8) ? url + 8
+                                                     : NULL;
+   if (!host || !host[0] || host[0] == '/' || strlen(url) > 2048)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)url; *p; p++)
+      if (*p <= 32 || *p == 127 || *p == '@' || *p == '?' || *p == '#' || *p == '\\')
+         return 0;
+   const char *path = strchr(host, '/');
+   aimee_core_endpoint_t parsed;
+   return (!path || !strcmp(path, "/")) && aimee_core_endpoint_parse(url, &parsed) == 0;
+}
+
 /* config.set: assign one field and persist aimee.yaml. */
 int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -167,6 +203,34 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *key = jo_str(req, "key", "");
    if (!key || !key[0])
       return server_send_error(conn, "usage: aimee config set <key> <value>", NULL);
+
+   /* Protect dotted/flat aliases too: the config owner normalizes lookup keys. */
+   if (!strncmp(key, "memory.backend", 14) || !strncmp(key, "memory_backend", 14))
+   {
+      if (!route_roundtable_mutation_authorized(server_http_identity_principal()))
+         return server_send_error(
+             conn, "memory backend changes require the appliance administrator", NULL);
+      if (!strcmp(key, "memory.backend"))
+      {
+         cJSON *value = cJSON_GetObjectItemCaseSensitive(req, "value");
+         if (!memory_backend_value_valid(value))
+            return server_send_error(
+                conn,
+                "memory: select native, cognee or hillock with a valid endpoint and authentication",
+                NULL);
+         if (config_client_set_value(key, cJSON_Duplicate(value, 1)) != 0 || config_reload() < 0)
+            return server_send_error(conn, "memory: could not save backend configuration", NULL);
+         cJSON *resp = jo_ok();
+         cJSON_AddStringToObject(resp, "key", key);
+         cJSON_AddItemToObject(resp, "value", cJSON_Duplicate(value, 1));
+         cJSON_AddStringToObject(resp, "reload", "restart");
+         cJSON_AddBoolToObject(resp, "applied_live", 0);
+         return server_send_ok(conn, resp);
+      }
+      if (strcmp(key, "memory_backend_token"))
+         return server_send_error(conn, "memory: save the complete memory.backend configuration",
+                                  NULL);
+   }
 
    /* Do not let the generic config surface bypass the roundtable preset API's
     * operator boundary (notably through roundtable.default). Local UDS callers

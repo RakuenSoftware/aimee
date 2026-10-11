@@ -21,7 +21,7 @@ export interface WizardStep {
    * 'git_identity' = vaulted commit author, 'connection' = git-host auth,
    * 'workspace' = org enumerate + bulk clone.
    * Rendered specially by SetupWizard. */
-  kind?: 'account' | 'chooser' | 'deploy' | 'git_identity' | 'connection' | 'workspace';
+  kind?: 'memory' | 'account' | 'chooser' | 'deploy' | 'git_identity' | 'connection' | 'workspace';
   /** When present, the step is only shown for the kb modes it returns true for.
    * Absent ⇒ always shown. */
   showWhen?: (kbMode: WizardKbMode) => boolean;
@@ -37,6 +37,7 @@ export function ownsPrimaryAction(step: WizardStep): boolean {
 export const WIZARD_STEPS: WizardStep[] = [
   { id: 'account', title: 'Secure your account', keys: [], kind: 'account' },
   { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
+  { id: 'memory', title: 'Memory backend', keys: [], kind: 'memory' },
   { id: 'embedding', title: 'Local memory models', keys: [], kind: 'deploy' },
   { id: 'git_identity', title: 'Git commit identity', keys: [], kind: 'git_identity', skipNote: 'Without it, every commit is refused rather than attributed to an invented author.' },
   // Always: authenticate to git hosts (OAuth / token / SSH). Optional — public

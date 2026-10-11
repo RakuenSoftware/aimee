@@ -78,6 +78,7 @@ class WorkflowTriggerTests(unittest.TestCase):
         self.assertEqual(len(keys), 2)  # Restore and save must address the same receipt.
         self.assertEqual(keys[0], keys[1])
         for key in keys:
+            self.assertTrue(key.startswith('hillock-qualified-v3-'))
             self.assertIn('${{ matrix.branch_key }}', key)
             self.assertIn('${{ matrix.revision }}', key)
             self.assertNotIn('github.sha', key)
@@ -87,6 +88,16 @@ class WorkflowTriggerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_required_live_scenarios_cannot_be_skipped_or_absent(self):
+        names = ('TestHillockLiveOwnerScenarios', 'TestHillockLiveRecallScenarios')
+        passing = '\n'.join('--- PASS: ' + name + ' (0.10s)' for name in names)
+        runner.require_live_tests(subprocess.CompletedProcess([], 0, passing), names)
+        for status, output in [(1, passing), (0, ''), (0, passing.replace('PASS', 'SKIP')),
+                               (0, passing.splitlines()[0]), (0, passing.replace('Scenarios ', 'ScenariosExtra ')),
+                               (0, passing + '\n--- FAIL: nested (0.1s)')]:
+            with self.subTest(status=status, output=output), self.assertRaises(RuntimeError):
+                runner.require_live_tests(subprocess.CompletedProcess([], status, output), names)
+
     def test_candidate_overlay_changes_only_revision_expectation(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)

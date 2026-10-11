@@ -5,7 +5,7 @@ import { saveConfigValue, loadConfig } from './configApi';
 import type { StepId } from './readiness';
 
 describe('WIZARD_STEPS', () => {
-  const expected: StepId[] = ['account', 'provider', 'embedding', 'git_identity', 'connection', 'project'];
+  const expected: StepId[] = ['account', 'provider', 'memory', 'embedding', 'git_identity', 'connection', 'project'];
   it('has no KB installation or shared database step in any deployment', () => {
     for (const mode of ['none', 'local', 'remote'] as const) {
       for (const appliance of [false, true]) expect(visibleSteps(mode, appliance).map(s => s.id)).toEqual(expected);

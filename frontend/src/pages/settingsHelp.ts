@@ -9,6 +9,7 @@
 // Postgres pool + the kb API listener bind at startup); every other exposed key
 // applies on the next turn. Keep in sync if a field's reload_class changes.
 export const RESTART_KEYS = new Set<string>([
+  'memory.backend', 'memory_backend_engine', 'memory_backend_endpoint', 'memory_backend_auth',
   "kb_connection_string",
   "kb_api_http_port", "kb_api_bearer_token",
   // Deploy-topology (page-2) record: the deploy layer reads these and the
@@ -134,6 +135,11 @@ export const SECTION_HELP: Record<string, string> = {
 
 // One line per config key. Plain language, states the default.
 export const FIELD_HELP: Record<string, string> = {
+  'memory.backend': 'Personal memory backend and service configuration. Takes effect after restart.',
+  memory_backend_engine: 'Aimee native memory, Cognee or Hillock. Requires restart.',
+  memory_backend_endpoint: 'HTTP(S) origin of the selected external memory service.',
+  memory_backend_auth: 'Bearer, Cognee API key, or explicit isolated development authentication.',
+  memory_backend_token: 'Service credential kept only in the Vault.',
   // Workflow trigger admission (live)
   "trigger.max_concurrent":
     "Maximum active runs admitted across all configured triggers. When the cap is reached, new proposals stay pending and are reconsidered on a later scheduler pass. Default 2. 0 or less means uncapped.",
