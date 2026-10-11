@@ -15,15 +15,41 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 static config_reapplier_fn g_reappliers[16];
 static int g_reapplier_count;
 static config_secret_writer_fn g_secret_writer;
 __thread int g_aimee_compute_threads_override;
 
+static pthread_once_t memory_backend_once = PTHREAD_ONCE_INIT;
+static char memory_backend_engine[32];
+
+static void memory_backend_capture(void)
+{
+   const char *override = getenv("AIMEE_MEMORY_BACKEND");
+   if (override && override[0])
+      snprintf(memory_backend_engine, sizeof(memory_backend_engine), "%s", override);
+   else if (config_client_read_string("memory_backend_engine", memory_backend_engine,
+                                      sizeof(memory_backend_engine)) != 0 ||
+            !memory_backend_engine[0])
+      snprintf(memory_backend_engine, sizeof(memory_backend_engine), "native");
+}
+
+const char *config_memory_backend_current(void)
+{
+   /* Keep host erasure/reset routing consistent with the running memory owner.
+    * Configuration changes take effect together on process restart. */
+   pthread_once(&memory_backend_once, memory_backend_capture);
+   return memory_backend_engine;
+}
+
 int config_snapshot_seed(void)
 {
-   return config_client_refresh();
+   int result = config_client_refresh();
+   if (result == 0)
+      (void)config_memory_backend_current();
+   return result;
 }
 
 int config_reload(void)
@@ -55,7 +81,10 @@ int config_wait_ready(unsigned int timeout_ms)
    do
    {
       if (config_present())
+      {
+         (void)config_memory_backend_current();
          return 1;
+      }
       if (waited_ms >= timeout_ms)
          break;
       unsigned int sleep_ms = timeout_ms - waited_ms;

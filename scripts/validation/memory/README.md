@@ -53,3 +53,15 @@ needed by Cognee's client; record the actual serving identity separately.
 
 Use a fresh artifact directory for every provider contract run. Never use these
 mutation probes with a user's store or export private resume/config files.
+
+
+## Hillock candidate scenarios
+
+`run-hillock-contract.py --revision <full-sha> --branch rc/v<major>.<minor>.<patch>
+--scale --artifacts <empty-directory>` fetches and verifies that exact upstream
+commit, runs the real engine through Aimee's adapter and owner/public-command/recall
+scenarios, then repeats after restarting Hillock. Required live tests cannot skip.
+The scale workload checks cold and concurrent warm retrieval at 100/1,000/10,000
+records. See the [scenario inventory and first-start setup](../../../integrations/hillock/README.md).
+These tests qualify Aimee's HDC/subword integration; they do not qualify Hillock's
+chat/graph/learning features or arbitrary conversational answer quality.

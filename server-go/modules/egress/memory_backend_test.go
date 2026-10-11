@@ -3,11 +3,14 @@ package egress
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/JBailes/aimee/server-go/bus"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -115,5 +118,78 @@ func TestMemoryBackendAPIKeyIsInjectedOnlyByEgress(t *testing.T) {
 	raw, _ = json.Marshal(request)
 	if _, status = p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: MemoryClientRef}, raw); status != bus.ModuleStatusInvalidRequest {
 		t.Fatal("caller credential header admitted", status)
+	}
+}
+
+func TestHillockLiveGovernedTransport(t *testing.T) {
+	endpoint := os.Getenv("AIMEE_HILLOCK_TEST_URL")
+	if endpoint == "" {
+		t.Skip("real Hillock endpoint required")
+	}
+	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
+	t.Setenv("AIMEE_MEMORY_BACKEND_URL", endpoint)
+	t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "bearer")
+	token, revoked := "contract-fixture", false
+	credentials := &vaultCredentialResolver{run: func(_ context.Context, name string) ([]byte, error) {
+		if name != "AIMEE_MEMORY_BACKEND_TOKEN" {
+			t.Fatal("unrelated credential requested", name)
+		}
+		if revoked {
+			return nil, errors.New("fixture revoked")
+		}
+		return []byte(token), nil
+	}}
+	p := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, backendCredentials: credentials}
+	invoke := func(method, path string, body []byte, principal uint32) (HTTPResponse, bus.ModuleStatus) {
+		t.Helper()
+		target := endpoint + path
+		request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "memory-backend", Method: method,
+			CredentialPresent: true, RequestSHA256: RequestDigest(method, target, body, true)},
+			Body: body, CredentialHandle: "memory-backend", MaxResponseBytes: 16384, TimeoutMS: 10000}
+		if body != nil {
+			request.Headers = map[string]string{"Content-Type": "application/json"}
+		}
+		raw, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: principal}, raw)
+		if status != bus.ModuleStatusOK {
+			return HTTPResponse{}, status
+		}
+		response, err := decodeHTTPResponse(reply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response, status
+	}
+	health, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
+	if status != bus.ModuleStatusOK || health.Status != 200 || !strings.Contains(string(health.Body), `"stateless":true`) {
+		t.Fatal(health, status)
+	}
+	body := []byte(`{"query":"lighthouse height","candidates":[{"id":1,"revision":"` + strings.Repeat("a", 64) + `","text":"lighthouse height is 69cm"}],"limit":1}`)
+	ranked, status := invoke("POST", "/v1/rank", body, MemoryClientRef)
+	if status != bus.ModuleStatusOK || ranked.Status != 200 || !strings.Contains(string(ranked.Body), `"id":1`) {
+		t.Fatal(ranked, status)
+	}
+	if reply, status := invoke("POST", "/v1/rank", body, ProvidersClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+		t.Fatal("foreign caller admitted")
+	}
+	if reply, status := invoke("POST", "/v1/chat/completions", body, MemoryClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+		t.Fatal("chat route admitted")
+	}
+	token = "rotated-invalid-fixture"
+	refused, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
+	if status != bus.ModuleStatusOK || refused.Status != 401 {
+		t.Fatal("rotated credential was not read", refused, status)
+	}
+	token = "contract-fixture"
+	restored, status := invoke("GET", "/v1/health", nil, MemoryClientRef)
+	if status != bus.ModuleStatusOK || restored.Status != 200 {
+		t.Fatal("credential recovery", restored, status)
+	}
+	revoked = true
+	if reply, status := invoke("GET", "/v1/health", nil, MemoryClientRef); status == bus.ModuleStatusOK && (reply.Status != 0 || reply.Error == "") {
+		t.Fatal("revoked credential admitted")
 	}
 }

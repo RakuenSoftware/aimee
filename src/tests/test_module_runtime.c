@@ -119,6 +119,26 @@ static aimee_module_status_t startup_store(const aimee_module_invocation_t *invo
    return AIMEE_MODULE_STATUS_OK;
 }
 
+/* Config is independently served at startup. The fixture supplies the public
+ * snapshot contract, never a native config parser or secret-bearing values. */
+static atomic_int startup_snapshots;
+static aimee_module_status_t startup_config(const aimee_module_invocation_t *invocation,
+                                            const uint8_t *request, uint32_t request_len,
+                                            uint8_t *response, uint32_t capacity,
+                                            uint32_t *response_len, void *user_data)
+{
+   (void)invocation;
+   (void)user_data;
+   static const char expected[] = "{\"operation\":\"snapshot\"}";
+   static const char snapshot[] = "{\"ok\":true,\"values\":{\"memory_backend_engine\":\"native\"}}";
+   assert(request_len == sizeof(expected) - 1 && !memcmp(request, expected, request_len));
+   assert(capacity >= sizeof(snapshot) - 1);
+   memcpy(response, snapshot, sizeof(snapshot) - 1);
+   *response_len = sizeof(snapshot) - 1;
+   atomic_fetch_add(&startup_snapshots, 1);
+   return AIMEE_MODULE_STATUS_OK;
+}
+
 static void *run_process(void *argument)
 {
    process_thread_t *thread = argument;
@@ -158,15 +178,17 @@ static void pump(bus_host_t *host, pthread_mutex_t *lock)
    pthread_mutex_unlock(lock);
 }
 
-static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t count, pid_t child)
+static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t count, pid_t child,
+                             uint32_t event_kind)
 {
    const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
    for (int i = 0; i < 10000; ++i)
    {
       pthread_mutex_lock(lock);
       uint32_t admitted = host->admitted;
+      int serving = bus_host_kind_has_server(host, event_kind);
       pthread_mutex_unlock(lock);
-      if (admitted >= count)
+      if (admitted >= count && serving)
          return;
       int status = 0;
       if (child > 0 && waitpid(child, &status, WNOHANG) == child)
@@ -225,7 +247,7 @@ static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
       (void)bus_runtime_maintain(runtime, now_ns);
       uint32_t admitted = host->admitted;
       pthread_mutex_unlock(lock);
-      if (admitted == 3)
+      if (admitted == 4)
          return;
       nanosleep(&pause, NULL);
    }
@@ -1067,6 +1089,8 @@ int main(int argc, char **argv)
    if (argc >= 3)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
    const int memory_process = argc >= 3 && strcmp(argv[2], "memory") == 0;
+   const int egress_process = argc >= 3 && strcmp(argv[2], "egress") == 0;
+   const int config_process = memory_process || egress_process;
    const int provider_process = argc >= 3 && strcmp(argv[2], "providers") == 0;
    char directory[256];
    snprintf(directory, sizeof directory, "%s/aimee-module-runtime-XXXXXX", platform_tmpdir());
@@ -1106,6 +1130,8 @@ int main(int argc, char **argv)
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
    const uint32_t postgres_request[] = {AIMEE_POSTGRES_EVENT_SQL};
+   const uint32_t memory_request[] = {AIMEE_POSTGRES_EVENT_SQL, 4609u};
+   const uint32_t config_request[] = {4609u};
    const uint32_t action_publish[] = {3000u};
    const uint32_t provider_request[] = {12290u, 12295u, 4609u};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
@@ -1127,13 +1153,25 @@ int main(int argc, char **argv)
                                     * that the shipped process can attach the
                                     * capability it will use in production. */
                                    {.principal_class = 1,
-                                    .principal_ref = memory_process ? 73 : 74,
+                                    .principal_ref = memory_process   ? 73
+                                                     : egress_process ? 75
+                                                                      : 74,
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = module_executable,
                                     .publish = memory_process ? action_publish : NULL,
                                     .publish_count = memory_process ? 1 : 0,
-                                    .request = memory_process ? postgres_request : provider_request,
-                                    .request_count = memory_process ? 1 : 3},
+                                    .request = memory_process   ? memory_request
+                                               : egress_process ? config_request
+                                                                : provider_request,
+                                    .request_count = memory_process   ? 2
+                                                     : egress_process ? 1
+                                                                      : 3},
+                                   {.principal_class = 1,
+                                    .principal_ref = 2,
+                                    .uid = BUS_RUNTIME_SELF_UID,
+                                    .executable = executable,
+                                    .serve = config_request,
+                                    .serve_count = 1},
                                    {.principal_class = 1,
                                     .principal_ref = 200,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -1163,8 +1201,9 @@ int main(int argc, char **argv)
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
                                           .grants = grants,
-                                          .grant_count = memory_process ? 5
-                                                         : argc == 4    ? 4
+                                          .grant_count = memory_process   ? 6
+                                                         : egress_process ? 4
+                                                         : argc == 4      ? 4
                                                          : (memory_process || provider_process)
                                                              ? 3
                                                              : 2};
@@ -1198,6 +1237,19 @@ int main(int argc, char **argv)
    if (memory_process)
       assert(pthread_create(&startup_thread, NULL, run_process, &startup) == 0);
 
+   static const aimee_module_stage_t config_stage[] = {{4609u, 1u}};
+   process_thread_t configuration = {.config = {.socket_path = socket_path,
+                                                .module_name = "startup-config-fixture",
+                                                .principal_class = 1,
+                                                .principal_ref = 2,
+                                                .stages = config_stage,
+                                                .stage_count = 1,
+                                                .handler = startup_config}};
+   pthread_t configuration_thread;
+   atomic_init(&startup_snapshots, 0);
+   if (config_process)
+      assert(pthread_create(&configuration_thread, NULL, run_process, &configuration) == 0);
+
    pthread_t module_thread;
    pid_t module_pid = -1;
    if (argc >= 2)
@@ -1212,7 +1264,11 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, memory_process ? 5 : provider_process ? 3 : 2, module_pid);
+   wait_for_clients(&host, &host_lock,
+                    memory_process                         ? 6
+                    : (provider_process || egress_process) ? 3
+                                                           : 2,
+                    module_pid, test_kind);
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
@@ -1234,7 +1290,7 @@ int main(int argc, char **argv)
             wait_for_memory_departure(runtime, &host, &host_lock, &caller, &embedding_host);
             memory_discovery_unavailable(&module_client);
             module_pid = spawn_module_child(module_executable, socket_path, NULL);
-            wait_for_clients(&host, &host_lock, 5, module_pid);
+            wait_for_clients(&host, &host_lock, 6, module_pid, test_kind);
             smoke_host_gateway_plan(&embedding_host);
             run_memory_probe(probe_executable, socket_path);
             puts("memory: terminated provider unavailable; restarted Go owner passed host/client "
@@ -1322,6 +1378,12 @@ finish:
       assert(atomic_load(&startup_replays) == (strcmp(placement, "server") == 0 ? 2 : 0));
       aimee_module_process_stop();
       assert(pthread_join(startup_thread, NULL) == 0 && startup.result == 0);
+   }
+   if (config_process)
+   {
+      assert(atomic_load(&startup_snapshots) >= (memory_process ? 2 : 1));
+      aimee_module_process_stop();
+      assert(pthread_join(configuration_thread, NULL) == 0 && configuration.result == 0);
    }
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);

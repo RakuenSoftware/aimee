@@ -51,11 +51,55 @@ Run those verification commands from the repository root. The runner checks out 
 
 [Current .253 support validation](../../docs/validation/external-memory-support-2026-10-08.md) records the completed integration checks and remaining quality limits.
 
+## First-start backend selection
+
+Aimee-server's setup wizard includes **Memory backend**, with Aimee native memory,
+Cognee and Hillock choices. Native remains the default for existing installations.
+For an external backend, start its service, enter the HTTP(S) origin reachable
+from the server and select authentication. Cognee also supports API-key auth.
+The wizard seals the credential through the existing Vault key
+`AIMEE_MEMORY_BACKEND_TOKEN` before saving the selection; public config reads expose
+only credential presence. Backend changes require the appliance administrator.
+
+The choice is saved atomically as non-secret `memory.backend` configuration:
+
+```yaml
+memory:
+  backend:
+    engine: hillock
+    endpoint: http://hillock:8097
+    auth: bearer
+```
+
+Restart the appliance after saving. Memory and egress read the same config-owner
+snapshot at process startup; host reset/erasure routing retains its startup choice
+until restart. Existing deployment environment settings take precedence; an explicit
+`AIMEE_MEMORY_BACKEND` selects the environment configuration instead of the saved
+object. No service is installed and no existing memories are migrated by this step.
+The shared KB is configured independently. Unavailable, unknown or incompatible
+external services fail readiness without switching to native memory.
+
 ## Release-candidate CI
 
 [Hillock prerelease qualification](../../.github/workflows/hillock-prereleases.yml) scans upstream branches matching `rc/v<major>.<minor>.<patch>` hourly (at minute 17). It discovers every matching branch, including new branches and updated tips; `rc/v0.10.0` is one example. Scheduled scans begin when the workflow is on Aimee's default branch. GitHub schedules can be delayed. Manual dispatch can select one branch or force a repeat of a previously successful qualification. Aimee pushes, pull requests and releases do not trigger this workflow. Normal Aimee CI runs the discovery/runner regression tests and the pinned production contract.
 
-Each branch tip is snapshotted to an immutable commit SHA and fetched by that SHA. Qualification runs memory owner/adapter race tests, the real upstream HDC lifecycle contract twice across a service restart, authenticated protocol/capacity checks, and cold/concurrent warm retrieval at 100, 1,000 and 10,000 records with a 30-second operation deadline. Candidate jobs run independently; a failure retains evidence and fails that job. Discovery/network failures fail the scan instead of reporting no candidates.
+Each branch tip is snapshotted to an immutable commit SHA and fetched by that SHA. Qualification runs memory owner/adapter race tests, the real upstream HDC lifecycle and Aimee owner/recall scenarios twice across a service restart, authenticated protocol/capacity checks, and cold/concurrent warm retrieval at 100, 1,000 and 10,000 records with a 30-second operation deadline. Candidate jobs run independently; a failure retains evidence and fails that job. Discovery/network failures fail the scan instead of reporting no candidates.
+
+The required live scenarios use the fetched engine with Aimee's production external
+catalog, memory handler and public command boundary. They verify attributed writes,
+idempotent retries, catalog reopen, correction/history/version conflicts, public
+search and scoped fact lookup returning current content, authority refusal, export
+and import, retirement, subject erasure and suppression of restored erased records.
+Recall scenarios verify project isolation, personal preference precedence, briefing
+composition and refusal to release a stale source collection. Adapter scenarios
+also cover Unicode content, scope/kind/tier filters, concurrent queries, empty
+scopes, cancellation, refused authentication and no cross-request retention.
+Governed transport scenarios execute real health/ranking requests through the shipping
+egress policy and HTTP executor with a fixture credential resolver, checking caller
+isolation, route admission and credential rotation/revocation.
+The runner requires all four named live tests to pass; absent or skipped scenarios
+fail qualification. The receipt schema is `v3`, so older successful receipts do
+not skip these stronger checks.
 
 A successful receipt is cached for the exact upstream branch and Hillock commit. A changed upstream tip or new branch must qualify; an Aimee commit alone does not invalidate the receipt. Candidates without successful receipts retry on the next scan. Use manual forced qualification to explicitly retest an unchanged upstream revision against newer Aimee code. The receipt records the Aimee revision actually tested. Cache eviction safely causes requalification. The cache holds only the success summary; fixture logs and scale results are retained as workflow artifacts for 30 days. Run/workflow summaries identify the branch and both revisions. Upstream code runs in disposable jobs without repository write permission or deployment secrets.
 

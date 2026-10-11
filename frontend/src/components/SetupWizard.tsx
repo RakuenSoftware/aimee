@@ -12,6 +12,7 @@ import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
 import GitIdentity from '../setup/GitIdentity';
+import MemoryBackend from '../setup/MemoryBackend';
 
 /* First-run setup wizard. A modal over the app that walks the operator through the
  * minimum path to a working local turn, with optional shared knowledge. Every value is written through the existing POST /api/config/set
@@ -275,6 +276,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <CreateAccount onCreated={handleAccountCreated} />
             ) : step.kind === 'chooser' ? (
               <PrimaryChooser onConfigured={handlePrimaryConfigured} />
+            ) : step.kind === 'memory' ? (
+              <MemoryBackend config={cfg} onSaved={handleDeploySaved} />
             ) : step.kind === 'deploy' ? (
               <DeployTopology onSaved={handleDeploySaved} />
             ) : step.kind === 'git_identity' ? (

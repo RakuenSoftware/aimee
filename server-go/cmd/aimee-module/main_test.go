@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	memorycontract "github.com/JBailes/aimee/server-go/memory"
+	configowner "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
 )
 
 func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
@@ -215,4 +218,42 @@ func implementedHere(id string) bool {
 		return false
 	}
 	return len(descriptor.GoSources) > 0
+}
+
+// Exercise the pinned config owner's persistence and flattened snapshot contract,
+// rather than assuming a wizard object can reach memory and egress at startup.
+func TestMemoryBackendSetupPersistsAcrossConfigOwnerRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []string{"native", "cognee", "hillock"} {
+		owner, err := configowner.NewStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		endpoint := "http://service:8097"
+		if engine == "native" {
+			endpoint = ""
+		}
+		selection := map[string]any{"engine": engine, "endpoint": endpoint, "auth": "bearer"}
+		if err = owner.SetVersioned("memory.backend", selection, ""); err != nil {
+			t.Fatal(err)
+		}
+		restarted, err := configowner.NewStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, _, err := restarted.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		settings, err := memorycontract.ResolveBackendSettings(snapshot, func(string) string { return "" })
+		if err != nil || settings.Engine != engine || settings.Endpoint != endpoint {
+			t.Fatal(settings, err)
+		}
+		if _, leaked := snapshot["memory_backend_token"]; leaked {
+			t.Fatal("credential in public configuration")
+		}
+	}
 }

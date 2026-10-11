@@ -90,6 +90,10 @@ int main(void)
    assert(config_client_key_is_secret("kb_api_bearer_token"));
    assert(strcmp(config_client_secret_name("kb_api_bearer_token"), "AIMEE_KB_API_BEARER_TOKEN") ==
           0);
+   assert(config_client_key_is_secret("memory_backend_token"));
+   assert(strcmp(config_client_secret_name("memory_backend_token"), "AIMEE_MEMORY_BACKEND_TOKEN") ==
+          0);
+   assert(!config_client_key_is_secret("memory.backend"));
    assert(!config_client_key_is_secret("provider"));
    printf("OK\n");
    return 0;

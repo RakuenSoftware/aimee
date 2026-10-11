@@ -26,6 +26,9 @@ func (e independentTransport) Do(ctx context.Context, _ uint64, r egress.HTTPReq
 	if err != nil {
 		return egress.HTTPResponse{}, err
 	}
+	if r.CredentialHandle == "memory-backend" {
+		req.Header.Set("Authorization", "Bearer contract-fixture")
+	}
 	for k, v := range r.Headers {
 		req.Header.Set(k, v)
 	}
@@ -43,11 +46,24 @@ func (e independentTransport) Do(ctx context.Context, _ uint64, r egress.HTTPReq
 func stringsReader(raw []byte) *bytes.Reader { return bytes.NewReader(raw) }
 
 func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
+	exerciseExternalBackendOwner(t, "")
+}
+
+func TestHillockLiveOwnerScenarios(t *testing.T) {
+	endpoint := os.Getenv("AIMEE_HILLOCK_TEST_URL")
+	if endpoint == "" {
+		t.Skip("real Hillock endpoint required")
+	}
+	exerciseExternalBackendOwner(t, endpoint)
+}
+
+func exerciseExternalBackendOwner(t *testing.T, endpoint string) {
 	home := t.TempDir()
 	if _, err := identity.Ensure(home, "server"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AIMEE_HOME", home)
+	t.Setenv("AIMEE_MEMORY_BACKEND_DIR", "")
 	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
 	t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "none")
 	// PostgreSQL is deliberately absent: the production external-store constructor
@@ -74,7 +90,12 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"hits": hits})
 	}))
 	defer server.Close()
-	t.Setenv("AIMEE_MEMORY_BACKEND_URL", server.URL)
+	if endpoint == "" {
+		endpoint = server.URL
+	} else {
+		t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "bearer")
+	}
+	t.Setenv("AIMEE_MEMORY_BACKEND_URL", endpoint)
 	executor := independentTransport{server.Client()}
 	data, err := configuredExternalStore(executor, PlacementServer)
 	if err != nil {
@@ -188,8 +209,15 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 	}
 	public("get", map[string]any{"id": id, "include_version": true})
 	public("update", map[string]any{"id": id, "content": "151cm", "authority": "user"})
-	public("search", map[string]any{"view": "server", "keywords": []string{"Samy"}})
-	public("find_facts_scoped", map[string]any{"query": "Samy", "scope_type": "project", "scope_value": "discord"})
+	for _, result := range []map[string]any{
+		public("search", map[string]any{"view": "server", "keywords": []string{"Samy"}}),
+		public("find_facts_scoped", map[string]any{"query": "Samy", "scope_type": "project", "scope_value": "discord"}),
+	} {
+		encoded := mustMarshal(result)
+		if !bytes.Contains(encoded, []byte("151cm")) || bytes.Contains(encoded, []byte("150cm")) {
+			t.Fatal("public retrieval omitted the correction or returned stale content", result)
+		}
+	}
 	updated := public("get", map[string]any{"id": id})
 	if !bytes.Contains(mustMarshal(updated), []byte("151cm")) {
 		t.Fatal(updated)

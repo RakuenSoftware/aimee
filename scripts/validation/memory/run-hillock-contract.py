@@ -62,6 +62,15 @@ def qualification_profile(root, work, revision):
     return candidate_service, ["-overlay=" + str(overlay)]
 
 
+def require_live_tests(result, names):
+    # An absent, skipped or failing required scenario cannot produce a receipt.
+    if result.returncode or re.search(r"(?:SKIP|FAIL)", result.stdout):
+        raise RuntimeError("required real Hillock/Aimee tests failed; inspect contract.log")
+    for name in names:
+        if not re.search(r"^--- PASS: " + re.escape(name) + r" \([^\n]*\)$", result.stdout, re.MULTILINE):
+            raise RuntimeError("missing required live scenario " + name + "; inspect contract.log")
+
+
 def validate(root, work, source, revision, go, scale):
     service, go_flags = qualification_profile(root, work, revision)
     token = work / "token"
@@ -121,8 +130,25 @@ def validate(root, work, source, revision, go, scale):
                     result = subprocess.run([go, "test", *go_flags, "-race", "-count=1", "-v", "./modules/memory/hillock", "-run", "^TestHillockLiveContract$"], cwd=root / "server-go", env=test_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120)
                     contract.write(result.stdout)
                     contract.flush()
-                    if result.returncode or "--- PASS: TestHillockLiveContract" not in result.stdout or "SKIP" in result.stdout:
-                        raise RuntimeError("required real Hillock contract failed; inspect contract.log")
+                    require_live_tests(result, ("TestHillockLiveContract",))
+                    # These construct Aimee's production external catalog/owner and
+                    # use its public command/admission/recall boundaries with the
+                    # real candidate service, not a fake ranking provider.
+                    owner = subprocess.run([go, "test", *go_flags, "-race", "-count=1", "-v", "./modules/memory",
+                                            "-run", "^TestHillockLive(Owner|Recall)Scenarios$"],
+                                           cwd=root / "server-go", env=test_env, stdout=subprocess.PIPE,
+                                           stderr=subprocess.STDOUT, text=True, timeout=180)
+                    contract.write(owner.stdout)
+                    contract.flush()
+                    required = ("TestHillockLiveOwnerScenarios", "TestHillockLiveRecallScenarios")
+                    require_live_tests(owner, required)
+                    governed = subprocess.run([go, "test", *go_flags, "-race", "-count=1", "-v", "./modules/egress",
+                                               "-run", "^TestHillockLiveGovernedTransport$"],
+                                              cwd=root / "server-go", env=test_env, stdout=subprocess.PIPE,
+                                              stderr=subprocess.STDOUT, text=True, timeout=120)
+                    contract.write(governed.stdout)
+                    contract.flush()
+                    require_live_tests(governed, ("TestHillockLiveGovernedTransport",))
                     if scale and round_number == 0:
                         with (work / "scale.log").open("w") as scale_log:
                             subprocess.run([go, "run", *go_flags, "../scripts/validation/memory/qualify-external.go",
@@ -139,7 +165,7 @@ def validate(root, work, source, revision, go, scale):
                     except subprocess.TimeoutExpired:
                         server.kill()
                         server.wait()
-        return {"restart_rounds": results, "http_auth_validation_capacity": "passed", "contract": "passed",
+        return {"restart_rounds": results, "http_auth_validation_capacity": "passed", "contract": "passed", "aimee_owner_scenarios": "passed", "governed_transport": "passed",
                 "scale": "passed" if scale else "not_requested"}
     finally:
         token.unlink(missing_ok=True)
