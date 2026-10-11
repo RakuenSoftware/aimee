@@ -105,9 +105,11 @@ credentials, exported user stores and production conversation contents are exclu
    trajectories remains pending in the conversational proposal.
 4. Live Discord gateway, mention, reconnect and unbounded multi-bot acceptance
    requires an explicitly designated test guild/channel. No messages were sent.
-5. GitHub CLI authentication is unavailable. Feature PR creation, required CI,
-   merge into testing, testing-to-main protected approval and the protected release
-   approval have not occurred. The existing workflows enforce those gates.
+5. [Draft PR #3020](https://github.com/RakuenSoftware/aimee/pull/3020) is open
+   against testing through the authenticated GitHub connector. GitHub CLI login
+   remains unavailable, but it no longer blocks PR creation. Required CI, merge
+   into testing, testing-to-main protected approval and protected release approval
+   remain outstanding. The existing workflows enforce those gates.
 
 The disposable native/Cognee/Hillock lab guests received the candidate memory
 binary and synthetic fixtures. Production Discord services/configuration and
