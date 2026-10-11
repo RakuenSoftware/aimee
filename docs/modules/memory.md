@@ -621,7 +621,7 @@ its source mutation. Startup replays canonical erasure and resets selected deriv
 
 ### Hillock proof of concept
 
-Native, Cognee and Hillock are selectable durable baseline backends. Cognee/Hillock use independent adapter-owned catalogs under `$AIMEE_HOME/memory-backends/<engine>/<placement>`; `AIMEE_MEMORY_BACKEND_DIR` overrides the root. Their production constructor returns before constructing native PostgreSQL storage. Catalogs persist records, scopes, authorship, exact versions, correction history, retry receipts and retained erasure markers with private permissions, process locking, atomic writes and fsync. Subject erasure removes history and receipt payloads; retained `erasures.json` prevents stale record restoration. [Completed baseline](../proposals/done/independent-durable-memory-backends.md) records evidence. [Remaining parity/qualification](../proposals/pending/external-memory-engine-scale-and-quality.md) remains pending.
+Native, Cognee and Hillock are selectable durable baseline backends. Cognee/Hillock use independent adapter-owned catalogs under `$AIMEE_HOME/memory-backends/<engine>/<placement>`; `AIMEE_MEMORY_BACKEND_DIR` overrides the root. Their production constructor returns before constructing native PostgreSQL storage. Catalogs persist records, scopes, authorship, exact versions, correction history, retry receipts and retained erasure markers with private permissions, process locking, atomic writes and fsync. Subject erasure removes history and receipt payloads; retained `erasures.json` prevents stale record restoration. [Completed baseline](../proposals/done/independent-durable-memory-backends.md) records evidence. [Remaining parity/qualification](../validation/external-memory-support-2026-10-08.md) records the outstanding qualification work.
 
 External owners expose scoped `backend_capabilities`, `backend_list` (stable `after_id` paging), `backend_export` and `backend_import` commands. Export/import requires verified human authority and an empty destination catalog; exports preserve scope, IDs, history and erasure controls. Native PostgreSQL migration is not yet this format. Advanced unsupported APIs do not execute native SQL. Discovery lists only supported baseline commands. The ordinary public CRUD command paths are tested with PostgreSQL absent.
 
@@ -629,7 +629,7 @@ External owners expose scoped `backend_capabilities`, `backend_list` (stable `af
 
 The rank API has explicit 256-candidate and 1 MiB bounds, with additional token/vocabulary limits; overload returns capacity, not truncated success. It does not implement upstream chat generation, extraction, graph or Hebbian learning. See [run/configuration and real-engine tests](../../integrations/hillock/README.md) and [the specific APIs required for full support](../../integrations/hillock/FULL_SUPPORT_CONTRACT.md). The `memory-backends` CI job requires the pinned real Hillock contract to execute across a restart, alongside existing native/Cognee coverage.
 
-## External conversation profile
+### External conversation profile
 
 Cognee and Hillock implement [the reusable conversation v2 contract](../../integrations/memory/CONTRACT.md) through independent durable catalogs and provider ranking. It includes recall/composition/briefing, exact history, authenticated export, source revalidation/send barriers, and idempotent erasure with fresh host-admitted writes. Native is exempt. [Support validation](../validation/external-memory-support-2026-10-08.md) distinguishes completed integration from remaining answer/scale qualification.
 
