@@ -150,9 +150,9 @@ of stale in this series.
   stale). Usable without P2.
 - **Depended on by:** P7 (review shows the outcome record), P9 (the trace shows
   the overlay's contribution).
-- **Related pending work:** [kb_hybrid outcome residual](../pending/kb-hybrid-outcome-wiring-residual.md)
+- **Related pending work:** [kb_hybrid outcome residual](../pending/retrieval-ranking-feedback-and-promotion.md)
   (propensity logging, explicit evaluation feedback) and
-  [per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
+  [per-query feature persistence residual](../pending/retrieval-ranking-feedback-and-promotion.md)
   (grouping key). P5 must not duplicate either; it consumes their grouping key
   and contributes its outcomes to their loop.
 

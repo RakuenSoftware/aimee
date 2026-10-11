@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv*/
+*.token
+*.key
+webhook.url
+config.json
+serving.json

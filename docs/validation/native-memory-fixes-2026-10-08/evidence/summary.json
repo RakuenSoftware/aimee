@@ -1,0 +1,74 @@
+{
+  "backend": "native",
+  "hostname": "aimee-native-memory-20261008",
+  "binary_sha256": {
+    "aimee": "8fa360646295d25278254b551d030bf9ffc84bfbc21ae4cc85d3cb376ddabffb",
+    "aimee-server": "b6953b8a1fa85fdecb581f1b312f30e812b44e168c17d424b25a23e8c1997f12",
+    "aimee-kb": "b5c2b377b9d3cf5b78a3972ed818009861e04836b5ec3989a7856910a1fb2952",
+    "src/build/obj/aimee-module": "67f2dac489d03ad5cf8b5688ccb86d50978de68238435dc041e1393a940a483e"
+  },
+  "postgres": "postgres (PostgreSQL) 18.6 (Debian 18.6-1.pgdg13+2)",
+  "checks": [
+    {
+      "name": "private CRUD/source-unit retention/retry/retrieval/isolation",
+      "status": "passed",
+      "seconds": 0.344
+    },
+    {
+      "name": "shared CRUD/source-unit retention/retry/retrieval/isolation",
+      "status": "passed",
+      "seconds": 0.475
+    },
+    {
+      "name": "user correction and stale-version refusal",
+      "status": "passed",
+      "seconds": 0.302
+    },
+    {
+      "name": "personal exact historical version",
+      "status": "passed",
+      "seconds": 0.053
+    },
+    {
+      "name": "kb correction and stale-version refusal",
+      "status": "passed",
+      "seconds": 0.478
+    },
+    {
+      "name": "shared project isolation",
+      "status": "passed",
+      "seconds": 0.092
+    },
+    {
+      "name": "user record deletion/current exclusion",
+      "status": "passed",
+      "seconds": 0.33
+    },
+    {
+      "name": "kb record deletion/current exclusion",
+      "status": "passed",
+      "seconds": 0.413
+    },
+    {
+      "name": "both supervised memory children restart with durable records",
+      "status": "passed",
+      "seconds": 3.398
+    },
+    {
+      "name": "chatbot memory/recall",
+      "status": "passed",
+      "seconds": 0.154
+    },
+    {
+      "name": "subject erasure completion/retry/retained records",
+      "status": "passed",
+      "seconds": 0.74
+    },
+    {
+      "name": "shipping shared context assembly",
+      "status": "passed",
+      "seconds": 0.09
+    }
+  ],
+  "status": "passed"
+}

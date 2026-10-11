@@ -1,0 +1,18 @@
+{
+  "route": "kb/erase-subject",
+  "http": 200,
+  "response": {
+    "status": "ok",
+    "request_id": "lxc-unrelated-erasure-hillock-1791459763507344321",
+    "subject": "lxc-disposable-unrelated-subject",
+    "session_count": 0,
+    "memory_count": 0,
+    "document_count": 0,
+    "event_created": true,
+    "coverage_complete": true,
+    "erasure_state": "completed",
+    "coverage_scope": "managed_application_stores",
+    "pending_owners": 0
+  },
+  "elapsed_seconds": 0.536
+}

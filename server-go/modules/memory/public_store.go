@@ -12,7 +12,7 @@ import (
 
 // The memory, its extraction authority, and its extraction job are one commit.
 // A capture or enqueue failure must never acknowledge a partially stored note.
-func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *bus.CommandContext) error {
+func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *bus.CommandContext, sourceOnly ...bool) error {
 	actor := FactActor{Principal: "system:model-inference", Role: "model", Rank: 10, TransportIdentity: "internal"}
 	if authority == AuthorityUser {
 		if caller == nil || !caller.Authenticated || !caller.UserAuthority {
@@ -28,9 +28,45 @@ VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(memory_id) DO NOTHING`, id, actor.Principa
 	if err != nil {
 		return err
 	}
+	if len(sourceOnly) > 0 && sourceOnly[0] {
+		return nil
+	}
 	_, err = s.db.Exec(ctx, `INSERT INTO kb_async_jobs(kind,document_id,project,status,updated_at)
 VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,document_id) DO UPDATE SET
  status='pending',generation=kb_async_jobs.generation+1,attempts=0,claimed_by='',claimed_at='',last_error='',next_attempt_at='',updated_at=pg_now_text()`, id)
+	if err != nil {
+		return err
+	}
+	// Publish exact, high-precision measurement assertions in the same transaction.
+	// The async worker uses identical source/job evidence, so its later replay
+	// deduplicates rather than creating a second supporting observation.
+	var jobID int64
+	if err = s.db.QueryRow(ctx, `SELECT id FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=$1`, id).Scan(&jobID); err != nil {
+		return err
+	}
+	content, observed, _, captured, err := s.memoryFactSource(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	candidates := measurementFactCandidates(content, observed, id, jobID, captured)
+	if len(candidates) == 0 {
+		return nil
+	}
+	// Fact commits carry their captured source actor. Restore the surrounding
+	// store caller before admission receipts and other ownership guards run.
+	var principal, role, transport, correlation string
+	if err = s.db.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.principal',true),''),COALESCE(current_setting('aimee.authority',true),''),COALESCE(current_setting('aimee.transport_identity',true),''),COALESCE(current_setting('aimee.correlation_id',true),'')`).Scan(&principal, &role, &transport, &correlation); err != nil {
+		return err
+	}
+	for _, candidate := range candidates {
+		if _, _, err = s.commitFactCandidate(ctx, candidate); err != nil {
+			if errors.Is(err, errFactTombstoned) {
+				continue
+			}
+			return err
+		}
+	}
+	_, err = s.db.Exec(ctx, `SELECT set_config('aimee.principal',$1,true),set_config('aimee.authority',$2,true),set_config('aimee.transport_identity',$3,true),set_config('aimee.correlation_id',$4,true)`, principal, role, transport, correlation)
 	return err
 }
 
@@ -39,7 +75,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return commandResult(commandError("invalid_argument", message))
 	}
 	request := DataRequest{Operation: "insert-epistemic", PublicView: true, Key: args.stringOr("key", ""), Content: args.stringOr("content", ""),
-		Tier: args.stringOr("tier", "L0"), Kind: args.stringOr("kind", "fact"), EpistemicKind: args.stringOr("epistemic_kind", "world_fact"),
+		SourceOnly: args.boolean("source_only"), Tier: args.stringOr("tier", "L0"), Kind: args.stringOr("kind", "fact"), EpistemicKind: args.stringOr("epistemic_kind", "world_fact"),
 		SessionID: args.stringOr("session_id", ""), UseCases: args.stringOr("use_cases", "")}
 	if args.stringOr("view", "") == "mcp" {
 		request.Tier = args.stringOr("tier", "L2")
@@ -52,6 +88,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		if json.Unmarshal(raw, &kind) != nil || kind == "" {
 			return invalid("epistemic_kind must be a string")
 		}
+	}
+	if request.SourceOnly && request.EpistemicKind != "episode" && request.EpistemicKind != "mental_model" {
+		return invalid("source_only requires an episode or derived mental_model")
 	}
 	if !validEpistemicKinds[request.EpistemicKind] {
 		return invalid("invalid epistemic_kind")
@@ -98,6 +137,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
 	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
@@ -162,6 +204,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
 	}
 	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)

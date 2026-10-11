@@ -1,0 +1,25 @@
+{
+  "local_race_packages": [
+    "memory",
+    "modules/memory",
+    "modules/memory/backendstore",
+    "modules/memory/cognee",
+    "modules/memory/hillock",
+    "modules/egress"
+  ],
+  "local_race": "passed",
+  "guest_builds": {
+    "9213": "passed",
+    "9214": "passed"
+  },
+  "portable_transfer_standard_make_target": "passed",
+  "memory_c_boundary": "passed",
+  "memory_ownership": "passed",
+  "module_descriptor_sources": "passed",
+  "go_package_ownership": "passed",
+  "module_process_contracts": "passed",
+  "module_egress": "passed",
+  "proposal_links": "passed",
+  "proposal_reconciliation": "passed (pre-existing report-only warnings)",
+  "generated_reference_docs": "passed"
+}

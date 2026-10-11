@@ -1,0 +1,25 @@
+{
+  "backend": "cognee",
+  "checks": [
+    {
+      "name": "race-backend-contract",
+      "exit": 1,
+      "elapsed_seconds": 420.99
+    },
+    {
+      "name": "required-owner-replay",
+      "exit": 2,
+      "elapsed_seconds": 305.99
+    },
+    {
+      "name": "real-cognee",
+      "exit": 0,
+      "elapsed_seconds": 34.12
+    },
+    {
+      "name": "boundaries",
+      "exit": 0,
+      "elapsed_seconds": 21.75
+    }
+  ]
+}

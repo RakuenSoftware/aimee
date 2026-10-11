@@ -1,0 +1,22 @@
+services:
+  hillock:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 2
+    pids_limit: 64
+    environment:
+      HILLOCK_TOKEN_FILE: /run/secrets/hillock_token
+    secrets: [hillock_token]
+    ports: ["127.0.0.1:8097:8097"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,urllib.request; r=urllib.request.Request('http://127.0.0.1:8097/v1/health',headers={'Authorization':'Bearer '+pathlib.Path('/run/secrets/hillock_token').read_text().strip()}); urllib.request.urlopen(r,timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+secrets:
+  hillock_token:
+    file: ${HILLOCK_TOKEN_FILE:?set a readable bearer token file}

@@ -22,8 +22,9 @@ func creationDigest(r DataRequest, authority int) (string, error) {
 		Authority                                                    int
 		Tier, Kind, EpistemicKind, Key, Content, UseCases, SessionID string
 		Confidence                                                   *float64
+		SourceOnly                                                   bool `json:",omitempty"`
 	}{2, r.Operation, r.Scope, r.Workspace, r.Project, r.IncludeAll, authority,
-		r.Tier, r.Kind, r.EpistemicKind, r.Key, r.Content, r.UseCases, r.SessionID, r.Confidence})
+		r.Tier, r.Kind, r.EpistemicKind, r.Key, r.Content, r.UseCases, r.SessionID, r.Confidence, r.SourceOnly})
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +142,7 @@ func (s *postgresDataStore) storeKBIdempotent(ctx context.Context, r DataRequest
 	if err != nil {
 		return Record{}, nil, err
 	}
-	if err = s.captureStoredFactActor(ctx, record.ID, r.Authority, caller); err != nil {
+	if err = s.captureStoredFactActor(ctx, record.ID, r.Authority, caller, r.SourceOnly); err != nil {
 		return Record{}, nil, err
 	}
 	if err = s.db.QueryRow(ctx, `SELECT record_revision FROM memories WHERE id=$1`, record.ID).Scan(&revision); err != nil {

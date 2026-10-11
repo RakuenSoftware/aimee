@@ -169,6 +169,28 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		return b, envelope.Recall
 	}
 	b, _ := recall("backend migration", 8192, false, "")
+	exec(`SAVEPOINT conversational_hint`)
+	exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
+	needle := seed("L2", "fact", "Virant reported Kibukx person height exactly 69cm", "project", "recall-project", "active")
+	seed("L2", "fact", "Virant reported Kibukx person height private-project", "project", "private-project", "active")
+	stale := seed("L2", "fact", "Virant reported Kibukx person height expired", "project", "recall-project", "active")
+	exec(`UPDATE memories SET valid_until=CURRENT_TIMESTAMP::text WHERE id=$1`, stale)
+	suppressed := seed("L2", "fact", "Virant reported Kibukx person height suppressed", "project", "recall-project", "active")
+	exec(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, suppressed)
+	for _, activation := range []string{"", `,"activation":{"current_turn":1,"rows":[]}`} {
+		question, _ := recall("What height did Virant report for Kibukx?", 8192, false, activation)
+		found := false
+		for _, record := range question.ActiveContext {
+			found = found || record.ID == needle
+			if record.ID == stale || record.ID == suppressed {
+				t.Fatal("conversational fallback escaped eligibility", record)
+			}
+		}
+		if !found {
+			t.Fatal("conversational question lost its admitted source", question.ActiveContext)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT conversational_hint; RELEASE SAVEPOINT conversational_hint`)
 	exec(`SAVEPOINT legacy_scope_recall`)
 	legacy := runPublicCommand(t, client, "recall", `{"task_hint":"backend migration","limit_tokens":8192,"project":"recall-project"}`)
 	encodedLegacy, _ := json.Marshal(legacy["recall"])

@@ -476,7 +476,7 @@ BEGIN
   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_privacy_erasure;
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_privacy_erasure;
   GRANT USAGE ON SCHEMA public TO aimee_kb_privacy_erasure;
-  GRANT SELECT,DELETE ON memories,memory_units,memory_embeddings,
+  GRANT SELECT,DELETE ON memories,memory_fact_actors,memory_units,memory_embeddings,
     derived_rederivation_queue,derived_memory_dependencies,derived_memory_registry,
     report_enrichments,memory_evidence_events,prospective_memories,
     epistemic_directives,learning_signals,artifacts,artifact_citations,
@@ -1381,3 +1381,25 @@ BEGIN
   END LOOP;
 END
 $$;
+
+-- The verified KB runtime acquires/releases source send guards through memory.
+-- It receives no direct access to the barrier or opaque lease tokens.
+DO $memory_send_guard_runtime$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime')
+    AND to_regprocedure('public.memory_send_guard_begin(text,integer)') IS NOT NULL THEN
+  GRANT EXECUTE ON FUNCTION public.memory_send_guard_begin(TEXT,INTEGER),
+   public.memory_send_guard_end(TEXT) TO aimee_kb_runtime;
+ END IF;
+END $memory_send_guard_runtime$;
+
+-- The Go memory worker advances a bounded durable relation-invalidation page.
+-- Cursor tables remain private to the definer; callers receive no source IDs.
+DO $memory_relation_runtime$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime')
+    AND to_regprocedure('public.memory_apply_relation_invalidations(integer)') IS NOT NULL THEN
+  GRANT EXECUTE ON FUNCTION public.memory_apply_relation_invalidations(INTEGER)
+   TO aimee_kb_runtime;
+ END IF;
+END $memory_relation_runtime$;

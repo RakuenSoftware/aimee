@@ -1,0 +1,896 @@
+{
+  "backend": "native",
+  "passed": true,
+  "fixture": "synthetic admitted episodes in disposable owner",
+  "checks": 8,
+  "cases": [
+    {
+      "id": "decision_topic_return_restart",
+      "status": "passed",
+      "query": "What did Virant say we agreed to use for the hiking pack?",
+      "required": [
+        "red",
+        "backpack",
+        "Virant"
+      ],
+      "forbidden": [],
+      "records": [
+        {
+          "id": 393,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204481",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204481\",\"message_id\":\"1558831078813204481\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204481\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 398,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204482",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204482\",\"message_id\":\"1558831078813204482\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204482\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 421,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204503",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204503\",\"message_id\":\"1558831078813204503\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"PeerBot\",\"speaker_kind\":\"bot\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"agent_message\",\"text\":\"Bot aside 19: gardening is an unrelated topic. I agree with Virant, but made no measurement.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"PeerBot\",\"message_id\":\"1558831078813204503\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "agent_message"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 398,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "decisions": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 421,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "PeerBot",
+            "speaker_kind": "bot"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 11,
+        "selected_records": 4,
+        "omitted_records": 7,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 1039.802
+    },
+    {
+      "id": "pronoun_after_bot_churn",
+      "status": "passed",
+      "query": "How much does the red backpack weigh according to Virant? Give the original units.",
+      "required": [
+        "7",
+        "kg",
+        "Virant"
+      ],
+      "forbidden": [
+        "7 pounds"
+      ],
+      "records": [
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 398,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204482",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204482\",\"message_id\":\"1558831078813204482\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204482\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 393,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204481",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204481\",\"message_id\":\"1558831078813204481\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204481\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 402,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204484",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204484\",\"message_id\":\"1558831078813204484\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"PeerBot\",\"speaker_kind\":\"bot\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"agent_message\",\"text\":\"Bot aside 0: gardening is an unrelated topic. I agree with Virant, but made no measurement.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"PeerBot\",\"message_id\":\"1558831078813204484\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "agent_message"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 398,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "decisions": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 402,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "PeerBot",
+            "speaker_kind": "bot"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 12,
+        "selected_records": 4,
+        "omitted_records": 8,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 17925.34
+    },
+    {
+      "id": "source_bound_correction_feedback",
+      "status": "passed",
+      "query": "Who corrected Kibukx the person's height? Give the exact original units and avoid calling the claim verified.",
+      "required": [
+        "Virant",
+        "69",
+        "cm"
+      ],
+      "forbidden": [
+        "69 feet",
+        "verified height"
+      ],
+      "records": [
+        {
+          "id": 422,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204504",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204504\",\"message_id\":\"1558831078813204504\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204504\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 398,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204482",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204482\",\"message_id\":\"1558831078813204482\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204482\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 393,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204481",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204481\",\"message_id\":\"1558831078813204481\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204481\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 398,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "decisions": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Our goal is prepare a hiking pack. We agreed to use the red backpack. Keep original measurements in metric units.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 393,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "speaker_kind": "human"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 8,
+        "selected_records": 4,
+        "omitted_records": 4,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 5496.934
+    },
+    {
+      "id": "fiction_then_human_correction",
+      "status": "passed",
+      "query": "Does the real green desk fly, or stay on the floor?",
+      "required": [
+        "floor"
+      ],
+      "forbidden": [
+        "does fly"
+      ],
+      "records": [
+        {
+          "id": 427,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204506",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204506\",\"message_id\":\"1558831078813204506\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Actually, the real green desk stays on the floor. The flying desk was a joke.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204506\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 422,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204504",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204504\",\"message_id\":\"1558831078813204504\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204504\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 398,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204482",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204482\",\"message_id\":\"1558831078813204482\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204482\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 398,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Kibukx the person is exactly 69cm tall. The Kibukx mountains are a different entity, measured in feet.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [],
+        "decisions": [],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 398,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "speaker_kind": "human"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 6,
+        "selected_records": 4,
+        "omitted_records": 2,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 893.128
+    },
+    {
+      "id": "preference_expiry",
+      "status": "passed",
+      "query": "The active preference projection is empty. Does Virant currently have an active reply preference? Say none is active.",
+      "required": [
+        "active"
+      ],
+      "forbidden": [],
+      "records": [
+        {
+          "id": 430,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204507",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204507\",\"message_id\":\"1558831078813204507\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"I prefer brief replies for next 2 seconds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204507\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 427,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204506",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204506\",\"message_id\":\"1558831078813204506\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Actually, the real green desk stays on the floor. The flying desk was a joke.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204506\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 422,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204504",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204504\",\"message_id\":\"1558831078813204504\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204504\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 426,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204505",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204505\",\"message_id\":\"1558831078813204505\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"In our story, the green desk flies. This is roleplay, not a real observation.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204505\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 430,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "I prefer brief replies for next 2 seconds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [],
+        "decisions": [],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 426,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "speaker_kind": "human"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 6,
+        "selected_records": 5,
+        "omitted_records": 1,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 4052.482
+    },
+    {
+      "id": "private_source_exclusion",
+      "status": "passed",
+      "query": "Do you have a source for a private fixture secret? Do not invent one.",
+      "required": [],
+      "forbidden": [
+        "violet-walrus-canary"
+      ],
+      "records": [
+        {
+          "id": 430,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204507",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204507\",\"message_id\":\"1558831078813204507\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"I prefer brief replies for next 2 seconds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204507\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 427,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204506",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204506\",\"message_id\":\"1558831078813204506\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Actually, the real green desk stays on the floor. The flying desk was a joke.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204506\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 422,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204504",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204504\",\"message_id\":\"1558831078813204504\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204504\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 426,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204505",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204505\",\"message_id\":\"1558831078813204505\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"In our story, the green desk flies. This is roleplay, not a real observation.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204505\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 430,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "I prefer brief replies for next 2 seconds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [],
+        "decisions": [],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 426,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "speaker_kind": "human"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 6,
+        "selected_records": 5,
+        "omitted_records": 1,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 847.408
+    },
+    {
+      "id": "deleted_source_projection",
+      "status": "passed",
+      "query": "Is the deleted first height report available as a current source? Say it is unavailable.",
+      "required": [
+        "unavailable"
+      ],
+      "forbidden": [],
+      "records": [
+        {
+          "id": 430,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204507",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204507\",\"message_id\":\"1558831078813204507\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"I prefer brief replies for next 2 seconds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204507\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 427,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204506",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204506\",\"message_id\":\"1558831078813204506\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Actually, the real green desk stays on the floor. The flying desk was a joke.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204506\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 422,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204504",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204504\",\"message_id\":\"1558831078813204504\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204504\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 400,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204483",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204483\",\"message_id\":\"1558831078813204483\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"The red backpack weighs exactly 7kg, not 7 pounds.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204483\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 426,
+          "key": "discord:111111111111111111:1791724690870298328:1558831078813204505",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:1791724690870298328:1558831078813204505\",\"message_id\":\"1558831078813204505\",\"speaker_id\":\"333333333333333333\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791724690870,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"In our story, the green desk flies. This is roleplay, not a real observation.\",\"reply_to_message_id\":\"\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333333\",\"author_name\":\"Virant\",\"message_id\":\"1558831078813204505\"}",
+          "source_session": "discord:111111111111111111:1791724690870298328",
+          "provenance_category": "user_stated"
+        }
+      ],
+      "projection": {
+        "recent_human_context": [
+          {
+            "source_id": 430,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "I prefer brief replies for next 2 seconds.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 400,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "The red backpack weighs exactly 7kg, not 7 pounds.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "purpose": [],
+        "decisions": [],
+        "open_questions": [],
+        "constraints": [
+          {
+            "source_id": 427,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Actually, the real green desk stays on the floor. The flying desk was a joke.",
+            "status": "unverified speaker statement"
+          },
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "feedback": [
+          {
+            "source_id": 422,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "text": "Correction: your answer was wrong. Kibukx the person is 69cm, not 69 feet. Keep the original source report, do not claim you verified it.",
+            "status": "unverified speaker statement"
+          }
+        ],
+        "preferences": [],
+        "partners": [
+          {
+            "source_id": 426,
+            "speaker_id": "333333333333333333",
+            "speaker_name": "Virant",
+            "speaker_kind": "human"
+          }
+        ]
+      },
+      "receipt": {
+        "available_records": 6,
+        "selected_records": 5,
+        "omitted_records": 1,
+        "budget_bytes": 4000,
+        "projection_policy": "latest 16 eligible pointers per category; up to 4 source items per category",
+        "coverage": "bounded source projection; retrieval is not exhaustive"
+      },
+      "recall_ms": 873.207
+    }
+  ]
+}

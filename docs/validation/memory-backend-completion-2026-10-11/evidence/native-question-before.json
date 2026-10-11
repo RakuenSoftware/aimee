@@ -1,0 +1,158 @@
+{
+  "backend": "native",
+  "profile": "shipping-scoped-recall; synthetic multi-speaker claims",
+  "cases": [
+    {
+      "id": "exact_units",
+      "query": "What height did Virant report for Kibukx?",
+      "required": [
+        "69",
+        "cm",
+        "Virant"
+      ],
+      "forbidden": [
+        "69 feet",
+        "69 ft",
+        "mountain"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 183.031,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "person_mountain",
+      "query": "What elevation did Samy report for the Kibukx mountains?",
+      "required": [
+        "69",
+        "feet",
+        "Samy"
+      ],
+      "forbidden": [
+        "69cm",
+        "69 cm"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 144.29,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "attribution",
+      "query": "Who originally reported Kibukx's backpack weight? Was Samy independent support?",
+      "required": [
+        "Virant",
+        "Samy"
+      ],
+      "forbidden": [
+        "Samy originally",
+        "two independent"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 125.693,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "conflict",
+      "query": "What do we know about the blue crate's weight?",
+      "required": [
+        "7",
+        "9",
+        "Virant",
+        "Samy"
+      ],
+      "forbidden": [
+        "definitely weighs",
+        "verified weight"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 133.703,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "negation",
+      "query": "Did Virant say the red box contains lithium?",
+      "required": [
+        "not",
+        "lithium",
+        "Virant"
+      ],
+      "forbidden": [
+        "yes, it contains",
+        "confirmed lithium"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 117.298,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "fiction",
+      "query": "Does the real green desk fly?",
+      "required": [
+        "joke",
+        "floor"
+      ],
+      "forbidden": [
+        "can fly",
+        "does fly"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 147.155,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "topic_return",
+      "query": "After our unrelated gardening discussion, what did we agree for the observatory review?",
+      "required": [
+        "Tuesday",
+        "14:00",
+        "UTC"
+      ],
+      "forbidden": [
+        "Wednesday",
+        "15:00"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 160.625,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    },
+    {
+      "id": "paraphrase",
+      "query": "How does Virant want laboratory reports written, and which measurement system?",
+      "required": [
+        "concise",
+        "metric"
+      ],
+      "forbidden": [
+        "imperial",
+        "verbose"
+      ],
+      "records": [],
+      "expected_record_retrieved": false,
+      "recall_ms": 116.464,
+      "budget_exceeded": false,
+      "approx_tokens": 214,
+      "status": "failed"
+    }
+  ],
+  "passed": false
+}

@@ -1,0 +1,139 @@
+{
+  "deadline_ms": 30000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "cognee",
+      "records": 100,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 47387,
+      "import_ms": 2.040968,
+      "restart_ms": 2.046527,
+      "cold_ms": 21146.475579,
+      "p50_ms": 4337.525238,
+      "p95_ms": 4378.030425,
+      "max_ms": 4378.030425,
+      "requests_per_second": 0.922271704536359,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 10064.545679,
+          "max_ms": 2534.268199
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 410.845005,
+          "max_ms": 56.516506
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 16216.47364,
+          "max_ms": 4250.505312
+        },
+        "POST /api/v1/aimee/index-chunks": {
+          "calls": 1,
+          "total_ms": 3793.675679,
+          "max_ms": 3793.675679
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 13709.597003000003,
+          "max_ms": 1093.059884
+        }
+      }
+    },
+    {
+      "backend": "cognee",
+      "records": 1000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 477593,
+      "import_ms": 20.327017,
+      "restart_ms": 23.245778,
+      "cold_ms": 22071.40772,
+      "p50_ms": 4672.86535,
+      "p95_ms": 4772.81129,
+      "max_ms": 4772.81129,
+      "requests_per_second": 0.8492629058173257,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 9968.104664,
+          "max_ms": 2502.208603
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 350.591943,
+          "max_ms": 24.056255
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 17094.881766,
+          "max_ms": 4341.534376
+        },
+        "POST /api/v1/aimee/index-chunks": {
+          "calls": 1,
+          "total_ms": 3762.85852,
+          "max_ms": 3762.85852
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 13829.114006999998,
+          "max_ms": 1107.917031
+        }
+      }
+    },
+    {
+      "backend": "cognee",
+      "records": 10000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 4824599,
+      "import_ms": 217.90097,
+      "restart_ms": 229.761867,
+      "cold_ms": 22462.69733,
+      "p50_ms": 6772.180399,
+      "p95_ms": 7435.406371,
+      "max_ms": 7435.406371,
+      "requests_per_second": 0.5632365887187408,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 10115.405714,
+          "max_ms": 2536.548968
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 301.527542,
+          "max_ms": 26.713819
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 16714.565182,
+          "max_ms": 4249.479053
+        },
+        "POST /api/v1/aimee/index-chunks": {
+          "calls": 1,
+          "total_ms": 3891.119767,
+          "max_ms": 3891.119767
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 13231.096574000001,
+          "max_ms": 1059.030738
+        }
+      }
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

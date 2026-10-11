@@ -122,7 +122,7 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	if err := tx.QueryRow(ctx, `SELECT source,target FROM entity_edges WHERE id=$1`, literal.AssertionID).Scan(&source, &target); err != nil || source != canonical || target != "Literal Role" {
 		t.Fatal(source, target, err)
 	}
-	// Corroboration threshold uses distinct active supporting evidence.
+	// Corroboration is a threshold for system candidates, not model authority.
 	durable, _ := seed("Parity durable", "works_for", "Org", NodePerson, NodeOrg, model)
 	seed("Parity durable", "works_for", "Org", NodePerson, NodeOrg, model)
 	seed("Parity durable", "works_for", "Org", NodePerson, NodeOrg, model)
@@ -177,6 +177,29 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	seed("Parity tombstoned", "works_for", "Org", NodePerson, NodeOrg, model)
 	seed("Parity tombstoned", "works_for", "Org", NodePerson, NodeOrg, model)
 	exec(`INSERT INTO memory_rejection_tombstones(object_kind,source,relation,target,authority_rank,reason,rejected_by) VALUES('fact','Parity tombstoned','works_for','Org',40,'explicit rejection','test:operator')`)
+	// Retained system-authority candidates exercise the maintenance success
+	// path, including legacy conflicts and rejection guards. New system asserts
+	// ordinarily enter persistent state directly.
+	system := FactActor{Principal: "system:parity", Role: "system", Rank: 20, TransportIdentity: "internal"}
+	systemCommit, err := s.openFactCommit(ctx, system, "fixture.system-candidates", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(`WITH changed AS (
+ UPDATE entity_edges SET authority_rank=20,actor_principal=$2,version=version+1,commit_id=$1
+ WHERE source LIKE 'Parity %' AND lifecycle_state='candidate' AND confidence_class='B'
+ RETURNING id,lifecycle_state,confidence,version)
+ INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,before_lifecycle,after_lifecycle,before_confidence,after_confidence,before_authority_rank,after_authority_rank,before_version,after_version)
+ SELECT $1,id,'fixture',1,1,lifecycle_state,lifecycle_state,confidence,confidence,10,20,version-1,version FROM changed`, systemCommit, system.Principal)
+	if err := s.closeFactCommit(ctx, systemCommit, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Distinct source IDs and a forged operator rank on the maintenance request
+	// must not turn the model's repeated claim into a serving fact.
+	modelOnly, _ := seed("Parity repeated model", "works_for", "Model Org", NodePerson, NodeOrg, model)
+	for i := 0; i < 4; i++ {
+		seed("Parity repeated model", "works_for", "Model Org", NodePerson, NodeOrg, model)
+	}
 	backend := *s
 	backend.db = runtimeRoleDB{evalQueryer{tx}, t}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &backend))
@@ -197,8 +220,24 @@ func exerciseFactIngestionParity(t *testing.T, ctx context.Context, tx pgx.Tx, s
 	}
 	exec(`RESET ROLE; DROP TRIGGER parity_fail_seal ON fact_graph_commits; SET LOCAL ROLE aimee_store_runtime`)
 	maintain("promote", 3, bus.ModuleStatusOK)
-	if life, class, conf, rank := state(durable.AssertionID); life != "persistent" || class != "B" || conf != .8 || rank != 10 {
+	if life, class, conf, rank := state(durable.AssertionID); life != "persistent" || class != "B" || conf != .8 || rank != 20 {
 		t.Fatal(life, class, conf, rank)
+	}
+	if life, class, conf, rank := state(modelOnly.AssertionID); life != "candidate" || class != "B" || conf != .6 || rank != 10 {
+		t.Fatal("maintenance promoted repeated model evidence", life, class, conf, rank)
+	}
+	for _, check := range []struct {
+		id   int64
+		want string
+	}{{durable.AssertionID, "- works_for: Org\n"}, {modelOnly.AssertionID, ""}} {
+		var subject string
+		if err := tx.QueryRow(ctx, `SELECT source FROM entity_edges WHERE id=$1`, check.id).Scan(&subject); err != nil {
+			t.Fatal(err)
+		}
+		block, _, err := s.recallFactBlock(ctx, subject, false, 4096)
+		if err != nil || block != check.want {
+			t.Fatal("maintenance recall boundary", block, check.want, err)
+		}
 	}
 	if life, _, _, _ := state(late.AssertionID); life != "persistent" {
 		t.Fatal("blocked candidates starved eligible batch", life)

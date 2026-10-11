@@ -265,3 +265,86 @@ Fresh provisioning, repeated current-role provisioning, ownership/ACL preservati
 runtime writes, and credential rotation passed against local PostgreSQL 18 after this
 removal. Shell syntax, test registration, and clean-checkout documentation checks passed.
 The replacement Docker restart/TLS test is wired into CI; Docker was unavailable locally.
+
+## Follow-up review: 2026-10-11
+
+Rechecked the [Atlas entry](https://neoneye.github.io/agent-memory-atlas/systems/aimee/)
+against checkout `0b298d23c`. The article still analyzes `6cd13694` from September 28;
+its absence claims and line numbers describe that older source pin. The fixes recorded
+above are present in this checkout. This follow-up does not certify a deployed service.
+
+### Repetition must not clear the model's review queue
+
+One residual issue was confirmed in
+[fact maintenance](../../server-go/modules/memory/fact_maintenance.go): promotion selected
+Class B candidates at any authority rank up to 20 when enough supporting evidence existed.
+Distinct evidence IDs do not establish independent authority. A model repeating the same
+claim across sources could satisfy the threshold and become recallable. The host dispatch
+does not require an operator for maintenance, although no production caller was found.
+Leaving this behavior dormant was therefore insufficient protection for future wiring.
+
+Promotion now selects only rank-20 system candidates. Rank-10 model candidates remain
+unserved until operator review or a verified higher-authority assertion. Expiration keeps
+its existing contract. The system maintenance actor, bounded batches, refusal checks,
+functional-conflict checks, transactional changes, and audit seal remain in use.
+System assertions normally enter persistent state directly; the promotion path remains
+available for retained system candidates without conferring authority on repeated text.
+
+The [runtime ingestion replay](../../server-go/modules/memory/fact_ingestion_parity_test.go)
+now checks five distinct model evidence sources through the real host maintenance dispatch,
+including a forged request actor rank. That claim must retain candidate state, confidence,
+and model authority. A system candidate provides the positive control and must become
+recallable while the model candidate produces an empty fact block. Existing rejection,
+Unicode conflict, paging, expiry, and audit-failure rollback checks remain exercised.
+
+### Disposition of the other feedback
+
+| Observation | Current evidence and decision |
+| --- | --- |
+| Runtime can erase refusals | Fixed in schema replay and current-role provisioning. Retain the actual-login DELETE/TRUNCATE denial and attributed-restore tests. Detailed evidence retention intentionally has different privileges. |
+| Raw database identity differs from Go | Fixed with the generated, versioned canonical refusal identity shared by lookup and trigger. Keep legacy/collision and direct-writer tests; changing Unicode rules still requires a migration. |
+| Missing episodic correction UI | Memory Center now calls the existing review contracts for both placements. UI transport tests remain mocks; deployed authentication is a separate qualification boundary. |
+| Injection checks occur at serving time | Bounded model admission screening now exists. Keep serving-time checks for retained/imported material. Expanding heuristics without measuring benign quoted evidence would introduce false positives. |
+| Obsolete lifecycle flag claims | Historical rollout results have a dated correction. The current knowledge guide had retained two obsolete claims about the already-fixed database gaps; this follow-up removes those claims and documents maintenance authority. |
+| Due decisions absent from model context | Deliberate operator queue, now visible in Governance with an explicit close action. Automatic delivery would need a separate scoped, budgeted reminder contract; it is not required for that queue. |
+| Two audit ledgers cannot be correlated | Shared-memory intents now carry changeset and evidence IDs. The WORM guide joins them to delivery and chain identity, and distinguishes pending delivery from verified chain evidence. Historical intents cannot gain metadata retroactively. |
+| System rank can clear candidates | Intended trusted-system authority floor, distinct from verified operator review. Keep model/system/user/operator separation; do not relabel all higher-authority assertions as human approvals. |
+| Recall graph relies on RLS for scope | Confirmed: the session bundle graph uses an all-scope application predicate, with the request transaction's RLS audience underneath. Runtime replay tests request scope. This is a defense-depth limitation, not evidence that authorized project requests can read another project. |
+| Owner bypasses memory RLS | Confirmed PostgreSQL owner behavior. Runtime roles are separately provisioned non-owners; actual-login tests check that boundary. FORCE RLS alone cannot constrain an owner that can alter policies. Expanding the KB-only hardened boot check across Go placements needs a separate startup/migrator contract. |
+| No memory lifecycle CHECK | Confirmed. Current and historical serving predicates fail closed on unknown states. A database enum constraint would require auditing legacy states and administrative migrations; it is not necessary to close the promotion defect. |
+| Size and untraced components | Valid coverage limit. Passing memory-owner tests does not establish correctness of unrelated control-plane, ingest, Python, or schema paths. No new capability or benchmark claim follows from this review. |
+
+The Aimee index service was unavailable for this follow-up; registered discovery and
+hybrid lookup were attempted before direct source inspection. Validation results below
+refer to disposable local fixtures, not production migration or deployment.
+
+### Follow-up validation
+
+- `go test ./modules/memory` passed with Go 1.26.7.
+- `go test -race -count=1 -v ./modules/memory` passed against a fresh PostgreSQL 18
+  fixture using the packaged roles, schema, and grants, with
+  `AIMEE_MEMORY_REPLAY_REQUIRED=1` and an actual runtime-login connection. This includes
+  the runtime-role, scope, refusal, correction, admission, and audit regression paths.
+- After adding the paired recall assertions, the final
+  `go test -race -count=1 -v -run '^TestFactMutationRuntimeReplay$' ./modules/memory`
+  passed against a second fresh PostgreSQL 18 fixture.
+- `python3 scripts/check-docs.py` and `git diff --check` passed.
+
+Both disposable PostgreSQL instances were stopped after validation. No production
+database, service configuration, or deployment was changed.
+
+### CI toolchain follow-up
+
+PR #3019's first CI run passed the tests but failed the reachable-vulnerability scan:
+nine Go 1.26.7 standard-library advisories were fixed in Go 1.26.9. The aggregate unit
+gate reported that same dependency failure. After upgrading Go, the scan also reached
+four `golang.org/x/net` advisories fixed in v0.60.0, including
+[GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617).
+
+All three service modules now require Go 1.26.9, and every Go Docker builder uses the
+registry-verified 1.26.9 Bookworm image digest. The shared module uses `x/net` v0.60.0
+and its required `x/sync`, `x/sys`, and `x/text` versions. The reachable-vulnerability
+gate and focused PostgreSQL fact-mutation replay passed after these updates.
+The complete `make -C src go-unit-tests` gate, including C/Go bus conformance,
+cgo-free memory process/probe builds, routing contract tests, and documentation
+checks also passed with the updated toolchain. Container image builds remain a CI check.

@@ -6,12 +6,13 @@ model weights, preparation and cached native state; selected memory stays outsid
 
 ![Aimee selects records while the enrolled inference host prepares model-specific attention memory](images/architecture/native-attention.svg)
 
-The current candidate is **0.3.3, unsigned and unpublished**. Five dedicated adapters share
-`aimee-native-runtime==0.3.3`, build 5. All five passed
-[native-memory smokes](releases/native-memory-v0.3.3/qualification/README.md) on one RX 7900 XTX
-with existing NAS GGUFs and zero CPU weight offload. The
-[release preparation record](releases/native-memory-v0.3.3/README.md) pins the final wheel bytes
-and signing/publication gates. Earlier 0.3.2 and 0.2.3 evidence belongs to its recorded bytes.
+The **1.0.1 application release preparation** includes five signed model bundles with plugin
+version **0.3.3**, sharing `aimee-native-runtime==0.3.3`, build 5. Each bundle contains one model
+adapter, its runtime and GGUF dependency, and verified Ed25519 signatures. Download the bundle
+for your model from the [1.0.1 release files](releases/v1.0.1/README.md).
+All five adapters passed [native-memory smokes](releases/native-memory-v0.3.3/qualification/README.md)
+on one RX 7900 XTX with existing NAS GGUFs and zero CPU weight offload. Earlier 0.3.2 and 0.2.3
+evidence belongs to its recorded bytes. The plugin is delivered with the regular application release.
 
 ## Choose the plugin for your checkpoint
 
@@ -32,23 +33,21 @@ Each plugin carries its own Rust adapter and checked model binding. Common enrol
 supervision and vLLM integration live in the shared runtime. Co-installation preserves separate
 namespaces; one serving process selects one adapter. Python/Cython remains the framework bridge.
 
-## Install the reviewed candidate and enroll
+## Install your signed model bundle and enroll
 
-**The commands below use locally supplied release wheels. Public release URLs are pending.**
-Install the GPU runtime in a Python 3.12 environment, verify the supplied wheels using the
-[release verifier](releases/native-memory-v0.3.3/verify_assets.py), then select your package:
+Choose one of the five [1.0.1 model bundles](releases/v1.0.1/README.md), extract it and follow that
+page's pinned-key signature and checksum verification commands. Each bundle supplies exactly three
+wheels: the selected adapter, shared runtime build 5 and GGUF loader. Install the verified files into
+a Python 3.12 environment with the correct GPU-specific vLLM runtime already installed:
 
 ```sh
-python -m pip install --no-index --no-deps --find-links /path/to/release-wheels \
-  'aimee-native-runtime==0.3.3' 'aimee-gemma4-12b==0.3.3' 'vllm-gguf-plugin==0.0.5+triton'
+python -m pip install --no-index --no-deps /path/to/verified-bundle/*.whl
 python -m pip check
-# Replace aimee-gemma4-12b with the matching package from the table.
 ```
 
-The wheel directory must contain the exact reviewed shared runtime, selected model adapter and
-GGUF loader. Start from an environment with the correct GPU-specific vLLM runtime and its
-dependencies already installed; these commands do not resolve missing dependencies from an index.
-Aimee binaries and model weights are separate. Use your existing checkpoint storage.
+Use a separate Python environment for each serving instance and install only its selected model's
+bundle. These commands do not resolve missing dependencies from an index. Aimee binaries and model
+weights are separate. Use your existing checkpoint storage.
 
 Create an invitation in Settings → Clients and enroll the standard thin client as described in
 [Thin clients](THIN_CLIENT.md). Connect the selected model command to that profile:
@@ -89,7 +88,7 @@ The server needs `POST /v1/native/primitive` plus unique, bounded source export.
 0.4.6 lacks that route. The pinned testing image in the
 [release manifest](releases/native-memory-v0.3.3/manifest.json) provides it and passed the model
 smokes. PR #3013 changed documentation and artifacts, so it required no new application image.
-Application publication and installation from public plugin downloads have separate validation gates.
+Application 1.0.1 publication follows the regular release process; the files in this PR are signed plugin bundles.
 
 Storage and retrieval remain selected through the [memory backend contract](modules/memory.md#memory-backend-contract).
 Changing native/Cognee retrieval and installing a model attention plugin are separate operations.

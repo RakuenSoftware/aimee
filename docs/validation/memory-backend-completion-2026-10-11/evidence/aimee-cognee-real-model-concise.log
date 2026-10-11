@@ -1,0 +1,13 @@
+=== RUN   TestCogneeLiveContract
+    live_test.go:92: real Cognee retrieval contract [] memory: backend unavailable
+--- FAIL: TestCogneeLiveContract (92.72s)
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory/cognee	92.729s
+FAIL
+Traceback (most recent call last):
+  File "/home/virant/dev/aimee/.aimee/worktrees/01a12a7c-38e28d67e74f69d4/main/scripts/validation/memory/run-cognee-contract.py", line 169, in <module>
+    main()
+    ~~~~^^
+  File "/home/virant/dev/aimee/.aimee/worktrees/01a12a7c-38e28d67e74f69d4/main/scripts/validation/memory/run-cognee-contract.py", line 148, in main
+    raise RuntimeError("required real Cognee contract failed or skipped")
+RuntimeError: required real Cognee contract failed or skipped

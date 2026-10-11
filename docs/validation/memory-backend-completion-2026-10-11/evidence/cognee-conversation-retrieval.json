@@ -1,0 +1,1029 @@
+{
+  "backend": "cognee",
+  "profile": "shipping-scoped-recall; synthetic multi-speaker claims",
+  "cases": [
+    {
+      "id": "exact_units",
+      "query": "What height did Virant report for Kibukx?",
+      "required": [
+        "69",
+        "cm",
+        "Virant"
+      ],
+      "forbidden": [
+        "69 feet",
+        "69 ft",
+        "mountain"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "803",
+            "record_revision": "1"
+          },
+          "id": 803,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:exact_units",
+          "content": "Virant reported: Kibukx is a person whose height is exactly 69cm. Original source: synthetic-message-alpha.",
+          "confidence": 0.8,
+          "memory_id": 803,
+          "text": "Virant reported: Kibukx is a person whose height is exactly 69cm. Original source: synthetic-message-alpha.",
+          "store": "kb",
+          "handle": "kb:memory:803"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "806",
+            "record_revision": "1"
+          },
+          "id": 806,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:conflict",
+          "content": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "confidence": 0.8,
+          "memory_id": 806,
+          "text": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "store": "kb",
+          "handle": "kb:memory:806"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 10586.616,
+      "budget_exceeded": false,
+      "approx_tokens": 950,
+      "status": "passed"
+    },
+    {
+      "id": "person_mountain",
+      "query": "What elevation did Samy report for the Kibukx mountains?",
+      "required": [
+        "69",
+        "feet",
+        "Samy"
+      ],
+      "forbidden": [
+        "69cm",
+        "69 cm"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "804",
+            "record_revision": "1"
+          },
+          "id": 804,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:person_mountain",
+          "content": "Samy reported: The Kibukx mountains have an elevation of 69 feet. This place is distinct from the person Kibukx. Original source: synthetic-message-beta.",
+          "confidence": 0.8,
+          "memory_id": 804,
+          "text": "Samy reported: The Kibukx mountains have an elevation of 69 feet. This place is distinct from the person Kibukx. Original source: synthetic-message-beta.",
+          "store": "kb",
+          "handle": "kb:memory:804"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "806",
+            "record_revision": "1"
+          },
+          "id": 806,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:conflict",
+          "content": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "confidence": 0.8,
+          "memory_id": 806,
+          "text": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "store": "kb",
+          "handle": "kb:memory:806"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 3437.984,
+      "budget_exceeded": false,
+      "approx_tokens": 974,
+      "status": "passed"
+    },
+    {
+      "id": "attribution",
+      "query": "Who originally reported Kibukx's backpack weight? Was Samy independent support?",
+      "required": [
+        "Virant",
+        "Samy"
+      ],
+      "forbidden": [
+        "Samy originally",
+        "two independent"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "803",
+            "record_revision": "1"
+          },
+          "id": 803,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:exact_units",
+          "content": "Virant reported: Kibukx is a person whose height is exactly 69cm. Original source: synthetic-message-alpha.",
+          "confidence": 0.8,
+          "memory_id": 803,
+          "text": "Virant reported: Kibukx is a person whose height is exactly 69cm. Original source: synthetic-message-alpha.",
+          "store": "kb",
+          "handle": "kb:memory:803"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "804",
+            "record_revision": "1"
+          },
+          "id": 804,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:person_mountain",
+          "content": "Samy reported: The Kibukx mountains have an elevation of 69 feet. This place is distinct from the person Kibukx. Original source: synthetic-message-beta.",
+          "confidence": 0.8,
+          "memory_id": 804,
+          "text": "Samy reported: The Kibukx mountains have an elevation of 69 feet. This place is distinct from the person Kibukx. Original source: synthetic-message-beta.",
+          "store": "kb",
+          "handle": "kb:memory:804"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "808",
+            "record_revision": "1"
+          },
+          "id": 808,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:fiction",
+          "content": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "confidence": 0.8,
+          "memory_id": 808,
+          "text": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "store": "kb",
+          "handle": "kb:memory:808"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 4744.529,
+      "budget_exceeded": false,
+      "approx_tokens": 954,
+      "status": "passed"
+    },
+    {
+      "id": "conflict",
+      "query": "What do we know about the blue crate's weight?",
+      "required": [
+        "7",
+        "9",
+        "Virant",
+        "Samy"
+      ],
+      "forbidden": [
+        "definitely weighs",
+        "verified weight"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "806",
+            "record_revision": "1"
+          },
+          "id": 806,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:conflict",
+          "content": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "confidence": 0.8,
+          "memory_id": 806,
+          "text": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "store": "kb",
+          "handle": "kb:memory:806"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "807",
+            "record_revision": "1"
+          },
+          "id": 807,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:negation",
+          "content": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "confidence": 0.8,
+          "memory_id": 807,
+          "text": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "store": "kb",
+          "handle": "kb:memory:807"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 5275.979,
+      "budget_exceeded": false,
+      "approx_tokens": 961,
+      "status": "passed"
+    },
+    {
+      "id": "negation",
+      "query": "Did Virant say the red box contains lithium?",
+      "required": [
+        "not",
+        "lithium",
+        "Virant"
+      ],
+      "forbidden": [
+        "yes, it contains",
+        "confirmed lithium"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "807",
+            "record_revision": "1"
+          },
+          "id": 807,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:negation",
+          "content": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "confidence": 0.8,
+          "memory_id": 807,
+          "text": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "store": "kb",
+          "handle": "kb:memory:807"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "809",
+            "record_revision": "1"
+          },
+          "id": 809,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:topic_return",
+          "content": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "confidence": 0.8,
+          "memory_id": 809,
+          "text": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "store": "kb",
+          "handle": "kb:memory:809"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 3447.138,
+      "budget_exceeded": false,
+      "approx_tokens": 942,
+      "status": "passed"
+    },
+    {
+      "id": "fiction",
+      "query": "Does the real green desk fly?",
+      "required": [
+        "floor"
+      ],
+      "forbidden": [
+        "can fly",
+        "does fly"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "807",
+            "record_revision": "1"
+          },
+          "id": 807,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:negation",
+          "content": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "confidence": 0.8,
+          "memory_id": 807,
+          "text": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "store": "kb",
+          "handle": "kb:memory:807"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "808",
+            "record_revision": "1"
+          },
+          "id": 808,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:fiction",
+          "content": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "confidence": 0.8,
+          "memory_id": 808,
+          "text": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "store": "kb",
+          "handle": "kb:memory:808"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "809",
+            "record_revision": "1"
+          },
+          "id": 809,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:topic_return",
+          "content": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "confidence": 0.8,
+          "memory_id": 809,
+          "text": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "store": "kb",
+          "handle": "kb:memory:809"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 2171.643,
+      "budget_exceeded": false,
+      "approx_tokens": 962,
+      "status": "passed"
+    },
+    {
+      "id": "topic_return",
+      "query": "After our unrelated gardening discussion, what did we agree for the observatory review?",
+      "required": [
+        "Tuesday",
+        "14:00",
+        "UTC"
+      ],
+      "forbidden": [
+        "Wednesday",
+        "15:00"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "805",
+            "record_revision": "1"
+          },
+          "id": 805,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:attribution",
+          "content": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "confidence": 0.8,
+          "memory_id": 805,
+          "text": "Virant reported: Kibukx's backpack weighs 7kg. Samy later repeated Virant's report; Samy did not make an independent measurement. Original source: synthetic-message-gamma.",
+          "store": "kb",
+          "handle": "kb:memory:805"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "806",
+            "record_revision": "1"
+          },
+          "id": 806,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:conflict",
+          "content": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "confidence": 0.8,
+          "memory_id": 806,
+          "text": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified. Sources: synthetic-message-delta and synthetic-message-epsilon.",
+          "store": "kb",
+          "handle": "kb:memory:806"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "809",
+            "record_revision": "1"
+          },
+          "id": 809,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:topic_return",
+          "content": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "confidence": 0.8,
+          "memory_id": 809,
+          "text": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "store": "kb",
+          "handle": "kb:memory:809"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 1855.967,
+      "budget_exceeded": false,
+      "approx_tokens": 991,
+      "status": "passed"
+    },
+    {
+      "id": "paraphrase",
+      "query": "How does Virant want laboratory reports written, and which measurement system?",
+      "required": [
+        "concise",
+        "metric"
+      ],
+      "forbidden": [
+        "imperial",
+        "verbose"
+      ],
+      "records": [
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "807",
+            "record_revision": "1"
+          },
+          "id": 807,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:negation",
+          "content": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "confidence": 0.8,
+          "memory_id": 807,
+          "text": "Virant explicitly said: the red box does not contain lithium. Its contents have not been verified. Source: synthetic-message-zeta.",
+          "store": "kb",
+          "handle": "kb:memory:807"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "808",
+            "record_revision": "1"
+          },
+          "id": 808,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:fiction",
+          "content": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "confidence": 0.8,
+          "memory_id": 808,
+          "text": "Samy's claim that the green desk flies was a roleplay joke, not a factual observation. Virant later clarified that the real green desk stays on the floor. Sources: synthetic-message-eta and synthetic-message-theta.",
+          "store": "kb",
+          "handle": "kb:memory:808"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "809",
+            "record_revision": "1"
+          },
+          "id": 809,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:topic_return",
+          "content": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "confidence": 0.8,
+          "memory_id": 809,
+          "text": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion. Source: synthetic-message-iota.",
+          "store": "kb",
+          "handle": "kb:memory:809"
+        },
+        {
+          "authorship": {
+            "category": "agent_message",
+            "principal": "owner",
+            "transport": "owner"
+          },
+          "version": {
+            "schema_version": 1,
+            "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+            "record_id": "810",
+            "record_revision": "1"
+          },
+          "id": 810,
+          "scope": {
+            "type": "project",
+            "value": "conversation-quality-1791717709035000408"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "conversation-quality-1791717709035000408:paraphrase",
+          "content": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "confidence": 0.8,
+          "memory_id": 810,
+          "text": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements. Source: synthetic-message-kappa.",
+          "store": "kb",
+          "handle": "kb:memory:810"
+        }
+      ],
+      "expected_record_retrieved": true,
+      "recall_ms": 946.965,
+      "budget_exceeded": false,
+      "approx_tokens": 962,
+      "status": "passed"
+    }
+  ],
+  "passed": true
+}

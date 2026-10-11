@@ -1,0 +1,14 @@
+# Dedicated Discord server only: this typed runner supports discord-paper.
+# Apply to the bot server project, not the knowledge-service project.
+services:
+  aimee-server:
+    image: ${AIMEE_DISCORD_WORKFLOW_SERVER_IMAGE:?Set the image with conversation wait resume support}
+    environment:
+      AIMEE_WFE_RUNNER_URL: http://localhost/workflow/step
+      AIMEE_WFE_RUNNER_SOCKET: /var/lib/aimee-behavior/runner.sock
+    volumes:
+      - discord-workflow-behavior:/var/lib/aimee-behavior
+volumes:
+  discord-workflow-behavior:
+    external: true
+    name: ${AIMEE_DISCORD_BEHAVIOR_VOLUME:?Set the bridge behavior volume name}

@@ -1,0 +1,19 @@
+{
+  "checks": [
+    {
+      "name": "targeted-regressions",
+      "exit": 0,
+      "seconds": 27.92
+    },
+    {
+      "name": "required-owner-replay",
+      "exit": 0,
+      "seconds": 398.57
+    },
+    {
+      "name": "boundaries",
+      "exit": 0,
+      "seconds": 20.2
+    }
+  ]
+}

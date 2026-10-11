@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -272,7 +273,7 @@ func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest
 		httpRequest.Header.Set(name, value)
 	}
 	if len(bearer) > 0 {
-		if request.Purpose == "provider" && request.CredentialScope == "x-api-key" {
+		if (request.Purpose == "provider" && request.CredentialScope == "x-api-key") || (request.Purpose == "memory-backend" && os.Getenv("AIMEE_MEMORY_BACKEND_AUTH") == "api-key") {
 			httpRequest.Header.Set("x-api-key", string(bearer))
 		} else {
 			httpRequest.Header.Set("Authorization", "Bearer "+string(bearer))

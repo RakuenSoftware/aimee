@@ -76,6 +76,9 @@ func (s *postgresDataStore) prepareKBStore(ctx context.Context, request DataRequ
 	if epistemic == "" {
 		epistemic = "world_fact"
 	}
+	if request.SourceOnly && epistemic != "episode" && epistemic != "mental_model" {
+		return plan, errors.New("memory: source-only capture requires an episode or mental model")
+	}
 	if !validEpistemicKinds[epistemic] || (request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 		return plan, errors.New("memory: invalid epistemic write policy")
 	}

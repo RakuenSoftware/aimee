@@ -479,12 +479,22 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Contract, native bridge, Cognee adapter and egress race tests
+      - name: Contract, native bridge, external adapters and egress race tests
         working-directory: server-go
-        run: go test -race ./memory ./modules/memory ./modules/memory/cognee ./modules/egress
+        run: go test -race ./memory ./modules/memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
+      - name: Portable transfer build and syntax
+        run: |
+          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./modules/memory/cmd/aimee-memory-transfer)
+          (cd server-go && go run ../scripts/validation/memory/qualify-external.go -sizes 100,1000 -output "$RUNNER_TEMP/catalog-scale.json")
+          python3 -m py_compile scripts/validation/memory/*.py scripts/validation/memory/lxc/*.py integrations/cognee/service.py integrations/discord/*.py
+      - name: Backend-neutral Discord episode, source and delivery tests
+        run: |
+          python3 -m venv "$RUNNER_TEMP/discord-venv"
+          "$RUNNER_TEMP/discord-venv/bin/pip" install -r integrations/discord/requirements.txt
+          (cd integrations/discord && "$RUNNER_TEMP/discord-venv/bin/python" -m unittest discover)
       - name: Install pinned real Cognee API
         run: |
           python3 -m venv "$RUNNER_TEMP/cognee-venv"
@@ -494,15 +504,25 @@ jobs:
           python3 scripts/validation/memory/run-cognee-contract.py \
             --python "$RUNNER_TEMP/cognee-venv/bin/python" \
             --artifacts "$RUNNER_TEMP/cognee-contract"
-      - name: Retain Cognee diagnostics
+      - name: Real pinned Hillock HDC contract (required, no skip)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hillock-venv"
+          "$RUNNER_TEMP/hillock-venv/bin/pip" install -r integrations/hillock/requirements.txt
+          "$RUNNER_TEMP/hillock-venv/bin/python" scripts/validation/memory/run-hillock-contract.py \
+            --artifacts "$RUNNER_TEMP/hillock-contract"
+      - name: Retain external memory diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cognee-memory-contract
+          name: external-memory-contract
           path: |
             ${{ runner.temp }}/cognee-contract/contract.log
             ${{ runner.temp }}/cognee-contract/server.log
             ${{ runner.temp }}/cognee-contract/summary.json
+            ${{ runner.temp }}/hillock-contract/contract.log
+            ${{ runner.temp }}/hillock-contract/server.log
+            ${{ runner.temp }}/hillock-contract/summary.json
+            ${{ runner.temp }}/catalog-scale.json
           if-no-files-found: warn
           retention-days: 7
 

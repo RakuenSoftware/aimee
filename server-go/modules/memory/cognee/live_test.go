@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	memory "github.com/JBailes/aimee/server-go/memory"
+	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +22,18 @@ func TestCogneeLiveContract(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("set AIMEE_COGNEE_TEST_URL for a disposable Cognee server")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	budget := 2 * time.Minute
+	callBudget := time.Minute
+	if value := os.Getenv("AIMEE_COGNEE_TEST_DEADLINE"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < time.Second || parsed > 10*time.Minute {
+			t.Fatal("invalid live qualification deadline")
+		}
+		budget, callBudget = max(budget, parsed), parsed
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	client := &http.Client{Timeout: time.Minute}
+	client := &http.Client{Timeout: callBudget}
 	form := url.Values{"username": {os.Getenv("AIMEE_COGNEE_TEST_USER")}, "password": {os.Getenv("AIMEE_COGNEE_TEST_PASSWORD")}}
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/api/v1/auth/login", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -62,7 +73,18 @@ func TestCogneeLiveContract(t *testing.T) {
 		return response.StatusCode, raw, err
 	}
 	scope := memory.Scope{Type: memory.ScopeProject, Value: "contract-live"}
-	records := &catalog{records: map[int64]memory.Record{1: {ID: 1, Scope: scope, Kind: "fact", Tier: "L2", Key: "needle", Content: "needle canonical", Confidence: .8}}}
+	dir := filepath.Join(t.TempDir(), "catalog")
+	records, err := backendstore.New(dir, "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = records.Put(ctx, scope, memory.Record{Kind: "fact", Tier: "L2", Key: "needle", Content: "needle canonical", Confidence: .8}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = backendstore.New(dir, "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend, err := New(records, transport, endpoint, "contract-live-"+time.Now().UTC().Format("20060102T150405.000000000"))
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +96,11 @@ func TestCogneeLiveContract(t *testing.T) {
 			t.Error("live test cleanup", err)
 		}
 	}()
-	found, err := backend.Search(ctx, scope, "needle", "fact", "L2", 1)
+	started := time.Now()
+	cold, coldCancel := context.WithTimeout(ctx, callBudget)
+	found, err := backend.Search(cold, scope, "needle", "fact", "L2", 1)
+	coldCancel()
+	t.Logf("cold source-chunk retrieval: %.3f ms (budget %s)", float64(time.Since(started).Microseconds())/1000, callBudget)
 	if err != nil || len(found) != 1 || found[0].ID != 1 || found[0].Content != "needle canonical" {
 		t.Fatal("real Cognee retrieval contract", found, err)
 	}
@@ -85,17 +111,17 @@ func TestCogneeLiveContract(t *testing.T) {
 	// Reproduce subject erasure outside Store.Delete: the existing canonical
 	// owner has already removed the source row while Cognee retains revisions.
 	private := memory.Scope{Type: memory.ScopeUser, Value: "_user"}
-	subject := memory.Record{ID: 1, Scope: private, Kind: "fact", Tier: "L2", Key: "subject", Content: "needle private subject", Confidence: .8}
+	subject := memory.Record{Scope: private, Kind: "fact", Tier: "L2", Key: "subject", Content: "needle private subject", Confidence: .8}
 	if _, err := records.Put(ctx, private, subject); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := backend.Search(ctx, private, "needle", "", "", 1); err != nil {
 		t.Fatal("index private subject", err)
 	}
-	if _, err := records.Delete(ctx, private, 1); err != nil {
+	if _, err := records.Delete(ctx, private, 2); err != nil {
 		t.Fatal(err)
 	}
-	retained := memory.Record{ID: 2, Scope: scope, Kind: "fact", Tier: "L2", Key: "retained", Content: "needle retained canonical", Confidence: .8}
+	retained := memory.Record{Scope: scope, Kind: "fact", Tier: "L2", Key: "retained", Content: "needle retained canonical", Confidence: .8}
 	if _, err := records.Put(ctx, scope, retained); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +131,7 @@ func TestCogneeLiveContract(t *testing.T) {
 	if err := backend.ResetDerived(ctx); err != nil {
 		t.Fatal("subject cleanup", err)
 	}
-	if _, err := records.Get(ctx, scope, 2); err != nil {
+	if _, err := records.Get(ctx, scope, 3); err != nil {
 		t.Fatal("cleanup erased unrelated canonical record", err)
 	}
 	if err := backend.ResetDerived(ctx); err != nil {

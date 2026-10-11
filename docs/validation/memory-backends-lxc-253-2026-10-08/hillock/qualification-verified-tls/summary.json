@@ -1,0 +1,25 @@
+{
+  "backend": "hillock",
+  "phase": "verified-tls",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after verified-tls",
+      "status": "passed",
+      "seconds": 0.04
+    },
+    {
+      "name": "user selected-backend list after verified-tls",
+      "status": "passed",
+      "seconds": 0.073
+    },
+    {
+      "name": "kb selected-backend list after verified-tls",
+      "status": "passed",
+      "seconds": 0.065
+    },
+    {
+      "name": "guest reboot retains erasure controls",
+      "status": "passed"
+    }
+  ]
+}

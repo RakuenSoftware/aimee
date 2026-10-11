@@ -1,6 +1,7 @@
 package cognee
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,7 @@ type cogneeFixture struct {
 	datasets        map[string]dataset
 	contents        map[string]string
 	searches        int
+	cognifications  int
 	serial          int
 	foreign         bool
 	started         bool
@@ -103,7 +105,8 @@ func (f *cogneeFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.contents[name] = string(raw)
 		respond(map[string]string{"status": "success"})
-	case r.Method == "POST" && r.URL.Path == "/api/v1/cognify":
+	case r.Method == "POST" && r.URL.Path == "/api/v1/aimee/index-chunks":
+		f.cognifications++
 		var input struct {
 			Datasets   []string `json:"datasets"`
 			Background bool     `json:"run_in_background"`
@@ -237,12 +240,27 @@ func TestCogneeContractRoundTripAndIsolation(t *testing.T) {
 	if len(fixture.datasets) != 2 {
 		t.Fatal("old revision retained", fixture.datasets)
 	}
+	beforeRuns := fixture.cognifications
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns {
+		t.Fatal("warm search reindexed acknowledged datasets", err)
+	}
+	// Same name with a new provider identity requires completion again.
+	for name, d := range fixture.datasets {
+		d.ID = "00000000-0000-0000-0000-ffffffffffff"
+		fixture.datasets[name] = d
+		break
+	}
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns+1 {
+		t.Fatal("recreated dataset skipped indexing", err)
+	}
 	fixture.foreign = true
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) {
 		t.Fatal("foreign result admitted", err)
 	}
 	fixture.foreign = false
 	fixture.started = true
+	backend, _ = New(records, transport, server.URL, "node-fixture")
+	provider = backend
 	before := fixture.searches
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) || fixture.searches != before {
 		t.Fatal("unfinished cognify treated as ready", err)
@@ -501,7 +519,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 			var b *Backend
 			transport := func(c context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
 				path := strings.TrimPrefix(target, "http://fixture")
-				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/cognify" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
+				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/aimee/index-chunks" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
 					return 503, []byte(`{}`), nil
 				}
 				req := httptest.NewRequest(method, target, strings.NewReader(string(body)))
@@ -509,7 +527,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 				w := httptest.NewRecorder()
 				fixture.ServeHTTP(w, req)
 				result := w.Body.Bytes()
-				if path == "/api/v1/cognify" {
+				if path == "/api/v1/aimee/index-chunks" {
 					switch fault {
 					case "missing-run":
 						result = []byte(`{}`)
@@ -661,5 +679,60 @@ func TestCogneeValidationInterruptedTransportAndResetVerification(t *testing.T) 
 	}
 	if validUUID("000000000000-0000-0000-000000000001") {
 		t.Fatal("misplaced UUID separator admitted")
+	}
+}
+
+type candidateCatalog struct {
+	*catalog
+	requested int
+	offset    int
+}
+
+func (c *candidateCatalog) Candidates(ctx context.Context, s memory.Scope, q, k, tier string, limit int) ([]memory.Record, error) {
+	c.requested = limit
+	all, err := c.catalog.Search(ctx, s, q, k, tier, MaxRecords+100)
+	if len(all) > c.offset {
+		all = all[c.offset:]
+	} else {
+		all = nil
+	}
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, err
+}
+func TestBoundedCandidatesRetainPriorValidIndexes(t *testing.T) {
+	scope := memory.Scope{Type: memory.ScopeProject, Value: "bulk"}
+	source := &candidateCatalog{catalog: &catalog{records: map[int64]memory.Record{}}}
+	for i := int64(1); i <= 300; i++ {
+		source.records[i] = memory.Record{ID: i, Scope: scope, Key: fmt.Sprint(i), Content: "needle", Kind: "fact", Tier: "L2"}
+	}
+	fixture := &cogneeFixture{datasets: map[string]dataset{}, contents: map[string]string{}}
+	server := httptest.NewServer(fixture)
+	defer server.Close()
+	transport := func(ctx context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
+		req, _ := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		response, err := server.Client().Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer response.Body.Close()
+		raw, err := io.ReadAll(response.Body)
+		return response.StatusCode, raw, err
+	}
+	backend, _ := New(source, transport, server.URL, "bounded")
+	if _, err := backend.Search(context.Background(), scope, "needle", "fact", "L2", 1); err != nil {
+		t.Fatal(err)
+	}
+	if source.requested != MaxCandidates || len(fixture.datasets) != MaxCandidates {
+		t.Fatalf("unbounded cold pool: %d/%d", source.requested, len(fixture.datasets))
+	}
+	source.offset = 1
+	if _, err := backend.Search(context.Background(), scope, "needle", "fact", "L2", 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.datasets) != MaxCandidates+1 {
+		t.Fatal("valid prior index was discarded on candidate-pool change")
 	}
 }

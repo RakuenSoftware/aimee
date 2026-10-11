@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "cognee": "1.6.2",
+  "models": "real inference and embeddings",
+  "diagnostic_request_deadline_seconds": 600,
+  "completion_max_tokens": 256,
+  "completion_model": "openai/unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dimensions": 384,
+  "fixture_calls": {
+    "embeddings": 20,
+    "completions": 10
+  }
+}

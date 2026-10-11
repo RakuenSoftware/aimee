@@ -1,0 +1,183 @@
+{
+  "backend": "native",
+  "model": "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+  "passed": true,
+  "status": "complete",
+  "cases": [
+    {
+      "id": "decision_topic_return_restart",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1781,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "Virant said, \"We agreed to use the red backpack.\"",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 14,
+        "prompt_tokens": 1781,
+        "total_tokens": 1795,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 16024.317
+    },
+    {
+      "id": "pronoun_after_bot_churn",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1783,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "The red backpack weighs exactly 7kg, not 7 pounds, according to Virant.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 20,
+        "prompt_tokens": 1783,
+        "total_tokens": 1803,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 16544.578
+    },
+    {
+      "id": "source_bound_correction_feedback",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1375,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "Virant corrected the height of Kibukx the person, stating it is 69cm, not 69 feet.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 27,
+        "prompt_tokens": 1375,
+        "total_tokens": 1402,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 1,
+      "status": "passed",
+      "elapsed_ms": 16121.209
+    },
+    {
+      "id": "fiction_then_human_correction",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1411,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "The real green desk stays on the floor. The flying desk was a joke. (Virant)",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 21,
+        "prompt_tokens": 1411,
+        "total_tokens": 1432,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 1,
+      "status": "passed",
+      "elapsed_ms": 16050.72
+    },
+    {
+      "id": "preference_expiry",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1735,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "None is active.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 5,
+        "prompt_tokens": 1735,
+        "total_tokens": 1740,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 1,
+      "status": "passed",
+      "elapsed_ms": 17802.857
+    },
+    {
+      "id": "private_source_exclusion",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1729,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "I do not have a source for a private fixture secret.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 1729,
+        "total_tokens": 1742,
+        "prompt_tokens_details": {
+          "cached_tokens": 1708
+        }
+      },
+      "omitted_records": 1,
+      "status": "passed",
+      "elapsed_ms": 5466.376
+    },
+    {
+      "id": "deleted_source_projection",
+      "retrieval_passed": true,
+      "token_budget": {
+        "prompt_tokens": 1730,
+        "completion_reserve": 256,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "answer": "The deleted first height report is unavailable.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 9,
+        "prompt_tokens": 1730,
+        "total_tokens": 1739,
+        "prompt_tokens_details": {
+          "cached_tokens": 1708
+        }
+      },
+      "omitted_records": 1,
+      "status": "passed",
+      "elapsed_ms": 6217.132
+    }
+  ]
+}

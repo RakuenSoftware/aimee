@@ -1,0 +1,26 @@
+{
+  "backend": "hillock",
+  "checks": [
+    {
+      "name": "shipping source revalidation, send guard, mutation refusal/release and stale collection",
+      "status": "passed",
+      "seconds": 0.408
+    },
+    {
+      "name": "shipping external shared exact historical revision",
+      "status": "passed",
+      "seconds": 0.23
+    },
+    {
+      "name": "shipping KB briefing contains corrected evidence",
+      "status": "passed",
+      "seconds": 0.026
+    },
+    {
+      "name": "shipping capabilities advertise profile and bounded non-exhaustive retrieval",
+      "status": "passed",
+      "seconds": 0.059
+    }
+  ],
+  "status": "passed"
+}

@@ -1,0 +1,38 @@
+{
+  "backend": "native",
+  "phase": "service-resume",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after service-resume",
+      "status": "passed",
+      "seconds": 0.3
+    },
+    {
+      "name": "user selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.089
+    },
+    {
+      "name": "kb selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.091
+    },
+    {
+      "name": "shipping KB briefing",
+      "status": "passed",
+      "response": {
+        "active_context_missing": false,
+        "briefing": {
+          "key_facts": [],
+          "recent_activity": [],
+          "active_entities": [],
+          "style": "compact",
+          "briefing_style": "compact",
+          "limit_tokens": 1024,
+          "approx_tokens": 36
+        },
+        "status": "ok"
+      }
+    }
+  ]
+}

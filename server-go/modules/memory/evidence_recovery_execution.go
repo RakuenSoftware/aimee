@@ -83,6 +83,17 @@ func (s *postgresDataStore) executeEvidenceRecovery(ctx context.Context, request
 	defer cancel()
 	admitted, err := s.recoveryLedger(work, request.recoveryActor, request.TypedContext.Requirements.TaskRevision, plan.RequirementDigest, nil)
 	if err != nil {
+		if ctx.Err() == nil && work.Err() == context.DeadlineExceeded {
+			// Admission itself consumes the work budget. Its commit receipt can
+			// be lost, so never overwrite a possibly durable pending reservation
+			// or start a read. A later attempt still consults the same ledger.
+			execution := &evidenceRecoveryExecution{State: "time_exhausted", ElapsedMS: time.Since(start).Milliseconds(), Attempts: []evidenceRecoveryAttempt{}}
+			for _, action := range plan.Actions {
+				execution.Attempts = append(execution.Attempts, evidenceRecoveryAttempt{Key: action.Key, State: "time_exhausted"})
+			}
+			r.recoveryExecution = execution
+			return finishEvidenceRecovery(r)
+		}
 		return err
 	}
 	execution := &evidenceRecoveryExecution{State: "completed", Rounds: 1, Attempts: []evidenceRecoveryAttempt{}}
@@ -123,6 +134,12 @@ func (s *postgresDataStore) executeEvidenceRecovery(ctx context.Context, request
 		// The authorized original temporal policy remains in force. No recovery read
 		// can turn a current-only task into historical inspection implicitly.
 		if _, err = s.db.Exec(work, `SAVEPOINT evidence_recovery_read`); err != nil {
+			if ctx.Err() == nil && work.Err() == context.DeadlineExceeded {
+				execution.State = "time_exhausted"
+				attempt.State = execution.State
+				execution.Attempts = append(execution.Attempts, attempt)
+				break
+			}
 			return err
 		}
 		items, readErr := s.evidenceRecoveryCandidates(work, lookup, exact, budget.MaxItems-execution.NewItems+1)
@@ -183,9 +200,13 @@ func (s *postgresDataStore) executeEvidenceRecovery(ctx context.Context, request
 	if _, err = s.recoveryLedger(ctx, request.recoveryActor, request.TypedContext.Requirements.TaskRevision, plan.RequirementDigest, execution); err != nil {
 		return err
 	}
+	return finishEvidenceRecovery(r)
+}
+
+func finishEvidenceRecovery(r *typedContextResult) error {
 	// Candidate evidence, never caller-supplied outcome IDs, enters the same final
 	// packer and evaluator. Dispatch still requires canonical source revalidation.
-	if err = r.finish(); err != nil {
+	if err := r.finish(); err != nil {
 		return err
 	}
 	if r.Recovery != nil {

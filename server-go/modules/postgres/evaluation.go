@@ -13,6 +13,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -75,7 +76,10 @@ func OpenEvaluationStore(ctx context.Context, schema string) (*EvaluationStore, 
 		}
 		return nil, errors.Join(err, cleanupErr)
 	}
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+quoted+" TEMPLATE template0"); err != nil {
+	// Disposable clusters can have a SQL_ASCII template0. Memory bootstrap
+	// functions hash UTF-8 text, so the isolated database must declare UTF-8
+	// rather than inherit the cluster's encoding and locale.
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+quoted+" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'"); err != nil {
 		// Cancellation may arrive after PostgreSQL created the database but
 		// before its receipt. Attempt cleanup even when CREATE reports failure.
 		return fail(errors.New("postgres evaluation: cannot create isolated database"))
@@ -168,10 +172,25 @@ func (s *EvaluationStore) Close() error {
 		s.pool.Close()
 		s.pool = nil
 	}
-	if _, err := s.admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{s.name}.Sanitize()); err != nil {
-		return fmt.Errorf("postgres evaluation: cleanup of %s failed", s.name)
+	// Rollback must not consume the drop's deadline. Only this owner's random
+	// database is disposable; FORCE also removes orphaned/background clients
+	// which would otherwise leave it behind. Checkpoint cancellation has an
+	// unknown outcome, so retry the same idempotent DROP with a fresh deadline.
+	for attempt := 0; attempt < 3; attempt++ {
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		_, err := s.admin.Exec(dropCtx, "DROP DATABASE IF EXISTS "+pgx.Identifier{s.name}.Sanitize()+" WITH (FORCE)")
+		timedOut := dropCtx.Err() != nil
+		dropCancel()
+		if err == nil {
+			s.admin.Close()
+			s.admin = nil
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		busy := errors.As(err, &pgErr) && pgErr.Code == "55006"
+		if attempt == 2 || (!timedOut && !busy) {
+			return fmt.Errorf("postgres evaluation: cleanup of %s failed", s.name)
+		}
 	}
-	s.admin.Close()
-	s.admin = nil
-	return nil
+	return fmt.Errorf("postgres evaluation: cleanup of %s failed", s.name)
 }

@@ -1,0 +1,13 @@
+[Unit]
+Description=Fresh Aimee memory backend validation stack
+After=network-online.target postgresql.service aimee-cognee.service aimee-hillock.service
+Wants=network-online.target postgresql.service
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /root/aimee-memory-resume.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+[Install]
+WantedBy=multi-user.target

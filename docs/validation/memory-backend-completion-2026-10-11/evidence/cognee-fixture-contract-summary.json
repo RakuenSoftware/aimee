@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "cognee": "1.6.2",
+  "models": "deterministic local fixtures",
+  "completion_model": "openai/fixture",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dimensions": 8,
+  "fixture_calls": {
+    "embeddings": 16,
+    "completions": 7
+  }
+}

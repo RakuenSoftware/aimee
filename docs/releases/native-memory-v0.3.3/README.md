@@ -1,8 +1,9 @@
 # Five native-memory plugins at 0.3.3
 
 The 0.3.3 candidate contains dedicated Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B
-adapters, shared-runtime build 5 and the pinned GGUF loader. The generated wheels are included
-for review. **This candidate is unsigned and unpublished.** It supersedes the mixed 0.3.2 stages;
+adapters, shared-runtime build 5 and the pinned GGUF loader. The original candidate wheels are included
+for review. The same wheel bytes are now supplied with verified signatures in the
+[five 1.0.1 model bundles](../v1.0.1/README.md). It supersedes the mixed 0.3.2 stages;
 [their evidence](../native-memory-v0.3.2/README.md) remains historical.
 
 [manifest.json](manifest.json) pins all seven wheel names, sizes, SHA-256 digests and proposed
@@ -23,25 +24,15 @@ SHA-bound Q4 capture profile introduced in build 4. Qwen's tested device prepara
 256 MiB; 128 MiB correctly refused a recurrent state larger than that budget. Earlier CUDA and
 extended small-model results belong to their recorded artifact versions.
 
-## Publish exact reviewed bytes
+## Delivery with application 1.0.1
+
+The plugin payload is included in the regular application 1.0.1 release preparation as
+[five model bundles](../v1.0.1/README.md), one file per model. Each bundle contains its adapter,
+shared-runtime build 5 and GGUF loader, plus their existing Ed25519 signatures and signed metadata.
+The installation guide provides pinned-key verification and offline installation commands.
+No separate native-memory GitHub release is used.
 
 The compatible application needs `POST /v1/native/primitive`, unique source versions, a 32-record
-cap and refusal of conflicting source rows. The tested application digest is in the manifest.
-Application 1.0.0 publication and plugin publication have separate approval gates.
-
-1. Sign all seven wheels, `manifest.json` and `SHA256SUMS` through the controlled Ed25519
-   signing pipeline using the reviewed key. Do not replace the pinned trust key with a downloaded key.
-2. Run the verifier below. All nine detached signatures are required. `--hashes-only` verifies
-   candidate identities and cannot authorize publication.
-3. Run [create_draft_release.sh](create_draft_release.sh) with the signed asset directory and exact
-   reviewed application commit. It creates a draft prerelease with Latest disabled and 18 assets.
-4. After publication, download all assets, verify them and test independent plugin installs,
-   dependency consistency, enrollment and native recall against the published application.
-
-```sh
-python3 docs/releases/native-memory-v0.3.3/verify_assets.py /path/to/release-assets
-```
-
-[Release notes](RELEASE_NOTES.md) and the [plugin guide](../../NATIVE_MEMORY_PLUGIN.md)
-describe installation and supported execution. Signing, publication and public-download installation
-remain uncompleted gates; local smoke results do not substitute for them.
+cap and refusal of conflicting source rows. The tested application digest remains recorded in the
+manifest. The original candidate manifest and qualification records retain their historical bytes;
+the signed delivery metadata is inside each 1.0.1 bundle.

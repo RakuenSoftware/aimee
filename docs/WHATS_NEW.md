@@ -1,12 +1,14 @@
 # What's new
 
-## 1.0.0 release in preparation
+## 1.0.1 release in preparation
 
-The next application release is **1.0.0**. The declared source series is `1.0`.
-The previous published release, verified on 2026-10-04, is [v0.4.6](https://github.com/RakuenSoftware/aimee/releases/tag/v0.4.6).
-The integration branch contains the newer 1.0.0 work, including merged PR #3005.
-This page describes the release target without claiming its artifacts are already published.
-Version numbers for separate module repositories and the native-memory plugin are independent.
+The next application release is **1.0.1**, following published
+[1.0.0](https://github.com/RakuenSoftware/aimee/releases/tag/v1.0.0). It adds exactly five
+[signed model plugin bundles](releases/v1.0.1/README.md) and documentation for choosing,
+verifying, installing and enrolling them. Models are Gemma4 E2B, E4B, 12B, 26B A4B and Qwen3.8 27B.
+Each bundle includes its adapter, shared runtime and GGUF loader, with the existing verified
+Ed25519 signatures. Plugin version remains 0.3.3. Application publication uses the regular release
+process; this preparation does not claim that 1.0.1 has shipped.
 
 | Application release | Published | Boundary |
 | --- | --- | --- |
@@ -28,9 +30,9 @@ See [Upgrading](UPGRADING.md) before reusing an older store.
 [PR #3005](https://github.com/RakuenSoftware/aimee/pull/3005) adds the generic memory contract and
 Cognee adapter, with required real-provider CI and deployed native/Cognee validation. Its implementation
 is not part of the published 0.4.6 image. See the [memory contract](modules/memory.md#memory-backend-contract).
-The separate native-memory 0.3.3 candidate has five dedicated model plugins on one shared runtime.
-Its [release preparation record](releases/native-memory-v0.3.3/README.md) identifies the server
-export prerequisite and publication checks. The signed 0.2.3 stage remains historical evidence.
+The native-memory 0.3.3 plugins are packaged as five signed model bundles for application 1.0.1.
+Their [installation guide](releases/v1.0.1/README.md) identifies the server export prerequisite
+and verification commands. The signed 0.2.3 stage remains historical evidence.
 
 ## 0.4.6: memory reliability
 

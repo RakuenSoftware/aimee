@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	memory "github.com/JBailes/aimee/server-go/memory"
 	"math"
 	"mime/multipart"
@@ -15,9 +16,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const MaxRecords = 256
+
+// MaxCandidates bounds synchronous chunk indexing within the shipping deadline.
+// This is a provider pool limit, not a canonical catalog size limit.
+const MaxCandidates = 4
 const MaxBody = 1 << 20
 
 // Transport is supplied by the host. Aimee supplies its existing governed
@@ -25,10 +31,12 @@ const MaxBody = 1 << 20
 type Transport func(context.Context, string, string, string, []byte) (int, []byte, error)
 
 type Backend struct {
-	records   memory.Store
-	transport Transport
-	endpoint  string
-	namespace string
+	records     memory.Store
+	transport   Transport
+	endpoint    string
+	namespace   string
+	completedMu sync.Mutex
+	completed   map[string]string // dataset name -> acknowledged dataset identity
 }
 
 func New(records memory.Store, transport Transport, endpoint, namespace string) (*Backend, error) {
@@ -37,7 +45,7 @@ func New(records memory.Store, transport Transport, endpoint, namespace string) 
 		return nil, memory.ErrUnavailable
 	}
 	sum := sha256.Sum256([]byte(namespace))
-	return &Backend{records: records, transport: transport, endpoint: strings.TrimSuffix(endpoint, "/"), namespace: hex.EncodeToString(sum[:16])}, nil
+	return &Backend{records: records, transport: transport, endpoint: strings.TrimSuffix(endpoint, "/"), namespace: hex.EncodeToString(sum[:16]), completed: map[string]string{}}, nil
 }
 func (b *Backend) Capabilities() memory.Capability {
 	return memory.Capability{Name: "cognee", Version: 1, Operations: []string{"get", "search", "put", "delete", "forget", "reset-derived"}}
@@ -191,7 +199,11 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 	if limit <= 0 || limit > MaxRecords || len(query) > 16384 {
 		return nil, memory.ErrCapacity
 	}
-	source, err := b.records.Search(ctx, scope, "", "", "", MaxRecords+1)
+	candidateLimit := MaxRecords
+	if _, ok := b.records.(memory.CandidateStore); ok {
+		candidateLimit = MaxCandidates
+	}
+	source, err := memory.RetrievalCandidates(ctx, b.records, scope, query, kind, tier, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -214,17 +226,36 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 		return nil, err
 	}
 	known := map[string]bool{}
+	identities := map[string]string{}
 	prefix := b.prefix(scope)
 	for _, d := range datasets {
+		identities[d.Name] = d.ID
 		if !strings.HasPrefix(d.Name, prefix) {
 			continue
 		}
 		if _, ok := wanted[d.Name]; !ok {
+			// Keep valid previously indexed records outside this query's pool.
+			// Search names remain restricted to the admitted current candidates.
+			parts := strings.Split(strings.TrimPrefix(d.Name, prefix), "_")
+			if len(parts) == 2 {
+				id, parseErr := strconv.ParseInt(parts[0], 10, 64)
+				if parseErr == nil {
+					current, getErr := b.records.Get(ctx, scope, id)
+					if getErr == nil && b.name(current) == d.Name {
+						continue
+					}
+					if getErr != nil && !errors.Is(getErr, memory.ErrNotFound) {
+						return nil, getErr
+					}
+				}
+			}
 			if err = b.remove(ctx, d.ID); err != nil {
 				return nil, err
 			}
+			delete(identities, d.Name)
 		} else {
 			known[d.Name] = true
+			identities[d.Name] = d.ID
 		}
 	}
 	names := make([]string, 0, len(wanted))
@@ -232,34 +263,76 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	added := false
 	for _, name := range names {
 		if !known[name] {
 			if err = b.add(ctx, name, wanted[name]); err != nil {
 				return nil, err
 			}
+			added = true
 		}
 	}
 	if len(names) == 0 {
 		return []memory.Record{}, nil
 	}
-	// Synchronous cognification reconciles an earlier unknown indexing outcome.
-	body, _ := json.Marshal(map[string]any{"datasets": names, "run_in_background": false})
+	// A provider catalog entry alone does not prove indexing completed. Cache
+	// only synchronous successful acknowledgements for this exact dataset ID.
+	// A restart, source revision or deleted/recreated dataset re-cognifies.
+	if added {
+		refreshed, e := b.datasets(ctx)
+		if e != nil {
+			return nil, e
+		}
+		identities = map[string]string{}
+		for _, d := range refreshed {
+			identities[d.Name] = d.ID
+		}
+	}
+	pending := []string{}
+	b.completedMu.Lock()
+	for name := range b.completed {
+		if identities[name] == "" {
+			delete(b.completed, name)
+		}
+	}
+	for _, name := range names {
+		if identities[name] == "" {
+			b.completedMu.Unlock()
+			return nil, memory.ErrUnavailable
+		}
+		if b.completed[name] != identities[name] {
+			pending = append(pending, name)
+		}
+	}
+	b.completedMu.Unlock()
+	body, _ := json.Marshal(map[string]any{"datasets": pending})
 	var runs map[string]struct {
 		Status string `json:"status"`
 		Name   string `json:"dataset_name"`
 	}
-	if err = b.call(ctx, "POST", "/api/v1/cognify", "application/json", body, &runs); err != nil {
-		return nil, err
-	}
-	completed := map[string]bool{}
-	for _, run := range runs {
-		if _, known := wanted[run.Name]; !known || completed[run.Name] || (run.Status != "PipelineRunCompleted" && run.Status != "PipelineRunAlreadyCompleted") {
+	if len(pending) > 0 {
+		if err = b.call(ctx, "POST", "/api/v1/aimee/index-chunks", "application/json", body, &runs); err != nil {
+			return nil, err
+		}
+		expected := map[string]bool{}
+		for _, name := range pending {
+			expected[name] = true
+		}
+		completed := map[string]bool{}
+		for _, run := range runs {
+			if !expected[run.Name] || completed[run.Name] || (run.Status != "PipelineRunCompleted" && run.Status != "PipelineRunAlreadyCompleted") {
+				return nil, memory.ErrUnavailable
+			}
+			completed[run.Name] = true
+		}
+		if len(completed) != len(pending) {
 			return nil, memory.ErrUnavailable
 		}
-		completed[run.Name] = true
-	}
-	if len(completed) != len(names) {
-		return nil, memory.ErrUnavailable
+		b.completedMu.Lock()
+		for _, name := range pending {
+			b.completed[name] = identities[name]
+		}
+		b.completedMu.Unlock()
 	}
 	body, _ = json.Marshal(map[string]any{"datasets": names, "query": query, "search_type": "CHUNKS", "top_k": 1, "only_context": false})
 	var results []struct {
