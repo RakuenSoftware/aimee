@@ -33,7 +33,7 @@ access to the intended thread. Do not enable unrelated bot permissions.
 ```sh
 mkdir -p ~/.local/share/aimee-discord ~/.config/aimee-discord
 chmod 700 ~/.local/share/aimee-discord ~/.config/aimee-discord
-cp integrations/discord/{bridge.py,conversation_memory.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
+cp integrations/discord/{bridge.py,behavior.py,workflow_chat.py,conversation_memory.py,conversation_projection.py,prompt_budget.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
   ~/.local/share/aimee-discord/
 python3 -m venv ~/.local/share/aimee-discord/venv
 ~/.local/share/aimee-discord/venv/bin/python -m pip install \
@@ -324,8 +324,8 @@ shared history, separate from the parent channel and other threads; servers stay
 conversations; restart clears this recent cache. Durable capture remains in Aimee when the
 knowledge endpoint is configured. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
-For the 2048-token E2B configuration, recent history uses a UTF-8 byte estimate
-and trims older turn pairs to fit alongside the latest message;
+For the 2048-token E2B configuration, the deployed chat template and tokenizer
+count the complete prompt; older turn pairs are removed as whole turns to fit;
 replies request at most 384 tokens. Queue overflow and failed inference
 are logged as metadata, without message content. The bridge does not receive attachments or audio.
 
@@ -401,16 +401,34 @@ unknown delivery outcome retains it for explicit recovery rather than pretending
 completion. Capture/recall outages allow ordinary conversation with a visible
 memory-unavailable notice and no remembered evidence.
 
-The current prompt cap is 6,144 UTF-8 content bytes, with complete history pairs
-removed to fit. This is a byte bound, not an exact tokenizer bound. Real-model
-qualification must check prompt usage against the deployed model's context.
-Run the adapter and worker regressions with:
+Configure `tokenizer_endpoint` and `tokenizer_tls_dir` for the deployed llama.cpp
+model, using its authenticated HTTPS service and synthesis client certificates.
+The bridge counts the complete rendered chat template, including roles, special
+tokens and generation prefix, before each request and repair. The cap is the
+smaller of the model context and 2048 tokens, with 384 tokens reserved for replies.
+Complete history turns and then whole source records are omitted until it fits;
+dependent projection pointers and coverage receipts change with those omissions.
+Tokenizer failure or an irreducible latest message refuses generation. The
+buffered gateway's explicit `preserve_messages` mode retains caller roles and
+`chat_template_kwargs`; returned prompt usage must equal the counted receipt.
+
+Source-bound projections retain purpose, decisions, open questions, constraints,
+feedback and preferences in the selected owner. Only canonical human episodes
+can anchor them. Reads recompute annotations from those sources, including
+revocations and resolutions; deleted or altered sources cannot supply controls.
+Preferences expire after 24 hours by default, with explicit durations bounded at
+30 days. Bots cannot grant preferences or resolve human questions. Episodes and
+pointers use `source_only` admission, retaining literal provenance without
+synchronous factual extraction. Source guard checks continue to cover delivery.
+
+Run the adapter, projection, tokenizer and worker regressions with:
 
 ```sh
-python -m unittest test_bridge test_prepare_e2b test_conversation_memory
+python -m unittest discover -s integrations/discord -v
 ```
 
 The disposable guest probe `scripts/validation/memory/lxc/bridge-profile-probe.py`
 checks the actual adapter against the selected owner without sending Discord
-messages. A live Discord acceptance run still requires an explicitly designated
-test guild/channel and covers gateway admission, mentions, reconnects and delivery.
+messages. The existing guild/channel supplies live acceptance; no new channel
+is needed. See the [2026-10-11 qualification report](../../docs/validation/memory-backend-completion-2026-10-11/README.md)
+for the separately recorded synthetic trajectories and authenticated live checks.

@@ -42,15 +42,23 @@ async def run(options):
         return await ConversationMemory(action, project).capture(turn)
     async def context(query):
         start=time.monotonic()
-        memory=ConversationMemory(action,project)
-        packed=json.loads((await memory.context(query, budget=4000)).split("\n",1)[1])
-        try:
-            await memory.guard("acquire"); await memory.guard("release")
-        except RuntimeError:
-            again=await action("memory.recall",dict(project=project,scope_context=True,task_hint=query,limit_tokens=1800))
-            options.output.with_suffix(".guard-debug.json").write_text(json.dumps({"observed":memory.sources,"again":again.get("recall",{}).get("collection_source")},indent=2))
-            raise
-        return packed,round((time.monotonic()-start)*1000,3)
+        # Index completion can advance the collection between projection and
+        # its preflight. Rebuild before any provider dispatch, under one budget.
+        async with asyncio.timeout(30):
+            while True:
+                memory=ConversationMemory(action,project)
+                packed=json.loads((await memory.context(query, budget=4000)).split("\n",1)[1])
+                try:
+                    try:
+                        await memory.guard("acquire")
+                    finally:
+                        # No provider is contacted by this synthetic preflight.
+                        await memory.guard("release")
+                    return packed,round((time.monotonic()-start)*1000,3)
+                except RuntimeError as error:
+                    if "no longer eligible" not in str(error):
+                        raise
+                    await asyncio.sleep(0.25)
     cases=[]
     def record(name, packed, elapsed, query, required=(), forbidden=()):
         cases.append({"id":name,"status":"passed","query":query,"required":list(required),"forbidden":list(forbidden),

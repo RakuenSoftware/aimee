@@ -159,7 +159,7 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
                                   parsed_response_t *out, char *error, size_t error_cap,
-                                  int preserve_messages);
+                                  int preserve_messages, const cJSON *template_kwargs);
 static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
@@ -277,12 +277,24 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
              !aimee_ir_path_enabled() && !instructions
                  ? server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt)
                  : NULL;
+         int preserve = openai_request_preserves_messages(body) && !tools;
+         cJSON *counted_request = preserve ? cJSON_Parse(body) : NULL;
+         if (preserve)
+         {
+            /* The OpenAI driver reads system roles from messages, whereas the
+             * generic splitter lifts them out for other drivers. Keep the exact
+             * caller sequence for the explicitly counted buffered chat path. */
+            cJSON_Delete(messages);
+            messages =
+                cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(counted_request, "messages"), 1);
+         }
          int trc = agent_execute_messages(
-             ag, messages, tools, instructions ? instructions : legacy_context,
+             ag, messages, tools, preserve ? NULL : (instructions ? instructions : legacy_context),
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
-             upstream_error, sizeof(upstream_error),
-             openai_request_preserves_messages(body) && !tools);
+             upstream_error, sizeof(upstream_error), preserve,
+             cJSON_GetObjectItemCaseSensitive(counted_request, "chat_template_kwargs"));
+         cJSON_Delete(counted_request);
          free(instructions);
          free(legacy_context);
          free(prompt);
@@ -867,7 +879,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    parsed_response_t result;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &result, upstream_error, sizeof(upstream_error), 0);
+                                    &result, upstream_error, sizeof(upstream_error), 0, NULL);
    free(instructions);
    if (erc != 0)
    {
@@ -1000,7 +1012,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          char upstream_error[512];
          int trc =
              agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &parsed, upstream_error, sizeof(upstream_error), 0);
+                                    &parsed, upstream_error, sizeof(upstream_error), 0, NULL);
          free(instructions);
          free(prompt);
 
@@ -1276,7 +1288,7 @@ static int strip_unusable_tools(cJSON *tools)
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
                                   parsed_response_t *out, char *error, size_t error_cap,
-                                  int preserve_messages)
+                                  int preserve_messages, const cJSON *template_kwargs)
 {
    snprintf(error, error_cap, "upstream model request failed");
    if (!out)
@@ -1417,6 +1429,24 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
       gw_mutate_ctx_free(&gwmc);
       cJSON_Delete(gw_raw);
       return -1;
+   }
+
+   if (preserve_messages && cJSON_IsObject(template_kwargs))
+   {
+      cJSON *counted_body = cJSON_Parse(body);
+      free(body);
+      cJSON_DeleteItemFromObjectCaseSensitive(counted_body, "chat_template_kwargs");
+      cJSON_AddItemToObject(counted_body, "chat_template_kwargs",
+                            cJSON_Duplicate(template_kwargs, 1));
+      body = cJSON_PrintUnformatted(counted_body);
+      cJSON_Delete(counted_body);
+      if (!body)
+      {
+         cJSON_Delete(mbox);
+         gw_mutate_ctx_free(&gwmc);
+         cJSON_Delete(gw_raw);
+         return -1;
+      }
    }
 
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
@@ -1609,7 +1639,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    parsed_response_t parsed;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &parsed, upstream_error, sizeof(upstream_error), 0);
+                                    &parsed, upstream_error, sizeof(upstream_error), 0, NULL);
 
    /* `response.created` is the per-response envelope event: emitted exactly
     * once here for EVERY downstream path (error -> response.failed, text turn,
