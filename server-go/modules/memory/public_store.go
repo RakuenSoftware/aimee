@@ -12,7 +12,7 @@ import (
 
 // The memory, its extraction authority, and its extraction job are one commit.
 // A capture or enqueue failure must never acknowledge a partially stored note.
-func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *bus.CommandContext) error {
+func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64, authority int, caller *bus.CommandContext, sourceOnly ...bool) error {
 	actor := FactActor{Principal: "system:model-inference", Role: "model", Rank: 10, TransportIdentity: "internal"}
 	if authority == AuthorityUser {
 		if caller == nil || !caller.Authenticated || !caller.UserAuthority {
@@ -27,6 +27,9 @@ func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64
 VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(memory_id) DO NOTHING`, id, actor.Principal, actor.Role, actor.Rank, actor.Authenticated, actor.TransportIdentity)
 	if err != nil {
 		return err
+	}
+	if len(sourceOnly) > 0 && sourceOnly[0] {
+		return nil
 	}
 	_, err = s.db.Exec(ctx, `INSERT INTO kb_async_jobs(kind,document_id,project,status,updated_at)
 VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,document_id) DO UPDATE SET
@@ -72,7 +75,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return commandResult(commandError("invalid_argument", message))
 	}
 	request := DataRequest{Operation: "insert-epistemic", PublicView: true, Key: args.stringOr("key", ""), Content: args.stringOr("content", ""),
-		Tier: args.stringOr("tier", "L0"), Kind: args.stringOr("kind", "fact"), EpistemicKind: args.stringOr("epistemic_kind", "world_fact"),
+		SourceOnly: args.boolean("source_only"), Tier: args.stringOr("tier", "L0"), Kind: args.stringOr("kind", "fact"), EpistemicKind: args.stringOr("epistemic_kind", "world_fact"),
 		SessionID: args.stringOr("session_id", ""), UseCases: args.stringOr("use_cases", "")}
 	if args.stringOr("view", "") == "mcp" {
 		request.Tier = args.stringOr("tier", "L2")
@@ -85,6 +88,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		if json.Unmarshal(raw, &kind) != nil || kind == "" {
 			return invalid("epistemic_kind must be a string")
 		}
+	}
+	if request.SourceOnly && request.EpistemicKind != "episode" && request.EpistemicKind != "mental_model" {
+		return invalid("source_only requires an episode or derived mental_model")
 	}
 	if !validEpistemicKinds[request.EpistemicKind] {
 		return invalid("invalid epistemic_kind")

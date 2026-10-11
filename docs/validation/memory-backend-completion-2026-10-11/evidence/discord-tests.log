@@ -1,0 +1,79 @@
+......Chatbot turn failed (OSError)
+.Chatbot turn failed (RuntimeError)
+...Conversation capture unavailable; input was not confirmed saved
+Chatbot turn failed (RuntimeError)
+Chatbot turn failed (RuntimeError)
+..Executing <Task pending name='Task-89' coro=<BridgeTests.test_cpu_model_requires_trusted_mtls_and_fixed_server_name() running at /home/virant/dev/aimee/.aimee/worktrees/01a12a7c-38e28d67e74f69d4/main/integrations/discord/test_bridge.py:679> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()] created at /usr/lib/python3.14/asyncio/tasks.py:752> cb=[_run_until_complete_cb() at /usr/lib/python3.14/asyncio/base_events.py:181] created at /usr/lib/python3.14/asyncio/runners.py:110> took 0.266 seconds
+Error on transport creation for incoming connection
+handle_traceback: Handle created at (most recent call last):
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 2049, in _run_once
+    handle._run()
+  File "/usr/lib/python3.14/asyncio/events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 968, in _read_ready
+    self._read_ready_cb()
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 996, in _read_ready__get_buffer
+    self._read_ready__on_eof()
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 1037, in _read_ready__on_eof
+    keep_open = self._protocol.eof_received()
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 467, in eof_received
+    self._on_handshake_complete(ConnectionResetError)
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 592, in _on_handshake_complete
+    self._wakeup_waiter(exc)
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 369, in _wakeup_waiter
+    self._waiter.set_exception(exc)
+protocol: <RequestHandler disconnected>
+transport: <asyncio.sslproto._SSLProtocolTransport object at 0x7fb052d21d30>
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 239, in _accept_connection2
+    await waiter
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 581, in _on_handshake_complete
+    raise handshake_exc
+ConnectionResetError
+Error on transport creation for incoming connection
+handle_traceback: Handle created at (most recent call last):
+  File "/usr/lib/python3.14/asyncio/base_events.py", line 2049, in _run_once
+    handle._run()
+  File "/usr/lib/python3.14/asyncio/events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 968, in _read_ready
+    self._read_ready_cb()
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 996, in _read_ready__get_buffer
+    self._read_ready__on_eof()
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 1037, in _read_ready__on_eof
+    keep_open = self._protocol.eof_received()
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 467, in eof_received
+    self._on_handshake_complete(ConnectionResetError)
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 592, in _on_handshake_complete
+    self._wakeup_waiter(exc)
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 369, in _wakeup_waiter
+    self._waiter.set_exception(exc)
+protocol: <RequestHandler disconnected>
+transport: <asyncio.sslproto._SSLProtocolTransport object at 0x7fb052c7f620>
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/asyncio/selector_events.py", line 239, in _accept_connection2
+    await waiter
+  File "/usr/lib/python3.14/asyncio/sslproto.py", line 581, in _on_handshake_complete
+    raise handshake_exc
+ConnectionResetError
+................./tmp/aimee-memory-discord-venv/lib/python3.14/site-packages/discord/utils.py:1010: DeprecationWarning: 'count' is passed as positional argument
+  return re.sub(regex, replacement, text, 0, re.MULTILINE)
+..Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+Discord turn queue full; request not admitted
+........Startup announcement failed (OSError)
+.............
+----------------------------------------------------------------------
+Ran 52 tests in 1.443s
+
+OK

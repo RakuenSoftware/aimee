@@ -1,16 +1,15 @@
 # Discord webhook and Gemma4 E2B chatbot
 
-This optional channel bridge receives mentions and sends every conversational reply through
-the authenticated Discord application bot account. A configured incoming webhook delivers
-startup announcements and operator-selected outbound messages. Gemma4 E2B supplies the reply. The CPU
+This optional channel bridge posts through a configured Discord incoming webhook and receives
+bot mentions through a Discord application. Gemma4 E2B supplies the reply. The CPU
 bridge archives exchanges and captures human statements through Aimee’s durable
 fact pipeline; the separate GPU setup below uses the enrolled native-memory plugin.
 The bot uses a dedicated Aimee environment and does not run agent tools.
 
 An incoming webhook can post messages but cannot read channel chat. Two-way chat therefore needs
 a Discord application bot token as well as the webhook. The bridge requests guild message events,
-responds to explicit human and bot mentions in the configured channel or its threads, and ignores
-webhook messages and DMs. It does not request privileged Message Content, member or presence intents.
+responds only to explicit mentions in the configured channel or its threads, and ignores bots,
+webhooks and DMs. It does not request privileged Message Content, member or presence intents.
 Discord supplies the content of messages that mention the bot account. A role
 mention with the same display name does not mention that account; Discord withholds
 the content and the bridge ignores the message. Select the bot user in the mention picker.
@@ -27,14 +26,14 @@ webhook URL in `~/.config/aimee-discord/webhook.url` and the application bot tok
 must have mode `0700`. The bridge never logs these values or raw Discord/API exceptions.
 
 Create the Discord application and invite its bot to the intended server with View Channel
-and Send Messages permissions in the selected channel. Conversational replies use the bot account.
-No Administrator, Manage Server, member-list or privileged message-content permission is needed.
-Threads require access to the intended thread and Send Messages in Threads permission. Do not enable unrelated bot permissions.
+permission in the selected channel. Reply delivery uses the supplied webhook. No Administrator,
+Manage Server, member-list or privileged message-content permission is needed. Threads require
+access to the intended thread. Do not enable unrelated bot permissions.
 
 ```sh
 mkdir -p ~/.local/share/aimee-discord ~/.config/aimee-discord
 chmod 700 ~/.local/share/aimee-discord ~/.config/aimee-discord
-cp integrations/discord/{bridge.py,behavior.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
+cp integrations/discord/{bridge.py,behavior.py,workflow_chat.py,conversation_memory.py,conversation_projection.py,prompt_budget.py,prepare_e2b.py,serve_e2b.py,requirements.txt} \
   ~/.local/share/aimee-discord/
 python3 -m venv ~/.local/share/aimee-discord/venv
 ~/.local/share/aimee-discord/venv/bin/python -m pip install \
@@ -304,14 +303,7 @@ an identity, start inference or overwrite an existing serving configuration.
 
 Set `config.json`'s `model` to the exact `model` path in `serving.json`; vLLM uses this as the default
 served model name. Keep `system_context` and `native_system_context` identical. The default instruction
-is shared by both preparation and chat. Aimee's default voice is sharp, warm and playful;
-character performances are requested modes. The bridge adds a separate conversation
-behavior instruction even when `system_context` is customized. It guides topical replies,
-varied phrasing and useful questions. It detects exact/near-duplicate recent replies and
-makes at most one regeneration attempt within the existing 120-second model deadline.
-An unsuccessful repair reports an inference failure instead of posting the duplicate.
-Explicit repeat/quote requests and short acknowledgements remain eligible. This bounds
-regeneration attempts, not bot conversation turns. Serving binds to loopback port 19852 with a generated API
+is shared by both preparation and chat. Serving binds to loopback port 19852 with a generated API
 key, synchronous eager V1, prefix caching disabled, one GPU and zero CPU weight offload.
 The memory recipient and catalog are derived by the installed plugin from the enrolled identity.
 They are never supplied by Discord message authors.
@@ -332,8 +324,8 @@ shared history, separate from the parent channel and other threads; servers stay
 conversations; restart clears this recent cache. Durable capture remains in Aimee when the
 knowledge endpoint is configured. The native-memory account remains the shared bot identity,
 not each Discord user's personal Aimee identity. Requests are serialized with an eight-turn queue.
-For the 2048-token E2B configuration, recent history uses a UTF-8 byte estimate
-and trims older turn pairs to fit alongside the latest message;
+For the 2048-token E2B configuration, the deployed chat template and tokenizer
+count the complete prompt; older turn pairs are removed as whole turns to fit;
 replies request at most 384 tokens. Queue overflow and failed inference
 are logged as metadata, without message content. The bridge does not receive attachments or audio.
 
@@ -371,8 +363,8 @@ Real bot accounts in the configured channel or its threads can address Aimee
 without an allowlist, a human-opened session, a timeout, or a turn limit. Human
 requests mentioning several bots address every mentioned bot regardless of wording.
 Full Discord-sized incoming messages are admitted; the reply model’s recent-history
-budget does not discard longer peer replies. All conversational replies, including human
-chat and thread responses, are sent through Aimee’s bot account rather than its webhook, so the author identity
+budget does not discard longer peer replies. Peer replies are
+sent through Aimee’s bot account rather than its webhook, so the author identity
 matches the account that peers mention. Notifications are enabled for those bot
 recipients. Self messages, webhook imitations and duplicate events are ignored.
 Peer exchanges are archived as agent messages and never admitted as human facts.
@@ -386,174 +378,57 @@ bot messages for an interactive exchange.
 
 Height source questions select the complete subject and `has_height` relation, so a person’s source answer excludes similarly named mountains and lifting capacities. Requests such as “have a conversation with each other” address the mentioned bot peers, as does “talk to”; the initial reply tags all of them and lets them respond.
 
-### Current default persona
 
-Aimee speaks English with the voice of a retired concierge from a hotel for cosmic
-horrors: gracious, dryly witty, warm, and mildly scandalized by ordinary life.
-Humor follows the actual topic; cosmic references are occasional seasoning.
-No recurring catchphrases or forced jokes. A configured `system_context` overrides
-this default. Klingon-only checks remain available for an explicitly configured
-Klingon persona and are inactive with the English default.
+## Backend-neutral conversation memory
 
-### Runtime personas and conversational goals
+Set `memory_profile` to `conversation-v2` with the authenticated local knowledge
+endpoint and server socket shown in `config.knowledge.example.json`. The selected
+Aimee memory owner can be native, Cognee or Hillock; the adapter does not keep a
+separate durable store. Existing configurations default to `native-assertions`
+for compatibility with the earlier structured assertion profile.
 
-Set `behavior_db` in the bridge configuration to an absolute SQLite path on a writable,
-private persistent directory. The CPU Compose overlay provides `/var/lib/aimee-behavior`.
-The operator must initialize that volume for the bridge's UID 1000 with mode 0700.
-`behavior.py` controls live state; changes take effect on the next admitted turn without
-rebuilding or restarting. Bots cannot execute these controls. Configured human operators can also use explicit Discord goal commands below.
+The conversation profile captures admitted inputs before inference, preserving
+speaker identity, original text, units, negation and the Discord event ID. Human
+statements remain unverified speaker episodes. Peer and assistant messages remain
+agent evidence. Capture retries use the same event key and payload. Delivered
+assistant replies are archived only after confirmed delivery.
 
-Scopes are exact `GUILD_ID:CHANNEL_ID` pairs. A thread uses its own channel ID; it does
-not inherit the parent channel's persona or goal. Different scopes can share a goal by
-operator configuration, but this first implementation does not merge their progress.
+Recall combines scoped retrieval with up to eight recent owner records and packs
+whole records with a visible omission receipt. It rechecks current content and
+record identity, then acquires the owner's collection send guard before delivery.
+Changed evidence refuses delivery. Confirmed delivery releases the guard; an
+unknown delivery outcome retains it for explicit recovery rather than pretending
+completion. Capture/recall outages allow ordinary conversation with a visible
+memory-unavailable notice and no remembered evidence.
 
-Run under the bridge's service identity, with access to its persistent state directory:
+Configure `tokenizer_endpoint` and `tokenizer_tls_dir` for the deployed llama.cpp
+model, using its authenticated HTTPS service and synthesis client certificates.
+The bridge counts the complete rendered chat template, including roles, special
+tokens and generation prefix, before each request and repair. The cap is the
+smaller of the model context and 2048 tokens, with 384 tokens reserved for replies.
+Complete history turns and then whole source records are omitted until it fits;
+dependent projection pointers and coverage receipts change with those omissions.
+Tokenizer failure or an irreducible latest message refuses generation. The
+buffered gateway's explicit `preserve_messages` mode retains caller roles and
+`chat_template_kwargs`; returned prompt usage must equal the counted receipt.
 
-```sh
-python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
-  put-persona librarian examples/haunted-librarian.txt
-python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
-  --scope GUILD_ID:CHANNEL_ID persona librarian
-python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
-  --scope GUILD_ID:CHANNEL_ID goal examples/business-goal.json
-python behavior.py --db /var/lib/aimee-behavior/behavior.sqlite \
-  --scope GUILD_ID:CHANNEL_ID status
-```
+Source-bound projections retain purpose, decisions, open questions, constraints,
+feedback and preferences in the selected owner. Only canonical human episodes
+can anchor them. Reads recompute annotations from those sources, including
+revocations and resolutions; deleted or altered sources cannot supply controls.
+Preferences expire after 24 hours by default, with explicit durations bounded at
+30 days. Bots cannot grant preferences or resolve human questions. Episodes and
+pointers use `source_only` admission, retaining literal provenance without
+synchronous factual extraction. Source guard checks continue to cover delivery.
 
-For the deployed container, use `docker exec -i aimee-discord-knowledge-discord-bridge-1
-python /app/behavior.py ...`; copy operator-selected profile/goal files into `/tmp` first.
-The image contains the controller, not the example fixtures. `persona default` restores
-the configured default. Updating an existing profile increments its version and affects
-all scopes selecting it on their next turn.
-
-Goals have an objective and 1–8 ordered milestones. Each milestone specifies a label,
-a literal evidence phrase (`match`, case-insensitive), and `speaker`: `human` (default),
-`assistant`, or `either`. Bot input never counts as human evidence. Literal matching is
-an explicit completion signal, not a semantic judge of whether a business is actually
-viable. Progress commits only after a successful public delivery. It stores milestone
-evidence, message IDs, the next pending step, turn counts and three bounded exchanges.
-When all signals have been observed, status becomes `review` and goal conditioning stops.
-An operator confirms `complete`. The goal controller grants no tools or permissions,
-and creates no unsolicited turns.
-
-Use `pause`, `resume`, `cancel`, or `complete` in place of `status` to control the goal.
-`goal FILE` replaces it. State survives a process/container restart. A control change
-between snapshot and delivery prevents the old turn from overwriting new goal state.
-The response already in flight retains its original persona and goal snapshot.
-On a persona swap, earlier assistant voice is removed from recent history after delivery;
-human context and approved factual memory remain.
-
-The deployed transport uses textual context. `export-attention` emits a versioned
-`aimee.behavior.v1` manifest for the native plugin owner, including scope, state hash,
-operator authority and mandatory persona/active-goal slots. It is explicitly
-`manifest-only`; emitting it does not install an attention bank. See the
-[native behavior requirements](../../docs/proposals/pending/native-attention-personas-goals.md).
-
-### Assign and inspect goals in Discord
-
-Configure `behavior_operator_ids` as the Discord user IDs allowed to change goals.
-The default is empty: ordinary chat admission does not grant goal-control authority.
-Only authenticated human message authors in this list can write goal state; bot
-accounts are excluded even if their ID appears in the list. No display-name lookup
-or model judgement grants this authority.
-
-Mention Aimee with one of these explicit commands:
-
-- `You now have a new goal: Write an academic paper on the funniest way of losing at chess with Samy.`
-- `What is your goal?`
-- `Pause your goal.` / `Resume your goal.` / `Cancel your goal.` / `Complete your goal.`
-
-`Your goal is ...` and `Set your goal to ...` are also supported. Goal objectives
-are bounded to 600 UTF-8 bytes. Assignments persist before acknowledgement and are
-not captured as personal factual claims. Goal questions read the scoped store
-without inference; persona wording cannot replace the objective with a generic
-assistant aspiration. Any admitted participant may inspect the channel's goal.
-Simple chat-created goals stay active until operator completion/cancellation; their
-single human evidence marker is `goal complete`, which requests review rather than
-claiming semantic success. Use the CLI JSON form for explicit multi-step milestones.
-
-### Executing Discord paper goals with the existing WFE
-
-Set `workflow_enabled: true` in the private bridge configuration and set
-`workflow_peer_bot_ids` to verified Discord bot identities (Samy on the deployed
-channel). The bridge requires its behavior database and authenticated Aimee Unix
-socket. Register `workflow_chat.YAML` through `/v1/workflow/save` before enabling
-execution. Paper/essay/article/report objectives explicitly select `discord-paper`;
-other goals retain conversational conditioning and do not acquire arbitrary tools.
-
-The graph is candidates → discussion → outline → draft → revision → delivery.
-There is **no human review gate**: this conversational writing goal finishes
-when the complete Markdown paper is saved and sent as an attachment. Incoming
-peer replies become source-linked workflow inputs rather than unrelated banter.
-The discussion can require many exchanges. Each fresh peer response is assessed
-against a specific candidate, comparison, critique, and resolution; Aimee sends a
-substantive, goal-specific follow-up while a requirement remains unresolved. Four
-bounded selection tasks identify actual source passages across the durable history;
-the bridge supplies their verbatim text. Resolution requires evidence after a
-follow-up, and remains valid through later tangential replies. Assessment inference
-is isolated from ordinary chat persona and retrieval. Parse failures return typed
-stage failures rather than malformed-request errors. An agreed-argument brief
-carries candidate, comparison, critique and resolution into drafting and revision.
-The complete discussion and cumulative synthesis survive restart.
-Repeated long sentences require a rewrite. Paper sections have distinct writing tasks and explicit chess facts for the chess
-objective. The adapter owns headings and removes redundant model headings. Narrow assertion
-checks review each full section for incorrect winner attribution, invented games or
-experiments, literal board destruction, and invented collaborator quotations. A
-reported defect triggers one rewrite; persistent defects fail visibly
-before delivery. The small model failed a live false-positive qualification as a judge, so these
-checks use explicit assertion rules. This is not a human approval gate, and does
-not guarantee exhaustive factual or stylistic quality.
-
-`ChatWorkflow.revise_completed(snapshot)` creates a new scoped writing goal from
-an accepted run. It integrity-checks and durably preserves the candidate,
-discussion and outline artifacts in one transaction with the new goal. The new
-WFE run reuses those inputs, then writes, checks, revises and delivers a new paper;
-it does not reopen or overwrite the accepted run. Failed revisions can retry from
-their accepted origin; an active run cannot be replaced by this helper.
-`notation_only=True` derives corrected draft/revision artifacts from an accepted
-chess paper, preserving its authored prose and original evidence. Canonical move
-number normalization applies only to the known Fool's Mate example, both during
-writing and this repair. The helper is an operator API,
-not a new command available to peer bots. While waiting,
-the WFE parks at `conversation_input`; a fresh response from the configured peer
-identity resumes the existing stage. There is no conversation turn limit. Ordinary human messages still receive replies.
-
-Apply `compose.workflow.yaml` to the **dedicated bot server** project, setting
-`AIMEE_DISCORD_BEHAVIOR_VOLUME` to the bridge's existing behavior volume. The WFE
-uses its typed HTTP runner over the private `runner.sock` (0600). The server must
-include the lifecycle resume support for `conversation_input` and `binding_pending`
-added by this change; older servers reject these new wait reasons. This adapter
-supports only `discord-paper`; do not apply it to a shared coding WFE. The Go WFE
-continues to own admission, scheduling, stage transitions, pause/resume/stop,
-recovery, and artifacts. The bridge's status watcher only mirrors state and resumes
-a stage when the requested input arrives; it does not implement another scheduler.
-`GET /workflow/health` reports readiness after Discord connects. Deployments wait
-for this before resuming a held run. After startup the watcher can retry a confirmed
-Unix socket connection failure once per run; model failures remain visible.
-
-Authorized Discord goal replacement stops the previous unfinished run. Pause,
-resume, and cancel operate on the persisted run ID. Status queries report actual
-WFE state. `Complete your goal` cannot bypass an executing workflow. Submitted
-goals use stable idempotency keys; stage outputs are cached durably for replay,
-including the full paper. WFE node artifacts retain complete content even though
-inference prompts use bounded excerpts. Final delivery checks recent channel
-history before retrying after a lost acknowledgement. Discord and SQLite cannot
-provide an atomic cross-service transaction; a failed discussion prompt is retried,
-and an acknowledgement lost across an exceptionally long history window can
-require operator inspection. Missing input stays visibly pending.
-
-Run tests with `python -m unittest test_bridge test_prepare_e2b test_behavior test_workflow_chat`.
-
-For a server based on the existing 1.0.0 package, build the small store-owner overlay
-from the repository root:
+Run the adapter, projection, tokenizer and worker regressions with:
 
 ```sh
-docker build -f integrations/discord/Dockerfile.workflow-server \
-  -t aimee-discord-server:conversation-waits .
+python -m unittest discover -s integrations/discord -v
 ```
 
-Set `AIMEE_DISCORD_WORKFLOW_SERVER_IMAGE` to that image when applying the dedicated
-server override. The module descriptor launches
-`/usr/local/libexec/aimee-modules/aimee-module-aimee`; replacing only the convenience
-binary in `/usr/local/bin` does not update the running DB owner. Future server
-releases containing the wait-reason change can use their published image directly.
+The disposable guest probe `scripts/validation/memory/lxc/bridge-profile-probe.py`
+checks the actual adapter against the selected owner without sending Discord
+messages. The existing guild/channel supplies live acceptance; no new channel
+is needed. See the [2026-10-11 qualification report](../../docs/validation/memory-backend-completion-2026-10-11/README.md)
+for the separately recorded synthetic trajectories and authenticated live checks.

@@ -1,0 +1,166 @@
+name: Hillock prerelease qualification
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Optional single rc/v<major>.<minor>.<patch> branch (empty scans all)'
+        type: string
+        default: ''
+      force:
+        description: 'Retest even when this exact Aimee/Hillock pair already passed'
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/hillock-prereleases.yml'
+      - 'scripts/validation/memory/discover-hillock-prereleases.py'
+      - 'scripts/validation/memory/run-hillock-contract.py'
+      - 'scripts/validation/memory/qualify-external.go'
+      - 'scripts/tests/test_hillock_prereleases.py'
+      - 'integrations/hillock/**'
+      - 'server-go/modules/memory/**'
+      - 'server-go/memory/**'
+      - 'server-go/go.mod'
+      - 'server-go/go.sum'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hillock-prereleases-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.scan.outputs.matrix }}
+      count: ${{ steps.scan.outputs.count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Discovery and qualification runner regression tests
+        run: python3 -m unittest discover -s scripts/tests -p test_hillock_prereleases.py
+      - name: Snapshot matching upstream branch tips
+        id: scan
+        env:
+          SELECTED_BRANCH: ${{ inputs.branch }}
+        run: |
+          python3 scripts/validation/memory/discover-hillock-prereleases.py \
+            --branch "$SELECTED_BRANCH" --output discovery.json --github-output "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('discovery.json'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f"Discovered {data['count']} Hillock release-candidate branches.\n\n")
+              for row in data['matrix']['include']:
+                  out.write(f"- `{row['branch']}` at `{row['revision']}`\n")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: hillock-discovery
+          path: discovery.json
+          retention-days: 30
+
+  qualify:
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    name: Qualify ${{ matrix.branch }}
+    env:
+      HILLOCK_BRANCH: ${{ matrix.branch }}
+      HILLOCK_REVISION: ${{ matrix.revision }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set disposable evidence paths
+        run: |
+          echo "EVIDENCE=$RUNNER_TEMP/hillock-evidence" >> "$GITHUB_ENV"
+          echo "RECEIPT=$RUNNER_TEMP/hillock-passed" >> "$GITHUB_ENV"
+      # Only successful receipts are cached, with no fallback keys. A new branch,
+      # upstream commit or Aimee commit must qualify; failed runs retry next scan.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: passed
+        if: inputs.force != true
+        with:
+          path: ${{ env.RECEIPT }}
+          key: hillock-qualified-v1-${{ matrix.branch_key }}-${{ matrix.revision }}-${{ github.sha }}
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        if: steps.passed.outputs.cache-hit != 'true'
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        if: steps.passed.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+      - name: Memory owner and adapter race tests
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$EVIDENCE"
+          set -o pipefail
+          cd server-go
+          go test -race -count=1 ./memory ./modules/memory ./modules/memory/backendstore \
+            ./modules/memory/cognee ./modules/memory/hillock ./modules/egress 2>&1 | tee "$EVIDENCE/race.log"
+      - name: Real candidate lifecycle, restart and scale contracts
+        if: steps.passed.outputs.cache-hit != 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hillock-venv"
+          "$RUNNER_TEMP/hillock-venv/bin/pip" install -r integrations/hillock/requirements.txt
+          "$RUNNER_TEMP/hillock-venv/bin/python" scripts/validation/memory/run-hillock-contract.py \
+            --revision "$HILLOCK_REVISION" --branch "$HILLOCK_BRANCH" --scale \
+            --artifacts "$EVIDENCE/contract"
+      - name: Record successful qualification
+        if: success() && steps.passed.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RECEIPT"
+          cp "$EVIDENCE/contract/summary.json" "$RECEIPT/summary.json"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: success() && steps.passed.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.RECEIPT }}
+          key: hillock-qualified-v1-${{ matrix.branch_key }}-${{ matrix.revision }}-${{ github.sha }}
+      - name: Qualification summary
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          CACHE_HIT: ${{ steps.passed.outputs.cache-hit }}
+          AIMEE_REVISION: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f"Hillock `{os.environ['HILLOCK_BRANCH']}` at `{os.environ['HILLOCK_REVISION']}`\n\n")
+              out.write(f"Aimee: `{os.environ['AIMEE_REVISION']}`\n\n")
+              out.write('Reused exact successful qualification.\n' if os.environ['CACHE_HIT'] == 'true'
+                        else f"Qualification result: **{os.environ['RESULT']}**. See evidence artifacts.\n")
+              receipt = Path(os.environ['RECEIPT']) / 'summary.json'
+              if receipt.exists():
+                  out.write('\n```json\n' + receipt.read_text() + '```\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: hillock-${{ matrix.branch_key }}-${{ matrix.revision }}
+          path: |
+            ${{ env.EVIDENCE }}/race.log
+            ${{ env.EVIDENCE }}/contract/summary.json
+            ${{ env.EVIDENCE }}/contract/server.log
+            ${{ env.EVIDENCE }}/contract/contract.log
+            ${{ env.EVIDENCE }}/contract/scale.log
+            ${{ env.EVIDENCE }}/contract/scale.json
+            ${{ env.RECEIPT }}/summary.json
+          retention-days: 30

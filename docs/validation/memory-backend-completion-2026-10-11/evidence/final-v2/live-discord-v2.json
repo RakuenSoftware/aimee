@@ -1,0 +1,92 @@
+{
+  "guild_id": "1532201714462101594",
+  "parent_channel_id": "1557125396716191786",
+  "thread_id": "1558834137350152292",
+  "gateway_ready": true,
+  "fixture": "authenticated existing Discord history replay; bot-authored live delivery",
+  "cases": [
+    {
+      "backend": "native",
+      "passed": true,
+      "source_message_ids": [
+        "1558743832521084929",
+        "1558647117113851905",
+        "1558832990358999091",
+        "1558829090042155089",
+        "1558829054902411295"
+      ],
+      "human_sources": 2,
+      "bot_sources": 3,
+      "selected_records": 2,
+      "token_budget": {
+        "prompt_tokens": 990,
+        "completion_reserve": 384,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "usage_verified_by_bridge": true,
+      "request_message_id": "1558834169235116053",
+      "delivered_message_id": "1558834278148612108",
+      "delivered_content_sha256": "3c90886055c560e720c194ea09bd6c29aa7740133c0a6562776bd961038c9ff5",
+      "guard": "acquired before send; released after receipt",
+      "response_capture": "actual bot message receipt retained by selected owner"
+    },
+    {
+      "backend": "cognee",
+      "passed": true,
+      "source_message_ids": [
+        "1558743832521084929",
+        "1558647117113851905",
+        "1558832990358999091",
+        "1558829090042155089",
+        "1558829054902411295"
+      ],
+      "human_sources": 2,
+      "bot_sources": 3,
+      "selected_records": 2,
+      "token_budget": {
+        "prompt_tokens": 990,
+        "completion_reserve": 384,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "usage_verified_by_bridge": true,
+      "request_message_id": "1558834319798308955",
+      "delivered_message_id": "1558834476497244224",
+      "delivered_content_sha256": "c1741c62b4ab72c90333a5e40c0c68def670f567a0a90a15163271a837e3b0fc",
+      "guard": "acquired before send; released after receipt",
+      "response_capture": "actual bot message receipt retained by selected owner"
+    },
+    {
+      "backend": "hillock",
+      "passed": true,
+      "source_message_ids": [
+        "1558743832521084929",
+        "1558647117113851905",
+        "1558832990358999091",
+        "1558829090042155089",
+        "1558829054902411295"
+      ],
+      "human_sources": 2,
+      "bot_sources": 3,
+      "selected_records": 2,
+      "token_budget": {
+        "prompt_tokens": 990,
+        "completion_reserve": 384,
+        "context_limit": 2048,
+        "omitted_history_messages": 0,
+        "counter": "deployed chat template and tokenizer"
+      },
+      "usage_verified_by_bridge": true,
+      "request_message_id": "1558834516586401846",
+      "delivered_message_id": "1558834642306605069",
+      "delivered_content_sha256": "7108092f141c6de7db4feda7a1cae16f91ca1c0b45472bf8485a924eed6fb3c1",
+      "guard": "acquired before send; released after receipt",
+      "response_capture": "actual bot message receipt retained by selected owner"
+    }
+  ],
+  "passed": true,
+  "thread_archived": true
+}

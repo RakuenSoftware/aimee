@@ -2680,7 +2680,7 @@
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
       ],
-      "sha256": "2bb8f5bfa9b34989275b361a33069aa41efd3758f738d8c99826e438502ec3dc",
+      "sha256": "e0dfef2c7a9e5acfd38612a23cbf38156ce2a4dc19f1e92feee388cba25318e0",
       "inputs": {
         "src/gen_schema.py": "594e22f8c740edeab764e881f22bf4b1fb044bcefe9eb1079ae41ffaa971f3c6",
         "src/modules/kb/c/schema.sql": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7",

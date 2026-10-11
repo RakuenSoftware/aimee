@@ -33,6 +33,7 @@ const (
 )
 
 type DataRequest struct {
+	SourceOnly          bool               `json:"source_only,omitempty"`
 	BackendErasureID    string             `json:"backend_erasure_id,omitempty"`
 	BackendSubject      string             `json:"backend_subject,omitempty"`
 	BackendSessions     []string           `json:"backend_sessions,omitempty"`
@@ -176,6 +177,7 @@ type DataRequest struct {
 }
 
 type Record struct {
+	Metadata       json.RawMessage      `json:"metadata,omitempty"`
 	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
 	Authorship     *PersonalAuthorship  `json:"authorship,omitempty"`
 	Version        *MemoryRecordVersion `json:"version,omitempty"`
@@ -1440,7 +1442,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 				if r.Authorship != nil {
 					category = r.Authorship.Category
 				}
-				response.PublicRecords = append(response.PublicRecords, publicMemoryRecord{ID: r.ID, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: r.Confidence, Version: r.Version, ProvenanceCategory: category})
+				var metadata struct {
+					UseCases      string `json:"use_cases"`
+					SourceSession string `json:"source_session"`
+				}
+				// Metadata is opaque optional JSON. Other imported shapes retain
+				// their payload without claiming this compatibility view.
+				_ = json.Unmarshal(r.Metadata, &metadata)
+				response.PublicRecords = append(response.PublicRecords, publicMemoryRecord{ID: r.ID, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: r.Confidence, Version: r.Version, ProvenanceCategory: category, UseCases: metadata.UseCases, SourceSession: metadata.SourceSession, Metadata: r.Metadata})
 			}
 		}
 		if readResult != nil {
@@ -2244,7 +2253,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				if !ok {
 					return nil, bus.ModuleStatusCapabilityAbsent
 				}
-				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext)
+				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext, request.SourceOnly)
 			}
 			response.Records = []Record{record}
 		case "update-as":

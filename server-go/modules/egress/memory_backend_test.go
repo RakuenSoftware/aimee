@@ -81,6 +81,9 @@ func TestHillockEgressRoutesAreProviderSpecific(t *testing.T) {
 		}
 	}
 	t.Setenv("AIMEE_MEMORY_BACKEND", "cognee")
+	if !memoryBackendTargetAllowed("POST", "/api/v1/aimee/index-chunks") || memoryBackendTargetAllowed("GET", "/api/v1/aimee/index-chunks") || memoryBackendTargetAllowed("POST", "/api/v1/aimee/index-chunks/other") {
+		t.Fatal("chunk indexing method/path admission changed")
+	}
 	if memoryBackendTargetAllowed("POST", "/v1/rank") {
 		t.Fatal("Hillock route admitted for Cognee")
 	}

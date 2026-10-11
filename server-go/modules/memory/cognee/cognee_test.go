@@ -57,6 +57,7 @@ type cogneeFixture struct {
 	datasets        map[string]dataset
 	contents        map[string]string
 	searches        int
+	cognifications  int
 	serial          int
 	foreign         bool
 	started         bool
@@ -104,7 +105,8 @@ func (f *cogneeFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.contents[name] = string(raw)
 		respond(map[string]string{"status": "success"})
-	case r.Method == "POST" && r.URL.Path == "/api/v1/cognify":
+	case r.Method == "POST" && r.URL.Path == "/api/v1/aimee/index-chunks":
+		f.cognifications++
 		var input struct {
 			Datasets   []string `json:"datasets"`
 			Background bool     `json:"run_in_background"`
@@ -238,12 +240,27 @@ func TestCogneeContractRoundTripAndIsolation(t *testing.T) {
 	if len(fixture.datasets) != 2 {
 		t.Fatal("old revision retained", fixture.datasets)
 	}
+	beforeRuns := fixture.cognifications
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns {
+		t.Fatal("warm search reindexed acknowledged datasets", err)
+	}
+	// Same name with a new provider identity requires completion again.
+	for name, d := range fixture.datasets {
+		d.ID = "00000000-0000-0000-0000-ffffffffffff"
+		fixture.datasets[name] = d
+		break
+	}
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns+1 {
+		t.Fatal("recreated dataset skipped indexing", err)
+	}
 	fixture.foreign = true
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) {
 		t.Fatal("foreign result admitted", err)
 	}
 	fixture.foreign = false
 	fixture.started = true
+	backend, _ = New(records, transport, server.URL, "node-fixture")
+	provider = backend
 	before := fixture.searches
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) || fixture.searches != before {
 		t.Fatal("unfinished cognify treated as ready", err)
@@ -502,7 +519,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 			var b *Backend
 			transport := func(c context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
 				path := strings.TrimPrefix(target, "http://fixture")
-				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/cognify" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
+				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/aimee/index-chunks" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
 					return 503, []byte(`{}`), nil
 				}
 				req := httptest.NewRequest(method, target, strings.NewReader(string(body)))
@@ -510,7 +527,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 				w := httptest.NewRecorder()
 				fixture.ServeHTTP(w, req)
 				result := w.Body.Bytes()
-				if path == "/api/v1/cognify" {
+				if path == "/api/v1/aimee/index-chunks" {
 					switch fault {
 					case "missing-run":
 						result = []byte(`{}`)

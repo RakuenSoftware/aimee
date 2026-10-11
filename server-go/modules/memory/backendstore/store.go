@@ -858,21 +858,27 @@ func (s *Store) Candidates(ctx context.Context, scope memory.Scope, query, kind,
 		return n
 	}
 	err = s.transaction(ctx, false, func(state *Snapshot) error {
+		type candidate struct {
+			record memory.Record
+			score  int
+		}
+		candidates := []candidate{}
 		for _, entry := range state.Entries {
 			r := entry.Record
 			if !entry.Retired && eligibleRecord(r) && r.Scope == scope && (kind == "" || r.Kind == kind) && (tier == "" || r.Tier == tier) {
-				out = append(out, r)
+				candidates = append(candidates, candidate{r, score(r)})
 			}
 		}
-		sort.Slice(out, func(i, j int) bool {
-			a, b := score(out[i]), score(out[j])
-			if a != b {
-				return a > b
+		// Compute each lexical score once. Sorting previously rebuilt the
+		// lowercased record text for every comparison across the entire corpus.
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score != candidates[j].score {
+				return candidates[i].score > candidates[j].score
 			}
-			return out[i].ID > out[j].ID
+			return candidates[i].record.ID > candidates[j].record.ID
 		})
-		if len(out) > limit {
-			out = out[:limit]
+		for _, candidate := range candidates[:min(limit, len(candidates))] {
+			out = append(out, candidate.record)
 		}
 		return nil
 	})

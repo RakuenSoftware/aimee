@@ -73,7 +73,7 @@ Requires=aimee-cognee-model-fixture.service
 [Service]
 WorkingDirectory=/var/lib/aimee-provider
 EnvironmentFile=/var/lib/aimee-provider/provider.env
-ExecStart=/opt/cognee-venv/bin/python -m uvicorn cognee.api.client:app --host 127.0.0.1 --port 8097
+ExecStart=/opt/cognee-venv/bin/python -m uvicorn service:app --app-dir /opt/aimee/integrations/cognee --host 127.0.0.1 --port 8097
 Restart=on-failure
 [Install]
 WantedBy=multi-user.target

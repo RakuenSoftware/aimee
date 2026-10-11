@@ -14,6 +14,7 @@ import (
 // fixed-size content buffer. Enrichment refuses changed payloads and mismatched
 // observed versions; a scoped READ COMMITTED transaction alone is not a snapshot.
 type publicMemoryRecord struct {
+	Metadata       json.RawMessage      `json:"metadata,omitempty"`
 	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
 	Version        *MemoryRecordVersion `json:"version,omitempty"`
 

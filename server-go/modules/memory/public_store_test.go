@@ -16,7 +16,7 @@ import (
 
 func TestStorePublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
-	for _, args := range []string{`{}`, `{"key":"x","content":" "}`, `{"key":"x","content":"y","confidence":null}`, `{"key":"x","content":"y","confidence":2}`, `{"key":"x","content":"y","epistemic_kind":"anything"}`} {
+	for _, args := range []string{`{}`, `{"key":"x","content":" "}`, `{"key":"x","content":"y","confidence":null}`, `{"key":"x","content":"y","confidence":2}`, `{"key":"x","content":"y","epistemic_kind":"anything"}`, `{"key":"x","content":"y","source_only":true}`} {
 		r := runPublicCommand(t, client, "store", args)
 		if r["kind"] != "invalid_argument" {
 			t.Fatal(r)
@@ -134,6 +134,17 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(user)
 	}
 	checkActor(user["id"], "user:alice", 30, 1)
+	for _, epistemic := range []string{"episode", "mental_model"} {
+		source := put(fmt.Sprintf(`{"key":%q,"content":"literal attributed source","epistemic_kind":%q,"source_only":true,"authority":"user","scope_context":true,"project":"app"}`, "source-only-"+epistemic, epistemic), true)
+		if source["status"] != "ok" {
+			t.Fatal(source)
+		}
+		checkActor(source["id"], "user:alice", 30, 1)
+		var queued int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM kb_async_jobs WHERE document_id=$1`, int64(source["id"].(float64))).Scan(&queued); err != nil || queued != 0 {
+			t.Fatal("source-only episode promoted into extraction", queued, err)
+		}
+	}
 	// A failed authorized correction must roll back the closed interval, replacement,
 	// lineage, and extraction actor together.
 	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs ADD CONSTRAINT update_enqueue_failure CHECK (document_id<0) NOT VALID`); err != nil {

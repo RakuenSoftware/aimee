@@ -1,0 +1,139 @@
+{
+  "deadline_ms": 30000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "cognee",
+      "records": 100,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 47387,
+      "import_ms": 18.530995,
+      "restart_ms": 26.730377,
+      "cold_ms": 9924.750271,
+      "p50_ms": 843.462533,
+      "p95_ms": 1735.667448,
+      "max_ms": 1735.667448,
+      "requests_per_second": 3.496075890361183,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 10305.161485,
+          "max_ms": 2777.667837
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 387.21989299999996,
+          "max_ms": 33.046841
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 1690.876304,
+          "max_ms": 580.40584
+        },
+        "POST /api/v1/cognify": {
+          "calls": 1,
+          "total_ms": 7852.998397,
+          "max_ms": 7852.998397
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 3364.2435179999998,
+          "max_ms": 803.193745
+        }
+      }
+    },
+    {
+      "backend": "cognee",
+      "records": 1000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 477593,
+      "import_ms": 28.730406,
+      "restart_ms": 42.379189,
+      "cold_ms": 8962.422715,
+      "p50_ms": 1537.981785,
+      "p95_ms": 1735.172151,
+      "max_ms": 1735.172151,
+      "requests_per_second": 2.462173586159604,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 9747.319538,
+          "max_ms": 2506.150778
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 358.59392599999995,
+          "max_ms": 24.9645
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 1850.100057,
+          "max_ms": 550.802641
+        },
+        "POST /api/v1/cognify": {
+          "calls": 1,
+          "total_ms": 6718.152502,
+          "max_ms": 6718.152502
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 3651.442748,
+          "max_ms": 338.731825
+        }
+      }
+    },
+    {
+      "backend": "cognee",
+      "records": 10000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 4824599,
+      "import_ms": 219.634088,
+      "restart_ms": 237.888809,
+      "cold_ms": 10065.983156,
+      "p50_ms": 5313.438494,
+      "p95_ms": 5948.17767,
+      "max_ms": 5948.17767,
+      "requests_per_second": 0.7394375661983946,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 4,
+          "total_ms": 9918.832672,
+          "max_ms": 2509.096722
+        },
+        "GET /api/v1/datasets": {
+          "calls": 18,
+          "total_ms": 388.15671999999995,
+          "max_ms": 28.26459
+        },
+        "POST /api/v1/add": {
+          "calls": 4,
+          "total_ms": 1901.813121,
+          "max_ms": 632.9902
+        },
+        "POST /api/v1/cognify": {
+          "calls": 1,
+          "total_ms": 6750.294709,
+          "max_ms": 6750.294709
+        },
+        "POST /api/v1/search": {
+          "calls": 13,
+          "total_ms": 5052.035977,
+          "max_ms": 741.271607
+        }
+      }
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

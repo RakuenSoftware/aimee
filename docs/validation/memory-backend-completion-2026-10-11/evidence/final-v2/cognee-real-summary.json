@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "cognee": "1.6.2",
+  "models": "real inference and embeddings",
+  "diagnostic_request_deadline_seconds": 30,
+  "completion_max_tokens": null,
+  "completion_model": "openai/fixture",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dimensions": 384,
+  "fixture_calls": {
+    "embeddings": 205,
+    "completions": 0
+  }
+}

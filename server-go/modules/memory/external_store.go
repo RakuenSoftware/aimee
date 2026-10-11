@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -79,9 +80,24 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 	if s.placement == PlacementKB && !explicit {
 		scopes = externalAudience(scope, request.Workspace)
 	}
+	searchScopes := append([]Scope(nil), scopes...)
+	if request.Operation == "list" {
+		// Public lists match native audience priority. Sorted collection audiences
+		// remain unchanged for source observations and revalidation.
+		priority := func(item Scope) int {
+			if item == scope {
+				return 0
+			}
+			if item.Type == ScopeWorkspace && item.Value == request.Workspace {
+				return 1
+			}
+			return 2
+		}
+		sort.SliceStable(searchScopes, func(i, j int) bool { return priority(searchScopes[i]) < priority(searchScopes[j]) })
+	}
 	search := func(query, kind, tier string, limit int) ([]contract.Record, error) {
 		result := []contract.Record{}
-		for _, admitted := range scopes {
+		for _, admitted := range searchScopes {
 			remaining := min(256, limit-len(result))
 			if remaining <= 0 {
 				break
@@ -89,7 +105,13 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 			var records []contract.Record
 			var err error
 			if query == "" {
-				records, err = s.catalog.Search(ctx, admitted, query, kind, tier, remaining)
+				if request.Operation == "list" {
+					// Latest canonical admissions, without changing the transfer cursor's
+					// ascending order or provider query ranking.
+					records, err = s.catalog.Candidates(ctx, admitted, "", kind, tier, remaining)
+				} else {
+					records, err = s.catalog.Search(ctx, admitted, query, kind, tier, remaining)
+				}
 			} else {
 				records, err = s.backend.Search(ctx, admitted, query, kind, tier, remaining)
 			}
@@ -248,6 +270,12 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 			return fail(err)
 		}
 		r := contract.Record{ID: request.ID, Scope: scope, Tier: request.Tier, Kind: request.Kind, Key: request.Key, Content: content, Confidence: confidence}
+		// Preserve caller-supplied source data as metadata, separate from the
+		// host-captured authorship/authority below. Discord identity/source spans
+		// must survive storage, recall, export and exact historical reads.
+		if request.UseCases != "" || request.SessionID != "" {
+			r.Metadata, _ = json.Marshal(map[string]string{"use_cases": request.UseCases, "source_session": request.SessionID})
+		}
 		if !deleting && !replacing && (r.ID != 0 || r.Key == "" || r.Kind == "") {
 			return response, bus.ModuleStatusInvalidRequest
 		}
@@ -305,8 +333,10 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 				if value, ok := metadata["epistemic_kind"].(string); ok && value != "" {
 					epistemic = value
 				}
-				if e := admitMemoryReplacement(epistemic, authorship.Category, actor.authority); e != nil {
-					return e
+				if !deleting || actor.authority != AuthorityUser {
+					if e := admitMemoryReplacement(epistemic, authorship.Category, actor.authority); e != nil {
+						return e
+					}
 				}
 			}
 			if deleting {

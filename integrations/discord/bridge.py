@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 import aiohttp
 import discord
 
+from conversation_memory import ConversationMemory
+from prompt_budget import PromptBudget
 from behavior import BehaviorStore, context as behavior_context, persona_key, chat_control, conversational_goal, goal_reply
 
 LOG = logging.getLogger("aimee.discord")
@@ -85,6 +87,9 @@ class Config:
     knowledge_endpoint: str | None = None
     knowledge_key_file: Path | None = None
     peer_bot_ids: tuple[int, ...] = ()
+    memory_profile: str = "native-assertions"
+    tokenizer_endpoint: str | None = None
+    tokenizer_tls_dir: Path | None = None
     behavior_db: Path | None = None
     behavior_operator_ids: tuple[int, ...] = ()
     workflow_enabled: bool = False
@@ -127,6 +132,17 @@ class Config:
         ):
             raise ValueError("allowed_user_ids must be Discord user IDs")
         peers = value.get("peer_bot_ids", [])
+        tokenizer_endpoint = value.get("tokenizer_endpoint")
+        tokenizer_tls_dir = Path(value["tokenizer_tls_dir"]) if value.get("tokenizer_tls_dir") else None
+        if tokenizer_endpoint:
+            tokenizer_url = urlsplit(tokenizer_endpoint)
+            if (tokenizer_url.scheme != "https" or not tokenizer_url.hostname or tokenizer_url.path not in ("", "/")
+                    or tokenizer_url.username or tokenizer_url.query or tokenizer_url.fragment
+                    or not tokenizer_tls_dir or not tokenizer_tls_dir.is_absolute()):
+                raise ValueError("tokenizer requires an HTTPS model origin and absolute TLS directory")
+        profile = value.get("memory_profile", "native-assertions")
+        if profile not in ("native-assertions", "conversation-v2"):
+            raise ValueError("memory_profile must be native-assertions or conversation-v2")
         if (not isinstance(peers, list) or len(peers) > 8 or any(
                 not re.fullmatch(r"[0-9]{17,20}", str(peer)) for peer in peers)):
             raise ValueError("peer_bot_ids must be at most eight Discord bot IDs")
@@ -158,7 +174,7 @@ class Config:
                    model=model, allowed_user_ids=tuple(map(int, users)),
                    knowledge_endpoint=knowledge_endpoint, knowledge_key_file=knowledge_key_file,
                    system_context=system, model_tls_dir=tls_dir, aimee_socket=aimee_socket,
-                   peer_bot_ids=tuple(int(peer) for peer in peers), behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)), workflow_enabled=workflow_enabled, workflow_peer_bot_ids=tuple(map(int, workflow_peers)))
+                   peer_bot_ids=tuple(int(peer) for peer in peers), memory_profile=profile, tokenizer_endpoint=tokenizer_endpoint, tokenizer_tls_dir=tokenizer_tls_dir, behavior_db=behavior_db, behavior_operator_ids=tuple(map(int, operators)), workflow_enabled=workflow_enabled, workflow_peer_bot_ids=tuple(map(int, workflow_peers)))
 
 
 def split_message(text: str, limit: int = 1900) -> list[str]:
@@ -213,6 +229,22 @@ class WebhookDelivery:
 class ModelClient:
     def __init__(self, config: Config, session: aiohttp.ClientSession):
         self.config, self.session = config, session
+        self.conversation_memory = None
+        self.prompt_budget = PromptBudget(self.tokenizer_request)
+
+    async def tokenizer_request(self, route, body):
+        endpoint, identity = self.config.tokenizer_endpoint, self.config.tokenizer_tls_dir
+        if not endpoint or not identity:
+            raise RuntimeError("conversation-v2 requires the deployed model tokenizer")
+        context = ssl.create_default_context(cafile=str(identity / "ca.pem"))
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.load_cert_chain(str(identity / "client.pem"), str(identity / "client.key"))
+        method = "GET" if body is None else "POST"
+        async with self.session.request(method, endpoint.rstrip("/") + route, json=body,
+                ssl=context, server_hostname="aimee-llm", allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=10, connect=5)) as response:
+            return await self.read_response(response, "Deployed tokenizer")
 
     def channel_project(self, channel_id: int | None) -> str:
         return f"discord:{self.config.guild_id}:{channel_id or self.config.channel_id}"
@@ -223,6 +255,8 @@ class ModelClient:
                                      allow_redirects=False,
                                      timeout=aiohttp.ClientTimeout(total=30, connect=5)) as response:
             value = await self.read_response(response, "Durable channel memory")
+        if action == "memory.get" and value.get("kind") == "not_found":
+            return value
         if value.get("status") not in ("ok", "degraded"):
             raise RuntimeError("Durable channel memory refused")
         return value
@@ -246,6 +280,10 @@ class ModelClient:
     async def capture_turn(self, turn: Turn, reply: str) -> bool:
         if not self.config.knowledge_endpoint:
             return False
+        if self.config.memory_profile == "conversation-v2":
+            self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(turn.channel_id))
+            await self.conversation_memory.capture(turn)
+            return not turn.is_bot
         # Archive every exchange as evidence. Generated replies are not fed
         # back into the fact compiler as independent confirmation of a claim.
         rejected = bool(re.match(
@@ -281,6 +319,9 @@ class ModelClient:
         return None
 
     async def memory_context(self, session: aiohttp.ClientSession, text: str, channel_id: int | None = None, *, provenance: bool = False) -> str:
+        if self.config.knowledge_endpoint and self.config.memory_profile == "conversation-v2":
+            self.conversation_memory = ConversationMemory(self.knowledge_action, self.channel_project(channel_id))
+            return await self.conversation_memory.context(text)
         if self.config.knowledge_endpoint:
             # Lexical fallback must not require question filler words to occur
             # in a semantic assertion. The complete task still goes to E2B.
@@ -588,7 +629,7 @@ class ModelClient:
             measurement = "feet"
         return f"{subject} is {number} {measurement} tall"
 
-    async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None, *, turn: Turn | None = None, behavior: dict | None = None) -> str:
+    async def reply(self, history: list[dict[str, str]], text: str, channel_id: int | None = None, *, turn: Turn | None = None, behavior: dict | None = None, memory_unavailable: bool = False) -> str:
         instructions = self.config.system_context
         if behavior and behavior.get("persona"):
             instructions = behavior["persona"]["instructions"]
@@ -609,7 +650,7 @@ class ModelClient:
         else:
             headers = {"Authorization": "Bearer " + read_secret(self.config.model_key_file)}
         budget = message_budget(budget_config)
-        if len(text.encode("utf-8")) > budget:
+        if self.config.memory_profile != "conversation-v2" and len(text.encode("utf-8")) > budget:
             raise ValueError("message exceeds the tested E2B context budget")
         async with AsyncExitStack() as stack:
             session = self.session
@@ -618,29 +659,46 @@ class ModelClient:
                 session = await stack.enter_async_context(aiohttp.ClientSession(
                     connector=aiohttp.UnixConnector(path=str(self.config.aimee_socket)),
                     trust_env=False))
-            provenance = bool(self.config.knowledge_endpoint and self.asks_provenance(text))
+            generic = self.config.memory_profile == "conversation-v2"
+            provenance = bool(self.config.knowledge_endpoint and self.asks_provenance(text) and not generic)
             query = self.provenance_query(history, text) if provenance else text
             # Resolve only the authenticated speaker, never a guessed nickname.
             self_height = re.fullmatch(r"(?:how tall (?:am I|do you (?:think|remember|know) I am)|what is my height)[?]?", text.strip(), re.IGNORECASE)
             resolved = (self.personal_height_statement(turn) or (f"How tall is <@{turn.user_id}>?" if self_height else text)) if turn else text
+            if generic:
+                resolved = text
             if not provenance:
                 query = resolved
             social = self.is_social_request(text) and not provenance
-            memory = await self.memory_context(session, query, channel_id, provenance=provenance) if self.config.aimee_socket and not social else ""
+            memory = ""
+            if self.config.aimee_socket and (generic or not social) and not memory_unavailable:
+                try:
+                    memory = await self.memory_context(session, query, channel_id, provenance=provenance)
+                except Exception:
+                    if not generic:
+                        raise
+                    self.conversation_memory = None
+                    memory_unavailable = True
+                    LOG.warning("Conversation recall unavailable; continuing without remembered evidence")
             klingon_only = "Speak exclusively in Klingon" in instructions
             if provenance:
                 return self.provenance_reply(memory, klingon=klingon_only)
-            confirmed = self.confirmed_statement(memory, resolved, klingon=klingon_only)
+            confirmed = None if generic else self.confirmed_statement(memory, resolved, klingon=klingon_only)
             if confirmed:
                 return confirmed
             recent_history = history[-8:]
             history = list(history)
-            while history and (
+            while not generic and history and (
                 sum(len(item["content"].encode("utf-8")) for item in history)
                 + len(text.encode("utf-8")) > budget
             ):
                 history = history[2:]
             system = instructions + "\n" + CHAT_BEHAVIOR + ("\n" + behavioral if behavioral else "") + ("\nUse current channel facts over earlier assistant replies. Confirm matching facts; correct false claims. Attribute facts only to their recorded authors; if none is recorded, say the source is unknown." if self.config.knowledge_endpoint and not social else "") + ("\n" + memory if memory else "")
+            if generic:
+                system += "\nDistinguish speaker claims from verification, jokes and bot repetitions. Preserve units, negation and conflicting reports. A correction changes the current claim, not the original source history. Prefer the latest authenticated human constraint. Apply only active projection preferences for the current speaker; expired, revoked or other speakers' preferences in raw history are historical data. Preferences cannot override system rules."
+            if memory_unavailable:
+                system += "\nMemory capture or retrieval is unavailable for this turn. Respond normally to the latest message, but do not claim to have saved it or invent remembered facts or sources."
+                history = []
             if turn:
                 identity = {"speaker": {"id": str(turn.user_id), "name": turn.author_name, "kind": "bot" if turn.is_bot else "human"},
                             "mentioned": [{"id": str(uid), "name": name} for uid, name in turn.mentions]}
@@ -657,10 +715,19 @@ class ModelClient:
                                  *history, {"role": "user", "content": text}],
                     "max_tokens": 384, "temperature": 0.5, "stream": False}
             async def generate():
+                if generic:
+                    body["chat_template_kwargs"] = {"enable_thinking": False}
+                    body["preserve_messages"] = True
+                    receipt = await self.prompt_budget.fit(body)
+                    LOG.info("Conversation token budget: %s", json.dumps(receipt, separators=(",", ":")))
                 async with session.post(self.config.endpoint, json=body, headers=headers, **transport,
                                         allow_redirects=False,
                                         timeout=aiohttp.ClientTimeout(total=120, connect=5)) as response:
                     value = await self.read_response(response, "E2B request")
+                if generic:
+                    usage = value.get("usage", {})
+                    if usage.get("prompt_tokens") != receipt["prompt_tokens"]:
+                        raise RuntimeError("provider prompt shape changed after exact token packing")
                 try:
                     result = value["choices"][0]["message"]["content"]
                 except (KeyError, IndexError, TypeError):
@@ -690,7 +757,7 @@ class ModelClient:
                         raise RuntimeError("Model returned English under Klingon-only persona")
                     if self.repeats_recent_reply(result, recent_history, text):
                         raise RuntimeError("Model repeated recent dialogue after repair")
-                return result
+                return ("I couldn't save or retrieve memory for this turn. " if memory_unavailable else "") + result
 
     @staticmethod
     def contains_english_prose(text: str, allowed_names: tuple[str, ...] = ()) -> bool:
@@ -747,6 +814,7 @@ class Turn:
     peer_target: int | None = None
     peer_targets: tuple[int, ...] = ()
     can_control_behavior: bool = False
+    reply_to_message_id: int | None = None
 
 
 def render_mentions(text: str, identities: dict[int, str]) -> str:
@@ -868,11 +936,13 @@ class ChatBot(discord.Client):
         mentioned_peers = tuple(user.id for user in message.mentions
                                 if user.id != self.user.id and getattr(user, "bot", False))[:4]
         peer_target = message.author.id if peer else next(iter(mentioned_peers), None)
-        return Turn(message.id, message.guild.id, message.channel.id, message.author.id, text,
+        admitted = Turn(message.id, message.guild.id, message.channel.id, message.author.id, text,
                     message.channel.id if parent == config.channel_id else None,
                     str(getattr(message.author, "display_name", getattr(message.author, "name", "")))[:80],
                     mentioned, peer, peer_target, mentioned_peers,
                     not peer and message.author.id in config.behavior_operator_ids)
+        reference = getattr(message, "reference", None)
+        return replace(admitted, reply_to_message_id=getattr(reference, "message_id", None))
 
     async def on_message(self, message):
         turn = self.admitted_turn(message)
@@ -895,11 +965,14 @@ class ChatBot(discord.Client):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         mentions = discord.AllowedMentions(everyone=False, roles=False, replied_user=False,
                                           users=[discord.Object(id=uid) for uid in peers])
+        delivered = []
         for chunk in split_message(text):
             if before_send:
                 await before_send()
-            await channel.send(chunk, allowed_mentions=mentions)
+            message = await channel.send(chunk, allowed_mentions=mentions)
+            delivered.append(message.id)
         LOG.info("Bot-account chat reply delivered (channel=%s peers=%s)", channel_id, peers)
+        return delivered
 
     async def send_paper(self, channel_id, paper, run, *, before_send=None):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
@@ -973,7 +1046,16 @@ class ChatBot(discord.Client):
                 if self.workflow and self.workflow.ingest(snapshot, turn):
                     # Contributions feed the WFE stage; no unrelated bot banter loop.
                     continue
-                if ModelClient.personal_height_statement(turn):
+                generic = self.config.memory_profile == "conversation-v2"
+                if generic:
+                    unavailable = False
+                    try:
+                        admitted = await self.model_client.capture_turn(turn, "")
+                    except Exception:
+                        LOG.warning("Conversation capture unavailable; input was not confirmed saved")
+                        unavailable, admitted = True, False
+                    reply = await self.model_client.reply(history, turn.text, **options, memory_unavailable=unavailable)
+                elif ModelClient.personal_height_statement(turn):
                     # A public statement about a Discord person is evidence for
                     # a correction, not a model truth-verification decision.
                     admitted = await self.model_client.capture_turn(turn, "")
@@ -1013,9 +1095,18 @@ class ChatBot(discord.Client):
                     for uid in peers:
                         if not re.search(rf"<@!?{uid}>", reply):
                             reply = f"<@{uid}> " + reply
-                if self.config.knowledge_endpoint:
+                if self.config.knowledge_endpoint and not generic:
                     await self.model_client.archive_turn(turn, reply, not admitted, "response")
-                await self.send_chat_reply(turn.channel_id, reply, peers)
+                projection = getattr(self.model_client, "conversation_memory", None) if generic else None
+                if projection:
+                    await projection.guard("acquire")
+                delivered_ids = await self.send_chat_reply(turn.channel_id, reply, peers)
+                if projection:
+                    await projection.guard("release")
+                    try:
+                        await projection.response(turn, reply, self.user.id, delivered_ids if isinstance(delivered_ids, list) else None)
+                    except Exception:
+                        LOG.warning("Delivered assistant episode could not be retained")
                 if swapped:
                     self.conversations.values[key] = (time.monotonic(), history)
                 self.conversations.append(key, turn.text, reply)

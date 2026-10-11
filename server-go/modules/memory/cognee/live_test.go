@@ -22,9 +22,18 @@ func TestCogneeLiveContract(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("set AIMEE_COGNEE_TEST_URL for a disposable Cognee server")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	budget := 2 * time.Minute
+	callBudget := time.Minute
+	if value := os.Getenv("AIMEE_COGNEE_TEST_DEADLINE"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < time.Second || parsed > 10*time.Minute {
+			t.Fatal("invalid live qualification deadline")
+		}
+		budget, callBudget = max(budget, parsed), parsed
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	client := &http.Client{Timeout: time.Minute}
+	client := &http.Client{Timeout: callBudget}
 	form := url.Values{"username": {os.Getenv("AIMEE_COGNEE_TEST_USER")}, "password": {os.Getenv("AIMEE_COGNEE_TEST_PASSWORD")}}
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/api/v1/auth/login", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -87,7 +96,11 @@ func TestCogneeLiveContract(t *testing.T) {
 			t.Error("live test cleanup", err)
 		}
 	}()
-	found, err := backend.Search(ctx, scope, "needle", "fact", "L2", 1)
+	started := time.Now()
+	cold, coldCancel := context.WithTimeout(ctx, callBudget)
+	found, err := backend.Search(cold, scope, "needle", "fact", "L2", 1)
+	coldCancel()
+	t.Logf("cold source-chunk retrieval: %.3f ms (budget %s)", float64(time.Since(started).Microseconds())/1000, callBudget)
 	if err != nil || len(found) != 1 || found[0].ID != 1 || found[0].Content != "needle canonical" {
 		t.Fatal("real Cognee retrieval contract", found, err)
 	}

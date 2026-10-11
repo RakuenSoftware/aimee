@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "test": "TestMemoryRuntimeRoleReplay",
+  "seconds": 278.77,
+  "source_log": "CT9212:/var/lib/aimee-memory-lab/native-question-replay-final-20261011.log",
+  "checks": [
+    "conversational lexical fallback",
+    "literal success path",
+    "scoped RLS",
+    "activation gate",
+    "expired/suppressed exclusions"
+  ]
+}

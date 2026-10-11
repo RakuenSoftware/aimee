@@ -53,6 +53,47 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         client.send_chat_reply = AsyncMock()
         return client
 
+    async def test_conversation_profile_capture_and_guard_order_and_outage(self):
+        for scenario in ("success", "capture-outage", "guard-refusal", "send-uncertain"):
+            with self.subTest(scenario=scenario):
+                bot = self.bot(replace(self.config, memory_profile="conversation-v2", knowledge_endpoint="http://127.0.0.1:8741/v1/actions"))
+                order = []
+                async def capture(*args):
+                    order.append("capture")
+                    if scenario == "capture-outage":
+                        raise RuntimeError("unavailable")
+                    return True
+                async def reply(*args, **kwargs):
+                    order.append("reply")
+                    self.assertEqual(kwargs["memory_unavailable"], scenario == "capture-outage")
+                    return "The backpack was reported as 7kg."
+                async def guard(operation):
+                    order.append(operation)
+                    if scenario == "guard-refusal":
+                        raise RuntimeError("ineligible")
+                async def send(*args):
+                    order.append("send")
+                    if scenario == "send-uncertain":
+                        raise RuntimeError("delivery unknown")
+                async def response(*args):
+                    order.append("response")
+                projection = None if scenario == "capture-outage" else SimpleNamespace(guard=guard, response=response)
+                bot.model_client = SimpleNamespace(capture_turn=capture, reply=reply, conversation_memory=projection)
+                bot.send_chat_reply = send
+                worker = asyncio.create_task(bot.process_turns())
+                try:
+                    await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "Virant reported 7kg."))
+                    await asyncio.wait_for(bot.queue.join(), 1)
+                    expected = {"success": ["capture", "reply", "acquire", "send", "release", "response"],
+                        "capture-outage": ["capture", "reply", "send"],
+                        "guard-refusal": ["capture", "reply", "acquire"],
+                        "send-uncertain": ["capture", "reply", "acquire", "send"]}
+                    self.assertEqual(order, expected[scenario])
+                finally:
+                    worker.cancel()
+                    await asyncio.gather(worker, return_exceptions=True)
+                    await bot.close()
+
     async def test_reported_possessive_corrections_commit_before_inference(self):
         for text, subject in (("Kibukx's height is really 69cm.", "Kibukx"),
                               (f"<@!{USER+1}>'s real height is 69cm.", f"<@{USER+1}>")):
@@ -764,6 +805,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
                 await ModelClient(config, session).reply([], "Talk to Samy.")
         self.assertEqual(len(requests), 2)
+
+    async def test_conversation_profile_uses_token_counter_instead_of_byte_pretrim(self):
+        question = "a" * 8192
+        history = [{"role": "user", "content": "b" * 8192},
+                   {"role": "assistant", "content": "Earlier statement."}]
+        received = []
+        async def model(request):
+            received.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "Accepted."}}],
+                                      "usage": {"prompt_tokens": 100}})
+        config = replace(self.config, endpoint=await self.serve(model), memory_profile="conversation-v2")
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            client.prompt_budget.fit = AsyncMock(return_value={"prompt_tokens": 100})
+            self.assertEqual(await client.reply(history, question), "Accepted.")
+        self.assertEqual(received[0]["messages"][1:], [*history, {"role": "user", "content": question}])
+        client.prompt_budget.fit.assert_awaited_once()
 
     async def test_repeated_persona_reply_is_repaired_once(self):
         requests = []

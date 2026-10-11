@@ -1,0 +1,54 @@
+{
+  "backend": "hillock",
+  "passed": true,
+  "checks": [
+    "authored human input and exact units",
+    "bot input is archived without human authority",
+    "restart reconstructs raw source projection",
+    "send barrier blocks canonical mutation",
+    "explicit completion releases barrier",
+    "delivered response remains agent evidence"
+  ],
+  "receipt": {
+    "available_records": 3,
+    "selected_records": 2,
+    "omitted_records": 1,
+    "budget_bytes": 1800,
+    "coverage": "bounded source projection; retrieval is not exhaustive"
+  },
+  "cases": [
+    {
+      "id": "bridge_attribution_after_restart",
+      "status": "passed",
+      "query": "Who originally reported the person Kibukx's height? Give the exact original units and say whether PeerBot measured independently.",
+      "required": [
+        "Virant",
+        "69",
+        "cm",
+        "PeerBot"
+      ],
+      "forbidden": [
+        "69 feet",
+        "independently measured"
+      ],
+      "records": [
+        {
+          "id": 554,
+          "key": "discord:111111111111111111:222222222222222222:1558803302370508801",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:222222222222222222:1558803302370508801\",\"message_id\":\"1558803302370508801\",\"speaker_id\":\"333333333333333334\",\"speaker_name\":\"Virant\",\"speaker_kind\":\"human\",\"observed_unix_ms\":1791718068450,\"claim_status\":\"unverified_speaker_statement\",\"text\":\"Kibukx the person is exactly 69cm tall. Keep the original units.\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333334\",\"author_name\":\"Virant\",\"message_id\":\"1558803302370508801\"}",
+          "source_session": "discord:111111111111111111:222222222222222222:1791718068450687085",
+          "provenance_category": "user_stated"
+        },
+        {
+          "id": 556,
+          "key": "discord:111111111111111111:222222222222222222:1558803302370508803",
+          "content": "{\"schema_version\":1,\"source\":\"discord:111111111111111111:222222222222222222:1558803302370508803\",\"message_id\":\"1558803302370508803\",\"speaker_id\":\"333333333333333336\",\"speaker_name\":\"PeerBot\",\"speaker_kind\":\"bot\",\"observed_unix_ms\":1791718068450,\"claim_status\":\"agent_message\",\"text\":\"I repeated Virant's 69cm report. I did not measure Kibukx independently.\"}",
+          "use_cases": "{\"source\":\"discord\",\"author_id\":\"333333333333333336\",\"author_name\":\"PeerBot\",\"message_id\":\"1558803302370508803\"}",
+          "source_session": "discord:111111111111111111:222222222222222222:1791718068450687085",
+          "provenance_category": "agent_message"
+        }
+      ]
+    }
+  ]
+}
