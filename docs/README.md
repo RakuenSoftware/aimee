@@ -17,6 +17,7 @@ Start here:
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [memory behavior](MEMORY.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
 | replace the memory engine | [Generic memory contract and Cognee](modules/memory.md#memory-backend-contract) |
 | deliver memory to a supported local model | [Native memory plugin](NATIVE_MEMORY_PLUGIN.md) |
+| prepare a Discord chatbot with Gemma4 E2B | [Discord bridge](../integrations/discord/README.md) |
 | understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
 | diagnose a failure | [Troubleshooting](TROUBLESHOOTING.md) |

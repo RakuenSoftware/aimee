@@ -10,15 +10,18 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from behavior import BehaviorStore
+
 from aiohttp import web
 import aiohttp
 import discord
 
-from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions
+from bridge import ChatBot, Config, Conversations, ModelClient, read_secret, split_message, WebhookDelivery, Turn, render_mentions, CHAT_BEHAVIOR, SYSTEM_CONTEXT
 
 GUILD, CHANNEL, USER, BOT = 111111111111111111, 222222222222222222, 333333333333333333, 444444444444444444
 FAKE_WEBHOOK = "https://discord.com/api/webhooks/555555555555555555/" + "x" * 68
 
+KLINGON_TEST_CONTEXT = "You are Aimee. Speak exclusively in Klingon. No English translations."
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -30,7 +33,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         for path, value in ((self.webhook, FAKE_WEBHOOK), (self.key, "test-model-key")):
             path.write_text(value)
             path.chmod(0o600)
-        self.config = Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL)
+        self.config = Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL,
+                             system_context="You are Aimee. Answer directly using approved memory.")
 
     def message(self, **changes):
         value = SimpleNamespace(
@@ -46,7 +50,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
     def bot(self, config=None):
         client = ChatBot(config or self.config)
         client._connection.user = SimpleNamespace(id=BOT)
-        client.send_peer_reply = AsyncMock()
+        client.send_chat_reply = AsyncMock()
         return client
 
     async def test_conversation_profile_capture_and_guard_order_and_outage(self):
@@ -153,7 +157,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(message)
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}>, what would you like to discuss?", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}>, what would you like to discuss?", (peer,))
             response = self.message(id=2, author=SimpleNamespace(id=peer, bot=True), content=f"<@{BOT}> Let's talk.")
             self.assertIsNotNone(bot.admitted_turn(response))
         finally:
@@ -218,13 +222,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         bot.model_client = SimpleNamespace(reply=AsyncMock(side_effect=reply),
                                           capture_turn=AsyncMock(side_effect=capture),
                                           archive_turn=AsyncMock(side_effect=archive))
-        bot.delivery = SimpleNamespace(send=AsyncMock(side_effect=delivery))
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        bot.send_chat_reply.side_effect = delivery
         worker = asyncio.create_task(bot.process_turns())
         try:
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             self.assertEqual(events, ["draft", "capture", "final", "archive", "delivery"])
-            bot.delivery.send.assert_awaited_once_with("corrected answer", None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "corrected answer", ())
+            bot.delivery.send.assert_not_awaited()
             self.assertEqual(bot.conversations.get((GUILD, CHANNEL))[-1]["content"], "corrected answer")
             self.assertEqual(bot.model_client.archive_turn.await_args.args[1:], ("corrected answer", False, "response"))
         finally:
@@ -242,6 +248,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
             bot.delivery.send.assert_not_awaited()
+            bot.send_chat_reply.assert_not_awaited()
             self.assertEqual(bot.conversations.get((GUILD, CHANNEL)), [])
         finally:
             worker.cancel()
@@ -336,7 +343,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             text="I’m 4 feet tall not 5 ok."
             await bot.queue.put(Turn(1,GUILD,CHANNEL,USER,text))
             await bot.queue.join()
-            bot.delivery.send.assert_awaited_once_with("Recorded height: 4 feet.",None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "Recorded height: 4 feet.", ())
             self.assertEqual(ModelClient.personal_height_statement(Turn(1,GUILD,CHANNEL,USER,text)),f"<@{USER}> is 4 feet tall")
         finally:
             task.cancel()
@@ -428,13 +435,35 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.peer_target, peer.id)
         await bot.close()
 
+    async def test_human_reply_uses_bot_transport_in_thread_without_notifications(self):
+        bot = self.bot()
+        bot.delivery = SimpleNamespace(send=AsyncMock())
+        channel = SimpleNamespace(send=AsyncMock())
+        bot.get_channel = lambda channel_id: None
+        bot.fetch_channel = AsyncMock(return_value=channel)
+        thread_id = CHANNEL + 1
+        text = f"<@{USER}> <@&{USER}> @everyone " + "Hello! " * 700
+        await ChatBot.send_chat_reply(bot, thread_id, text)
+        bot.fetch_channel.assert_awaited_once_with(thread_id)
+        self.assertGreater(channel.send.await_count, 1)
+        self.assertEqual("".join(call.args[0] for call in channel.send.await_args_list), text)
+        for call in channel.send.await_args_list:
+            mentions = call.kwargs["allowed_mentions"]
+            self.assertEqual(mentions.users, [])
+            self.assertFalse(mentions.roles)
+            self.assertFalse(mentions.everyone)
+            self.assertFalse(mentions.replied_user)
+            self.assertLessEqual(len(call.args[0]), 2000)
+        bot.delivery.send.assert_not_awaited()
+        await bot.close()
+
     async def test_peer_reply_uses_bot_channel_transport_and_all_observed_bot_recipients(self):
         bot = self.bot()
         bot.delivery = SimpleNamespace(send=AsyncMock())
         channel = SimpleNamespace(send=AsyncMock())
         bot.get_channel = lambda channel_id: channel
         peers = (USER+1, USER+2)
-        await ChatBot.send_peer_reply(bot, CHANNEL, "Hello bots", peers)
+        await ChatBot.send_chat_reply(bot, CHANNEL, "Hello bots", peers)
         channel.send.assert_awaited_once()
         mentions = channel.send.call_args.kwargs["allowed_mentions"]
         self.assertEqual([u.id for u in mentions.users], list(peers))
@@ -452,7 +481,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(message)
             await asyncio.wait_for(bot.queue.join(), 1)
-            call = bot.send_peer_reply.call_args
+            call = bot.send_chat_reply.call_args
             self.assertEqual(call.args[0], CHANNEL)
             self.assertEqual(call.args[2], peers)
             for uid in peers: self.assertIn(f"<@{uid}>", call.args[1])
@@ -491,7 +520,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await bot.on_message(self.message(content=f"<@{BOT}> <@{peer}> Say hello to each other.",
                                               mentions=[SimpleNamespace(id=BOT),partner]))
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello!", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello!", (peer,))
             turn = bot.model_client.reply.call_args.kwargs["turn"]
             self.assertEqual(turn.user_id,USER)
             self.assertEqual(turn.mentions,((peer,"Samy"),))
@@ -618,11 +647,116 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "Say hello", mentions=((peer,"Samy"),(recipient,"Kibukx")), peer_target=peer))
             await bot.queue.join()
-            bot.send_peer_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello! <@{recipient}> smells.", (peer,))
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, f"<@{peer}> Hello! <@{recipient}> smells.", (peer,))
         finally:
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
+
+    async def test_klingon_persona_keeps_verified_memory_and_sources_out_of_english(self):
+        config = replace(self.config, system_context=KLINGON_TEST_CONTEXT,
+                         knowledge_endpoint="http://127.0.0.1:8741/v1/actions")
+        self.assertEqual(Config(self.webhook, self.root / "bot.token", self.key, GUILD, CHANNEL).system_context,
+                         SYSTEM_CONTEXT)
+        memory = "facts\n" + json.dumps([{"subject": "Kibukx", "relation": "has_height",
+                  "object": "69 cm", "authors": ["Virant"],
+                  "sources": [{"author": "Virant", "url": "https://discord.com/channels/1/2/3"}]}])
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            answer = client.confirmed_statement(memory, "How tall is Kibukx?", klingon=True)
+            self.assertEqual(answer, "De' qawlu': Kibukx: 69 cm. De' nobwI': Virant.")
+            provenance = client.provenance_reply(memory, klingon=True)
+            self.assertIn("69 cm", provenance)
+            self.assertIn("Virant ([QIn](https://discord.com/channels/1/2/3))", provenance)
+            self.assertNotIn("from", provenance)
+            self.assertNotIn("recorded", client.provenance_reply("", klingon=True))
+            self.assertEqual(await client.reply([], "Who told you Kibukx's height?"),
+                             "De' nobwI' Sovbe'lu'. nuq De'?")
+        self.assertIn("Speak exclusively in Klingon", config.system_context)
+
+    async def test_chat_goal_controls_persist_and_recall_without_model_or_fact_capture(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite", behavior_operator_ids=(USER,))
+        bot = self.bot(config)
+        bot.model_client = SimpleNamespace(reply=AsyncMock(), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        objective = "Write an academic paper on the funniest way of losing at chess with Samy."
+        try:
+            await bot.on_message(self.message(content=f"<@{BOT}> You now  have a new goal: " + objective))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(bot.behavior_store.snapshot(f"{GUILD}:{CHANNEL}")["goal"]["objective"], objective)
+            await bot.on_message(self.message(id=2, content=f"<@{BOT}> What is your goal?"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            bot.send_chat_reply.assert_awaited_with(CHANNEL, "My current goal: " + objective, ())
+            bot.model_client.reply.assert_not_awaited()
+            bot.model_client.capture_turn.assert_not_awaited()
+            await bot.on_message(self.message(id=3, content=f"<@{BOT}> Pause your goal."))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            self.assertEqual(bot.behavior_store.snapshot(f"{GUILD}:{CHANNEL}")["goal"]["status"], "paused")
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
+
+    async def test_bot_and_unconfigured_human_cannot_replace_chat_goal(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite", behavior_operator_ids=(USER, USER+2))
+        bot = self.bot(config)
+        scope = f"{GUILD}:{CHANNEL}"
+        bot.behavior_store.edit(scope, "goal", {"objective": "Keep the chess goal", "milestones": [{"label": "Finish", "match": "goal complete"}]})
+        bot.model_client = SimpleNamespace(reply=AsyncMock(), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            for index, author in enumerate((SimpleNamespace(id=USER+1, bot=False), SimpleNamespace(id=USER+2, bot=True))):
+                message = self.message(id=50+index, author=author, content=f"<@{BOT}> Your goal is to abandon chess.")
+                self.assertFalse(bot.admitted_turn(message).can_control_behavior)
+                await bot.on_message(message)
+                await asyncio.wait_for(bot.queue.join(), 1)
+                self.assertEqual(bot.behavior_store.snapshot(scope)["goal"]["objective"], "Keep the chess goal")
+            bot.model_client.reply.assert_not_awaited()
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
+
+    async def test_runtime_persona_and_goal_are_snapshotted_and_budgeted(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "The library ghosts have reserved your printer."}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        store = BehaviorStore(self.root / "behavior.sqlite")
+        store.put_persona("librarian", "Speak English as a haunted librarian.")
+        store.edit("one", "persona", "librarian")
+        snap = store.edit("one", "goal", {"objective": "Invent a haunted library business.",
+                    "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
+        async with aiohttp.ClientSession() as session:
+            await ModelClient(config, session).reply([], "What next?", behavior=snap)
+        system = requests[0]["messages"][0]["content"]
+        self.assertIn("haunted librarian", system)
+        self.assertIn("Invent a haunted library business", system)
+        self.assertIn("never permissions", system)
+        self.assertNotIn(config.system_context, system)
+
+    async def test_runtime_switch_removes_old_voice_and_failed_delivery_does_not_advance_goal(self):
+        config = replace(self.config, behavior_db=self.root / "behavior.sqlite")
+        bot = self.bot(config)
+        scope = f"{GUILD}:{CHANNEL}"
+        bot.behavior_store.put_persona("one", "Speak as an English haunted librarian.")
+        bot.behavior_store.edit(scope, "persona", "one")
+        bot.behavior_store.edit(scope, "goal", {"objective": "Agree a business name.",
+                  "milestones": [{"label": "Agree a name", "match": "name agreed"}]})
+        bot.conversations.append((GUILD, CHANNEL), "Earlier user topic", "Qapla'. Old voice.")
+        bot.model_client = SimpleNamespace(reply=AsyncMock(return_value="New voice."), capture_turn=AsyncMock())
+        worker = asyncio.create_task(bot.process_turns())
+        try:
+            await bot.on_message(self.message())
+            await asyncio.wait_for(bot.queue.join(), 1)
+            history = bot.model_client.reply.await_args.args[0]
+            self.assertEqual(history, [{"role": "user", "content": "Earlier user topic"}])
+            self.assertNotIn("Qapla'", str(bot.conversations.get((GUILD, CHANNEL))))
+            bot.send_chat_reply.side_effect = OSError("delivery failed")
+            await bot.on_message(self.message(id=42, content=f"<@{BOT}> name agreed"))
+            await asyncio.wait_for(bot.queue.join(), 1)
+            goal = bot.behavior_store.snapshot(scope)["goal"]
+            self.assertEqual(goal["turns"], 1)
+            self.assertFalse(goal["milestones"][0]["done"])
+        finally:
+            worker.cancel();await asyncio.gather(worker, return_exceptions=True);await bot.close()
 
     async def test_model_wire_auth_rotation_history_budget_and_bound_response(self):
         requests = []
@@ -641,8 +775,70 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0][0], "Bearer test-model-key")
         self.assertEqual(requests[1][0], "Bearer rotated-test-key")
         self.assertEqual(requests[0][1]["messages"], [
-            {"role": "system", "content": config.system_context}, {"role": "user", "content": "hello"}])
+            {"role": "system", "content": config.system_context + "\n" + CHAT_BEHAVIOR}, {"role": "user", "content": "hello"}])
         self.assertEqual(requests[0][1]["max_tokens"], 384)
+        self.assertIn(CHAT_BEHAVIOR, requests[1][1]["messages"][0]["content"])
+
+    async def test_klingon_prefix_does_not_allow_english_prose(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            answer = "Qapla'. The scaffolding of the dream is indeed fragile." if len(requests) == 1 else "Qapla'. jIjang."
+            return web.json_response({"choices": [{"message": {"content": answer}}]})
+        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
+        async with aiohttp.ClientSession() as session:
+            answer = await ModelClient(config, session).reply(
+                [{"role": "assistant", "content": "An old English answer."}], "Discuss dreams.")
+        self.assertEqual(answer, "Qapla'. jIjang.")
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests[1]["messages"]), 2)
+        self.assertIn("contained English", requests[1]["messages"][0]["content"])
+        self.assertFalse(ModelClient.contains_english_prose("De' qawlu': Kibukx: 69 cm. Qapla'."))
+
+    async def test_klingon_english_repair_failure_is_not_delivered(self):
+        requests = []
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "Qapla'. The Federation will issue a memo."}}]})
+        config = replace(self.config, endpoint=await self.serve(model), system_context=KLINGON_TEST_CONTEXT)
+        async with aiohttp.ClientSession() as session:
+            with self.assertRaisesRegex(RuntimeError, "English under Klingon-only"):
+                await ModelClient(config, session).reply([], "Talk to Samy.")
+        self.assertEqual(len(requests), 2)
+
+    async def test_repeated_persona_reply_is_repaired_once(self):
+        requests = []
+        canned = "Whoa, hold the phone! Groovy! What's the scoop?"
+        async def model(request):
+            requests.append(await request.json())
+            answer = canned if len(requests) == 1 else "Your cat has promoted the laundry basket to executive housing."
+            return web.json_response({"choices": [{"message": {"content": answer}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        history = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": canned}]
+        async with aiohttp.ClientSession() as session:
+            answer = await ModelClient(config, session).reply(history, "Found my cat in the laundry basket.")
+        self.assertIn("laundry basket", answer)
+        self.assertEqual(len(requests), 2)
+        self.assertIn("fresh, topic-specific", requests[1]["messages"][0]["content"])
+        self.assertEqual(history[-1]["content"], canned)
+
+    async def test_repetition_repair_is_bounded(self):
+        requests = []
+        canned = "Whoa, hold the phone! Groovy! What's the scoop?"
+        async def model(request):
+            requests.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": canned}}]})
+        config = replace(self.config, endpoint=await self.serve(model))
+        async with aiohttp.ClientSession() as session:
+            with self.assertRaisesRegex(RuntimeError, "repeated recent dialogue"):
+                await ModelClient(config, session).reply([{"role": "assistant", "content": canned}], "My hamster escaped.")
+        self.assertEqual(len(requests), 2)
+
+    def test_repetition_detection_preserves_requested_and_factual_repeats(self):
+        previous = [{"role": "assistant", "content": "The cat is hiding under the bed near the closet."}]
+        self.assertFalse(ModelClient.repeats_recent_reply(previous[0]["content"], previous, "Repeat that verbatim."))
+        self.assertFalse(ModelClient.repeats_recent_reply("The cat is hiding under the sofa next to the window.", previous, "Where else?"))
+        self.assertFalse(ModelClient.repeats_recent_reply("Yes.", [{"role": "assistant", "content": "Yes."}], "Are you sure?"))
 
     async def test_cpu_model_requires_trusted_mtls_and_fixed_server_name(self):
         def openssl(*args):
@@ -919,7 +1115,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bot.on_message(self.message())
             await asyncio.wait_for(bot.queue.join(), 1)
-            bot.delivery.send.assert_awaited_once_with("An E2B answer", None)
+            bot.send_chat_reply.assert_awaited_once_with(CHANNEL, "An E2B answer", ())
+            bot.delivery.send.assert_not_awaited()
             key = (GUILD, CHANNEL)
             self.assertEqual(bot.conversations.get(key)[-1]["content"], "An E2B answer")
             shared_history = bot.conversations.get(key)
@@ -938,7 +1135,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(bot.queue.join(), 1)
             bot.model_client.reply.assert_awaited_with([], "New thread", channel_id=thread_id,
                                                       turn=Turn(124, GUILD, thread_id, USER, "New thread", thread_id))
-            bot.delivery.send.assert_awaited_with("An E2B answer", thread_id)
+            bot.send_chat_reply.assert_awaited_with(thread_id, "An E2B answer", ())
             thread_history = bot.conversations.get((GUILD, thread_id))
             await bot.on_message(self.message(
                 id=125, author=SimpleNamespace(id=USER + 1, bot=False),
@@ -949,7 +1146,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                                                       turn=Turn(125, GUILD, thread_id, USER+1, "Continue this thread", thread_id))
             self.assertEqual(len(bot.conversations.get(key)), 4)
             self.assertEqual(bot.conversations.get((GUILD + 1, CHANNEL)), [])
-            bot.delivery.send.side_effect = RuntimeError("delivery failed")
+            bot.send_chat_reply.side_effect = RuntimeError("delivery failed")
             await bot.on_message(self.message(id=126, content=f"<@{BOT}> failed turn"))
             await asyncio.wait_for(bot.queue.join(), 1)
             self.assertEqual(len(bot.conversations.get(key)), 4)
