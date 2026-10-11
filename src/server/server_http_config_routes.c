@@ -1174,9 +1174,14 @@ int rh_command_invoke(const route_req_t *rq, char *resp, int cap)
 
    const char *account = server_request_account();
    const char *principal = request_context_principal();
-   if (!account) account = "";
+   if (!account)
+      account = "";
    cJSON *context = cJSON_CreateObject();
-   if (!context) { cJSON_Delete(args); return err_json(resp, cap, 500, "out of memory"); }
+   if (!context)
+   {
+      cJSON_Delete(args);
+      return err_json(resp, cap, 500, "out of memory");
+   }
    cJSON_AddBoolToObject(context, "authenticated", account[0] || principal[0]);
    cJSON_AddBoolToObject(context, "user_authority", account[0] != 0);
    cJSON_AddStringToObject(context, "principal", account[0] ? account : principal);
@@ -1184,7 +1189,8 @@ int rh_command_invoke(const route_req_t *rq, char *resp, int cap)
    cJSON *result = NULL;
    int dispatched = aimee_module_commands_dispatch_raw_context(rq->id, args, context, &result);
    cJSON_Delete(context);
-   if (!dispatched) result = cmd->fn(args, cmd->ud);
+   if (!dispatched)
+      result = cmd->fn(args, cmd->ud);
    cJSON_Delete(args);
    if (!result)
       return err_json(resp, cap, 502, "command handler failed");

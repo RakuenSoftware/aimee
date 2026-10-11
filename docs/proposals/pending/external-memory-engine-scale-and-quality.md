@@ -2,6 +2,7 @@
 
 - **State:** pending.
 - **Completed integration:** [external-memory-conversation-support.md](../done/external-memory-conversation-support.md).
+- **Archived foundations:** [replaceable memory](../done/unified-aimee-nodes-and-replaceable-memory.md) and [independent durable backends](../done/independent-durable-memory-backends.md).
 - **Contract:** [reusable external memory contract](../../../integrations/memory/CONTRACT.md). Native is exempt.
 
 Cognee and Hillock now use independent durable catalogs and the same conversation profile. Recall, composition, briefing, verified export, fresh admission after erasure, source revalidation, send barriers and portable record migration are implemented. These are no longer pending integration blockers.

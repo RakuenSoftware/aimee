@@ -8005,7 +8005,11 @@ int kb_module_memory_reset_derived(void)
    return derived_cleanup_failure ? -1 : 0;
 }
 
-int kb_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions)
+int kb_module_memory_erase_subject(const char *request_id, const char *subject,
+                                   const cJSON *sessions)
 {
-   (void)request_id; (void)subject; (void)sessions; return 0;
+   (void)request_id;
+   (void)subject;
+   (void)sessions;
+   return 0;
 }

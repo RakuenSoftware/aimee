@@ -207,7 +207,8 @@ int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_Delete(receipt);
       cJSON_Delete(begin);
       free(replay_json);
-      return server_send_error(conn, "private backend erasure failed; retry the same request_id", NULL);
+      return server_send_error(conn, "private backend erasure failed; retry the same request_id",
+                               NULL);
    }
    cJSON_Delete(receipt);
    cJSON *replayed = replay_json ? cJSON_Parse(replay_json) : NULL;
