@@ -487,7 +487,7 @@ jobs:
           python-version: "3.13"
       - name: Portable transfer build and syntax
         run: |
-          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./cmd/aimee-memory-transfer)
+          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./modules/memory/tools/transfer)
           python3 -m py_compile scripts/validation/memory/native-transfer.py scripts/validation/memory/lxc/*.py
       - name: Install pinned real Cognee API
         run: |
