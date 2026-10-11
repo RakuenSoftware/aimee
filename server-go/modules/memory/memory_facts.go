@@ -29,6 +29,7 @@ type FactActor struct {
 	Role              string `json:"role"`
 	Rank              int    `json:"rank"`
 	Authenticated     int    `json:"authenticated"`
+	DiscordSubject    string `json:"discord_subject,omitempty"`
 }
 
 type FactEvidence struct {
@@ -81,6 +82,8 @@ type memoryFactEnvelope struct {
 }
 
 var relationAliases = map[string]string{
+	"lifting_capacity": "can_lift", "can_lift_weight": "can_lift",
+	"height": "has_height", "is_tall": "has_height",
 	"has_ip": "device_has_ip", "ip": "device_has_ip", "ip_address": "device_has_ip",
 	"hostname": "has_hostname", "has_host": "has_hostname", "host_name": "has_hostname",
 	"works_at": "works_for", "employed_by": "works_for", "employer": "works_for",
@@ -135,6 +138,7 @@ func memoryFactPrompt() string {
 		"triple grounded strictly in the note. For relation, choose the single nearest fit from these canonical predicates " +
 		"when one reasonably applies: " + strings.Join(relations, ", ") + ". If NONE fits, emit a concise snake_case " +
 		"predicate of your own (e.g. drives, founded, mentors) - NEVER a generic catch-all such as other/unknown/misc. " +
+		"Keep full entity names distinct, including qualifying nouns. A has_distance subject must explicitly name both endpoints; never invent a reference point for away/nearby. Height in feet/metres is has_height, never age. Lifting capacity in pounds/kilograms is can_lift. " +
 		"subject is the entity the fact is about (use user for the note's author when it is first-person). confidence is " +
 		"0..1. Extract only durable, generalizable facts; skip transient state, feelings, plans, and one-off events. If the " +
 		"note RETRACTS or DENIES something (no longer, did not, never, is not, has left, was removed), do NOT emit the " +
@@ -254,7 +258,7 @@ func memoryFactProviderUnavailable(reason string) bool {
 func patternFactCandidates(content, observedAt string, memoryID, jobID int64, actor FactActor) []FactCandidate {
 	triples := ExtractPatterns(content, memoryFactMaxTriples)
 	evidence := memoryFactEvidence(content, 0, int64(len(content)), actor, observedAt, memoryID, jobID)
-	out := make([]FactCandidate, 0, len(triples))
+	out := measurementFactCandidates(content, observedAt, memoryID, jobID, actor)
 	for _, triple := range triples {
 		relation := canonicalRelation(triple.RelType)
 		subjectKind, objectKind := memoryFactKinds(relation, triple.SubjectKind, triple.ObjectKind)
@@ -262,7 +266,7 @@ func patternFactCandidates(content, observedAt string, memoryID, jobID int64, ac
 			SubjectKind: subjectKind, ObjectKind: objectKind, Actor: actor, Evidence: evidence,
 			AssertionKind: "world_fact", ValidFrom: observedAt})
 	}
-	return out
+	return out[:min(len(out), memoryFactMaxTriples)]
 }
 
 func parseModelFactCandidates(response, content, observedAt string, memoryID, jobID int64, sourceActor FactActor) ([]FactCandidate, error) {
@@ -307,13 +311,24 @@ func parseModelFactCandidates(response, content, observedAt string, memoryID, jo
 }
 
 func (s *postgresDataStore) memoryFactSource(ctx context.Context, jobID int64) (content, observedAt string, memoryID int64, actor FactActor, err error) {
-	err = s.db.QueryRow(ctx, `SELECT m.content,m.created_at,m.id,
+	var sourceMeta, sourceKey, scopeType, scopeValue string
+	err = s.db.QueryRow(ctx, `SELECT m.content,m.created_at,m.id,COALESCE(m.use_cases,''),m.key,m.scope_type,m.scope_value,
  COALESCE(a.actor_principal,'system:model-inference'),COALESCE(a.transport_identity,'internal'),
  COALESCE(a.actor_role,'model'),COALESCE(a.authority_rank,10),COALESCE(a.authenticated,0)
 FROM kb_async_jobs j JOIN memories m ON m.id=j.document_id
 LEFT JOIN memory_fact_actors a ON a.memory_id=m.id
-WHERE j.id=$1 AND j.kind='memory_facts'`, jobID).Scan(&content, &observedAt, &memoryID,
+WHERE j.id=$1 AND j.kind='memory_facts'`, jobID).Scan(&content, &observedAt, &memoryID, &sourceMeta, &sourceKey, &scopeType, &scopeValue,
 		&actor.Principal, &actor.TransportIdentity, &actor.Role, &actor.Rank, &actor.Authenticated)
+	if err == nil && actor.Role == "user" && actor.Rank == 30 && actor.Authenticated == 1 {
+		var meta struct {
+			Source  string `json:"source"`
+			Author  string `json:"author_id"`
+			Message string `json:"message_id"`
+		}
+		if json.Unmarshal([]byte(sourceMeta), &meta) == nil && meta.Source == "discord" && scopeType == "project" && strings.HasPrefix(scopeValue, "discord:") && sourceKey == scopeValue+":"+meta.Message && discordNumericID.MatchString(meta.Author) && discordNumericID.MatchString(meta.Message) {
+			actor.DiscordSubject = "<@" + meta.Author + ">"
+		}
+	}
 	return
 }
 

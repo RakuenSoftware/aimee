@@ -71,7 +71,7 @@ Its Go owner is identical. Shared schema upgrade and reapply both passed; privat
 append-only migrations were unchanged. Earlier reproductions and repairs are
 recorded in the [component evidence](memory-mr02-authority-2026-09-24.md).
 
-The [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
+The [eight-gate checklist](../proposals/done/memory-reliability-02-closeout.md)
 maps each clause to implementation and tests. These are local/isolated validation
 results, not a claim of GitHub CI completion or completion of later proposals.
 

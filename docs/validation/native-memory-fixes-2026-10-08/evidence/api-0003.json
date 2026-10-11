@@ -1,0 +1,22 @@
+{
+  "route": "memory/store",
+  "http": 200,
+  "response": {
+    "id": 11,
+    "mutation_receipt": {
+      "schema_version": 2,
+      "commit_id": "085d7a5e-15d4-4874-b1e3-61551e642d23",
+      "version": {
+        "schema_version": 1,
+        "owner_id": "c55b5c13-8ae5-4034-a68e-e4bebf5e75ed",
+        "record_id": "11",
+        "record_revision": "1"
+      },
+      "outcome": "stored",
+      "replayed": false
+    },
+    "status": "ok",
+    "store": "user"
+  },
+  "elapsed_seconds": 0.123
+}

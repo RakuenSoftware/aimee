@@ -1,0 +1,36 @@
+{
+  "route": "memory/supersede",
+  "http": 200,
+  "response": {
+    "status": "ok",
+    "store": "kb",
+    "mutation_receipt": {
+      "schema_version": 1,
+      "commit_id": "5cabbf2f-c5cc-57c2-ba12-9d54563dbfdc",
+      "version": {
+        "schema_version": 1,
+        "owner_id": "8cd0c717-2f44-468f-b046-db92caf778e3",
+        "record_id": "16",
+        "record_revision": "2"
+      },
+      "replayed": false
+    },
+    "id": 16,
+    "tier": "L2",
+    "kind": "fact",
+    "key": "kb-Kibukx height-1791465671280807376",
+    "headline": "",
+    "content": "needle kb: Kibukx corrected height is 170cm; human correction. fixture=1791465671280807376",
+    "use_cases": "",
+    "confidence": 1,
+    "use_count": 0,
+    "last_used_at": "",
+    "created_at": "2026-10-08 13:21:12",
+    "updated_at": "2026-10-08 13:21:12",
+    "source_session": "",
+    "provenance_category": "user_stated",
+    "retrieval_score": 0,
+    "hybrid_rank": 0
+  },
+  "elapsed_seconds": 0.193
+}

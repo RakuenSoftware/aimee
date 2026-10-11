@@ -9,7 +9,7 @@
 > **Archived after partial delivery.** Retrieval events/outcomes, fused feature persistence, the
 > fitter, pairwise weighting, offline serving path, and a measured promotion gate are shipping.
 > Default-off label capture, head-only candidate capture, and true propensity logging remain in
-> [`learning-to-rank-activation-and-ipw-residual.md`](../pending/learning-to-rank-activation-and-ipw-residual.md).
+> [`learning-to-rank-activation-and-ipw-residual.md`](../pending/retrieval-ranking-feedback-and-promotion.md).
 
 Written 2026-07-30 out of the retrieval measurement campaign
   ([retrieval-stack-report](../../validation/retrieval-stack-report-2026-07-30.md)).

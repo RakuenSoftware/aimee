@@ -263,3 +263,6 @@ benchmarks/compaction-quality/.cache-ab/
 # Standalone Go memory corpus evaluator
 /aimee-memory-eval
 /aimee-memory-eval.exe
+
+/aimee-memory-transfer
+/aimee-memory-transfer.exe

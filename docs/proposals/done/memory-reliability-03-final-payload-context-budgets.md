@@ -1,0 +1,86 @@
+# MR-03: Final-payload context budgets and protected projections
+
+- **State:** done.
+- **Archive notice — 2026-10-08:** The MR-01–18 implementation and deterministic acceptance are complete within the operator-approved modes documented in [the frozen release closeout](../../validation/memory-mr18-release-2026-09-27.md); adaptive promotion remains unqualified. Implementation completion is limited to that scope. Historical planning and earlier checkpoints below are retained as evidence, not an active backlog.
+- **Remaining work:** [memory-reliability-promotion-and-adapter-residuals.md](../pending/memory-reliability-promotion-and-adapter-residuals.md).
+
+
+**Historical state:** retained below; see the dated archive notice.
+- **Priority:** P0: context correctness
+- **Owner:** Go memory projection, with host/provider assembly and economizer accounting
+- **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for eligible candidates
+- **Delivery:** Three implementation slices
+
+## Problem and implemented result
+
+Go owns minimal typed projection, complete byte accounting, whole-row outer
+packing and retained-source coverage. Reviewed procedures render once with their
+trust class. Hard rules reserve space before optional evidence. Final provider
+requests obey caller/operator byte ceilings after serialization and on fallback;
+unsupported token accounting refuses explicitly rather than claiming compliance.
+
+User/system/developer messages survive folding unchanged. Generated history
+remains assistant evidence, with safe tail placement and exact protected-content
+validation. Native candidates pass shrink and tool-pair admission before use.
+Automatic observations cannot create hard rules or overwrite their content.
+External CLI backends refuse declared hard limits when final serialization is
+unobservable. Native HTTP adapters retain normal complete-body admission.
+
+The [final closeout](../../validation/memory-mr03-closeout-2026-09-24.md) and
+[six-gate checklist](memory-reliability-03-closeout.md) record passing acceptance
+and capability boundaries. The original contract below remains unchanged; exact
+provider tokenization and priced transform authorization are not claimed.
+
+## Existing integration points
+
+Change `RecallBundle` and `AssembleContext` in `server-go/modules/memory/retrieval.go`. Move memory-specific typed selection/projection from `src/kb/db2_adapters/kb_service_backend_context.c` into the Go memory owner, exposed through the versioned memory-data contract. `ingress_render_block` in `src/server/ingress_preinject.c` and provider adapters retain outer host packing and final request accounting. Reuse the exact-count and provenance requirements in `server-go/modules/economizer`.
+
+The host reports final retained memory IDs/spans and projection identity to Go memory for coverage evaluation after any outer trim or transform. Bind that result to the exact plan revision; do not let C reconstruct memory sufficiency from item counts. The Go projection and host request share explicit budget/count provenance while each owner enforces its own boundary.
+
+## Budget contract
+
+Represent limits with named units: `max_context_bytes`, `max_context_tokens`, `max_request_tokens`, `reserved_response_tokens` and `reserved_tool_tokens`. Values include explicit `count_state` (`exact`, `conservative_estimate`, `unavailable`) and tokenizer/model revision. Zero is a literal zero where allowed; absence requests an inherited limit. Do not reuse a field whose legacy zero means disabled.
+
+An internal `ContextProjection` has stable item IDs, protected class, rendered bytes, source versions and omission reasons. An `AssemblyResult` contains retained IDs, final bytes, token accounting, projection digest and packing trace. Exact provider request accounting includes roles, tool definitions, wrapper text and provider serialization overhead supported by the tokenizer contract.
+
+## Packing behavior
+
+1. Derive a minimal projection from eligible candidates. Render reviewed procedures once while preserving their reviewed status. Keep untrusted evidence separate from authority-bearing instructions.
+2. Reserve mandatory policy and explicit user-constraint content. A model-generated label cannot promote an item into a protected class.
+3. Select optional evidence under both byte and token limits. Coherent required bundles may be atomic; record why they fail to fit.
+4. Serialize the actual request and count again. Remove optional items deterministically and reserialize until the caps hold. Bound iterations and work.
+5. If protected content alone exceeds capacity, return `protected_context_overflow`; choose an authorized larger-context route, split the task or ask for a narrower task. Do not silently truncate policy.
+6. Record exact final retained IDs. [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) recomputes sufficiency after this step; [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) records assembly and dispatch separately.
+
+No implicit “always include the first result” exception is permitted. Missing exact tokenization cannot support an exact-cost claim. An explicitly supported conservative estimator may permit ordinary serving with its uncertainty recorded; an unknown estimator with no defensible bound must not claim compliance with a hard token cap.
+
+## Protected-content transformation
+
+Preserve user constraints, negation, numerical bounds, deadlines, required identifiers and authority-bearing instructions through any condensation step. Bind transformed bytes to the request/attempt and require existing economizer admission before applying a cost-saving transform. Heuristic commitment extraction is a check, not proof of semantic equivalence. Failed validation falls back only if the original still fits; otherwise return an explicit overflow outcome.
+
+[Native refusal propagation](../../validation/memory-context-refusals-2026-09-21.md)
+now stops initial native dispatch and refresh on explicit Go recall refusal and
+preserves that result through routing/fallback. MCP retains non-success statuses
+before guidance. HTTP ingress omission paths and full protected-context rendering
+remain acceptance work.
+
+## Implementation slices
+
+1. Introduce the projection/result types and provider-bound counting adapters. Add byte-accounting coverage for every component.
+2. Replace bundle row heuristics as a budget enforcement mechanism, migrate typed memory projection into Go and remove duplicate typed-procedure rendering. Return retained/omitted IDs from the outer packer through the shared contract; remove converted C selection policy.
+3. Add protected-content validation, full-request recount after economizer/provider adaptation and bounded overflow handling.
+
+## Acceptance gates
+
+- Long metadata cannot be admitted at the cost of its short summary. JSON escapes, Unicode, channel wrappers, reminders, directives and empty-channel overhead are counted.
+- Final request bytes/tokens obey declared hard limits; item count is not accepted as a substitute.
+- A small required constraint survives a large optional item. Required evidence dropped by packing makes sufficiency partial.
+- The model-visible procedure is present once and carries the correct trust classification.
+- A transform that breaks negation, a numerical limit or a protected prefix is rejected; a fallback that exceeds capacity is not sent.
+- Repeated assembly over identical inputs and versions yields identical projection bytes, selection and digest.
+
+## Rollout and rollback
+
+Run old/new packing in shadow to measure changes in retained evidence, false overflow, task outcomes and latency. Enable by endpoint after its cap tests pass. Preserve the outer byte guard throughout. A ranking rollback must not restore inaccurate accounting or duplicate rendering.
+
+[Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)

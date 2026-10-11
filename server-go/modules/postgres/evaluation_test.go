@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -68,6 +69,10 @@ func TestEvaluationIsolationAndAbandonedTransactionCleanup(t *testing.T) {
 		}
 	})
 	var one, two string
+	var encoding string
+	if err := first.QueryRow(ctx, "SHOW server_encoding").Scan(&encoding); err != nil || encoding != "UTF8" {
+		t.Fatal("evaluation database must use UTF8", encoding, err)
+	}
 	if err := first.QueryRow(ctx, "SELECT current_database()").Scan(&one); err != nil {
 		t.Fatal(err)
 	}
@@ -162,5 +167,57 @@ func TestEvaluationCancellationAndFailedBootstrapCleanup(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal("cancelled session could not clean up", err)
+	}
+}
+
+func TestEvaluationCloseTerminatesOnlyItsOrphanedConnections(t *testing.T) {
+	admin := evaluationAdmin(t)
+	ctx := context.Background()
+	first, err := OpenEvaluationStore(ctx, "CREATE TABLE eval_fixture(id int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := first.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	sibling, err := OpenEvaluationStore(ctx, "CREATE TABLE eval_fixture(id int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := sibling.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	config, err := pgx.ParseConfig(os.Getenv("AIMEE_DB_TEST_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Database = first.name
+	orphan, err := pgx.ConnectConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orphan.Close(ctx)
+	if _, err := orphan.Exec(ctx, "BEGIN; LOCK TABLE eval_fixture IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal("orphaned client prevented cleanup", err)
+	}
+	if _, err := orphan.Exec(ctx, "SELECT 1"); err == nil {
+		t.Fatal("closed fixture retained orphaned client")
+	}
+	var count int
+	if err := admin.QueryRow(ctx, "SELECT count(*) FROM pg_database WHERE datname=$1", first.name).Scan(&count); err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+	if _, err := sibling.Exec(ctx, "INSERT INTO eval_fixture VALUES (1)"); err != nil {
+		t.Fatal("cleanup interrupted sibling", err)
+	}
+	if _, err := admin.Exec(ctx, "SELECT 1"); err != nil {
+		t.Fatal("cleanup interrupted admin", err)
 	}
 }

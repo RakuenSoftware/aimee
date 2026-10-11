@@ -1,6 +1,6 @@
 module github.com/JBailes/aimee/control-web
 
-go 1.26.7
+go 1.26.9
 
 require (
 	github.com/JBailes/aimee/server-go v0.0.0

@@ -1,0 +1,17 @@
+{
+  "upstream_revision": "1edd166ead75b85a9ab95cd6ba4faf7011ad567c",
+  "profile": "hdc-subword",
+  "real_engine": true,
+  "restart_rounds": [
+    {
+      "round": 0,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "passed": true
+    }
+  ],
+  "http_auth_validation_capacity": "passed",
+  "contract": "passed"
+}

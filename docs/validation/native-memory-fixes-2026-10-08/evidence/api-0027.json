@@ -1,0 +1,25 @@
+{
+  "route": "memory/delete",
+  "http": 200,
+  "response": {
+    "active_context_missing": false,
+    "deleted": true,
+    "destroyed": true,
+    "id": 17,
+    "mutation_receipt": {
+      "schema_version": 2,
+      "commit_id": "edf809d8-86ef-e1dd-3e11-f6bc3bcd65fb",
+      "target_version": {
+        "schema_version": 1,
+        "owner_id": "8cd0c717-2f44-468f-b046-db92caf778e3",
+        "record_id": "17",
+        "record_revision": "1"
+      },
+      "outcome": "destroyed",
+      "replayed": false
+    },
+    "status": "ok",
+    "store": "kb"
+  },
+  "elapsed_seconds": 0.135
+}

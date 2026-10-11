@@ -1,0 +1,10 @@
+{
+  "route": "memory/recall",
+  "http": 503,
+  "response": {
+    "kind": "unavailable",
+    "message": "memory recall unavailable",
+    "status": "error"
+  },
+  "elapsed_seconds": 0.069
+}
