@@ -50,3 +50,21 @@ python3 -m venv /tmp/hillock-poc-venv
 Run those verification commands from the repository root. The runner checks out the pinned upstream, rejects modified tracked source, starts an authenticated service on an ephemeral loopback port, requires the live Go test to execute, verifies corrections/deletion/capacity and no cross-request retained retrieval, then repeats after a process restart. It retains fixture-only logs and a summary. Unit/race tests also reject malformed identities, changed revisions, outages and cancellation. CI runs the real contract with pinned NumPy. These checks establish POC behavior, not production-scale quality or measured conversational improvement. The Docker deployment recipe is supplied; the local evidence does not claim a Docker build or live Discord rollout.
 
 [Current .253 support validation](../../docs/validation/external-memory-support-2026-10-08.md) records the completed integration checks and remaining quality limits.
+
+## Release-candidate CI
+
+[Hillock prerelease qualification](../../.github/workflows/hillock-prereleases.yml) scans upstream branches matching `rc/v<major>.<minor>.<patch>` hourly (at minute 17). It discovers every matching branch, including new branches and updated tips; `rc/v0.10.0` is one example. Scheduled scans begin when the workflow is on Aimee's default branch. GitHub schedules can be delayed. Manual dispatch can select one branch or force a repeat of a previously successful qualification. Relevant pull requests also run the scanner and qualification jobs.
+
+Each branch tip is snapshotted to an immutable commit SHA and fetched by that SHA. Qualification runs memory owner/adapter race tests, the real upstream HDC lifecycle contract twice across a service restart, authenticated protocol/capacity checks, and cold/concurrent warm retrieval at 100, 1,000 and 10,000 records with a 30-second operation deadline. Candidate jobs run independently; a failure retains evidence and fails that job. Discovery/network failures fail the scan instead of reporting no candidates.
+
+A successful receipt is cached for the exact branch, Hillock commit and Aimee commit. Only that exact receipt skips repeat work. A changed upstream tip, new branch or changed Aimee commit must qualify; failures retry on the next scan. Cache eviction safely causes requalification. The cache holds only the success summary; fixture logs and scale results are retained as workflow artifacts for 30 days. Run/workflow summaries identify the branch and both revisions. Upstream code runs in disposable jobs without repository write permission or deployment secrets.
+
+The runner makes temporary copies of the sidecar and a Go build overlay changing only their expected revision constants. All actual ranking code comes from the discovered upstream commit. Production source, Docker revision and startup pin remain unchanged: passing CI supplies compatibility evidence, and promotion still requires a reviewed pin update. This gate covers the HDC/subword profile, not upstream chat, graph, learning or Aimee's remaining model/gateway qualification work.
+
+To reproduce a candidate locally (use an empty artifact directory):
+
+```sh
+/tmp/hillock-poc-venv/bin/python scripts/validation/memory/run-hillock-contract.py \
+  --branch rc/v0.10.0 --revision <full-40-character-commit-sha> --scale \
+  --artifacts /tmp/hillock-candidate-evidence-new-run
+```
