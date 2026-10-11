@@ -2510,7 +2510,7 @@
         "server_module_memory_data",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "da90696ca508cc7967042fe696784fe1b96cfba4c764f539c7e8822fd15323b5"
+      "sha256": "f8076b8da80ee143adb7ffe6afb84541a8eaba855fc2589c6da6435d76a847e6"
     },
     "src/tests/test_pgvec_neardup.c": {
       "disposition": "legacy-fixture",

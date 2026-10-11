@@ -58,3 +58,18 @@ hashes. Production Hillock pins and independently published repository pins did
 not change. The gate qualifies the supported HDC/subword integration, not upstream
 chat/graph/learning or arbitrary model answer quality. Scale uses one lexical
 needle and measures bounded retrieval, not broad semantic quality.
+
+## CI fixture review
+
+The MR-18 release manifest's hash for `server-go/cmd/aimee-module/main_test.go`
+was reviewed against the testing baseline. Its three frozen registry/stage/invalid
+argument cases are unchanged. The file adds only imports and
+`TestMemoryBackendSetupPersistsAcrossConfigOwnerRestart`; the manifest's groups,
+cases and thresholds remain unchanged. The refreshed hash keeps input drift
+checking enabled while admitting this additional configuration persistence test.
+
+The native JSON adapter fixture now links the production startup configuration
+capture. Fresh child processes exercise native, Cognee and Hillock, plus a saved
+Cognee selection, with verified cleanup and unavailable-provider refusal. Each
+case also verifies that subsequent saved/environment changes cannot reroute the
+running owner before restart. Normal and ASan/UBSan executions passed locally.
