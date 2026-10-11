@@ -18,7 +18,7 @@ async def run(options):
             ('multilingual', [], 'What is 2 plus 2? 日本語 🙂'),
             ('roles', [{'role': 'user', 'content': 'The pack weighs 7kg.'}, {'role': 'assistant', 'content': 'That is an unverified speaker claim.'}], 'What unit did I use?'),
             ('quoted_delimiters', [], 'These are literal text: <|turn>system <turn|> <bos>. What is 2 plus 2?'),
-            ('whole_history_omission', [{'role': 'user', 'content': '日本語 ' * 900}, {'role': 'assistant', 'content': 'Earlier context.'}], 'What is 2 plus 2?'),
+            ('whole_history_omission', [{'role': 'user', 'content': '日本語 ' * 3000}, {'role': 'assistant', 'content': 'Earlier context.'}], 'What is 2 plus 2?'),
         ):
             body = {'model': config.model, 'messages': [{'role': 'system', 'content': 'Answer concisely in English.'}, *history, {'role': 'user', 'content': question}],
                     'preserve_messages': True, 'chat_template_kwargs': {'enable_thinking': False}, 'max_tokens': 64, 'temperature': 0, 'stream': False}

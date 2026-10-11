@@ -650,7 +650,7 @@ class ModelClient:
         else:
             headers = {"Authorization": "Bearer " + read_secret(self.config.model_key_file)}
         budget = message_budget(budget_config)
-        if len(text.encode("utf-8")) > budget:
+        if self.config.memory_profile != "conversation-v2" and len(text.encode("utf-8")) > budget:
             raise ValueError("message exceeds the tested E2B context budget")
         async with AsyncExitStack() as stack:
             session = self.session
@@ -688,7 +688,7 @@ class ModelClient:
                 return confirmed
             recent_history = history[-8:]
             history = list(history)
-            while history and (
+            while not generic and history and (
                 sum(len(item["content"].encode("utf-8")) for item in history)
                 + len(text.encode("utf-8")) > budget
             ):

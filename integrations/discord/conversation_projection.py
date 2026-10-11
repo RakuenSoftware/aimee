@@ -15,7 +15,7 @@ CATEGORY_PATTERNS = {
     "recent_human_context": r"(?s).",
     "purpose": r"\b(?:our goal|the goal|our purpose|we want to|we need to|let's work on)\b",
     "decisions": r"\b(?:we agreed|we decided|our decision|let's use|the decision is)\b",
-    "open_questions": r"\?$|\b(?:open question|still need to decide|unresolved|resolved:|answer:)\b",
+    "open_questions": r"\?$|\b(?:open question|still need to decide|unresolved)\b|\b(?:resolved|answer):",
     "constraints": r"\b(?:must|do not|don't|keep|only|correction|actually|not .*but)\b",
     "feedback": r"\b(?:your (?:answer|reply)|that (?:answer|reply|was) (?:is )?(?:wrong|incorrect)|you got|correction:)\b",
     "preferences": r"\b(?:i prefer|please (?:respond|reply|use|keep)|my preference|forget (?:my |the )?preference)\b",
@@ -104,7 +104,7 @@ async def rebuild(action, project, pointers, now=None):
                 resolved.add(pointer["reply_to_message_id"])
     for pointer in sorted(decoded, key=lambda p: p["observed_at"], reverse=True):
         category = pointer.get("category")
-        if category not in CATEGORY_PATTERNS or pointer.get("revoked") or pointer.get("resolved") or pointer["source"].rsplit(":", 1)[-1] in resolved:
+        if category not in CATEGORY_PATTERNS or pointer.get("revoked") or pointer.get("resolved") or (category == "open_questions" and pointer["source"].rsplit(":", 1)[-1] in resolved):
             continue
         if category == "preferences" and (pointer["expires_at"] <= now or pointer["observed_at"] <= revoked.get(pointer["speaker_id"], 0)):
             continue

@@ -806,6 +806,23 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await ModelClient(config, session).reply([], "Talk to Samy.")
         self.assertEqual(len(requests), 2)
 
+    async def test_conversation_profile_uses_token_counter_instead_of_byte_pretrim(self):
+        question = "a" * 8192
+        history = [{"role": "user", "content": "b" * 8192},
+                   {"role": "assistant", "content": "Earlier statement."}]
+        received = []
+        async def model(request):
+            received.append(await request.json())
+            return web.json_response({"choices": [{"message": {"content": "Accepted."}}],
+                                      "usage": {"prompt_tokens": 100}})
+        config = replace(self.config, endpoint=await self.serve(model), memory_profile="conversation-v2")
+        async with aiohttp.ClientSession() as session:
+            client = ModelClient(config, session)
+            client.prompt_budget.fit = AsyncMock(return_value={"prompt_tokens": 100})
+            self.assertEqual(await client.reply(history, question), "Accepted.")
+        self.assertEqual(received[0]["messages"][1:], [*history, {"role": "user", "content": question}])
+        client.prompt_budget.fit.assert_awaited_once()
+
     async def test_repeated_persona_reply_is_repaired_once(self):
         requests = []
         canned = "Whoa, hold the phone! Groovy! What's the scoop?"

@@ -61,3 +61,34 @@ class ProjectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_feedback_is_provenance_bound_and_bot_agreement_is_not_a_decision(self):
         self.assertEqual(annotations(episode("Your answer was wrong; correction: the person is 69cm tall."))[0]["speaker_id"], "1")
         self.assertEqual(annotations(episode("We agreed that Virant is correct.", bot=True)), [])
+
+    async def test_deleted_controls_restore_preferences_and_open_questions(self):
+        episodes = {
+            10: episode("I prefer brief replies for next 2 minutes."),
+            11: episode("Forget my preference.", timestamp=1010000),
+            12: episode("Our goal is pack a backpack. Which pack should we use?"),
+            13: episode("Resolved: use the red backpack.", timestamp=1020000),
+        }
+        for identity, value in episodes.items():
+            value["source"] = f"discord:1:2:{identity}"
+        episodes[13]["reply_to_message_id"] = "12"
+        pointers = []
+        for identity, value in episodes.items():
+            for item in annotations(value):
+                item.update(schema_version=1, project="discord:1:2", source_id=identity, source=value["source"])
+                pointers.append({"key": f"discord-projection:{identity}:{item['category']}", "content": json.dumps(item)})
+        deleted = set()
+        async def action(name, args):
+            identity = args["id"]
+            if identity in deleted:
+                return {"kind": "not_found"}
+            value = episodes[identity]
+            return {"memory": {"id": identity, "key": value["source"], "content": json.dumps(value), "provenance_category": "user_stated"}}
+        projection, _ = await rebuild(action, "discord:1:2", pointers, now=1050)
+        self.assertEqual(projection["preferences"], [])
+        self.assertEqual(projection["open_questions"], [])
+        self.assertEqual(projection["purpose"][0]["source_id"], 12)
+        deleted.update({11, 13})
+        projection, _ = await rebuild(action, "discord:1:2", pointers, now=1050)
+        self.assertEqual(projection["preferences"][0]["source_id"], 10)
+        self.assertEqual(projection["open_questions"][0]["source_id"], 12)
