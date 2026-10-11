@@ -37,7 +37,7 @@ Metadata is optional JSON carried unchanged by storage/transfer. Native transfer
 
 ## Portable transfer
 
-Build `server-go/cmd/aimee-memory-transfer`. Export/import with `-operation export|import -directory ABSOLUTE_CATALOG -namespace HOST_NAMESPACE_UUID -file SNAPSHOT`. Files are created mode0600, are bounded to 64 MiB, and contain private memory: keep them out of public evidence. Never delete a target's retained erasure ledger to make import pass. The namespace is the destination's host-derived namespace; imported version owners remain the original canonical owner.
+Build `server-go/modules/memory/tools/transfer`. Export/import with `-operation export|import -directory ABSOLUTE_CATALOG -namespace HOST_NAMESPACE_UUID -file SNAPSHOT`. Files are created mode0600, are bounded to 64 MiB, and contain private memory: keep them out of public evidence. Never delete a target's retained erasure ledger to make import pass. The namespace is the destination's host-derived namespace; imported version owners remain the original canonical owner.
 
 `scripts/validation/memory/native-transfer.py` supplies an **offline native maintenance bridge** using operator-owned `PG*` connection configuration. `native-export --placement server|kb --schema SCHEMA --file SNAPSHOT` exports canonical rows, private retained versions, captured authorship and native erasure restrictions. `native-import` requires an empty stopped native record owner and the generic validator utility. Native keeps its own schema; migration preserves mechanical revisions under an exclusive lock while its erasure guards remain enabled. Native-only graphs, vectors, learned state and control services are outside this record snapshot; rebuild derived state after transfer.
 

@@ -80,7 +80,8 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
       if (kb_module_memory_erase_subject(jr->valuestring, js->valuestring, jids) != 0)
       {
          cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"backend erasure failed; retry request_id\"}");
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"backend erasure failed; retry request_id\"}");
          return 503;
       }
       cJSON *resp = cJSON_CreateObject();

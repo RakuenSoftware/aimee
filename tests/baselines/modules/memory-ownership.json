@@ -1878,7 +1878,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "bc68aec3dd02ac7f829ea0e5abc7fdee2625a0fa8bef5f4730961b5c918c0162",
+      "sha256": "bf27ac910c2b577669ba23b3b2c73c34d94af48bc66ffaad72da475d3e3f3cf1",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2143,7 +2143,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "32dc9217d3983bf3e24cb9786177297b8de1b4bf3ed4c7eeb7ab2c0a2d19f07c",
+      "sha256": "b7e635b7b325848fe316a5ad0dadabf632accb265fbf6a02fbdd33c76b0bb434",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2619,7 +2619,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "329f95e8db6d4635fe0d3c3fafc55792fa5140fddb03d8b3a1d710afc73f1d6b",
+      "sha256": "e433e68f0bc3e9e34c4708e41a1d3caf4495219eed7b0d6cf980189556b3dbdb",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2639,7 +2639,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "89f7196b969f4d4b0ff4b9e3725b08e4b953fbba01fbc6ea53c03432566a2fc5",
+      "sha256": "322ff96444b6de86ec616f5df7291724474441a7559d8695298bf2114f59b9b0",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2652,7 +2652,7 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "b0bed34776dc9b54417667ae1973a3ea973ffaabe64f2e0f3ac8c59354b1a2d6",
+      "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
@@ -2665,7 +2665,7 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "8015ff7ce1ba205af59c75df75c84ece970753840286ff5363a914ccb3784925",
+      "sha256": "f3961c603e77311d2a5b50f19e3aa668ee769f5e7d1cda6c07c66186c495ddb4",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"

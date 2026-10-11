@@ -244,7 +244,7 @@
     "server-go/modules/memory/public_backends.go",
     "server-go/modules/memory/hillock/hillock.go",
     "server-go/modules/memory/backendstore/store.go",
-    "server-go/cmd/aimee-memory-transfer/main.go",
+    "server-go/modules/memory/tools/transfer/main.go",
     "server-go/modules/memory/height_facts.go",
     "server-go/modules/memory/discord_alias_facts.go",
     "server-go/modules/memory/lifting_facts.go",

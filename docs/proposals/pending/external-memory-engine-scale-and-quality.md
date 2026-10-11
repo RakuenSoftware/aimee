@@ -1,6 +1,7 @@
 # External memory retrieval scale and answer quality
 
 - **State:** pending.
+- **Archived foundation:** [unified-aimee-nodes-and-replaceable-memory.md](../done/unified-aimee-nodes-and-replaceable-memory.md).
 - **Completed integration:** [external-memory-conversation-support.md](../done/external-memory-conversation-support.md).
 - **Contract:** [reusable external memory contract](../../../integrations/memory/CONTRACT.md). Native is exempt.
 
