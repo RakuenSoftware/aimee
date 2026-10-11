@@ -36,6 +36,8 @@ keeps its cursor contract. See [qualification evidence](../../validation/memory-
 
 This does not complete all deliverables: the final prompt is byte-bounded rather
 than exactly tokenizer-bounded, a richer structured purpose/decision/feedback
-projection with preference lifetimes is not yet qualified, and live multi-bot
-Discord/reconnect behavior requires a designated test channel. Keep this proposal
+projection with preference lifetimes is not yet qualified, and live validation of
+the new `conversation-v2` path across backends remains outstanding. The existing
+Discord bridge/channel and its substantial live testing are already available;
+no additional channel designation is needed. Keep this proposal
 pending until those acceptance conditions and release gates are satisfied.

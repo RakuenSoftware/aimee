@@ -103,8 +103,13 @@ credentials, exported user stores and production conversation contents are exclu
 3. A richer structured purpose/decision/feedback projection with scoped preference
    lifetimes and all requested pronoun, deletion/private-source, expiry and feedback
    trajectories remains pending in the conversational proposal.
-4. Live Discord gateway, mention, reconnect and unbounded multi-bot acceptance
-   requires an explicitly designated test guild/channel. No messages were sent.
+4. The existing Discord bridge/channel already has substantial live validation,
+   including real multi-bot exchanges, restart recovery and verified attachment
+   delivery, recorded in the Discord worktree's 2026-10-10 runtime/workflow reports.
+   No additional channel designation is needed. The remaining delta is live
+   validation of the newly added `conversation-v2` memory path with each selected
+   backend; the earlier bridge evidence does not establish that coverage. This
+   qualification run sent no Discord messages.
 5. [Draft PR #3020](https://github.com/RakuenSoftware/aimee/pull/3020) is open
    against testing through the authenticated GitHub connector. GitHub CLI login
    remains unavailable, but it no longer blocks PR creation. Required CI, merge
