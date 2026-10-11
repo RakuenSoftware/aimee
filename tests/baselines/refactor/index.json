@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "eff8fd6526ab0330fdd0ececc5126a9e930369fd70384fd7ab47178203a03fc5"
+          "sha256": "b03dfe28f4ffd6d6a62eae8903338b8bfa3f9cc323a567b30bbfced2034bf59a"
         }
       ]
     },
@@ -227,11 +227,11 @@
         },
         {
           "path": "src/modules/kb/c/schema.sql",
-          "sha256": "5426a7f572a8968194c7a777ede9ee9cde8e2511e50af537143e5bcbe6c1ca90"
+          "sha256": "e1b088299913d5d4b77666ed9ac3b5e46f1c84d42c23873ade5f924ce2d897c7"
         },
         {
           "path": "src/modules/kb/c/schema_grants.sql",
-          "sha256": "17d92a08425610fadcb465b834919fdf6029184bde998655d2b70818316e9918"
+          "sha256": "07c08fe7116a34a945d21618b9d59397ec36f0afafcad66ce82e7863ebed4e2f"
         },
         {
           "path": "src/modules/kb/c/schema_roles.sql",
@@ -239,7 +239,7 @@
         },
         {
           "path": "src/modules/kb/c/schema_sqlite.sql",
-          "sha256": "bcf16ace981d42b9b79729994b3f59c3e9bba1036b8c9be14eca3f964e7e2ed5"
+          "sha256": "432e5ef11ecc0b7db4e2216b5b6412ff806f59f8d885017dc39e18d3ce5f4fd3"
         }
       ]
     },
@@ -247,15 +247,15 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "9505d1e9e62da59f83e8118bcd9b72188ce10ca272af6586b97f34796e81964a"
+          "sha256": "f7f5eda64f378fc50870d410029b056ea999b6fb6e725caaf2917e52d6416ed3"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
-          "sha256": "0c3fa232676eaae32f425f665a8effbc9c8f3acafb864a7a6da8a7e1a9c8c9c8"
+          "sha256": "29c43101781946671b9449a1909ac1a6ee735304dfddcd7321fda897c2be9e95"
         },
         {
           "path": "Dockerfile.control-web",
-          "sha256": "750731bfc30da9f06f45472cbd7bc14aea29f689a0631fa2abebbbb21615e1d2"
+          "sha256": "040921d18e62d4c8ac79f318145a0a4cf761e56c404b4a94ac23ea4d457d4c42"
         },
         {
           "path": "Dockerfile.embedder",
@@ -271,7 +271,7 @@
         },
         {
           "path": "Dockerfile.postgres",
-          "sha256": "10c626c5878aed5eb3597600f91e7bbde4f7d607a9bd677ac59469eaaf823510"
+          "sha256": "de3c91c7be543fbc5b9c7f13ea143424a906b173d6eadc9385cc96aad499126d"
         },
         {
           "path": "Dockerfile.proxy",
@@ -279,11 +279,11 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "9505d1e9e62da59f83e8118bcd9b72188ce10ca272af6586b97f34796e81964a"
+          "sha256": "f7f5eda64f378fc50870d410029b056ea999b6fb6e725caaf2917e52d6416ed3"
         },
         {
           "path": "Dockerfile.status-authority",
-          "sha256": "cdbf6ca3e21cdc71616bae74e5dfeb03c827240df3839c44ce3ca37d335be92e"
+          "sha256": "4e46c5c92d486cf662183f68a75e56fcaf093bd2ee938a654e4fc0f510ebf88a"
         },
         {
           "path": "editors/vscode/package-lock.json",
@@ -311,7 +311,7 @@
         },
         {
           "path": "src/Makefile#install",
-          "sha256": "6e646407e1465b778ed99b55ef66f81c90ad353f0454ecec883ffefae9ec7719"
+          "sha256": "b32d1106c614ea28f512711082272cf4660eed2443e0fd192aae8a3d60f0d136"
         }
       ]
     },
@@ -1227,7 +1227,7 @@
         },
         {
           "path": "src/headers/module_stage_adapters.h",
-          "sha256": "4c077fb9e23e39da55b11c517a26719f38e01b1207a25a640c716354bdee462f"
+          "sha256": "96aa7f907d21172f622095e7f7914e7f82f3d13d5b7060b821ab046fafa90fcf"
         },
         {
           "path": "src/headers/msg_session_key.h",
@@ -1992,7 +1992,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "2a657ddf95e53fcf098cbd0826a798a5cc829a5b8fb3732ae8335c1376dcaff0",
+      "sha256": "4d91bc27a929efc9cdd71fddf03e74f15440cf808e4f8e9d75c405936bcc794d",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
