@@ -105,7 +105,7 @@ func (f *cogneeFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.contents[name] = string(raw)
 		respond(map[string]string{"status": "success"})
-	case r.Method == "POST" && r.URL.Path == "/api/v1/cognify":
+	case r.Method == "POST" && r.URL.Path == "/api/v1/aimee/index-chunks":
 		f.cognifications++
 		var input struct {
 			Datasets   []string `json:"datasets"`
@@ -519,7 +519,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 			var b *Backend
 			transport := func(c context.Context, method, target, contentType string, body []byte) (int, []byte, error) {
 				path := strings.TrimPrefix(target, "http://fixture")
-				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/cognify" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
+				if fault == "catalog" && method == "GET" || fault == "add" && path == "/api/v1/add" || fault == "cognify" && path == "/api/v1/aimee/index-chunks" || fault == "search" && path == "/api/v1/search" || fault == "delete-stale" && method == "DELETE" {
 					return 503, []byte(`{}`), nil
 				}
 				req := httptest.NewRequest(method, target, strings.NewReader(string(body)))
@@ -527,7 +527,7 @@ func TestCogneeValidationSearchFailuresAndFilters(t *testing.T) {
 				w := httptest.NewRecorder()
 				fixture.ServeHTTP(w, req)
 				result := w.Body.Bytes()
-				if path == "/api/v1/cognify" {
+				if path == "/api/v1/aimee/index-chunks" {
 					switch fault {
 					case "missing-run":
 						result = []byte(`{}`)

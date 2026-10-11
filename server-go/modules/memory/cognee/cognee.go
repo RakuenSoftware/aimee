@@ -21,7 +21,7 @@ import (
 
 const MaxRecords = 256
 
-// MaxCandidates bounds synchronous cold indexing within the shipping deadline.
+// MaxCandidates bounds synchronous chunk indexing within the shipping deadline.
 // This is a provider pool limit, not a canonical catalog size limit.
 const MaxCandidates = 4
 const MaxBody = 1 << 20
@@ -305,13 +305,13 @@ func (b *Backend) Search(ctx context.Context, scope memory.Scope, query, kind, t
 		}
 	}
 	b.completedMu.Unlock()
-	body, _ := json.Marshal(map[string]any{"datasets": pending, "run_in_background": false, "custom_prompt": "Extract only explicitly stated entities and relationships. Return the required KnowledgeGraph JSON. Every node must have string id, name, type and description; every edge must have string source_node_id, target_node_id and relationship_name. Descriptions must be short plain strings, not objects. Do not infer or verify claims. Keep the extraction concise."})
+	body, _ := json.Marshal(map[string]any{"datasets": pending})
 	var runs map[string]struct {
 		Status string `json:"status"`
 		Name   string `json:"dataset_name"`
 	}
 	if len(pending) > 0 {
-		if err = b.call(ctx, "POST", "/api/v1/cognify", "application/json", body, &runs); err != nil {
+		if err = b.call(ctx, "POST", "/api/v1/aimee/index-chunks", "application/json", body, &runs); err != nil {
 			return nil, err
 		}
 		expected := map[string]bool{}

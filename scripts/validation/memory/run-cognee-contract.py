@@ -120,7 +120,7 @@ def main():
     server = None
     try:
         with (work / "server.log").open("w") as log:
-            server = subprocess.Popen([args.python, "-m", "uvicorn", "cognee.api.client:app",
+            server = subprocess.Popen([args.python, "-m", "uvicorn", "service:app", "--app-dir", str(Path(__file__).resolve().parents[3] / "integrations/cognee"),
                                        "--host", "127.0.0.1", "--port", str(api_port)],
                                       cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 120
@@ -151,8 +151,8 @@ def main():
             print(result.stdout, end="", flush=True)
             if result.returncode or "--- PASS: TestCogneeLiveContract" not in result.stdout:
                 raise RuntimeError("required real Cognee contract failed or skipped")
-            if not all(ModelFixture.calls.values()):
-                raise RuntimeError("contract did not exercise both local model fixture routes")
+            if not ModelFixture.calls["embeddings"] or ModelFixture.calls["completions"]:
+                raise RuntimeError("chunk contract must embed sources without graph-completion calls")
             (work / "summary.json").write_text(json.dumps({
                 "status": "passed", "cognee": "1.6.2", "models": "real inference and embeddings" if ModelFixture.commands else "deterministic local fixtures",
                 "diagnostic_request_deadline_seconds": args.request_deadline or None, "completion_max_tokens": args.completion_max_tokens or None,
