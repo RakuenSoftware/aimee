@@ -79,7 +79,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                     order.append("response")
                 projection = None if scenario == "capture-outage" else SimpleNamespace(guard=guard, response=response)
                 bot.model_client = SimpleNamespace(capture_turn=capture, reply=reply, conversation_memory=projection)
-                bot.delivery = SimpleNamespace(send=send)
+                bot.send_chat_reply = send
                 worker = asyncio.create_task(bot.process_turns())
                 try:
                     await bot.queue.put(Turn(1, GUILD, CHANNEL, USER, "Virant reported 7kg."))

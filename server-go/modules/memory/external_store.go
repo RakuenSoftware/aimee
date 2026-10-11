@@ -333,8 +333,10 @@ func (s *externalDataStore) execute(ctx context.Context, request DataRequest, sc
 				if value, ok := metadata["epistemic_kind"].(string); ok && value != "" {
 					epistemic = value
 				}
-				if e := admitMemoryReplacement(epistemic, authorship.Category, actor.authority); e != nil {
-					return e
+				if !deleting || actor.authority != AuthorityUser {
+					if e := admitMemoryReplacement(epistemic, authorship.Category, actor.authority); e != nil {
+						return e
+					}
 				}
 			}
 			if deleting {

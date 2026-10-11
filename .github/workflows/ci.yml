@@ -489,12 +489,12 @@ jobs:
         run: |
           (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./modules/memory/cmd/aimee-memory-transfer)
           (cd server-go && go run ../scripts/validation/memory/qualify-external.go -sizes 100,1000 -output "$RUNNER_TEMP/catalog-scale.json")
-          python3 -m py_compile scripts/validation/memory/*.py scripts/validation/memory/lxc/*.py
+          python3 -m py_compile scripts/validation/memory/*.py scripts/validation/memory/lxc/*.py integrations/cognee/service.py integrations/discord/*.py
       - name: Backend-neutral Discord episode, source and delivery tests
         run: |
           python3 -m venv "$RUNNER_TEMP/discord-venv"
           "$RUNNER_TEMP/discord-venv/bin/pip" install -r integrations/discord/requirements.txt
-          (cd integrations/discord && "$RUNNER_TEMP/discord-venv/bin/python" -m unittest test_bridge test_prepare_e2b test_conversation_memory)
+          (cd integrations/discord && "$RUNNER_TEMP/discord-venv/bin/python" -m unittest discover)
       - name: Install pinned real Cognee API
         run: |
           python3 -m venv "$RUNNER_TEMP/cognee-venv"

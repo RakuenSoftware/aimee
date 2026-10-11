@@ -32,6 +32,7 @@ services:
       - ${AIMEE_DISCORD_CONFIG_DIR}/model.key:/run/discord/model.key:ro
       - ${AIMEE_DISCORD_CONFIG_DIR}/knowledge.token:/run/discord/knowledge.token:ro
       - discord-chat-home:/run/aimee-server:ro
+      - aimee-model-tls:/run/aimee-tokenizer-tls:ro
 volumes:
   discord-chat-home:
     external: true

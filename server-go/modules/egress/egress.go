@@ -367,7 +367,7 @@ func memoryBackendTargetAllowed(method, path string) bool {
 		return (method == "POST" && path == "/v1/rank") || (method == "GET" && path == "/v1/health")
 	}
 	switch path {
-	case "/api/v1/add", "/api/v1/cognify", "/api/v1/search":
+	case "/api/v1/add", "/api/v1/cognify", "/api/v1/aimee/index-chunks", "/api/v1/search":
 		return method == "POST"
 	case "/api/v1/datasets":
 		return method == "GET"

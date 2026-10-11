@@ -29,7 +29,7 @@ func TestCogneeLiveContract(t *testing.T) {
 		if err != nil || parsed < time.Second || parsed > 10*time.Minute {
 			t.Fatal("invalid live qualification deadline")
 		}
-		budget, callBudget = parsed, parsed
+		budget, callBudget = max(budget, parsed), parsed
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
@@ -96,7 +96,11 @@ func TestCogneeLiveContract(t *testing.T) {
 			t.Error("live test cleanup", err)
 		}
 	}()
-	found, err := backend.Search(ctx, scope, "needle", "fact", "L2", 1)
+	started := time.Now()
+	cold, coldCancel := context.WithTimeout(ctx, callBudget)
+	found, err := backend.Search(cold, scope, "needle", "fact", "L2", 1)
+	coldCancel()
+	t.Logf("cold source-chunk retrieval: %.3f ms (budget %s)", float64(time.Since(started).Microseconds())/1000, callBudget)
 	if err != nil || len(found) != 1 || found[0].ID != 1 || found[0].Content != "needle canonical" {
 		t.Fatal("real Cognee retrieval contract", found, err)
 	}

@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.request
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -73,6 +74,7 @@ def main():
     parser.add_argument("--completion-command", help="JSON argv for real inference, stdin OpenAI request/stdout response")
     parser.add_argument("--embedding-command", help="JSON argv for real embedding, stdin OpenAI request/stdout response")
     parser.add_argument("--request-deadline", type=int, default=0, help="optional diagnostic timeout in seconds, at most 600")
+    parser.add_argument("--scale", action="store_true", help="qualify 100/1000/10000-record cold and concurrent warm retrieval")
     parser.add_argument("--completion-max-tokens", type=int, default=0)
     parser.add_argument("--model", default="openai/fixture")
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
@@ -151,6 +153,21 @@ def main():
             print(result.stdout, end="", flush=True)
             if result.returncode or "--- PASS: TestCogneeLiveContract" not in result.stdout:
                 raise RuntimeError("required real Cognee contract failed or skipped")
+            if args.scale:
+                login = urllib.request.Request(api_url + "/api/v1/auth/login", data=urllib.parse.urlencode(
+                    {"username": "default_user@example.com", "password": "contract-fixture-password"}).encode())
+                with urllib.request.urlopen(login, timeout=10) as response:
+                    token = json.load(response)["access_token"]
+                credential = work / "scale-token"
+                credential.write_text(token); credential.chmod(0o600)
+                try:
+                    with (work / "scale.log").open("w") as scale_log:
+                        subprocess.run([args.go, "run", "../scripts/validation/memory/qualify-external.go",
+                            "-backend", "cognee", "-endpoint", api_url, "-token-file", str(credential),
+                            "-deadline", "30s", "-output", str(work / "scale.json")],
+                            cwd=root / "server-go", stdout=scale_log, stderr=subprocess.STDOUT, check=True, timeout=300)
+                finally:
+                    credential.unlink()
             if not ModelFixture.calls["embeddings"] or ModelFixture.calls["completions"]:
                 raise RuntimeError("chunk contract must embed sources without graph-completion calls")
             (work / "summary.json").write_text(json.dumps({

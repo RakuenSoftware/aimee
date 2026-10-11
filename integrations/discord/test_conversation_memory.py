@@ -18,9 +18,9 @@ class ConversationMemoryTests(unittest.IsolatedAsyncioTestCase):
         action = AsyncMock(return_value={"id": 1})
         memory = ConversationMemory(action, "discord:111111111111111111:222222222222222222")
         await memory.capture(turn())
-        first = action.await_args.args[1]
+        first = action.await_args_list[0].args[1]
         await memory.capture(turn())
-        self.assertEqual(first, action.await_args.args[1])
+        self.assertEqual(first, action.await_args_list[2].args[1])
         self.assertEqual(json.loads(first["content"])["text"], turn().text)
         self.assertEqual(json.loads(first["use_cases"])["author_id"], str(turn().user_id))
         self.assertEqual(first["authority"], "user")
@@ -45,6 +45,17 @@ class ConversationMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["records"], [rows[0]])
         self.assertEqual(result["receipt"]["omitted_records"], 1)
         self.assertEqual(result["receipt"]["available_records"], 2)
+
+    async def test_collection_index_changes_retry_whole_projection(self):
+        observations = iter((1, 2, 2, 2))
+        async def action(name, args):
+            if name == "memory.recall":
+                return {"status": "ok", "recall": {"collection_source": {"revision": next(observations)},
+                    "identity": [], "preferences": [], "active_context": [], "open_commitments": []}}
+            return {"memories": []}
+        memory = ConversationMemory(action, "project")
+        await memory.context("topic")
+        self.assertEqual(memory.sources[0]["source_version"], {"revision": 2})
 
     async def test_source_mutation_refuses_projection(self):
         async def action(name, args):

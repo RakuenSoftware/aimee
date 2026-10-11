@@ -33,6 +33,7 @@ const (
 )
 
 type DataRequest struct {
+	SourceOnly          bool               `json:"source_only,omitempty"`
 	BackendErasureID    string             `json:"backend_erasure_id,omitempty"`
 	BackendSubject      string             `json:"backend_subject,omitempty"`
 	BackendSessions     []string           `json:"backend_sessions,omitempty"`
@@ -2252,7 +2253,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 				if !ok {
 					return nil, bus.ModuleStatusCapabilityAbsent
 				}
-				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext)
+				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext, request.SourceOnly)
 			}
 			response.Records = []Record{record}
 		case "update-as":

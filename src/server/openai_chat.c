@@ -163,6 +163,16 @@ static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
+/* A connector that packs/counts chat messages must keep that exact role shape.
+ * Opt in explicitly; legacy text callers retain their existing assembly path. */
+static int openai_request_preserves_messages(const char *body)
+{
+   cJSON *root = cJSON_Parse(body ? body : "");
+   int preserve = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "preserve_messages"));
+   cJSON_Delete(root);
+   return preserve;
+}
+
 static int openai_request_has_assistant(const char *body)
 {
    cJSON *root = body ? cJSON_Parse(body) : NULL;
@@ -257,7 +267,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    {
       char *instructions = NULL;
       cJSON *messages = NULL, *tools = NULL;
-      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
+      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 &&
+          (tools || openai_request_preserves_messages(body)))
       {
          parsed_response_t parsed;
          char upstream_error[512];

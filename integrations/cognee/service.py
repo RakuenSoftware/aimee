@@ -4,6 +4,7 @@ Cognee still owns chunking, embeddings, dataset locks, provenance and deletion.
 Graph enrichment remains available through the upstream cognify API, but is not
 on the latency-sensitive CHUNKS retrieval path.
 """
+import asyncio
 from cognee import __version__
 from cognee.api.client import app
 from cognee.api.v1.cognify.cognify import raise_if_cognify_errored
@@ -36,8 +37,13 @@ async def index_chunks(payload: ChunkIndex, user: User = Depends(get_authenticat
     tasks = [Task(classify_documents, needs_llm=False),
              Task(extract_chunks_from_documents, max_chunk_size=512, needs_llm=False),
              Task(add_data_points, task_config={"batch_size": 16}, needs_llm=False)]
-    result = await run_pipeline_blocking(run_pipeline, datasets=payload.datasets,
-        tasks=tasks, pipeline_name="aimee_chunks_v1", user=user,
-        incremental_loading=True, data_per_batch=4, needs_llm=False)
-    raise_if_cognify_errored(result)
-    return result
+    async def one(name):
+        result = await run_pipeline_blocking(run_pipeline, datasets=[name],
+            tasks=tasks, pipeline_name="aimee_chunks_v1", user=user,
+            incremental_loading=True, data_per_batch=4, needs_llm=False)
+        raise_if_cognify_errored(result)
+        return result
+    # Cognee owns an independent lock/context per authorized dataset. Bounded
+    # parallelism avoids repeating connection/setup waits four times in series.
+    results = await asyncio.gather(*(one(name) for name in payload.datasets))
+    return {key: value for result in results for key, value in result.items()}

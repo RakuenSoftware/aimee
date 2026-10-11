@@ -10,5 +10,7 @@
   "channel_id": "REPLACE_WITH_DISCORD_CHANNEL_ID",
   "endpoint": "http://127.0.0.1:18743/v1/chat/completions",
   "model": "discord-e2b",
-  "allowed_user_ids": []
+  "allowed_user_ids": [],
+  "tokenizer_endpoint": "https://aimee-llm:8761",
+  "tokenizer_tls_dir": "/run/aimee-tokenizer-tls/synthesis/client"
 }

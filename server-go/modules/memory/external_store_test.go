@@ -222,6 +222,11 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 	t.Setenv("AIMEE_MEMORY_BACKEND_DIR", "")
 	public("list", map[string]any{})
 	public("delete", map[string]any{"id": id, "authority": "user"})
+	for _, kind := range []string{"episode", "experience", "policy"} {
+		created := public("store", map[string]any{"key": "protected-" + kind, "content": "source evidence", "epistemic_kind": kind, "authority": "user"})
+		public("delete", map[string]any{"id": created["id"], "authority": "user"})
+	}
+
 	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
 	dir := filepath.Join(home, "memory-backends", "hillock", string(PlacementServer))
 	backup, err := os.ReadFile(filepath.Join(dir, "records.json"))

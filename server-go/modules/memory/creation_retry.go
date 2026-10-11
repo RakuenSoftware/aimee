@@ -141,7 +141,7 @@ func (s *postgresDataStore) storeKBIdempotent(ctx context.Context, r DataRequest
 	if err != nil {
 		return Record{}, nil, err
 	}
-	if err = s.captureStoredFactActor(ctx, record.ID, r.Authority, caller); err != nil {
+	if err = s.captureStoredFactActor(ctx, record.ID, r.Authority, caller, r.SourceOnly); err != nil {
 		return Record{}, nil, err
 	}
 	if err = s.db.QueryRow(ctx, `SELECT record_revision FROM memories WHERE id=$1`, record.ID).Scan(&revision); err != nil {
