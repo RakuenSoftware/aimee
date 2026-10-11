@@ -1,4 +1,5 @@
 """Conversation projection over the selected Aimee owner, with no local store."""
+import asyncio
 import hashlib
 import json
 import time
@@ -46,12 +47,18 @@ class ConversationMemory:
         return source_id
 
     async def context(self, query, budget=1800):
-        for attempt in range(2):
-            try:
-                return await self._context(query, budget)
-            except RuntimeError as error:
-                if attempt or "changed during projection" not in str(error):
-                    raise
+        async with asyncio.timeout(30):
+            for attempt in range(100):
+                try:
+                    return await self._context(query, budget)
+                except RuntimeError as error:
+                    if "collection changed during projection" in str(error):
+                        # Index workers may finish after episode capture. Rebuild
+                        # against a stable head within the same request deadline.
+                        await asyncio.sleep(0.25)
+                    elif attempt or "changed during projection" not in str(error):
+                        raise
+            raise RuntimeError("conversation collection did not stabilize")
 
     async def _context(self, query, budget):
         self.sources, self.check_id = [], ""
