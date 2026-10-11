@@ -10,7 +10,8 @@ import (
 )
 
 // Candidate maintenance is a bounded system transition, never user/operator
-// authority. It shares the mutation lock, change log and WORM seal with writes.
+// authority. Evidence counts never confer authority on a model candidate. It
+// shares the mutation lock, change log and WORM seal with writes.
 func (s *postgresDataStore) maintainFacts(ctx context.Context, action string, value int) (int, error) {
 	if s.placement != PlacementKB || value <= 0 || value > 36500 || (action != "promote" && action != "expire") {
 		return 0, errors.New("memory: invalid fact maintenance")
@@ -26,6 +27,10 @@ func (s *postgresDataStore) maintainFacts(ctx context.Context, action string, va
 	if action == "expire" {
 		condition = `e.confidence_class='C' AND e.asserted_at<>'' AND replace(substr(e.asserted_at,1,19),'T',' ') < to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - $1::int * interval '1 day','YYYY-MM-DD HH24:MI:SS') AND (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.stance='supports' AND f.invalidated_at='')<=1`
 	} else {
+		// Repetition across distinct model-authored sources is not independent
+		// authorization. Only system-authority candidates may cross the serving
+		// boundary here; model candidates require review or a trusted assertion.
+		condition += ` AND e.authority_rank=20`
 		functional, _ := json.Marshal(functionalFactRelations)
 		params = append(params, string(functional))
 		// Filter keyed conflicts before the batch; legacy Unicode identities receive

@@ -99,14 +99,14 @@ assertion or permitted review can change that state.
 
 The KB console provides operator approve, reject, and undo. A model cannot acquire operator rank
 from text or from the human's ambient login. Confidence and repeated exposure do not override an
-active refusal. Automatic fact-maintenance code exists, but no production caller of its dispatch
-operation was found at the reviewed commit; a configuration field alone does not establish a
-running promotion loop.
+active refusal. Fact maintenance may promote only system-authority candidates; repeated model
+evidence cannot clear review. No production caller of its dispatch operation was found in the
+Atlas review; a configuration field alone does not establish a running promotion loop.
 
-The Go rejection consult and database backstop both protect refused facts, with a remaining
-canonical-identity mismatch described in the [Atlas review](reviews/agent-memory-atlas-2026-09-29.md).
-The same review records the effective runtime-role grant gap. Those limits matter when describing
-protection against writers that bypass the Go owner.
+The Go rejection consult and database backstop use the same versioned canonical refusal identity.
+Runtime roles cannot delete or truncate refusals; restoration remains an attributed update.
+The [Atlas review](reviews/agent-memory-atlas-2026-09-29.md) records the original gaps, their fixes,
+and migration and validation limits. Database administrators remain outside this role boundary.
 
 ## Corrections and history
 
