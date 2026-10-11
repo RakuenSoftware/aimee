@@ -39,6 +39,15 @@ func exerciseCreationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 		}
 		return n
 	}
+	// Extraction policy is part of creation intent, including on receipt replay.
+	sourceArgs := map[string]any{"key": "source-only-retry", "content": "literal episode", "epistemic_kind": "episode", "source_only": true, "authority": "user", "project": "source-only-retry", "scope_context": true, "idempotency_key": "source-only-retry-key"}
+	if out := invoke("store", sourceArgs); out["status"] != "ok" {
+		t.Fatal(out)
+	}
+	sourceArgs["source_only"] = false
+	if out := invoke("store", sourceArgs); out["reason"] != "idempotency_conflict" {
+		t.Fatal("changed extraction policy reused receipt", out)
+	}
 	for _, authority := range []string{"model", "user"} {
 		scope := "creation-retry-" + authority
 		args := map[string]any{"key": scope, "content": "creation fixture", "authority": authority, "project": scope, "scope_context": true, "idempotency_key": "creation-fixture-" + authority}

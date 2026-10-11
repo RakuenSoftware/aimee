@@ -158,7 +158,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
  * branch in run_completion is their first caller. */
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out, char *error, size_t error_cap);
+                                  parsed_response_t *out, char *error, size_t error_cap,
+                                  int preserve_messages);
 static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
@@ -280,7 +281,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
              ag, messages, tools, instructions ? instructions : legacy_context,
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
-             upstream_error, sizeof(upstream_error));
+             upstream_error, sizeof(upstream_error),
+             openai_request_preserves_messages(body) && !tools);
          free(instructions);
          free(legacy_context);
          free(prompt);
@@ -300,7 +302,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
 
-         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+         if (!(openai_request_preserves_messages(body) && !tools) &&
+             gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
             LOG_INFO("completion.gate", "continued incomplete OpenAI chat repair");
 
          /* Same response-side policing the streaming path runs, so a denied
@@ -864,7 +867,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    parsed_response_t result;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &result, upstream_error, sizeof(upstream_error));
+                                    &result, upstream_error, sizeof(upstream_error), 0);
    free(instructions);
    if (erc != 0)
    {
@@ -997,7 +1000,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          char upstream_error[512];
          int trc =
              agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &parsed, upstream_error, sizeof(upstream_error));
+                                    &parsed, upstream_error, sizeof(upstream_error), 0);
          free(instructions);
          free(prompt);
 
@@ -1218,10 +1221,10 @@ static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
  * Returns a malloc'd JSON string (caller frees) or NULL. */
 static char *openai_build_body(const agent_t *agent, const delegate_driver_t *driver,
                                cJSON *eff_messages, cJSON *eff_tools, const char *eff_system,
-                               int tok, double temperature)
+                               int tok, double temperature, int preserve_messages)
 {
    cJSON *req = NULL;
-   if (aimee_ir_path_enabled())
+   if (!preserve_messages && aimee_ir_path_enabled())
       req = aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system,
                                      driver->name, tok, temperature);
    if (!req)
@@ -1272,7 +1275,8 @@ static int strip_unusable_tools(cJSON *tools)
 
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out, char *error, size_t error_cap)
+                                  parsed_response_t *out, char *error, size_t error_cap,
+                                  int preserve_messages)
 {
    snprintf(error, error_cap, "upstream model request failed");
    if (!out)
@@ -1326,11 +1330,14 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * original array unless the policy emptied + dropped it (then omit — never
     * forward `tools: []`). */
    cJSON *gw_raw = cJSON_CreateObject();
-   char *tool_system = gw_request_tool_system_prompt(tools, system_prompt);
+   char *tool_system =
+       preserve_messages ? NULL : gw_request_tool_system_prompt(tools, system_prompt);
    if (tool_system)
       LOG_INFO("aimee.tools", "applied CLI-first policy to OpenAI ingress turn");
-   char *completion_system =
-       gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_prompt);
+   char *completion_system = preserve_messages
+                                 ? NULL
+                                 : gw_request_completion_system_prompt(
+                                       messages, tool_system ? tool_system : system_prompt);
    cJSON_AddStringToObject(
        gw_raw, "instructions",
        completion_system ? completion_system
@@ -1385,7 +1392,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    cJSON *mbox = NULL;
    cJSON *econ_messages = messages;
    int upstream_is_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
-   if (gw_mutate_upstream_ok(upstream_is_anthropic))
+   if (!preserve_messages && gw_mutate_upstream_ok(upstream_is_anthropic))
    {
       mbox = cJSON_CreateObject();
       if (mbox)
@@ -1400,8 +1407,8 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
       }
    }
 
-   char *body =
-       openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok, temperature);
+   char *body = openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok,
+                                  temperature, preserve_messages);
    if (!body)
    {
       LOG_WARN("openai.responses", "openai_build_body returned nothing: driver=%s model=%s",
@@ -1602,7 +1609,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    parsed_response_t parsed;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
-                                    &parsed, upstream_error, sizeof(upstream_error));
+                                    &parsed, upstream_error, sizeof(upstream_error), 0);
 
    /* `response.created` is the per-response envelope event: emitted exactly
     * once here for EVERY downstream path (error -> response.failed, text turn,

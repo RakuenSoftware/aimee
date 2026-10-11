@@ -22,8 +22,9 @@ func creationDigest(r DataRequest, authority int) (string, error) {
 		Authority                                                    int
 		Tier, Kind, EpistemicKind, Key, Content, UseCases, SessionID string
 		Confidence                                                   *float64
+		SourceOnly                                                   bool `json:",omitempty"`
 	}{2, r.Operation, r.Scope, r.Workspace, r.Project, r.IncludeAll, authority,
-		r.Tier, r.Kind, r.EpistemicKind, r.Key, r.Content, r.UseCases, r.SessionID, r.Confidence})
+		r.Tier, r.Kind, r.EpistemicKind, r.Key, r.Content, r.UseCases, r.SessionID, r.Confidence, r.SourceOnly})
 	if err != nil {
 		return "", err
 	}

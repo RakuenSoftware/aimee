@@ -1392,3 +1392,14 @@ BEGIN
    public.memory_send_guard_end(TEXT) TO aimee_kb_runtime;
  END IF;
 END $memory_send_guard_runtime$;
+
+-- The Go memory worker advances a bounded durable relation-invalidation page.
+-- Cursor tables remain private to the definer; callers receive no source IDs.
+DO $memory_relation_runtime$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime')
+    AND to_regprocedure('public.memory_apply_relation_invalidations(integer)') IS NOT NULL THEN
+  GRANT EXECUTE ON FUNCTION public.memory_apply_relation_invalidations(INTEGER)
+   TO aimee_kb_runtime;
+ END IF;
+END $memory_relation_runtime$;
