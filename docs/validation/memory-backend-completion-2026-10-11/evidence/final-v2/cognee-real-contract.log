@@ -1,0 +1,5 @@
+=== RUN   TestCogneeLiveContract
+    live_test.go:103: cold source-chunk retrieval: 11031.085 ms (budget 30s)
+--- PASS: TestCogneeLiveContract (36.14s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cognee	37.146s

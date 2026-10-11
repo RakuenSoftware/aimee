@@ -34,10 +34,17 @@ conversation with an explicit memory-unavailable notice. Public external listing
 now prioritizes the active project and latest admissions, while portable transfer
 keeps its cursor contract. See [qualification evidence](../../validation/memory-backend-completion-2026-10-11/README.md).
 
-This does not complete all deliverables: the final prompt is byte-bounded rather
-than exactly tokenizer-bounded, a richer structured purpose/decision/feedback
-projection with preference lifetimes is not yet qualified, and live validation of
-the new `conversation-v2` path across backends remains outstanding. The existing
-Discord bridge/channel and its substantial live testing are already available;
-no additional channel designation is needed. Keep this proposal
-pending until those acceptance conditions and release gates are satisfied.
+The follow-up now uses the deployed chat template and tokenizer for the complete
+prompt, with whole-turn/record omission and model-usage equality checks. Durable
+purpose, partner, decision, question, constraint, feedback and preference pointers
+are rebuilt from canonical human episodes; source deletion also invalidates
+revocation and resolution controls. Preferences have finite, scoped lifetimes.
+Eight targeted trajectory checks and seven real E2B answer checks per owner cover
+topic return, pronouns, corrections, roleplay, expiry, privacy, deletion and outage.
+See the linked report for exact-token gateway and existing-channel live receipts.
+
+Keep this broader proposal pending: complete before/after benefit evaluation,
+full claim-card/served-view assembly and general multi-speaker semantic coverage
+remain beyond the four follow-up acceptance gaps. Protected main/release promotion
+also remains separate from the testing-branch PR. The existing Discord channel
+and earlier live bridge tests remain available; no new channel is required.

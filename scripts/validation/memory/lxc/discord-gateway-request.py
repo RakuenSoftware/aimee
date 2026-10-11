@@ -29,5 +29,7 @@ async def main():
   print(json.dumps(value))
 asyncio.run(main())'''
 result=subprocess.run(['docker','exec','-i','aimee-discord-knowledge-discord-bridge-1','python','-c',code],input=json.dumps(request),text=True,capture_output=True,timeout=140)
-if result.returncode:raise RuntimeError('bridge gateway request failed')
+if result.returncode:
+ print(result.stderr.splitlines()[-1] if result.stderr else 'bridge gateway request failed',file=sys.stderr)
+ raise RuntimeError('bridge gateway request failed')
 sys.stdout.write(result.stdout)

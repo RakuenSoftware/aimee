@@ -1,6 +1,6 @@
 # Memory backend qualification, 2026-10-11
 
-Status: implementation and disposable-lab qualification; **not released**.
+Status: all four follow-up acceptance gaps qualified; PR CI and merge into testing pending.
 The baseline independent native/Cognee/Hillock integration is brought onto the
 current testing base. This follow-up fixes defects exposed by corpus and
 conversation tests and adds a backend-neutral Discord episode profile.
@@ -64,27 +64,29 @@ criterion requires the factual answer instead. Native evidence includes that
 explicit scoring correction. These are frozen synthetic cases, not live Discord
 messages or an exhaustive semantic-quality benchmark.
 
-The real Cognee contract with Gemma4 E2B Q4 inference and Bekko A25M embeddings
-passed in 159.28 seconds with an explicit 600-second diagnostic budget. It made
-10 completion and 20 embedding calls. The initial one-minute HTTP calls failed
-before indexing completed, including schema retries. This establishes a functional
-real-model route, **not** acceptance within the bridge's 30-second timeout.
+The original synchronous graph-cognify diagnostic took 159.28 seconds. The final
+CHUNKS route performs bounded parallel document classification, extraction and
+embedding without graph LLM extraction. With pinned real Cognee 1.6.2 and deployed
+Bekko A25M embeddings, the contract cold recall takes 11,031 ms. At 100, 1,000 and
+10,000 records, cold recalls take 21,146 / 22,071 / 22,463 ms and queued warm p95
+is 4,378 / 4,773 / 7,435 ms. All stay within 30 seconds with zero identity errors.
 The embedding wire alias is `text-embedding-3-small`; the actual model is
 `hotchpotch/bekko-embedding-v1-a25m`, pinned revision
 `44f0b8af0f487acd0ccf1a7cb7ae7a29a6dfc09c`, 384 dimensions, identical empty query
-and document prefixes. Native embedding conversion therefore preserves its space.
+and document prefixes. See `evidence/final-v2/cognee-real-*.json` and contract log.
 
 ## Validation and evidence
 
 - Required real pinned Hillock contract passed, including restart and erasure.
 - Required real Cognee contract with deterministic models passed after the changes.
 - Memory/core/catalog/provider/egress Go packages pass race tests.
-- 52 Discord adapter, worker and configuration tests pass.
+- 121 Discord adapter, projection, exact-token, worker and configuration tests pass.
 - Six real adapter/guard checks pass for each of native, Cognee and Hillock.
   Assistant evidence can be omitted from bounded context, but exact owner reads
   prove its retained provenance and the omission receipt remains visible.
-- Native PostgreSQL runtime replay passed in 278.77 seconds, including question,
-  RLS, expiry and activation regression checks.
+- Native PostgreSQL runtime replay passed initially in 278.77 seconds; the final
+  isolated runtime-role replay passes in 152.86 seconds, including source-only
+  creation retry intent, question, RLS, expiry and activation regressions.
 - Module descriptors, source ownership, C memory boundary, process contracts,
   egress ownership and release approval topology pass. Proposal reconciliation
   remains report-only with pre-existing drift warnings.
@@ -93,30 +95,65 @@ See [evidence](evidence/) for safe synthetic JSON receipts, frozen answers,
 provider summaries, contracts and test results. Private lab resume state, bearer
 credentials, exported user stores and production conversation contents are excluded.
 
-## Remaining acceptance and release gates
+## Four follow-up acceptance gaps
 
-1. Real-model Cognee cold indexing within the conversational request budget is
-   unqualified; the extended diagnostic does not remove that gate.
-2. The bridge's assembled prompt is capped at 6,144 UTF-8 content bytes rather than
-   exactly counted with the deployed tokenizer. The frozen E2B fixtures fit its
-   context, but arbitrary conversation inputs/history are not thus qualified.
-3. A richer structured purpose/decision/feedback projection with scoped preference
-   lifetimes and all requested pronoun, deletion/private-source, expiry and feedback
-   trajectories remains pending in the conversational proposal.
-4. The existing Discord bridge/channel already has substantial live validation,
-   including real multi-bot exchanges, restart recovery and verified attachment
-   delivery, recorded in the Discord worktree's 2026-10-10 runtime/workflow reports.
-   No additional channel designation is needed. The remaining delta is live
-   validation of the newly added `conversation-v2` memory path with each selected
-   backend; the earlier bridge evidence does not establish that coverage. This
-   qualification run sent no Discord messages.
-5. [Draft PR #3020](https://github.com/RakuenSoftware/aimee/pull/3020) is open
-   against testing through the authenticated GitHub connector. GitHub CLI login
-   remains unavailable, but it no longer blocks PR creation. Required CI, merge
-   into testing, testing-to-main protected approval and protected release approval
-   remain outstanding. The existing workflows enforce those gates.
+1. Real-model Cognee cold retrieval now meets the 30-second budget through the
+   bounded CHUNKS wrapper above; graph cognify is a separate operation.
+2. The bridge counts the deployed model's rendered template and tokenizer before
+   every generation and repair, including roles, BOS, delimiters and template
+   arguments. It reserves the output budget, removes complete history turns and
+   whole evidence records, and updates dependent projections and omissions.
+   Missing tokenizer access and irreducible prompts refuse generation. The
+   gateway's explicit preservation mode prevents hidden prompt augmentation;
+   bridge responses require reported prompt usage to match the count. All four
+   deployed gateway cases pass: multilingual text, role history, literal special
+   delimiters and oversized history removed as complete turns (30/50/40/27
+   counted tokens, respectively, exactly matching model usage).
+3. Purpose, decisions, open questions, constraints, feedback and finite-lived
+   preferences are durable pointers in the selected owner. Every pointer and
+   control is recomputed against its canonical human episode before use. Bot
+   repetition cannot confer human authority; revoked, deleted or expired sources
+   are excluded. Literal episode admission bypasses factual extraction through
+   `source_only`, which is included in creation retry identity. Eight fresh
+   trajectory checks pass per backend: restart/topic return, pronoun after bot
+   churn, person/place correction and feedback, roleplay then real correction,
+   preference expiry, project privacy, source deletion and unavailable recall.
+   Seven real Gemma4 E2B answers per backend pass with exact tokenizer receipts;
+   the eighth outage case verifies no evidence is fabricated, without inference.
+4. The live run passes for native, Cognee and Hillock in the existing channel
+   `1557125396716191786`, guild `1532201714462101594`. Authenticated REST history
+   supplies two actual human and three actual bot source messages per owner.
+   Bot-authored fixture queries and replies are sent in private thread
+   `1558834137350152292`; the exact thread ID is authoritative in the JSON receipt.
+   The deployed `ModelClient.reply` uses each selected owner's prefetched context,
+   the actual Unix gateway and mTLS Gemma4 E2B. All three count 990 prompt tokens,
+   reserve 384 output tokens in the 2048-token limit, and verify provider usage
+   equality. Each collection guard is acquired before Discord send, released
+   after the confirmed receipt, and the actual bot response message ID is retained
+   by that owner. REST verifies the delivered author. The thread is archived and
+   locked. This is authenticated historical-source replay plus bot-authored live
+   delivery, separate from synthetic human trajectories; it does not claim a new
+   human or unlimited multi-bot conversation occurred in this run.
 
-The disposable native/Cognee/Hillock lab guests received the candidate memory
-binary and synthetic fixtures. Production Discord services/configuration and
-backend selection were not changed. Keep both pending qualification proposals
-pending; no production-scale or identical retrieval behavior claim is made.
+The existing bridge's earlier multi-bot, reconnect, attachment and workflow
+validation remains in its 2026-10-10 reports. These checks concern the newly
+introduced conversation-v2 path; no new channel designation is required.
+
+Production candidate services retain the existing bot identity, workflow service,
+personas, volumes and model weights. Native remains the selected production
+owner; Cognee and Hillock are qualified through their isolated selected-owner
+services. The three owners are alternatives, not simultaneous replicated stores.
+The conversation-v2 profile is enabled after the exact gateway probe.
+
+[PR #3020](https://github.com/RakuenSoftware/aimee/pull/3020) targets testing.
+Required checks and merge remain pending at this report's preparation point.
+Protected testing-to-main and release approvals remain their existing separate
+workflow; this qualification does not claim a main release or exhaustive semantic
+quality, corpus-scale indexing equivalence, or completion of broader research.
+
+Final evidence lives in `evidence/final-v2/`. The final Cognee answer rerun uses
+the existing knowledge Gemma4 E2B instance (same weights and template), capped by
+the packer at 2048 tokens; native/Hillock use the existing 2048-token reply instance.
+Live runs for all three owners use the actual reply gateway. It includes safe synthetic fixtures,
+model answers and usage, test logs, and live metadata receipts. Private resume
+state, credentials, provider databases and production chat contents are excluded.
