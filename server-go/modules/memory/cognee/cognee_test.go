@@ -57,6 +57,7 @@ type cogneeFixture struct {
 	datasets        map[string]dataset
 	contents        map[string]string
 	searches        int
+	cognifications  int
 	serial          int
 	foreign         bool
 	started         bool
@@ -105,6 +106,7 @@ func (f *cogneeFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.contents[name] = string(raw)
 		respond(map[string]string{"status": "success"})
 	case r.Method == "POST" && r.URL.Path == "/api/v1/cognify":
+		f.cognifications++
 		var input struct {
 			Datasets   []string `json:"datasets"`
 			Background bool     `json:"run_in_background"`
@@ -238,12 +240,27 @@ func TestCogneeContractRoundTripAndIsolation(t *testing.T) {
 	if len(fixture.datasets) != 2 {
 		t.Fatal("old revision retained", fixture.datasets)
 	}
+	beforeRuns := fixture.cognifications
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns {
+		t.Fatal("warm search reindexed acknowledged datasets", err)
+	}
+	// Same name with a new provider identity requires completion again.
+	for name, d := range fixture.datasets {
+		d.ID = "00000000-0000-0000-0000-ffffffffffff"
+		fixture.datasets[name] = d
+		break
+	}
+	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); err != nil || fixture.cognifications != beforeRuns+1 {
+		t.Fatal("recreated dataset skipped indexing", err)
+	}
 	fixture.foreign = true
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) {
 		t.Fatal("foreign result admitted", err)
 	}
 	fixture.foreign = false
 	fixture.started = true
+	backend, _ = New(records, transport, server.URL, "node-fixture")
+	provider = backend
 	before := fixture.searches
 	if _, err = provider.Search(ctx, scope, "needle", "", "", 2); !errors.Is(err, memory.ErrUnavailable) || fixture.searches != before {
 		t.Fatal("unfinished cognify treated as ready", err)

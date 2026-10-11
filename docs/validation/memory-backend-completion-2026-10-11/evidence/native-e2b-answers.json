@@ -1,0 +1,153 @@
+{
+  "backend": "native",
+  "model": "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+  "passed": true,
+  "status": "complete",
+  "cases": [
+    {
+      "id": "exact_units",
+      "retrieval_passed": true,
+      "answer": "Virant reported that Kibukx is a person whose height is exactly 69cm.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 20,
+        "prompt_tokens": 465,
+        "total_tokens": 485,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 5633.254
+    },
+    {
+      "id": "person_mountain",
+      "retrieval_passed": true,
+      "answer": "Samy reported that the Kibukx mountains have an elevation of 69 feet.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 19,
+        "prompt_tokens": 467,
+        "total_tokens": 486,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 4547.936
+    },
+    {
+      "id": "attribution",
+      "retrieval_passed": true,
+      "answer": "Virant reported Kibukx's backpack weighs 7kg. Samy later repeated Virant's report, but Samy did not make an independent measurement.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 35,
+        "prompt_tokens": 490,
+        "total_tokens": 525,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 5406.981
+    },
+    {
+      "id": "conflict",
+      "retrieval_passed": true,
+      "answer": "Virant reported the blue crate weighs 7kg; Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims. Neither has been verified.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 37,
+        "prompt_tokens": 162,
+        "total_tokens": 199,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 3088.353
+    },
+    {
+      "id": "negation",
+      "retrieval_passed": true,
+      "answer": "Virant explicitly said: the red box does not contain lithium.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 14,
+        "prompt_tokens": 468,
+        "total_tokens": 482,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 5470.389
+    },
+    {
+      "id": "fiction",
+      "retrieval_passed": true,
+      "answer": "Virant later clarified that the real green desk stays on the floor.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 15,
+        "prompt_tokens": 156,
+        "total_tokens": 171,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 2195.7,
+      "scoring_note": "Criterion requires grounded real behavior; it does not require repeating the word joke."
+    },
+    {
+      "id": "topic_return",
+      "retrieval_passed": true,
+      "answer": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC. Virant requested the original time be preserved without a local-time conversion.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 37,
+        "prompt_tokens": 161,
+        "total_tokens": 198,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 2562.835
+    },
+    {
+      "id": "paraphrase",
+      "retrieval_passed": true,
+      "answer": "Virant's enduring preference for the laboratory reports is concise answers with metric measurements.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 18,
+        "prompt_tokens": 474,
+        "total_tokens": 492,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 4421.349
+    }
+  ]
+}

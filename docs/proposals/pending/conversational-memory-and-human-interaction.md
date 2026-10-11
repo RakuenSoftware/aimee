@@ -20,3 +20,22 @@ The bridge's live bot-chat and height correction fixes demonstrate conversation 
 Freeze multi-speaker conversational trajectories for: 69cm versus feet; mistaken human/mountain entity links; “who told you?”; conflicting reporters; jokes/roleplay then real correction; pronoun follow-ups; explicit preferences and expiry; topic return/restart; deleted/private memories; backend outage; and an unbounded multi-bot exchange. Compare before/after exact answers, source attribution, unsupported claims, useful context, latency and token cost. Run the same cases against native, Cognee and Hillock profiles with backend limits declared. Never claim memory benefit from retrieval counts alone or auto-promote a learned policy from this fixture.
 
 Related producer work remains in [auto-population](memory-auto-population-phase4.md), while fitted ranking and activation are owned by [ranking/feedback](retrieval-ranking-feedback-and-promotion.md) and [MR promotion residuals](memory-reliability-promotion-and-adapter-residuals.md).
+
+
+## Implementation update, 2026-10-11
+
+The optional `conversation-v2` Discord profile now captures admitted episodes
+before inference and rebuilds context from the selected owner after restart.
+It preserves raw text, speaker identity and original units; bot turns remain agent
+evidence. Scoped served recall plus recent source admissions are packed as whole
+records with omission receipts. Current identity/content/version are checked and
+the owner send guard protects delivery. Capture/recall outages permit ordinary
+conversation with an explicit memory-unavailable notice. Public external listing
+now prioritizes the active project and latest admissions, while portable transfer
+keeps its cursor contract. See [qualification evidence](../../validation/memory-backend-completion-2026-10-11/README.md).
+
+This does not complete all deliverables: the final prompt is byte-bounded rather
+than exactly tokenizer-bounded, a richer structured purpose/decision/feedback
+projection with preference lifetimes is not yet qualified, and live multi-bot
+Discord/reconnect behavior requires a designated test channel. Keep this proposal
+pending until those acceptance conditions and release gates are satisfied.

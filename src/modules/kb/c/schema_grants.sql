@@ -1381,3 +1381,14 @@ BEGIN
   END LOOP;
 END
 $$;
+
+-- The verified KB runtime acquires/releases source send guards through memory.
+-- It receives no direct access to the barrier or opaque lease tokens.
+DO $memory_send_guard_runtime$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime')
+    AND to_regprocedure('public.memory_send_guard_begin(text,integer)') IS NOT NULL THEN
+  GRANT EXECUTE ON FUNCTION public.memory_send_guard_begin(TEXT,INTEGER),
+   public.memory_send_guard_end(TEXT) TO aimee_kb_runtime;
+ END IF;
+END $memory_send_guard_runtime$;

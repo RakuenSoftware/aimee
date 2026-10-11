@@ -176,6 +176,7 @@ type DataRequest struct {
 }
 
 type Record struct {
+	Metadata       json.RawMessage      `json:"metadata,omitempty"`
 	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
 	Authorship     *PersonalAuthorship  `json:"authorship,omitempty"`
 	Version        *MemoryRecordVersion `json:"version,omitempty"`
@@ -1440,7 +1441,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 				if r.Authorship != nil {
 					category = r.Authorship.Category
 				}
-				response.PublicRecords = append(response.PublicRecords, publicMemoryRecord{ID: r.ID, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: r.Confidence, Version: r.Version, ProvenanceCategory: category})
+				var metadata struct {
+					UseCases      string `json:"use_cases"`
+					SourceSession string `json:"source_session"`
+				}
+				// Metadata is opaque optional JSON. Other imported shapes retain
+				// their payload without claiming this compatibility view.
+				_ = json.Unmarshal(r.Metadata, &metadata)
+				response.PublicRecords = append(response.PublicRecords, publicMemoryRecord{ID: r.ID, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: r.Confidence, Version: r.Version, ProvenanceCategory: category, UseCases: metadata.UseCases, SourceSession: metadata.SourceSession, Metadata: r.Metadata})
 			}
 		}
 		if readResult != nil {

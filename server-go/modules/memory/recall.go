@@ -202,6 +202,28 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 	if err != nil {
 		return nil, err
 	}
+	if s.placement == PlacementKB && s.backendFactory == nil && query != "" && len(active) == 0 {
+		// A question need not occur verbatim in an admitted source. Keep the
+		// existing phrase success path, then rank current lexical evidence when
+		// that path is empty. The same source/validity and activation gates apply.
+		fallback, e := s.recallLexicalRecords(ctx, query, activeCap)
+		if e != nil {
+			return nil, e
+		}
+		if snapshot != nil {
+			var why map[int64]string
+			var count int
+			fallback, why, count, e = s.activationAfterFusion(ctx, snapshot, fallback, nil, activeCap)
+			held += count
+			for id, reason := range why {
+				reasons[id] = reason
+			}
+			if e != nil {
+				return nil, e
+			}
+		}
+		active = fallback
+	}
 	recordRetrievalArm(ctx, "lexical", retrievalArmObservation{State: "available", Reason: "eligible_native_active_context_sql", Candidates: len(active), Quota: activeCap, IndexReadiness: "query_executed"})
 	if s.backendFactory != nil && s.placement == PlacementKB && query != "" {
 		request := s.backendRequest

@@ -1,0 +1,15 @@
+{
+  "status": "shipping-deadline-failed",
+  "provider": "Cognee 1.6.2",
+  "completion_model": "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+  "context_tokens": 8192,
+  "embedding_model": "bekko-a25m",
+  "embedding_repo": "hotchpotch/bekko-embedding-v1-a25m",
+  "embedding_revision": "44f0b8af0f487acd0ccf1a7cb7ae7a29a6dfc09c",
+  "dimensions": 384,
+  "query_prefix": "",
+  "document_prefix": "",
+  "wire_embedding_alias": "text-embedding-3-small",
+  "summary": "real indexing completed after the one-minute HTTP call had failed; retries included missing graph descriptions and an object where summary must be a string",
+  "diagnostic_with_extended_deadline": "passed in 159.28 seconds with a 600-second budget; not a 30-second deadline pass"
+}

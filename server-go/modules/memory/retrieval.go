@@ -113,6 +113,20 @@ ORDER BY `+queryScopeOrder+`,confidence DESC,use_count DESC,updated_at DESC,id D
 	return s.readRecallRecords(ctx, query, args...)
 }
 
+func (s *postgresDataStore) recallLexicalRecords(ctx context.Context, query string, limit int) ([]Record, error) {
+	// plainto_tsquery quotes/normalizes user text before changing conjunctions
+	// to alternatives. No query text is interpolated into SQL or tsquery syntax.
+	return s.readRecallRecords(ctx, `WITH hint AS (
+ SELECT replace(plainto_tsquery('english',$1)::text,' & ',' | ')::tsquery AS terms
+)
+SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
+FROM `+s.recallSource()+`,hint
+WHERE lifecycle_state='active' AND activation_suppressed=0
+ AND to_tsvector('english',key||' '||content) @@ hint.terms
+ORDER BY `+queryScopeOrder+`,ts_rank_cd(to_tsvector('english',key||' '||content),hint.terms) DESC,
+ confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $2`, query, limit)
+}
+
 func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string, args ...any) ([]Record, error) {
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {

@@ -1,0 +1,58 @@
+{
+  "deadline_ms": 30000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "hillock",
+      "records": 100,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 47387,
+      "import_ms": 6.028219,
+      "restart_ms": 21.768924,
+      "cold_ms": 156.154426,
+      "p50_ms": 641.839442,
+      "p95_ms": 656.435828,
+      "max_ms": 656.435828,
+      "requests_per_second": 6.208691370930287,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    },
+    {
+      "backend": "hillock",
+      "records": 1000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 477593,
+      "import_ms": 53.497374,
+      "restart_ms": 37.302154,
+      "cold_ms": 578.231428,
+      "p50_ms": 1858.024154,
+      "p95_ms": 1889.069434,
+      "max_ms": 1889.069434,
+      "requests_per_second": 2.1581170858754284,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    },
+    {
+      "backend": "hillock",
+      "records": 10000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 4824599,
+      "import_ms": 285.425474,
+      "restart_ms": 291.755889,
+      "cold_ms": 924.584116,
+      "p50_ms": 3634.407565,
+      "p95_ms": 3710.996831,
+      "max_ms": 3710.996831,
+      "requests_per_second": 1.1053045872994085,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

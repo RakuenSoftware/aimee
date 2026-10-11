@@ -1,0 +1,51 @@
+{
+  "deadline_ms": 120000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "cognee",
+      "records": 10000,
+      "workers": 2,
+      "samples": 4,
+      "catalog_bytes": 4824599,
+      "import_ms": 207.200564,
+      "restart_ms": 284.292507,
+      "cold_ms": 57137.124724,
+      "p50_ms": 24114.37785,
+      "p95_ms": 24933.683185,
+      "max_ms": 24933.683185,
+      "requests_per_second": 0.08159587092649688,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "DELETE /api/v1/datasets/:id": {
+          "calls": 16,
+          "total_ms": 55807.852593999996,
+          "max_ms": 4179.805076
+        },
+        "GET /api/v1/datasets": {
+          "calls": 10,
+          "total_ms": 304.944772,
+          "max_ms": 98.659823
+        },
+        "POST /api/v1/add": {
+          "calls": 16,
+          "total_ms": 11202.271103,
+          "max_ms": 2614.928752
+        },
+        "POST /api/v1/cognify": {
+          "calls": 1,
+          "total_ms": 33846.418403,
+          "max_ms": 33846.418403
+        },
+        "POST /api/v1/search": {
+          "calls": 5,
+          "total_ms": 54909.098454,
+          "max_ms": 11562.213483
+        }
+      }
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

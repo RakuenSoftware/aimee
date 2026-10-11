@@ -1,0 +1,4 @@
+=== RUN   TestCogneeLiveContract
+--- PASS: TestCogneeLiveContract (159.28s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cognee	160.308s

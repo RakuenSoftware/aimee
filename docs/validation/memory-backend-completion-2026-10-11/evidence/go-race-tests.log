@@ -1,0 +1,6 @@
+ok  	github.com/JBailes/aimee/server-go/memory	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/memory	20.899s
+ok  	github.com/JBailes/aimee/server-go/modules/memory/backendstore	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/memory/cognee	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	(cached)
+ok  	github.com/JBailes/aimee/server-go/modules/egress	(cached)

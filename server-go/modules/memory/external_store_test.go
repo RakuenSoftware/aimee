@@ -8,10 +8,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/JBailes/aimee/server-go/modules/memory/backendstore"
 	"github.com/JBailes/aimee/server-go/modules/memory/hillock"
 	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
 )
@@ -96,13 +99,17 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 		return out
 	}
 	confidence := 1.0
-	first := call(DataRequest{Operation: "store", Kind: "world_fact", Key: "Kibukx height", Content: "69cm", Confidence: &confidence, Authority: AuthorityUser, IdempotencyKey: "independent-create-0001"})
+	metadata := `{"source":"discord","author_id":"333333333333333333","message_id":"777777777777777777"}`
+	first := call(DataRequest{Operation: "store", Kind: "world_fact", Key: "Kibukx height", Content: "69cm", UseCases: metadata, SessionID: "chat-1", PublicView: true, Confidence: &confidence, Authority: AuthorityUser, IdempotencyKey: "independent-create-0001"})
 	if len(first.Records) != 1 || first.Records[0].ID <= 0 {
 		t.Fatal(first)
 	}
 	record := first.Records[0]
-	repeated := call(DataRequest{Operation: "store", Kind: "world_fact", Key: "Kibukx height", Content: "69cm", Confidence: &confidence, Authority: AuthorityUser, IdempotencyKey: "independent-create-0001"})
-	if repeated.Records[0].ID != record.ID {
+	if len(first.PublicRecords) != 1 || first.PublicRecords[0].UseCases != metadata || first.PublicRecords[0].SourceSession != "chat-1" {
+		t.Fatal("external public capture lost Discord source", first)
+	}
+	repeated := call(DataRequest{Operation: "store", Kind: "world_fact", Key: "Kibukx height", Content: "69cm", UseCases: metadata, SessionID: "chat-1", PublicView: true, Confidence: &confidence, Authority: AuthorityUser, IdempotencyKey: "independent-create-0001"})
+	if len(repeated.Records) != 1 || repeated.Records[0].ID != record.ID {
 		t.Fatal("retry duplicated record")
 	}
 	data, err = configuredExternalStore(executor, PlacementServer)
@@ -113,6 +120,9 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 	got := call(DataRequest{Operation: "get", ID: record.ID, IncludeVersion: true})
 	if got.Records[0].Content != "69cm" || got.Records[0].Authorship.Principal != "Virant" {
 		t.Fatal(got)
+	}
+	if string(got.Records[0].Metadata) != string(record.Metadata) || len(record.Metadata) == 0 {
+		t.Fatal("restart lost source metadata", got)
 	}
 	correction := call(DataRequest{Operation: "supersede", ID: record.ID, Content: "170cm", Confidence: &confidence, ExpectedVersion: record.Version, Authority: AuthorityUser})
 	if correction.Records[0].Content != "170cm" {
@@ -125,6 +135,9 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 	old := call(DataRequest{Operation: "get", ID: record.ID, AtVersion: record.Version})
 	if old.Records[0].Content != "69cm" || !old.Records[0].Historical {
 		t.Fatal(old)
+	}
+	if string(old.Records[0].Metadata) != string(record.Metadata) || string(correction.Records[0].Metadata) != string(record.Metadata) {
+		t.Fatal("correction/history lost original source data", old, correction)
 	}
 	actor.UserAuthority = false
 	refused := call(DataRequest{Operation: "supersede", ID: record.ID, Content: "4 feet", Confidence: &confidence, Authority: AuthorityUser})
@@ -237,3 +250,30 @@ func TestExternalBackendHandlerWithoutNativeStorage(t *testing.T) {
 }
 
 func mustMarshal(value any) []byte { raw, _ := json.Marshal(value); return raw }
+
+func TestExternalPublicListPrefersLatestAdmittedProjectRecords(t *testing.T) {
+	catalog, err := backendstore.New(filepath.Join(t.TempDir(), "catalog"), "11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	put := func(scope Scope, key string) contract.Record {
+		r, err := catalog.Put(ctx, scope, contract.Record{Key: key, Content: key, Kind: "fact", Tier: "L2", Confidence: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for i := 0; i < 10; i++ {
+		put(Scope{Type: ScopeGlobal, Value: "_global"}, strconv.Itoa(i))
+	}
+	project := Scope{Type: ScopeProject, Value: "chat"}
+	older := put(project, "older input")
+	latest := put(project, "latest assistant episode")
+	put(Scope{Type: ScopeProject, Value: "private"}, "PRIVATE CANARY")
+	owner := &externalDataStore{catalog: catalog, placement: PlacementKB}
+	result, status := owner.execute(ctx, DataRequest{Operation: "list", Project: "chat", Limit: 2}, project, handlerOptions{}, false)
+	if status != bus.ModuleStatusOK || len(result.Records) != 2 || result.Records[0].ID != latest.ID || result.Records[1].ID != older.ID {
+		t.Fatal("global/old records displaced current channel admissions", result, status)
+	}
+}

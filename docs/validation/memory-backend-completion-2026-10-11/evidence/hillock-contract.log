@@ -1,0 +1,8 @@
+=== RUN   TestHillockLiveContract
+--- PASS: TestHillockLiveContract (3.95s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	4.959s
+=== RUN   TestHillockLiveContract
+--- PASS: TestHillockLiveContract (3.92s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory/hillock	4.932s

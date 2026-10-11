@@ -9,7 +9,7 @@ env=os.environ.copy();env.update(PATH='/usr/local/go/bin:'+env.get('PATH',''),GO
 with (out/'regression.log').open('w') as log:
  subprocess.run(['go','test','-race','-short','-count=1','./memory','./modules/memory','./modules/memory/backendstore','./modules/memory/cognee','./modules/memory/hillock','./modules/egress'],cwd=root/'server-go',env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
 with (out/'transfer-build.log').open('w') as log:
- subprocess.run(['go','build','-o','/opt/aimee/src/build/obj/aimee-memory-transfer','./cmd/aimee-memory-transfer'],cwd=root/'server-go',env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+ subprocess.run(['go','build','-o','/opt/aimee/src/build/obj/aimee-memory-transfer','./modules/memory/cmd/aimee-memory-transfer'],cwd=root/'server-go',env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
 with (out/'build.log').open('w') as log:
  subprocess.run(['make','-C','src','-j4','../aimee','../aimee-server','../aimee-kb','../aimee-delegate-egress','build/obj/aimee-module','build/obj/aimee-module-config'],cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
 subprocess.run(['systemctl','stop','aimee-memory-validation'],check=True)

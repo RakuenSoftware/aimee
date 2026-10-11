@@ -1,0 +1,58 @@
+{
+  "deadline_ms": 30000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "catalog",
+      "records": 100,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 47387,
+      "import_ms": 1.399161,
+      "restart_ms": 1.533119,
+      "cold_ms": 1.593962,
+      "p50_ms": 1.260934,
+      "p95_ms": 26.978364,
+      "max_ms": 26.978364,
+      "requests_per_second": 438.1430388053066,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    },
+    {
+      "backend": "catalog",
+      "records": 1000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 477593,
+      "import_ms": 14.57471,
+      "restart_ms": 16.161129,
+      "cold_ms": 13.864039,
+      "p50_ms": 16.255504,
+      "p95_ms": 265.016883,
+      "max_ms": 265.016883,
+      "requests_per_second": 45.26403888778426,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    },
+    {
+      "backend": "catalog",
+      "records": 10000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 4824599,
+      "import_ms": 169.453711,
+      "restart_ms": 177.018582,
+      "cold_ms": 187.904415,
+      "p50_ms": 223.033561,
+      "p95_ms": 2613.676047,
+      "max_ms": 2613.676047,
+      "requests_per_second": 4.587845779938782,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

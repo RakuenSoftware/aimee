@@ -1,0 +1,152 @@
+{
+  "backend": "cognee",
+  "model": "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL",
+  "passed": true,
+  "status": "complete",
+  "cases": [
+    {
+      "id": "exact_units",
+      "retrieval_passed": true,
+      "answer": "Virant reported that Kibukx's height is exactly 69cm.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 18,
+        "prompt_tokens": 388,
+        "total_tokens": 406,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 3900.741
+    },
+    {
+      "id": "person_mountain",
+      "retrieval_passed": true,
+      "answer": "Samy reported that the Kibukx mountains have an elevation of 69 feet.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 19,
+        "prompt_tokens": 400,
+        "total_tokens": 419,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 3841.946
+    },
+    {
+      "id": "attribution",
+      "retrieval_passed": true,
+      "answer": "Virant reported that Kibukx's backpack weighs 7kg. Samy later repeated Virant's report, and Samy did not make an independent measurement.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 36,
+        "prompt_tokens": 406,
+        "total_tokens": 442,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 4203.95
+    },
+    {
+      "id": "conflict",
+      "retrieval_passed": true,
+      "answer": "Virant reported the blue crate weighs 7kg, and Samy reported the same blue crate weighs 9kg. These are conflicting unverified speaker claims.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 33,
+        "prompt_tokens": 388,
+        "total_tokens": 421,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 4034.654
+    },
+    {
+      "id": "negation",
+      "retrieval_passed": true,
+      "answer": "Virant explicitly said: the red box does not contain lithium.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 14,
+        "prompt_tokens": 382,
+        "total_tokens": 396,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 5610.67
+    },
+    {
+      "id": "fiction",
+      "retrieval_passed": true,
+      "answer": "Virant later clarified that the real green desk stays on the floor.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 15,
+        "prompt_tokens": 385,
+        "total_tokens": 400,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 3673.533
+    },
+    {
+      "id": "topic_return",
+      "retrieval_passed": true,
+      "answer": "Virant and Samy agreed that the observatory review is Tuesday at 14:00 UTC.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 22,
+        "prompt_tokens": 408,
+        "total_tokens": 430,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 6868.407
+    },
+    {
+      "id": "paraphrase",
+      "retrieval_passed": true,
+      "answer": "Virant has an enduring preference for the laboratory reports to be concise answers with metric measurements.",
+      "missing": [],
+      "forbidden": [],
+      "usage": {
+        "completion_tokens": 19,
+        "prompt_tokens": 392,
+        "total_tokens": 411,
+        "prompt_tokens_details": {
+          "cached_tokens": 369
+        }
+      },
+      "omitted_records": 0,
+      "status": "passed",
+      "elapsed_ms": 1649.763
+    }
+  ]
+}

@@ -1489,7 +1489,7 @@ $(BINARY): $(CLI_OBJS) $(CLIENT_SUPPORT_OBJS) $(CORE_CONNECTION_LIB)
 # The corpus evaluator owns its disposable PostgreSQL session and Go memory owner.
 MEMORY_EVAL_GO_SRCS := $(shell find ../server-go -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
 $(MEMORY_TRANSFER): $(MEMORY_EVAL_GO_SRCS)
-	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-transfer ./cmd/aimee-memory-transfer
+	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-transfer ./modules/memory/cmd/aimee-memory-transfer
 
 $(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-eval ./modules/memory/cmd/aimee-memory-eval
