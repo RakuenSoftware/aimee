@@ -332,3 +332,19 @@ refer to disposable local fixtures, not production migration or deployment.
 
 Both disposable PostgreSQL instances were stopped after validation. No production
 database, service configuration, or deployment was changed.
+
+### CI toolchain follow-up
+
+PR #3019's first CI run passed the tests but failed the reachable-vulnerability scan:
+nine Go 1.26.7 standard-library advisories were fixed in Go 1.26.9. The aggregate unit
+gate reported that same dependency failure. After upgrading Go, the scan also reached
+four `golang.org/x/net` advisories fixed in v0.60.0, including
+[GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617).
+
+All three service modules now require Go 1.26.9, and every Go Docker builder uses the
+registry-verified 1.26.9 Bookworm image digest. The shared module uses `x/net` v0.60.0
+and its required `x/sync`, `x/sys`, and `x/text` versions. The reachable-vulnerability
+gate and focused PostgreSQL fact-mutation replay passed after these updates.
+The complete `make -C src go-unit-tests` gate, including C/Go bus conformance,
+cgo-free memory process/probe builds, routing contract tests, and documentation
+checks also passed with the updated toolchain. Container image builds remain a CI check.
