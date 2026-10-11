@@ -10,21 +10,9 @@ on:
         type: string
         default: ''
       force:
-        description: 'Retest even when this exact Aimee/Hillock pair already passed'
+        description: 'Retest even when this Hillock branch revision already passed'
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - '.github/workflows/hillock-prereleases.yml'
-      - 'scripts/validation/memory/discover-hillock-prereleases.py'
-      - 'scripts/validation/memory/run-hillock-contract.py'
-      - 'scripts/validation/memory/qualify-external.go'
-      - 'scripts/tests/test_hillock_prereleases.py'
-      - 'integrations/hillock/**'
-      - 'server-go/modules/memory/**'
-      - 'server-go/memory/**'
-      - 'server-go/go.mod'
-      - 'server-go/go.sum'
 
 permissions:
   contents: read
@@ -89,14 +77,14 @@ jobs:
         run: |
           echo "EVIDENCE=$RUNNER_TEMP/hillock-evidence" >> "$GITHUB_ENV"
           echo "RECEIPT=$RUNNER_TEMP/hillock-passed" >> "$GITHUB_ENV"
-      # Only successful receipts are cached, with no fallback keys. A new branch,
-      # upstream commit or Aimee commit must qualify; failed runs retry next scan.
+      # Only successful receipts are cached, with no fallback keys. A new branch
+      # or upstream commit must qualify; Aimee commits do not trigger retests.
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         id: passed
         if: inputs.force != true
         with:
           path: ${{ env.RECEIPT }}
-          key: hillock-qualified-v1-${{ matrix.branch_key }}-${{ matrix.revision }}-${{ github.sha }}
+          key: hillock-qualified-v2-${{ matrix.branch_key }}-${{ matrix.revision }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         if: steps.passed.outputs.cache-hit != 'true'
         with:
@@ -131,7 +119,7 @@ jobs:
         if: success() && steps.passed.outputs.cache-hit != 'true'
         with:
           path: ${{ env.RECEIPT }}
-          key: hillock-qualified-v1-${{ matrix.branch_key }}-${{ matrix.revision }}-${{ github.sha }}
+          key: hillock-qualified-v2-${{ matrix.branch_key }}-${{ matrix.revision }}
       - name: Qualification summary
         if: always()
         env:
@@ -144,8 +132,8 @@ jobs:
           from pathlib import Path
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
               out.write(f"Hillock `{os.environ['HILLOCK_BRANCH']}` at `{os.environ['HILLOCK_REVISION']}`\n\n")
-              out.write(f"Aimee: `{os.environ['AIMEE_REVISION']}`\n\n")
-              out.write('Reused exact successful qualification.\n' if os.environ['CACHE_HIT'] == 'true'
+              out.write(f"Scanner Aimee revision: `{os.environ['AIMEE_REVISION']}`\n\n")
+              out.write('Reused successful upstream qualification; the receipt identifies the Aimee revision tested.\n' if os.environ['CACHE_HIT'] == 'true'
                         else f"Qualification result: **{os.environ['RESULT']}**. See evidence artifacts.\n")
               receipt = Path(os.environ['RECEIPT']) / 'summary.json'
               if receipt.exists():

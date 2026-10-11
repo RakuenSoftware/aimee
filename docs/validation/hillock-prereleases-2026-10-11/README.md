@@ -1,6 +1,6 @@
 # Hillock release-candidate qualification
 
-The new [prerelease workflow](../../../.github/workflows/hillock-prereleases.yml) discovers all `rc/v<major>.<minor>.<patch>` branches, snapshots immutable tips and qualifies each against Aimee's HDC/subword adapter. Hourly scanning starts after the workflow reaches the default branch. Relevant PR changes run the same gate; manual dispatch supports one branch and forced requalification.
+The new [prerelease workflow](../../../.github/workflows/hillock-prereleases.yml) discovers all `rc/v<major>.<minor>.<patch>` branches, snapshots immutable tips and qualifies each against Aimee's HDC/subword adapter. Hourly scanning starts after the workflow reaches the default branch. Aimee PRs, pushes and releases do not trigger the scanner; manual dispatch supports one branch and forced requalification. Normal CI covers the workflow regression tests and pinned production contract.
 
 ## Local evidence
 
@@ -18,6 +18,6 @@ Seven discovery/runner regressions passed, including general branch matching, nu
 
 ## Operation and limits
 
-Only an exact successful receipt for branch, Hillock SHA and Aimee SHA skips repeat qualification. New branches/tips and Aimee commits require another run; failures retry next scan and cache eviction reruns safely. Success receipts contain no credentials or source/corpus data. Fixture logs and results are retained for 30 days, and failures remain visible as failed workflow jobs. Deleted branches disappear from the next discovery snapshot.
+Only an exact successful receipt for upstream branch and Hillock SHA skips repeat qualification. New upstream branches/tips require another run; Aimee commits do not invalidate receipts. Candidates without successful receipts retry next scan and cache eviction reruns safely. Manual force explicitly retests an unchanged candidate against current Aimee code. Receipts retain the Aimee SHA actually tested. Success receipts contain no credentials or source/corpus data. Fixture logs and results are retained for 30 days, and failures remain visible as failed workflow jobs. Deleted branches disappear from the next discovery snapshot.
 
 Candidate qualification changes only expected revision constants in temporary sidecar copies and a Go build overlay. Production source and Docker pins are unchanged. A passing candidate needs a reviewed pin update before deployment. Upstream chat/graph/learning and the remaining real gateway/model qualification work on PR #3020 are outside this gate.

@@ -1,6 +1,7 @@
 """Immutable upstream discovery and production-pin isolation for Hillock CI."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -61,6 +62,28 @@ class DiscoveryTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     discovery.main()
             self.assertFalse(output.exists())
+
+
+class WorkflowTriggerTests(unittest.TestCase):
+    def test_scanner_is_not_triggered_by_aimee_branches_or_releases(self):
+        workflow = (ROOT / '.github/workflows/hillock-prereleases.yml').read_text()
+        events = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
+        self.assertEqual(set(re.findall(r'^  ([a-z_]+):', events, re.MULTILINE)),
+                         {'schedule', 'workflow_dispatch'})
+        self.assertIn("cron: '17 * * * *'", events)
+
+    def test_upstream_receipt_identity_ignores_aimee_commit(self):
+        workflow = (ROOT / '.github/workflows/hillock-prereleases.yml').read_text()
+        keys = re.findall(r'^          key: (.+)$', workflow, re.MULTILINE)
+        self.assertEqual(len(keys), 2)  # Restore and save must address the same receipt.
+        self.assertEqual(keys[0], keys[1])
+        for key in keys:
+            self.assertIn('${{ matrix.branch_key }}', key)
+            self.assertIn('${{ matrix.revision }}', key)
+            self.assertNotIn('github.sha', key)
+        save = workflow.split('      - uses: actions/cache/save@', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("if: success() && steps.passed.outputs.cache-hit != 'true'", save)
+        self.assertNotIn('restore-keys:', workflow)
 
 
 class QualificationTests(unittest.TestCase):
