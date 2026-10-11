@@ -1,0 +1,8 @@
+{
+  "objective": "Collaborate with the other bots to invent an absurd but coherent business. Challenge its weaknesses and arrive at a short pitch.",
+  "milestones": [
+    {"label": "Agree a business name with the human", "match": "name agreed", "speaker": "human"},
+    {"label": "Address one concrete business risk", "match": "Risk:", "speaker": "assistant"},
+    {"label": "Deliver a short business pitch", "match": "Our pitch:", "speaker": "assistant"}
+  ]
+}

@@ -1,7 +1,7 @@
 # MR-03 protected projections — 2026-09-24
 
 MR-03 is [complete](memory-mr03-closeout-2026-09-24.md). Its
-[six-gate checklist](../proposals/pending/memory-reliability-03-closeout.md) preserves
+[six-gate checklist](../proposals/done/memory-reliability-03-closeout.md) preserves
 the original acceptance clauses.
 
 The fold regression reproduced loss of user, system and developer messages when

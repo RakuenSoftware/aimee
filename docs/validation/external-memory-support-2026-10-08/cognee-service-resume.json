@@ -1,0 +1,75 @@
+{
+  "backend": "cognee",
+  "phase": "service-resume",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after service-resume",
+      "status": "passed",
+      "seconds": 0.049
+    },
+    {
+      "name": "user selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.057
+    },
+    {
+      "name": "kb selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.066
+    },
+    {
+      "name": "new authorized memory after subject erasure",
+      "status": "passed",
+      "seconds": 0.1
+    },
+    {
+      "name": "shipping KB briefing",
+      "status": "passed",
+      "response": {
+        "active_context_missing": false,
+        "briefing": {
+          "key_facts": [
+            {
+              "authorship": {
+                "category": "user_stated",
+                "principal": "owner",
+                "transport": "owner"
+              },
+              "version": {
+                "schema_version": 1,
+                "owner_id": "e8fb4535-43fe-45e9-a149-017b4570f3ee",
+                "record_id": "790",
+                "record_revision": "1"
+              },
+              "id": 790,
+              "scope": {
+                "type": "project",
+                "value": "qualification-1791476867522179463"
+              },
+              "tier": "L0",
+              "kind": "fact",
+              "key": "post-erasure",
+              "content": "New consent after completed erasure",
+              "confidence": 1,
+              "memory_id": 790,
+              "text": "New consent after completed erasure",
+              "store": "kb",
+              "handle": "kb:memory:790",
+              "evidence_strength": 0,
+              "observation_count": 0,
+              "salience": 0,
+              "last_seen_at": ""
+            }
+          ],
+          "recent_activity": [],
+          "active_entities": [],
+          "style": "compact",
+          "briefing_style": "compact",
+          "limit_tokens": 1800,
+          "approx_tokens": 178
+        },
+        "status": "ok"
+      }
+    }
+  ]
+}

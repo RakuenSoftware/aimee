@@ -114,7 +114,7 @@ operator expects is worse than one that says it does not know.
 - No new ranking features. P9 exposes what exists.
 - No replacement of `feature_rows` or the fitter's training view; the trace
   complements them and feeds the pending
-  [per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
+  [per-query feature persistence residual](../pending/retrieval-ranking-feedback-and-promotion.md)
   rather than forking it.
 - No end-user explanation UI. This is an operator and evaluation surface; a
   user-facing "why did you say that" view is a separate proposal.
@@ -169,5 +169,5 @@ operator expects is worse than one that says it does not know.
 Supersedes nothing. Extends the audit-trace surface delivered by
 [auditable correctness for the KB](../done/auditable-correctness-for-the-kb.md)
 from "what was surfaced" to "why", and supplies the per-query decomposition the
-pending [per-query feature persistence residual](../pending/per-query-feature-persistence-residual.md)
-and [kb_hybrid outcome residual](../pending/kb-hybrid-outcome-wiring-residual.md) both need.
+pending [per-query feature persistence residual](../pending/retrieval-ranking-feedback-and-promotion.md)
+and [kb_hybrid outcome residual](../pending/retrieval-ranking-feedback-and-promotion.md) both need.

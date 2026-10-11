@@ -1,0 +1,28 @@
+{
+  "backend": "native",
+  "status": "failed",
+  "checks": [
+    {
+      "name": "user verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.141
+    },
+    {
+      "name": "kb verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.188
+    },
+    {
+      "name": "actual-author erasure physically removes canonical/history/receipt content",
+      "status": "failed",
+      "error": "",
+      "seconds": 0.875
+    },
+    {
+      "name": "native memory restart preserves actual erased absence",
+      "status": "failed",
+      "error": "",
+      "seconds": 4.044
+    }
+  ]
+}

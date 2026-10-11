@@ -1,0 +1,18 @@
+[Unit]
+Description=Isolated Aimee Gemma4 E2B inference for Discord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/aimee-discord
+Environment=PATH=%h/.local/share/aimee-discord/model-venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/aimee-discord/venv/bin/python serve_e2b.py --key-file %h/.config/aimee-discord/model.key --root %h/.local/share/aimee-discord/e2b --config %h/.config/aimee-discord/serving.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+LimitCORE=0
+
+[Install]
+WantedBy=default.target

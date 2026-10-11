@@ -1,0 +1,25 @@
+{
+  "backend": "native",
+  "phase": "guest-reboot",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after guest-reboot",
+      "status": "passed",
+      "seconds": 0.04
+    },
+    {
+      "name": "user selected-backend list after guest-reboot",
+      "status": "passed",
+      "seconds": 0.068
+    },
+    {
+      "name": "kb selected-backend list after guest-reboot",
+      "status": "passed",
+      "seconds": 0.064
+    },
+    {
+      "name": "guest reboot retains erasure controls",
+      "status": "passed"
+    }
+  ]
+}

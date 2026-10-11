@@ -1,0 +1,36 @@
+{
+  "backend": "cognee",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "shipping CRUD/search with native record-table access revoked",
+      "status": "passed",
+      "seconds": 14.579
+    },
+    {
+      "name": "257 eligible records refuse bounded retrieval without truncating stored data",
+      "status": "passed",
+      "seconds": 13.265
+    },
+    {
+      "name": "user verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.077
+    },
+    {
+      "name": "kb verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.106
+    },
+    {
+      "name": "actual-author erasure physically removes canonical/history/receipt content",
+      "status": "passed",
+      "seconds": 14.552
+    },
+    {
+      "name": "stale canonical restore replays retained erasure metadata before readiness",
+      "status": "passed",
+      "seconds": 3.014
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "webhook_file": "/run/discord/webhook.url",
+  "bot_token_file": "/run/discord/bot.token",
+  "model_key_file": "/run/discord/model.key",
+  "knowledge_key_file": "/run/discord/knowledge.token",
+  "knowledge_endpoint": "http://127.0.0.1:8741/v1/actions",
+  "aimee_socket": "/run/aimee-server/aimee-http.sock",
+  "guild_id": "REPLACE_WITH_DISCORD_SERVER_ID",
+  "channel_id": "REPLACE_WITH_DISCORD_CHANNEL_ID",
+  "endpoint": "http://127.0.0.1:18743/v1/chat/completions",
+  "model": "discord-e2b",
+  "allowed_user_ids": []
+}

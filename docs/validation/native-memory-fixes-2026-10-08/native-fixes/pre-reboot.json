@@ -1,0 +1,18 @@
+{
+  "anchors": {
+    "kb": {
+      "id": 16,
+      "content": "needle kb: Kibukx corrected height is 170cm; human correction. fixture=1791465671280807376",
+      "project": "memory-lxc-1791465671280807376"
+    },
+    "user": {
+      "id": 11,
+      "content": "needle user: Kibukx corrected height is 170cm; human correction. fixture=1791465671280807376",
+      "project": "memory-lxc-1791465671280807376"
+    }
+  },
+  "erasure_hashes": {
+    "aimee_private.user_memory_erasure_intents": "9de27e98a3d92b928ce82c829cdaca23",
+    "public.memory_erasure_intents": "1736a95ce2f512a86950364d54b46337"
+  }
+}

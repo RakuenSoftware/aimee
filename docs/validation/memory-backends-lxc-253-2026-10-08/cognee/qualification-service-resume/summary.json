@@ -1,0 +1,36 @@
+{
+  "backend": "cognee",
+  "phase": "service-resume",
+  "checks": [
+    {
+      "name": "enrolled mTLS health after service-resume",
+      "status": "passed",
+      "seconds": 0.044
+    },
+    {
+      "name": "user selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.061
+    },
+    {
+      "name": "kb selected-backend list after service-resume",
+      "status": "passed",
+      "seconds": 0.05
+    },
+    {
+      "name": "new authorized memory after subject erasure",
+      "status": "failed",
+      "error": "{'http_status': 409, 'kind': 'conflict', 'message': 'memory: expected version is no longer current; read the current record before correcting it', 'reason': 'expected_version_conflict', 'status': 'error'}",
+      "seconds": 0.056
+    },
+    {
+      "name": "shipping KB briefing",
+      "status": "failed",
+      "response": {
+        "kind": "unavailable",
+        "message": "memory module unavailable",
+        "status": "error"
+      }
+    }
+  ]
+}

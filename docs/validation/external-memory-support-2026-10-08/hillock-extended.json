@@ -1,0 +1,46 @@
+{
+  "backend": "hillock",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "shipping CRUD/search with native record-table access revoked",
+      "status": "passed",
+      "seconds": 1.313
+    },
+    {
+      "name": "257 eligible records support bounded retrieval without truncating stored data",
+      "status": "passed",
+      "seconds": 9.692
+    },
+    {
+      "name": "user verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.107
+    },
+    {
+      "name": "kb verified actual author discovered from durable metadata",
+      "status": "passed",
+      "seconds": 0.095
+    },
+    {
+      "name": "actual-author erasure physically removes canonical/history/receipt content",
+      "status": "passed",
+      "seconds": 0.584
+    },
+    {
+      "name": "stale canonical restore replays retained erasure metadata before readiness",
+      "status": "passed",
+      "seconds": 3.018
+    },
+    {
+      "name": "fresh admission after erasure and completed-erasure retry preserves new records",
+      "status": "passed",
+      "seconds": 0.836
+    },
+    {
+      "name": "real Hillock identity/unit/negation/paraphrase diagnostic probes",
+      "status": "passed",
+      "seconds": 0.227
+    }
+  ]
+}

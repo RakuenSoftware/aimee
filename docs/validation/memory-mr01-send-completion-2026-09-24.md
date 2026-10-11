@@ -57,6 +57,6 @@ The combined [full race suite and export build](memory-mr01-send-completion-2026
 
 These results alone do not certify MR-01. Remaining endpoint/temporal contracts
 and final Server/KB parity are tracked in the
-[closeout checklist](../proposals/pending/memory-reliability-01-closeout.md).
+[closeout checklist](../proposals/done/memory-reliability-01-closeout.md).
 Draft schema and application validation runs only on CT109. Released CT100 0.4.5
 is not migrated to this candidate.

@@ -89,7 +89,7 @@ The older C ranker used heuristic and LLM query decomposition with an interleave
 That implementation has been retired. It must not be described as the current default Go retrieval
 path or configured through its old benchmark-only environment flag.
 
-The [compatibility decisions](proposals/pending/memory-reliability-retrieval-compatibility.md)
+The [compatibility decisions](proposals/done/memory-reliability-retrieval-compatibility.md)
 record retired query expansion and ranking behavior. Current evaluation must use the Go owner and
 its policy fingerprint. A historical result from the C candidate pool is not a baseline for a
 changed Go policy without a controlled comparison.

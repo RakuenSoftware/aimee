@@ -37,6 +37,9 @@ func handleRecallComposition(options handlerOptions, invocation bus.ModuleInvoca
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Failure != nil {
+		return commandResult(commandError(response.Failure.Kind, response.Failure.Message))
+	}
 	// A string carries exact int64 tokens through native JSON transport.
 	return nativeRecallText(response.Payload, args)
 }

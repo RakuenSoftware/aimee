@@ -151,6 +151,15 @@ func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocati
 	if options.placement == PlacementKB {
 		routes = append(append([]commandRoute{}, sharedCommandRoutes...), kbCommandRoutes...)
 	}
+	if _, external := options.data.(*externalDataStore); external {
+		routes = append([]commandRoute{}, backendCommandRoutes...)
+		for _, route := range append(append([]commandRoute{}, sharedCommandRoutes...), kbCommandRoutes...) {
+			switch route.verb {
+			case "revalidate_sources", "screen_content", "store", "supersede", "get", "list", "delete", "update", "search", "recall", "find_facts", "find_facts_visible", "find_facts_scoped", "briefing", "context_block", "assemble_context":
+				routes = append(routes, route)
+			}
+		}
+	}
 	for _, r := range routes {
 		if r.public {
 			commands = append(commands, bus.CommandDefinition{Group: r.group, Verb: r.verb, Summary: r.summary, Surfaces: SurfaceRPC, Visibility: MCPDiscoverable})
