@@ -5,4 +5,3 @@ export function validateMemoryEndpoint(endpoint: string): boolean {
       (!url.pathname || url.pathname === '/') && !url.search && !url.hash && !/[\s\\]/.test(endpoint);
   } catch { return false; }
 }
-
