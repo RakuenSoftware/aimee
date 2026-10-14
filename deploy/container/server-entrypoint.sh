@@ -10,7 +10,6 @@
 #
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
-. /usr/local/bin/startup-failure-lib.sh
 
 vault_bootstrapped=0
 while [ "$#" -gt 0 ]; do
@@ -126,6 +125,17 @@ fi
     exit 2
 }
 . "$optional_modules_lib"
+
+startup_failure_lib=/usr/local/bin/startup-failure-lib.sh
+if [ ! -r "$startup_failure_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    startup_failure_lib="$entrypoint_dir/startup-failure-lib.sh"
+fi
+[ -r "$startup_failure_lib" ] || {
+    printf '[server-entrypoint] fatal: startup-failure helper is unavailable\n' >&2
+    exit 2
+}
+. "$startup_failure_lib"
 
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
