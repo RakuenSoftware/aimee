@@ -102,7 +102,9 @@ static cJSON *serve_fetch(void *vctx)
        * this serve loop is pointed at a tree the server does not know about.
        * Older servers omit the field, so absence is treated as served. */
       const cJSON *served = resp ? cJSON_GetObjectItemCaseSensitive(resp, "served") : NULL;
-      if (resp && status >= 200 && status < 300 && (!cJSON_IsBool(served) || cJSON_IsTrue(served)))
+      if (resp && status >= 200 && status < 300 &&
+          cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(resp, "have_op")) &&
+          (!served || cJSON_IsTrue(served)))
          c->registered = 1;
       if (cJSON_IsBool(served) && !cJSON_IsTrue(served) && !c->warned_unserved)
       {

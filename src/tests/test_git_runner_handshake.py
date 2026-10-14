@@ -12,7 +12,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("AIMEE_TEST_CLI", ROOT / "aimee"))
 
-def exercise(served):
+def exercise(served, poll_response=None):
     with tempfile.TemporaryDirectory(prefix="git-runner-handshake-") as tmp:
         target = Path(tmp) / "checkout"
         target.mkdir()
@@ -43,7 +43,8 @@ def exercise(served):
                     assert body["workspace_id"] == str(target)
                     time.sleep(0.15)
                     state["registered"] = served
-                    self.reply({"ok": True, "have_op": False, "served": served})
+                    self.reply(poll_response if poll_response is not None else
+                               {"ok": True, "have_op": False, "served": served})
                 elif body.get("tool") == "git_status":
                     state["git_calls"] += 1
                     state["early"] |= not state["registered"]
@@ -72,4 +73,9 @@ def exercise(served):
 
 exercise(True)
 exercise(False)
+exercise(False, {})
+exercise(False, {"error": "runner unavailable"})
+exercise(False, {"have_op": False, "served": "false"})
+exercise(False, {"have_op": "false", "served": True})
+exercise(True, {"have_op": False})  # Compatible legacy acknowledgment.
 print("Git waits for runner registration; unserved workspaces fail before dispatch.")
