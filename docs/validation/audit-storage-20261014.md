@@ -44,7 +44,10 @@ Reference: <https://sqlite.org/wal.html#walreset>.
   capture storage to 4 GiB. This does not delete or rotate the WORM ledger.
 - Advertise readiness failure below 512 MiB free on the audit volume, using the
   background sampler. Capacity recovery restores readiness.
-- Bound automatic crash retries to five. Integrity admission remains fail-closed.
+- A rejected startup stops the child planes and leaves the container unhealthy
+  without a crash loop. Docker's boot restart policy remains `unless-stopped`.
+  Repair the reported error and restart explicitly; integrity admission remains
+  fail-closed.
 - Explicit operator recovery uses a separate `AIMEE_AUDIT_RECOVERY_EPOCH` database;
   it does not overwrite or rehash the original. `/v1/audit/verify` keeps aggregate
   and historical verification **red** and reports live-chain verification
@@ -73,6 +76,8 @@ all ten diagnostic captures. Private evidence is under the operator's
    compatibility. Preserve the existing tamper, checkpoint-MAC and sealing tests.
 6. A healthy module/database graph with insufficient audit capacity returns 503;
    restoring capacity returns 200.
+7. A rejected startup remains quiescent and terminates cleanly on SIGTERM; the
+   usual Docker boot restart policy is retained.
 
 Additional appliance checks must confirm health, audit history reporting,
 restart persistence, the selected SQLite runtime, and actual detached Git/PR

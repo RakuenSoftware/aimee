@@ -45,3 +45,5 @@ jobs:
           sudo mount -t tmpfs -o size=1m,mode=1777 tmpfs "$capacity_dir"
           trap 'sudo umount "$capacity_dir"' EXIT
           TMPDIR="$capacity_dir" src/build/obj/tests/unit-test-audit-worm --disk-full
+      - name: Failed startup stays quiescent and stops cleanly
+        run: timeout 10 sh scripts/tests/test_startup_failure_hold.sh

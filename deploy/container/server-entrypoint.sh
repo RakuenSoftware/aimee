@@ -10,6 +10,7 @@
 #
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
+. /usr/local/bin/startup-failure-lib.sh
 
 vault_bootstrapped=0
 while [ "$#" -gt 0 ]; do
@@ -633,7 +634,8 @@ if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]
         log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
     fi
     shutdown
-    exit 1
+    log "startup rejected; container remains unhealthy until the error is repaired and the container restarted"
+    hold_startup_failure
 fi
 
 # Derive the managed compose `.env` through the live server config route. The
