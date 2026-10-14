@@ -2260,7 +2260,8 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_RERANK"
       ],
-      "sha256": "bf94cbd69407ec998e860743c073d9f95a43514bbd31a22410875455d694d22a"
+      "sha256": "2d33e0887a6a2a1c6052a041d1d710c241b5024fcd9a23e7aa138f61dd923571",
+      "review": "2026-10-14: Audit capacity readiness only; memory rerank attachment and transport owner are unchanged. test_server_ready covers capacity failure and recovery."
     },
     "src/server/server_session.c": {
       "disposition": "host-transport",
@@ -2276,7 +2277,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "d76f82a6d8d0250a6669a649b9aee0cd0736c93a03a82ecb681d326baf583d3d"
+      "sha256": "3a31a0b7ec12b2d80586314f70faa699289f281dc4953c88c5758bd155b393a9",
+      "review": "2026-10-14: Adds explicit historical/live audit verification reporting; memory request handlers, actor checks, and Go ownership are unchanged."
     },
     "src/tasks.c": {
       "disposition": "host-context",

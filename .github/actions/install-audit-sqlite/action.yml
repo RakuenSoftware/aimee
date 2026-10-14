@@ -1,0 +1,11 @@
+name: Install fixed audit SQLite
+description: Use the same verified SQLite runtime in native CI and application images.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sh "$GITHUB_WORKSPACE/scripts/build-audit-sqlite.sh" "$RUNNER_TEMP/audit-sqlite"
+        sudo install -m 0755 "$RUNNER_TEMP/audit-sqlite/libsqlite3.so.0" /usr/local/lib/libsqlite3.so.0
+        sudo ldconfig
+        python3 -c 'import sqlite3; assert sqlite3.sqlite_version_info >= (3,51,3)'

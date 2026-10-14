@@ -24,6 +24,9 @@ static void mk_tmpdir(void)
 {
    snprintf(g_dir, sizeof g_dir, "%s/worm_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_dir) != NULL);
+   /* The checkpoint key belongs to the fixture too. Standalone test modes
+    * must not depend on an existing operator home or key directory. */
+   assert(setenv("AIMEE_HOME", g_dir, 1) == 0);
 }
 
 /* audit_worm_seal() makes each sealed snapshot OS-immutable, which is the point
@@ -683,7 +686,8 @@ static void test_disk_full(void)
    db_path(path, sizeof path);
    assert(audit_worm_init_at(path) == 0);
    assert(audit_worm_append("system", "fixture", "test.before-full", "fixture", "ok", "{}") == 0);
-   long committed = 1;
+   assert(audit_worm_checkpoint() == 0);
+   long committed = 2;
    snprintf(filler, sizeof filler, "%s/filler", g_dir);
    FILE *file = fopen(filler, "wb");
    assert(file);
@@ -709,7 +713,15 @@ static void test_disk_full(void)
    assert(audit_worm_verify_chain(NULL, 0) == 0);
    audit_worm_close();
    assert(audit_worm_init_at(path) == 0);
-   assert(audit_worm_startup_verify(NULL, 0, NULL, NULL) == 0);
+   char restart_error[256] = "";
+   int restarted = audit_worm_startup_verify(restart_error, sizeof restart_error, NULL, NULL);
+   if (restarted != 0)
+   {
+      assert(statvfs(g_dir, &fs) == 0);
+      fprintf(stderr, "disk-full restart failed: %s; committed=%ld; available=%llu\n",
+              restart_error, committed, (unsigned long long)fs.f_bavail * fs.f_frsize);
+   }
+   assert(restarted == 0);
    assert(audit_worm_append("system", "fixture", "test.recovered", "fixture", "ok", "{}") == 0);
    assert(audit_worm_verify_chain(NULL, 0) == 0);
    audit_worm_close();
