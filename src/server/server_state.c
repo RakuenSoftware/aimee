@@ -2028,6 +2028,17 @@ int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *status =
        st == AUDIT_WORM_VERIFY_GREEN ? "green" : (st == AUDIT_WORM_VERIFY_AMBER ? "amber" : "red");
    cJSON *resp = jo_ok();
+   const char *epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   if (epoch && epoch[0])
+   {
+      cJSON_AddStringToObject(resp, "live_verify", status);
+      cJSON_AddStringToObject(resp, "recovery_epoch", epoch);
+      cJSON_AddStringToObject(resp, "historical_verify", "red");
+      cJSON_AddStringToObject(
+          resp, "detail",
+          "Historical audit continuity is broken; original evidence is preserved separately.");
+      status = "red";
+   }
    cJSON_AddStringToObject(resp, "verify", status);
    cJSON_AddNumberToObject(resp, "head_seq", head);
    cJSON_AddNumberToObject(resp, "last_checkpoint_seq", ckpt);

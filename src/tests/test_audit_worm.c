@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/statvfs.h>
 
 #include <aimee/audit/audit_worm.h>
 #include "cJSON.h"
@@ -580,10 +581,184 @@ static void test_health_snapshot_scope_and_bounds(void)
    puts("  test_health_snapshot_scope_and_bounds: ok");
 }
 
-int main(void)
+/* Reproduce the production symptom: an allocated table page contains zeros.
+ * Do not rehash, truncate, or silently admit the unreadable ledger. */
+static void test_zeroed_table_page_rejects_startup(void)
 {
+   char path[300];
+   snprintf(path, sizeof path, "%s/zero-page.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("system", "fixture", "test.page", "fixture", "ok", "{}") == 0);
+   audit_worm_close();
+   sqlite3 *raw = NULL;
+   sqlite3_stmt *q = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_prepare_v2(raw, "SELECT rootpage FROM sqlite_master WHERE name='audit_event'", -1,
+                             &q, NULL) == SQLITE_OK);
+   assert(sqlite3_step(q) == SQLITE_ROW);
+   int root = sqlite3_column_int(q, 0);
+   sqlite3_finalize(q);
+   assert(sqlite3_prepare_v2(raw, "PRAGMA page_size", -1, &q, NULL) == SQLITE_OK);
+   assert(sqlite3_step(q) == SQLITE_ROW);
+   int page_size = sqlite3_column_int(q, 0);
+   sqlite3_finalize(q);
+   sqlite3_close(raw);
+   FILE *file = fopen(path, "r+b");
+   assert(file);
+   void *zeros = calloc(1, (size_t)page_size);
+   assert(zeros);
+   assert(fseek(file, (long)(root - 1) * page_size, SEEK_SET) == 0);
+   assert(fwrite(zeros, 1, (size_t)page_size, file) == (size_t)page_size);
+   assert(fflush(file) == 0 && fsync(fileno(file)) == 0);
+   fclose(file);
+   free(zeros);
+   assert(audit_worm_init_at(path) == 0);
+   char err[256];
+   assert(audit_worm_startup_verify(err, sizeof err, NULL, NULL) == -1);
+   assert(strstr(err, "cannot read WORM store") != NULL);
+   audit_worm_close();
+   puts("  test_zeroed_table_page_rejects_startup: ok");
+}
+
+/* Independent connections contend for WAL writes and checkpoints. Closing the
+ * connection before fork avoids inheriting a live SQLite connection. */
+static void test_concurrent_writers_and_checkpoints(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/concurrent.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("system", "fixture", "test.seed", "fixture", "ok", "{}") == 0);
+   assert(audit_worm_checkpoint() == 0);
+   audit_worm_close();
+   pid_t children[3];
+   for (int worker = 0; worker < 3; ++worker)
+   {
+      children[worker] = fork();
+      assert(children[worker] >= 0);
+      if (children[worker] != 0)
+         continue;
+      if (worker < 2)
+      {
+         assert(audit_worm_init_at(path) == 0);
+         for (int i = 0; i < 256; ++i)
+            assert(audit_worm_append("system", "writer", "test.concurrent", "fixture", "ok",
+                                     "{}") == 0);
+         audit_worm_close();
+      }
+      else
+      {
+         sqlite3 *raw = NULL;
+         assert(sqlite3_open(path, &raw) == SQLITE_OK);
+         sqlite3_busy_timeout(raw, 100);
+         for (int i = 0; i < 256; ++i)
+         {
+            int rc = sqlite3_wal_checkpoint_v2(raw, NULL, SQLITE_CHECKPOINT_RESTART, NULL, NULL);
+            assert(rc == SQLITE_OK || rc == SQLITE_BUSY);
+         }
+         sqlite3_close(raw);
+      }
+      _exit(0);
+   }
+   for (int i = 0; i < 3; ++i)
+   {
+      int status = 0;
+      assert(waitpid(children[i], &status, 0) == children[i]);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   }
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_count() == 514);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   assert(audit_worm_startup_verify(NULL, 0, NULL, NULL) == 0);
+   audit_worm_close();
+   puts("  test_concurrent_writers_and_checkpoints: 512 committed writes and restart verified");
+}
+
+/* Run only on an explicitly supplied tiny tmpfs, never fill a real volume. */
+static void test_disk_full(void)
+{
+   struct statvfs fs;
+   assert(statvfs(g_dir, &fs) == 0);
+   assert((unsigned long long)fs.f_blocks * fs.f_frsize <= 16u * 1024u * 1024u);
+   char path[300], filler[300];
+   db_path(path, sizeof path);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("system", "fixture", "test.before-full", "fixture", "ok", "{}") == 0);
+   long committed = 1;
+   snprintf(filler, sizeof filler, "%s/filler", g_dir);
+   FILE *file = fopen(filler, "wb");
+   assert(file);
+   char payload[8193];
+   memset(payload, 'x', sizeof payload - 1);
+   payload[sizeof payload - 1] = 0;
+   while (fwrite(payload, 1, sizeof payload - 1, file) == sizeof payload - 1)
+      ;
+   fclose(file);
+   int failed = 0;
+   for (int i = 0; i < 4096; ++i)
+   {
+      if (audit_worm_append("system", "fixture", "test.full", "fixture", "ok", payload) != 0)
+      {
+         failed = 1;
+         break;
+      }
+      committed++;
+   }
+   assert(failed);
+   assert(unlink(filler) == 0);
+   assert(audit_worm_count() == committed);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_startup_verify(NULL, 0, NULL, NULL) == 0);
+   assert(audit_worm_append("system", "fixture", "test.recovered", "fixture", "ok", "{}") == 0);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+   puts("  test_disk_full: committed rows preserved; write failure and restart recovery verified");
+}
+
+int main(int argc, char **argv)
+{
+   if (argc == 2 && strcmp(argv[1], "--check-runtime") == 0)
+      return audit_worm_runtime_supported() == 0 ? 0 : 1;
+   /* Operator recovery helper: seed a distinct epoch with its loss manifest.
+    * This never changes the damaged original ledger or claims continuity. */
+   if (argc == 3 && strcmp(argv[1], "--begin-recovery") == 0)
+   {
+      const char *epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+      if (!epoch || !epoch[0] || audit_worm_runtime_supported() != 0 || audit_worm_count() != 0)
+         return 1;
+      FILE *file = fopen(argv[2], "rb");
+      if (!file)
+         return 1;
+      char detail[2048];
+      size_t count = fread(detail, 1, sizeof detail - 1, file);
+      int truncated = !feof(file);
+      fclose(file);
+      if (truncated)
+         return 1;
+      detail[count] = 0;
+      if (audit_worm_append("operator", "recovery", "audit.recovery", epoch, "historical-gap",
+                            detail) != 0 ||
+          audit_worm_checkpoint() != 0 || audit_worm_verify_chain(NULL, 0) != 0)
+         return 1;
+      audit_worm_close();
+      puts("New recovery epoch seeded; historical continuity remains broken.");
+      return 0;
+   }
+   if (argc == 3 && strcmp(argv[1], "--verify-file") == 0)
+   {
+      char err[256] = "";
+      int rc = audit_worm_verify_file(argv[2], err, sizeof err);
+      printf("verify: %s %s\n", rc == 0 ? "PASS" : "FAIL", err);
+      return rc == 0 ? 0 : 1;
+   }
    mk_tmpdir();
    assert(atexit(rm_tmpdir) == 0);
+   if (argc == 2 && strcmp(argv[1], "--disk-full") == 0)
+   {
+      test_disk_full();
+      return 0;
+   }
    test_health_snapshot_scope_and_bounds();
    test_dispatch_owner_crash();
    test_cross_engine_vector();
@@ -598,6 +773,8 @@ int main(void)
    test_timestamp_tamper_detected();
    test_checkpoint_and_verify_status();
    test_startup_verify_fails_closed();
+   test_zeroed_table_page_rejects_startup();
+   test_concurrent_writers_and_checkpoints();
    test_checkpoint_bound_to_chain_key();
    test_seal_snapshot_verifies();
    test_sealed_snapshot_tamper_detected();

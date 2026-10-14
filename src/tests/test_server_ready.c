@@ -247,6 +247,15 @@ int main(void)
       assert(strstr(resp, "\"status\":\"unknown\""));
    }
 
+   /* A healthy DB/module graph must not hide an almost-full audit volume. */
+   server_ready_diagnostics_t capacity = ok;
+   capacity.audit_capacity_failed = 1;
+   capacity.failed_boundary = "audit_capacity";
+   assert(server_ready_render(1, 1, &capacity, NOW - 5, NOW, 60, resp, sizeof(resp)) == 503);
+   assert(strstr(resp, "\"ready\":false"));
+   assert(strstr(resp, "audit_capacity"));
+   capacity.audit_capacity_failed = 0;
+   assert(server_ready_render(1, 1, &capacity, NOW - 5, NOW, 60, resp, sizeof(resp)) == 200);
    printf("server_ready: OK\n");
    return 0;
 }

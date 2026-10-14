@@ -28,7 +28,7 @@ services:
     stop_grace_period: 60s
 
   aimee-server:
-    restart: unless-stopped
+    restart: on-failure:5
     build:
       context: .
       dockerfile: Dockerfile.server

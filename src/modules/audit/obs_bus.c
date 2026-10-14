@@ -61,7 +61,8 @@ typedef enum
    CAPTURE_NO_HOME,
    CAPTURE_OPEN_FAILED,
    CAPTURE_WRITE_FAILED,
-   CAPTURE_SINK_BROKEN
+   CAPTURE_SINK_BROKEN,
+   CAPTURE_SIZE_LIMIT
 } capture_state_t;
 
 typedef struct durable_pending
@@ -168,6 +169,8 @@ static struct
     * lock guards it. */
    bus_capture_t capture;
    int cap_fd; /* -1 when capture is off (no writable home / open failed) */
+   uint64_t capture_bytes;
+   uint64_t capture_limit;
    atomic_int capture_state;
    atomic_uint_least64_t capture_last_seq; /* last seq successfully flushed to disk */
    char capture_session[128];
@@ -698,6 +701,8 @@ static const char *capture_state_name(capture_state_t state)
       return "write_failed";
    case CAPTURE_SINK_BROKEN:
       return "sink_broken";
+   case CAPTURE_SIZE_LIMIT:
+      return "size_limit";
    case CAPTURE_NOT_STARTED:
    default:
       return "not_started";
@@ -742,6 +747,18 @@ static void capture_flush(void)
    }
    if (g.capture.len == 0)
       return;
+   /* File-count retention alone did not bound storage: one long-running
+    * session grew to 10 GB. Replay is losable; preserve the durable ledger
+    * and explicitly report the replay gap before exhausting its volume. */
+   if (g.capture.len > g.capture_limit - g.capture_bytes)
+   {
+      close(g.cap_fd);
+      g.cap_fd = -1;
+      g.capture.broken = 1;
+      g.capture.len = 0;
+      capture_mark_gap(CAPTURE_SIZE_LIMIT);
+      return;
+   }
    size_t off = 0;
    while (off < g.capture.len)
    {
@@ -758,6 +775,7 @@ static void capture_flush(void)
          return;
       }
       off += (size_t)w;
+      g.capture_bytes += (uint64_t)w;
    }
    atomic_store_explicit(&g.capture_last_seq, g.capture.last_seq, memory_order_release);
    g.capture.len = 0; /* keep header_written/first_seq: the header is already on disk */
@@ -829,6 +847,16 @@ static void capture_prune(const char *dir, int keep)
 static void capture_open(void)
 {
    g.cap_fd = -1;
+   g.capture_bytes = 0;
+   g.capture_limit = 256u * 1024u * 1024u;
+   const char *limit = getenv("AIMEE_CAPTURE_MAX_BYTES");
+   if (limit && limit[0])
+   {
+      char *end = NULL;
+      unsigned long long parsed = strtoull(limit, &end, 10);
+      if (end && !*end && parsed > 0 && parsed <= g.capture_limit)
+         g.capture_limit = parsed;
+   }
    bus_capture_init(&g.capture, 1, 1, bus_control_epoch(g.host.control));
 
    static unsigned session_seq = 0;

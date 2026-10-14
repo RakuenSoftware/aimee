@@ -56,6 +56,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/statvfs.h>
 
 typedef enum
 {
@@ -71,6 +72,7 @@ typedef struct
    dep_state_t kb;
    dep_state_t retrieval;
    dep_state_t modules;
+   int audit_capacity_failed;
    int kb_disabled;
    char failed_boundary[32];
    char missing_module[32];
@@ -279,6 +281,16 @@ void server_ready_sample_now(void)
                                      : "");
    }
 
+   const char *audit_home = getenv("AIMEE_HOME");
+   if (audit_home && audit_home[0])
+   {
+      struct statvfs fs;
+      s.audit_capacity_failed =
+          statvfs(audit_home, &fs) != 0 ||
+          (unsigned long long)fs.f_bavail * fs.f_frsize < 512u * 1024u * 1024u;
+      if (s.audit_capacity_failed)
+         snprintf(s.failed_boundary, sizeof(s.failed_boundary), "audit_capacity");
+   }
    s.sampled_at = (long)time(NULL);
 
    pthread_mutex_lock(&g_ready_mtx);
@@ -330,7 +342,8 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    }
 
    int ready = (db1 == DEP_OK && (kb == DEP_OK || kb == DEP_DISABLED) &&
-                (retrieval == DEP_OK || retrieval == DEP_DISABLED) && modules == DEP_OK);
+                (retrieval == DEP_OK || retrieval == DEP_DISABLED) && modules == DEP_OK &&
+                !(diagnostics && diagnostics->audit_capacity_failed));
    const char *status = ready ? "ok" : (stale ? "unknown" : "degraded");
 
    if (stale && (sampled_at <= 0 || age < 0))
@@ -389,6 +402,7 @@ static int ready_provider(char *resp, int cap)
        .kb_disabled = s.kb_disabled,
        .retrieval_ok = (s.retrieval == DEP_UNKNOWN) ? -1 : (s.retrieval == DEP_OK),
        .modules_ok = (s.modules == DEP_UNKNOWN) ? -1 : (s.modules == DEP_OK),
+       .audit_capacity_failed = s.audit_capacity_failed,
        .failed_boundary = s.failed_boundary,
        .missing_module = s.missing_module,
        .breaker_state = s.breaker_state,

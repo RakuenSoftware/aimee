@@ -189,6 +189,11 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
    /* Initialize logging */
    log_init(log_level);
+   if (audit_worm_runtime_supported() != 0)
+   {
+      startup_notify(notify_fd, "error: unsupported SQLite audit runtime\n");
+      return 1;
+   }
    audit_log_open();
 
    /* The SQLite WORM ledger is an admission boundary, not a health warning.
