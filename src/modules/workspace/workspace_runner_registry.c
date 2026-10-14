@@ -7,6 +7,7 @@
  * each one carries an id and nothing else. */
 #include "workspace_runner_registry.h"
 #include "cJSON.h"
+#include "config.h"
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/workspace/module_api.h>
@@ -126,6 +127,17 @@ ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id)
     * visible and attributable. */
    (void)runner_ask(AIMEE_WS_RUNNER_OP_REGISTER, id, NULL, 0);
    return handle_intern(id);
+}
+
+int ws_runner_registry_register_configured(const char *workspace)
+{
+   if (!workspace || !workspace[0])
+      return 0;
+   for (int i = 0; i < config_workspace_count(); i++)
+      if (strcmp(workspace, config_workspaces(i)) == 0 &&
+          strcmp(config_workspace_providers(i), "detached") == 0)
+         return ws_runner_registry_get_or_create(workspace) != NULL;
+   return 0;
 }
 
 ws_runner_queue_t *ws_runner_registry_lookup(const char *id)

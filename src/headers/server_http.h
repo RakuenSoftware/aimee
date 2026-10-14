@@ -505,9 +505,10 @@ extern "C"
     * Writes the JSON body and returns the HTTP status (200 ready / 503 not). */
    typedef struct
    {
-      int retrieval_ok; /* 1 usable, 0 failed, -1 unknown */
-      int kb_disabled;  /* no optional KB connection; shared retrieval is disabled */
-      int modules_ok;   /* required local process modules attached */
+      int retrieval_ok;          /* 1 usable, 0 failed, -1 unknown */
+      int kb_disabled;           /* no optional KB connection; shared retrieval is disabled */
+      int modules_ok;            /* required local process modules attached */
+      int audit_capacity_failed; /* insufficient free space on the audit volume */
       const char *failed_boundary;
       const char *missing_module;
       const char *breaker_state;

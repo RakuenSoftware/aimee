@@ -42,6 +42,9 @@ extern "C"
    /* Test/embedding entry point: open a store at an explicit path. */
    int audit_worm_init_at(const char *db_path);
 
+   /* Production startup requires an engine with the WAL-reset race fixed. */
+   int audit_worm_runtime_supported(void);
+
    /* Append one governed action. All string args are required (pass "" not NULL for
     * an absent field); `detail` is opaque canonical bytes. The row is fsync-durable
     * before this returns 0. Returns -1 on any failure (the caller decides whether to

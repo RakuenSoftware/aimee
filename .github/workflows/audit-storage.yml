@@ -1,0 +1,51 @@
+name: Audit storage regressions
+on:
+  push:
+    branches: [main, testing]
+  pull_request:
+    branches: [main, testing]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  corruption-and-capacity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config curl libcurl4-openssl-dev libsqlite3-dev libssl-dev libpq-dev libpam0g-dev libp11-kit-dev libzstd-dev zlib1g-dev
+      - name: Build the production audit runtime and tests
+        run: |
+          sh scripts/build-audit-sqlite.sh "$RUNNER_TEMP/audit-sqlite"
+          make -C src ../aimee build/obj/tests/unit-test-audit-worm build/obj/tests/unit-test-bus-capture-gaps build/obj/tests/unit-test-server-ready build/obj/tests/unit-test-workspace-turn -j2
+      - name: Corruption, capture capacity, and runtime compatibility
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/audit-sqlite
+        run: |
+          bin=src/build/obj/tests/unit-test-audit-worm
+          "$bin" --check-runtime
+          python3 -c 'import sqlite3; c=sqlite3.connect(":memory:"); assert sqlite3.sqlite_version_info >= (3,51,3); c.execute("CREATE VIRTUAL TABLE compatibility_check USING fts5(content)")'
+          "$bin"
+          src/build/obj/tests/unit-test-bus-capture-gaps
+          src/build/obj/tests/unit-test-server-ready
+          src/build/obj/tests/unit-test-workspace-turn
+          python3 src/tests/test_git_runner_handshake.py
+          printf '%s\n' 'int sqlite3_libversion_number(void) { return 3051002; }' 'const char *sqlite3_libversion(void) { return "3.51.2"; }' > "$RUNNER_TEMP/old-sqlite.c"
+          cc -shared -fPIC "$RUNNER_TEMP/old-sqlite.c" -o "$RUNNER_TEMP/old-sqlite.so"
+          if LD_PRELOAD="$RUNNER_TEMP/old-sqlite.so" "$bin" --check-runtime; then
+            echo 'Unsupported SQLite was accepted'; exit 1
+          fi
+      - name: Real filesystem exhaustion and restart
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/audit-sqlite
+        run: |
+          capacity_dir="$RUNNER_TEMP/audit-tiny-filesystem"
+          mkdir -p "$capacity_dir"
+          sudo mount -t tmpfs -o size=1m,mode=1777 tmpfs "$capacity_dir"
+          trap 'sudo umount "$capacity_dir"' EXIT
+          TMPDIR="$capacity_dir" src/build/obj/tests/unit-test-audit-worm --disk-full
+      - name: Failed startup stays quiescent and stops cleanly
+        run: timeout 10 sh scripts/tests/test_startup_failure_hold.sh

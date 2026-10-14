@@ -211,6 +211,7 @@ SERVER_CONTAINER_FILES = frozenset(
         "deploy/container/runtime-web-lib.sh",
         "deploy/container/optional-modules-lib.sh",
         "deploy/container/plane-supervisor.sh",
+        "deploy/container/startup-failure-lib.sh",
         "deploy/container/module-supervisor.sh",
         "deploy/container/core-storage.sh",
         "deploy/container/server-entrypoint.sh",
