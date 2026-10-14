@@ -1597,6 +1597,7 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "missing workspace_id");
    }
    int unserved = 0; /* poll paces an unserved tree itself; see its header */
+   (void)ws_runner_registry_register_configured(wsid);
    cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS, &unserved);
    cJSON_Delete(body);
 

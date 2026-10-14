@@ -20,7 +20,7 @@ jobs:
       - name: Build the production audit runtime and tests
         run: |
           sh scripts/build-audit-sqlite.sh "$RUNNER_TEMP/audit-sqlite"
-          make -C src build/obj/tests/unit-test-audit-worm build/obj/tests/unit-test-bus-capture-gaps build/obj/tests/unit-test-server-ready -j2
+          make -C src ../aimee build/obj/tests/unit-test-audit-worm build/obj/tests/unit-test-bus-capture-gaps build/obj/tests/unit-test-server-ready build/obj/tests/unit-test-workspace-turn -j2
       - name: Corruption, capture capacity, and runtime compatibility
         env:
           LD_LIBRARY_PATH: ${{ runner.temp }}/audit-sqlite
@@ -31,6 +31,8 @@ jobs:
           "$bin"
           src/build/obj/tests/unit-test-bus-capture-gaps
           src/build/obj/tests/unit-test-server-ready
+          src/build/obj/tests/unit-test-workspace-turn
+          python3 src/tests/test_git_runner_handshake.py
           printf '%s\n' 'int sqlite3_libversion_number(void) { return 3051002; }' 'const char *sqlite3_libversion(void) { return "3.51.2"; }' > "$RUNNER_TEMP/old-sqlite.c"
           cc -shared -fPIC "$RUNNER_TEMP/old-sqlite.c" -o "$RUNNER_TEMP/old-sqlite.so"
           if LD_PRELOAD="$RUNNER_TEMP/old-sqlite.so" "$bin" --check-runtime; then

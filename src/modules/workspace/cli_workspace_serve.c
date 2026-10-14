@@ -48,6 +48,7 @@ typedef struct
    const char *endpoint; /* remote /v1 endpoint (NULL when local) */
    const char *bearer;   /* bearer for the remote endpoint */
    int warned_unserved;  /* the "no runner registered" notice is said once */
+   int registered;
 } serve_ctx_t;
 
 static volatile sig_atomic_t g_serve_stop = 0;
@@ -87,6 +88,7 @@ static cJSON *serve_fetch(void *vctx)
       free(body);
       cJSON *op = NULL;
       if (resp && status >= 200 && status < 300 &&
+          cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(resp, "have_op")) &&
           cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "have_op")))
       {
          cJSON *o = cJSON_GetObjectItemCaseSensitive(resp, "op");
@@ -100,6 +102,8 @@ static cJSON *serve_fetch(void *vctx)
        * this serve loop is pointed at a tree the server does not know about.
        * Older servers omit the field, so absence is treated as served. */
       const cJSON *served = resp ? cJSON_GetObjectItemCaseSensitive(resp, "served") : NULL;
+      if (resp && status >= 200 && status < 300 && (!cJSON_IsBool(served) || cJSON_IsTrue(served)))
+         c->registered = 1;
       if (cJSON_IsBool(served) && !cJSON_IsTrue(served) && !c->warned_unserved)
       {
          c->warned_unserved = 1;
@@ -181,7 +185,7 @@ static int cli_workspace_serve_loop_impl(const char *workspace_id, const char *s
                                          const char *endpoint, const char *bearer,
                                          volatile sig_atomic_t *stop, int quiet_unserved)
 {
-   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer, quiet_unserved ? 1 : 0};
+   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer, quiet_unserved ? 1 : 0, 0};
    int rc = 0;
    int consecutive_errors = 0;
    while (!*stop)
@@ -325,6 +329,21 @@ int cli_workspace_git_runner_start(const char *target)
    free(endpoint);
    g_git_runner_bearer = bearer;
    g_git_runner_stop = 0;
+
+   /* Complete an authenticated registration poll before dispatching Git.
+    * Merely starting the thread races the server's path authorization after
+    * a cold restart, when its detached runner registry is still empty. */
+   serve_ctx_t initial = {
+       NULL, g_git_runner_workspace, g_git_runner_endpoint, g_git_runner_bearer, 1, 0};
+   (void)ws_runner_serve_once(serve_fetch, serve_post, &initial);
+   if (!initial.registered)
+   {
+      free(g_git_runner_bearer);
+      g_git_runner_bearer = NULL;
+      g_git_runner_workspace[0] = '\0';
+      g_git_runner_endpoint[0] = '\0';
+      return -1;
+   }
 
 #ifdef _WIN32
    uintptr_t handle = _beginthreadex(NULL, 0, git_runner_thread_main, NULL, 0, NULL);

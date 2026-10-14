@@ -39,6 +39,10 @@ int ws_runner_io(unsigned op, const char *id, const char *payload, size_t payloa
  * NULL only when `id` is invalid or the registry is full. */
 ws_runner_queue_t *ws_runner_registry_get_or_create(const char *id);
 
+/* Restore only an exact configured detached root before its first poll after
+ * restart. This never registers an unknown root or changes provider choice. */
+int ws_runner_registry_register_configured(const char *workspace);
+
 /* Return the queue for `id`, or NULL if none is registered. */
 ws_runner_queue_t *ws_runner_registry_lookup(const char *id);
 

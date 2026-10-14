@@ -5,6 +5,14 @@ unreachable. The server's SQLite audit admission check rejected its ledger on
 every startup. Docker's `unless-stopped` policy retried more than 31,000 times.
 This was not a missing GitHub login.
 
+Fresh detached Git calls also raced queue registration after daemon recreation.
+The previous CLI dispatches Git before its first runner poll is acknowledged;
+a deliberately delayed HTTP fixture reproduces that failure. The corrected CLI
+completes a successful registration poll before Git dispatch, and the server
+restores queues only for exact configured detached roots. Shared, nested, and
+unknown roots cannot create a queue. This preserves provider choice and avoids
+falling back to the server filesystem.
+
 ## Evidence and limits
 
 - CT 100 on .253, endpoint `192.168.1.100:8743`, ran production revision
@@ -78,6 +86,10 @@ all ten diagnostic captures. Private evidence is under the operator's
    restoring capacity returns 200.
 7. A rejected startup remains quiescent and terminates cleanly on SIGTERM; the
    usual Docker boot restart policy is retained.
+8. A delayed runner-registration fixture fails with the previous CLI and passes
+   with the fix. An unserved response refuses Git before dispatch; queue restore
+   accepts only configured detached roots. Workspace and HTTP unit suites cover
+   the host boundaries.
 
 Additional appliance checks must confirm health, audit history reporting,
 restart persistence, the selected SQLite runtime, and actual detached Git/PR

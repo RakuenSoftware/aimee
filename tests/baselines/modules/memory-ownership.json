@@ -2201,7 +2201,8 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "561e36f49184be3c587ad14a5723f70395c599f03bf6073c7a640413bf1c1bb4"
+      "sha256": "0948f3d7a333751b0b1bd04be60911d8fce953c5f81704173cde7c2206b486b5",
+      "review": "2026-10-14: restores queues only for exact configured detached roots before polling; memory owner, actor authorization, and transport envelope are unchanged. Workspace registration tests cover shared/unknown-root refusal."
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
