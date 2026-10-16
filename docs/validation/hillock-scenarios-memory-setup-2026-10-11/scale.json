@@ -1,0 +1,94 @@
+{
+  "deadline_ms": 30000,
+  "passed": true,
+  "results": [
+    {
+      "backend": "hillock",
+      "records": 100,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 47387,
+      "import_ms": 4.589379,
+      "restart_ms": 5.155722,
+      "cold_ms": 134.308878,
+      "p50_ms": 531.622245,
+      "p95_ms": 538.403692,
+      "max_ms": 538.403692,
+      "requests_per_second": 7.4890791065609505,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "GET /v1/health": {
+          "calls": 2,
+          "total_ms": 1.494901,
+          "max_ms": 0.869307
+        },
+        "POST /v1/rank": {
+          "calls": 13,
+          "total_ms": 1688.744249,
+          "max_ms": 131.7632
+        }
+      }
+    },
+    {
+      "backend": "hillock",
+      "records": 1000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 477593,
+      "import_ms": 19.948235,
+      "restart_ms": 31.620431,
+      "cold_ms": 387.176919,
+      "p50_ms": 1537.563753,
+      "p95_ms": 1639.510519,
+      "max_ms": 1639.510519,
+      "requests_per_second": 2.5300845330844495,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "GET /v1/health": {
+          "calls": 2,
+          "total_ms": 1.707868,
+          "max_ms": 0.933627
+        },
+        "POST /v1/rank": {
+          "calls": 13,
+          "total_ms": 4657.833786,
+          "max_ms": 383.053197
+        }
+      }
+    },
+    {
+      "backend": "hillock",
+      "records": 10000,
+      "workers": 4,
+      "samples": 12,
+      "catalog_bytes": 4824599,
+      "import_ms": 171.697821,
+      "restart_ms": 208.979665,
+      "cold_ms": 789.712674,
+      "p50_ms": 3155.753409,
+      "p95_ms": 3184.191905,
+      "max_ms": 3184.191905,
+      "requests_per_second": 1.2651901308893183,
+      "errors": 0,
+      "wrong_identity": 0,
+      "passed": true,
+      "provider_http": {
+        "GET /v1/health": {
+          "calls": 2,
+          "total_ms": 1.260054,
+          "max_ms": 0.664937
+        },
+        "POST /v1/rank": {
+          "calls": 13,
+          "total_ms": 5883.158411999999,
+          "max_ms": 465.194625
+        }
+      }
+    }
+  ],
+  "workload": "synthetic attributed records; one exact lexical needle; concurrent readers"
+}

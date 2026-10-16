@@ -78,7 +78,8 @@ static const struct
                       {"trigger_auth_token", "AIMEE_TRIGGER_AUTH_TOKEN"},
                       {"kb_curator_provider_api_key", "AIMEE_KB_CURATOR_PROVIDER_API_KEY"},
                       {"embedder_api_key", "EMBEDDER_API_KEY"},
-                      {"synthesis_api_key", "SYNTHESIS_API_KEY"}};
+                      {"synthesis_api_key", "SYNTHESIS_API_KEY"},
+                      {"memory_backend_token", "AIMEE_MEMORY_BACKEND_TOKEN"}};
 
 const char *config_client_secret_key(size_t index)
 {

@@ -3,6 +3,7 @@
   "id": "egress",
   "dependencies": [
     "audit",
+    "config",
     "module-runtime"
   ],
   "runtime_toggle": {

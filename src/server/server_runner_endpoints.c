@@ -709,6 +709,7 @@ int handle_runner_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* ws_runner_registry_poll paces an unserved tree for us; see its header. */
    int unserved = 0;
+   (void)ws_runner_registry_register_configured(argv[0]);
    cJSON *op = ws_runner_registry_poll(argv[0], 25000, &unserved);
    cJSON *resp = jo_ok();
    jo_add_bool(resp, "have_op", op != NULL);

@@ -149,6 +149,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Install script test dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
       - name: Build the thin client required by proxy regression tests
@@ -162,6 +165,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Install native build dependencies
         run: |
           sudo apt-get update -q
@@ -588,6 +594,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -696,6 +705,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -752,6 +764,9 @@ jobs:
       CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Restore compiler cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -889,6 +904,9 @@ jobs:
       CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Restore compiler cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -989,6 +1007,9 @@ jobs:
       EMBEDDER_DIMS: "384"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -1064,6 +1085,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -1258,6 +1282,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -1350,6 +1377,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Install dependencies
         # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
         # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
@@ -1408,6 +1438,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1476,6 +1509,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1533,6 +1569,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -1666,6 +1705,9 @@ jobs:
       # section when it cannot find one -- so relying on the image would mean
       # the whole /v1/workflow surface silently stops being covered the day
       # that changes, with the job still green. Pin it instead.
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -1754,6 +1796,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -2129,6 +2174,9 @@ jobs:
       AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -2299,6 +2347,9 @@ jobs:
       # Started with the same image and pull-retry as the sibling Postgres jobs:
       # the runner pulls with no retry, so a transient Docker Hub timeout would
       # fail a required check for a reason that has nothing to do with the code.
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -2355,6 +2406,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Runner diagnostics
         run: |
           gcc --version 2>/dev/null | head -1 || true
@@ -2386,6 +2440,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install fixed audit runtime
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-audit-sqlite
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true

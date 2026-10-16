@@ -342,6 +342,8 @@ typedef struct
 } config_roundtable_preset_t;
 
 int config_server_api_bearer_extra_snapshot(char out[][256], int max);
+/* Process-start selection; saved changes require a restart with memory/egress. */
+const char *config_memory_backend_current(void);
 int config_snapshot_seed(void);
 int config_reload(void);
 int config_present(void);

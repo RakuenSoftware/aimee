@@ -126,6 +126,17 @@ fi
 }
 . "$optional_modules_lib"
 
+startup_failure_lib=/usr/local/bin/startup-failure-lib.sh
+if [ ! -r "$startup_failure_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    startup_failure_lib="$entrypoint_dir/startup-failure-lib.sh"
+fi
+[ -r "$startup_failure_lib" ] || {
+    printf '[server-entrypoint] fatal: startup-failure helper is unavailable\n' >&2
+    exit 2
+}
+. "$startup_failure_lib"
+
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
 if [ "$#" -gt 0 ]; then
@@ -633,7 +644,8 @@ if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]
         log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
     fi
     shutdown
-    exit 1
+    log "startup rejected; container remains unhealthy until the error is repaired and the container restarted"
+    hold_startup_failure
 fi
 
 # Derive the managed compose `.env` through the live server config route. The

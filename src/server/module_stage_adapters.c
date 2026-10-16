@@ -115,7 +115,7 @@ cJSON *server_module_memory_data(const cJSON *request)
       return NULL;
    }
    uint64_t budget = MODULE_MEMORY_DATA_DEADLINE_NS;
-   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   const char *backend = config_memory_backend_current();
    if (backend && backend[0] && strcmp(backend, "native") != 0 &&
        strcmp(backend, "aimee-native") != 0)
       budget = 120ULL * 1000000000ULL;
@@ -1129,7 +1129,7 @@ void server_module_stage_adapters_configure(void)
 
 int server_module_memory_reset_derived(void)
 {
-   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   const char *backend = config_memory_backend_current();
    if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
        strcmp(backend, "aimee-native") == 0)
       return 0;
@@ -1148,7 +1148,7 @@ int server_module_memory_reset_derived(void)
 int server_module_memory_erase_subject(const char *request_id, const char *subject,
                                        const cJSON *sessions)
 {
-   const char *backend = getenv("AIMEE_MEMORY_BACKEND");
+   const char *backend = config_memory_backend_current();
    if (!backend || !backend[0] || strcmp(backend, "native") == 0 ||
        strcmp(backend, "aimee-native") == 0)
       return 0;

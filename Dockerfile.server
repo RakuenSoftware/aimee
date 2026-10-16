@@ -18,6 +18,14 @@ ARG WITH_RUNTIME_WEB=1
 # feature; build with --build-arg WITH_VSCODE=0 to omit it (saves ~100 MB).
 ARG WITH_VSCODE=1
 
+# Debian bookworm's SQLite 3.40 contains the WAL-reset corruption race.
+# Use the fixed stable patch release for the audit ledger on both architectures.
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS audit-sqlite-build
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/build-audit-sqlite.sh /tmp/build-audit-sqlite.sh
+RUN sh /tmp/build-audit-sqlite.sh /out
+
 # The module runtime is a static multicall binary. The canonical process
 # contracts decide which executable names are populated from it in the C build
 # stage below, so Docker never carries a second language-selection list.
@@ -170,6 +178,8 @@ RUN mkdir -p /opt/codeserver/usr
 FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+COPY --from=audit-sqlite-build /out/libsqlite3.so.0 /usr/local/lib/libsqlite3.so.0
+RUN ldconfig
 
 # Verification builds the KB sources too. They use PostgreSQL 17's asynchronous
 # cancellation API, while Debian bookworm ships libpq 15 headers. Add the
@@ -453,6 +463,7 @@ RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bun
 COPY deploy/container/pam.d-aimee /etc/pam.d/aimee
 COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/optional-modules-lib.sh /usr/local/bin/optional-modules-lib.sh
+COPY deploy/container/startup-failure-lib.sh /usr/local/bin/startup-failure-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh

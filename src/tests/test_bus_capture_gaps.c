@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <aimee/audit/audit_worm.h>
@@ -117,6 +118,30 @@ int main(void)
    induce_gap("open_failed", 0);
    induce_gap("write_failed", 1);
    induce_gap("sink_broken", 0);
+   assert(obs_bus_test_capture_fault(NULL) == 0);
+   setenv("AIMEE_CAPTURE_MAX_BYTES", "64", 1);
+   assert(obs_bus_start() == 0);
+   obs_bus_emit_durable_event("test.size-limit", "bounded-replay", "ok", "{}");
+   wait_reason("size_limit");
+   obs_bus_emit_durable_event("test.after-limit", "ledger-still-live", "ok", "{}");
+   obs_bus_stop();
+   assert(rows_matching("bus.capture.gap", "size_limit") == 1);
+   assert(rows_matching("test.after-limit", NULL) == 1);
+   DIR *captures = opendir(home);
+   assert(captures);
+   struct dirent *entry;
+   while ((entry = readdir(captures)) != NULL)
+   {
+      if (strncmp(entry->d_name, "audit-bus-capture-", 18) != 0)
+         continue;
+      char path[512];
+      snprintf(path, sizeof path, "%s/%s", home, entry->d_name);
+      struct stat st;
+      assert(stat(path, &st) == 0);
+      assert(st.st_size <= 64);
+   }
+   closedir(captures);
+   unsetenv("AIMEE_CAPTURE_MAX_BYTES");
    test_prune_marker(home);
 
    assert(audit_worm_verify_chain(NULL, 0) == 0);

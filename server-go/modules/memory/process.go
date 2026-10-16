@@ -12,6 +12,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	configclient "github.com/JBailes/aimee/server-go/config"
 	store "github.com/JBailes/aimee/server-go/db"
+	contract "github.com/JBailes/aimee/server-go/memory"
 	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
@@ -44,7 +45,7 @@ func (r processResources) EmbeddingEndpoint() (string, error) {
 	return os.Getenv("EMBEDDER_URL"), nil
 }
 
-func openProcessStore(ctx context.Context, socket string) (processResources, func(), error) {
+func openProcessResources(ctx context.Context, socket string) (processResources, func(), error) {
 	client, err := bus.ConnectClient(ctx, socket, 1, processStorePrincipalRef)
 	if err != nil {
 		return processResources{}, nil, err
@@ -103,29 +104,34 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	if err != nil {
 		return nil, err
 	}
+	resources, closeConnection, err := openProcessResources(ctx, socket)
+	if err != nil {
+		return nil, fmt.Errorf("memory: config/storage/audit bus connection: %w", err)
+	}
+	settings, err := resources.MemorySettings()
+	if err != nil {
+		closeConnection()
+		return nil, fmt.Errorf("memory: backend configuration: %w", err)
+	}
+	if err = contract.ApplyBackendSettings(settings); err != nil {
+		closeConnection()
+		return nil, fmt.Errorf("memory: backend configuration: %w", err)
+	}
 	backendName := strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND"))
 	if backendName != "" && backendName != "native" && backendName != "aimee-native" {
 		executor := processEgress(ctx, socket)
 		data, err := configuredExternalStore(executor, placement)
 		if err != nil {
+			closeConnection()
 			return nil, err
 		}
 		if err = resetDerivedBackend(ctx, data); err != nil {
+			closeConnection()
 			return nil, err
 		}
-		auditClient, auditErr := bus.ConnectClient(ctx, socket, 1, processStorePrincipalRef)
-		if auditErr != nil {
-			return nil, fmt.Errorf("memory: audit bus connection: %w", auditErr)
-		}
-		data.auditAction = func(ctx context.Context, action audit.Action) error {
-			return audit.PublishAction(ctx, auditClient, action)
-		}
+		data.auditAction = resources.MemoryAuditAction
 		log.Printf("memory module: placement=%s storage=backend-owned backend=%s", placement, backendName)
 		return NewHandler(executor, WithDataStore(placement, data), func(options *handlerOptions) { options.dataContext = ctx }), nil
-	}
-	resources, closeConnection, err := openProcessStore(ctx, socket)
-	if err != nil {
-		return nil, fmt.Errorf("memory: postgres bus connection: %w", err)
 	}
 	data, err := NewPostgresDataStore(resources, placement)
 	if err != nil {

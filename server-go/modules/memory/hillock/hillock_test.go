@@ -214,6 +214,71 @@ func TestHillockLiveContract(t *testing.T) {
 	if err = b.call(ctx, "POST", "/v1/rank", raw, &empty); err != nil || len(empty.Hits) != 0 {
 		t.Fatal("cross-request retention", empty, err)
 	}
+	t.Run("scopes-filters-unicode-concurrency-and-cancellation", func(t *testing.T) {
+		eligible := memory.Scope{Type: memory.ScopeProject, Value: "unicode-live"}
+		foreign := memory.Scope{Type: memory.ScopeProject, Value: "foreign-live"}
+		needle, err := source.Put(ctx, eligible, memory.Record{Key: "café bicycle", Content: "café bicycle belongs to Zoë", Kind: "fact", Tier: "L2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, input := range []struct {
+			scope               memory.Scope
+			kind, tier, content string
+		}{
+			{foreign, "fact", "L2", "café bicycle foreign private content"},
+			{eligible, "episode", "L2", "café bicycle excluded episode"},
+			{eligible, "fact", "L1", "café bicycle excluded tier"},
+		} {
+			if _, err := source.Put(ctx, input.scope, memory.Record{Key: input.content, Content: input.content, Kind: input.kind, Tier: input.tier}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		results := make(chan error, 8)
+		for worker := 0; worker < 8; worker++ {
+			go func() {
+				records, err := b.Search(ctx, eligible, "café bicycle", "fact", "L2", 1)
+				if err == nil && (len(records) != 1 || records[0].ID != needle.ID || records[0].Content != needle.Content) {
+					err = fmt.Errorf("wrong scoped Unicode result: %v", records)
+				}
+				results <- err
+			}()
+		}
+		for worker := 0; worker < 8; worker++ {
+			if err := <-results; err != nil {
+				t.Fatal(err)
+			}
+		}
+		empty, err := b.Search(ctx, memory.Scope{Type: memory.ScopeProject, Value: "empty-live"}, "café bicycle", "fact", "L2", 1)
+		if err != nil || len(empty) != 0 {
+			t.Fatal("cross-project retrieval", empty, err)
+		}
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		if _, err := b.Search(cancelled, eligible, "café bicycle", "fact", "L2", 1); err == nil {
+			t.Fatal("cancelled lookup succeeded")
+		}
+		// A refused service cannot fall back to a different memory engine.
+		refused, err := New(source, func(ctx context.Context, method, target, kind string, body []byte) (int, []byte, error) {
+			request, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(string(body)))
+			if err != nil {
+				return 0, nil, err
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				return 0, nil, err
+			}
+			defer response.Body.Close()
+			data, err := io.ReadAll(response.Body)
+			return response.StatusCode, data, err
+		}, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := refused.Search(ctx, eligible, "café bicycle", "fact", "L2", 1); err == nil {
+			t.Fatal("unauthenticated service produced a result")
+		}
+	})
+
 	for i := int64(3); i <= MaxRecords+3; i++ {
 		if _, err = source.Put(ctx, scope, memory.Record{Kind: "fact", Key: fmt.Sprint(i), Content: fmt.Sprint(i)}); err != nil {
 			t.Fatal(err)

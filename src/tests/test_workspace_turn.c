@@ -4,6 +4,7 @@
  * registered providers through the configuration module contract. */
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_runner_registry.h"
 #include "config.h"
 #include <aimee/delegates/delegate_backend.h>
 #include "modules/workspace/workspace_provider_container.h"
@@ -139,6 +140,14 @@ int main(void)
    register_standard_workspaces();
 
    ws_test_set_module_responder(fake_module);
+
+   /* Restore only explicitly configured detached roots after a cold registry
+    * start. A shared, nested, or unknown path cannot create a serving queue. */
+   assert(ws_runner_registry_register_configured("/tmp/ws-detached") == 1);
+   assert(ws_runner_registry_register_configured("/tmp/ws-shared") == 0);
+   assert(ws_runner_registry_register_configured("/tmp/ws-detached/subdir") == 0);
+   assert(ws_runner_registry_register_configured("/tmp/not-registered") == 0);
+   assert(ws_runner_registry_register_configured(NULL) == 0);
 
    const workspace_provider_t *shared = workspace_provider_shared();
 

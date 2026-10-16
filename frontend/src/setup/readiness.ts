@@ -1,8 +1,9 @@
 /* Single-user setup readiness; optional KB connection never supplies local model readiness. */
 
 import { FIELD_HELP } from '../pages/settingsHelp';
+import { validateMemoryEndpoint } from './memoryBackendConfig';
 
-export type StepId = 'account' | 'provider' | 'embedding' | 'git_identity' | 'connection' | 'project';
+export type StepId = 'memory' | 'account' | 'provider' | 'embedding' | 'git_identity' | 'connection' | 'project';
 
 /* The config keys readiness inspects. Exported so a test can assert each one is a
  * real, documented config field (a key rename in settingsHelp.ts that we miss
@@ -11,6 +12,10 @@ export type StepId = 'account' | 'provider' | 'embedding' | 'git_identity' | 'co
  * GET /api/setup/account — none has a config key, so they are absent here. */
 export const READINESS_KEYS = [
   'provider',
+  'memory_backend_engine',
+  'memory_backend_endpoint',
+  'memory_backend_auth',
+  'memory_backend_token',
   'embedder_command',
   'embedder_url',
   'embedder_model',
@@ -69,6 +74,14 @@ export function computeReadiness(
       ok: provider !== '',
       detail: provider !== '' ? `primary: ${provider}` : 'no primary provider set',
     },
+    memory: {
+      ok: !asStr(cfg, 'memory_backend_engine') || asStr(cfg, 'memory_backend_engine') === 'native' ||
+        (['cognee', 'hillock'].includes(asStr(cfg, 'memory_backend_engine')) && validateMemoryEndpoint(asStr(cfg, 'memory_backend_endpoint')) &&
+          (['', 'bearer', 'none'].includes(asStr(cfg, 'memory_backend_auth')) ||
+            (asStr(cfg, 'memory_backend_engine') === 'cognee' && asStr(cfg, 'memory_backend_auth') === 'api-key')) &&
+          (asStr(cfg, 'memory_backend_auth') === 'none' || cfg.memory_backend_token === true)),
+      detail: asStr(cfg, 'memory_backend_engine') || 'Aimee native (default)',
+    },
     embedding: {
       ok: embConfigured,
       detail: embConfigured ? 'local memory embedder configured' : 'choose a local memory embedder',
@@ -115,6 +128,7 @@ export function completedSteps(
   const done = new Set<StepId>();
   if (accountReady) done.add('account');
   if (asStr(cfg, 'provider') !== '') done.add('provider');
+  if (asStr(cfg, 'memory_backend_engine') && computeReadiness(cfg, { accountReady, projectCount, hostsConnected, gitIdentityReady }).steps.memory.ok) done.add('memory');
 
   const embConfigured =
     asStr(cfg, 'embedder_command') !== '' ||

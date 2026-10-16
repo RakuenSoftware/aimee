@@ -64,7 +64,7 @@
     "src/tests/test_ranker_fit.c": 20,
     "src/tests/test_role_templates.c": 1,
     "src/tests/test_script_runner.c": 4,
-    "src/tests/test_server_dispatch.c": 13,
+    "src/tests/test_server_dispatch.c": 8,
     "src/tests/test_session_brief.c": 1,
     "src/tests/test_skill.c": 4,
     "src/tests/test_synthesis_mtls_client.c": 1,
@@ -90,6 +90,6 @@
     "src/tests/test_workspace.c": 1,
     "src/tests/test_workspace_migration.c": 1,
     "src/tests/test_workspace_mirror.c": 3,
-    "src/tests/test_workspace_turn.c": 34
+    "src/tests/test_workspace_turn.c": 38
   }
 }

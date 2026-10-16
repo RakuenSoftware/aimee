@@ -15,6 +15,7 @@ versioned bounded wire in `aimee/egress/module_api.h`; redirects require a fresh
 ## Dependencies and consumers
 
 - `audit`: receives content-free authorization and transfer outcomes for the WORM evidence path.
+- `config`: supplies the saved memory backend origin and authentication policy at process startup.
 - `module-runtime`: attests principal `32`, caller identities, executable ownership, lifecycle, and stage grants.
 
 Provider requests, memory embedding and backend calls, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses

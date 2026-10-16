@@ -118,6 +118,19 @@ static void ensure_parent_dir(const char *path)
 }
 
 /* Caller must hold g_worm_mu. Opens + schematizes the store if not already open. */
+int audit_worm_runtime_supported(void)
+{
+   /* Older engines contain the WAL-reset corruption race. Pin the engine in
+    * the image and fail explicitly if a deployment loses that runtime. */
+   if (sqlite3_libversion_number() < 3051003)
+   {
+      fprintf(stderr, "audit_worm: SQLite %s is unsupported; require 3.51.3 or later\n",
+              sqlite3_libversion());
+      return -1;
+   }
+   return 0;
+}
+
 static int worm_open_locked(const char *db_path)
 {
    if (g_worm_db)
@@ -133,9 +146,16 @@ static int worm_open_locked(const char *db_path)
       return -1;
    }
    sqlite3_busy_timeout(db, 15000);
-   sqlite3_exec(db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
-   sqlite3_exec(db, "PRAGMA synchronous=FULL", NULL, NULL, NULL); /* fsync-durable commits */
    char *emsg = NULL;
+   if (sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL", NULL, NULL, &emsg) !=
+       SQLITE_OK)
+   {
+      fprintf(stderr, "audit_worm: durability configuration failed (%d): %s\n",
+              sqlite3_extended_errcode(db), emsg ? emsg : sqlite3_errmsg(db));
+      sqlite3_free(emsg);
+      sqlite3_close(db);
+      return -1;
+   }
    if (sqlite3_exec(db, WORM_SCHEMA_SQL, NULL, NULL, &emsg) != SQLITE_OK)
    {
       fprintf(stderr, "audit_worm: schema apply failed: %s\n", emsg ? emsg : "(nil)");
@@ -185,7 +205,20 @@ static int worm_open_locked(const char *db_path)
 static int worm_open_locked_default(void)
 {
    char path[1024];
-   snprintf(path, sizeof path, "%s/audit/worm-live.db", aimee_home());
+   const char *epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   if (epoch && epoch[0])
+   {
+      if (strlen(epoch) > 64 || strspn(epoch, "0123456789-") != strlen(epoch))
+      {
+         fprintf(stderr, "audit_worm: invalid recovery epoch\n");
+         return -1;
+      }
+      /* Explicit operator recovery creates a separate chain; the damaged
+       * ledger remains untouched. API verification retains historical RED. */
+      snprintf(path, sizeof path, "%s/audit/worm-recovery-%s.db", aimee_home(), epoch);
+   }
+   else
+      snprintf(path, sizeof path, "%s/audit/worm-live.db", aimee_home());
    return worm_open_locked(path);
 }
 
@@ -938,6 +971,9 @@ long audit_worm_count(void)
       if (sqlite3_step(q) == SQLITE_ROW)
          n = (long)sqlite3_column_int64(q, 0);
    }
+   if (n < 0)
+      fprintf(stderr, "audit_worm: count failed (%d): %s\n", sqlite3_extended_errcode(g_worm_db),
+              sqlite3_errmsg(g_worm_db));
    sqlite3_finalize(q);
    pthread_mutex_unlock(&g_worm_mu);
    return n;
