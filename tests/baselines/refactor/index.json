@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "e57a35299129c5ba00449ab6539a32454eeab32480cd16705d49dbff96dc9029"
+          "sha256": "bd6ef5d3b46d297d2b0c2d0b911b44f95ce5480c53f741c8467fe82ffee09aa6"
         }
       ]
     },
@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "b03dfe28f4ffd6d6a62eae8903338b8bfa3f9cc323a567b30bbfced2034bf59a"
+          "sha256": "5a440c19641caaaa0bbc951150bb9f00a95b9b6cb19747973bc1b65ef990b2c9"
         }
       ]
     },
@@ -247,7 +247,7 @@
       "files": [
         {
           "path": "Dockerfile",
-          "sha256": "f7f5eda64f378fc50870d410029b056ea999b6fb6e725caaf2917e52d6416ed3"
+          "sha256": "27e0daada10a920bceefe541b8b7d86405c34b1062110f93a01ea053d557122c"
         },
         {
           "path": "Dockerfile.authority-bootstrap",
@@ -279,7 +279,7 @@
         },
         {
           "path": "Dockerfile.server",
-          "sha256": "f7f5eda64f378fc50870d410029b056ea999b6fb6e725caaf2917e52d6416ed3"
+          "sha256": "27e0daada10a920bceefe541b8b7d86405c34b1062110f93a01ea053d557122c"
         },
         {
           "path": "Dockerfile.status-authority",
@@ -683,7 +683,7 @@
         },
         {
           "path": "src/headers/config.h",
-          "sha256": "5f4d539c04c524eb4a75e575e7b1acf31083d91a120e0ad198c8eec88a76c88b"
+          "sha256": "4814318e5d0c4d3714d5542e99b5f2f962efd8e53e6f8c7d03286e954c1532cb"
         },
         {
           "path": "src/headers/config_accessors.h",
@@ -1431,7 +1431,7 @@
         },
         {
           "path": "src/headers/server_http.h",
-          "sha256": "e9d002d802e383986ae8bbfc790a61be5a5e79ea09ad5652d1b3e1cc7ac80977"
+          "sha256": "8e23333660a24e35edd37bc393635662e7832bef786e8db1bd0f64667172a90a"
         },
         {
           "path": "src/headers/server_http_authz.h",
@@ -1695,7 +1695,7 @@
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm.h",
-          "sha256": "c30551bc073cb4035a7cae0056952841b01d46dd52bc182b9b120753f9fb7cb1"
+          "sha256": "697076cd2707604487f53dc49eb5d1a75478f674119f362f26f347b0ed422ab1"
         },
         {
           "path": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
@@ -1992,7 +1992,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "4d91bc27a929efc9cdd71fddf03e74f15440cf808e4f8e9d75c405936bcc794d",
+      "sha256": "0d7432d6fecde6b4255f589c6174ab2031148150e283e54d710318b53f78f811",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
