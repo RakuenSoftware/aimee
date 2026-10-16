@@ -6,7 +6,11 @@ validation and publication; no patch version is hard-coded in application source
 
 ## Promotion candidate
 
-`release/v1.0.2` starts from testing commit
+[PR #3027](https://github.com/RakuenSoftware/aimee/pull/3027) delivers the release
+preparation to `testing`. The subsequent main promotion must originate from
+`testing`, as required by the unchanged `allow-only-testing-source` policy.
+
+The preparation branch `release/v1.0.2` starts from testing commit
 `c2184d11a29c2eb9b040163c7c60a68a7f979b4d` and incorporates main commit
 `875cff004cc5155de76b1b7d83b3c4fde8ac80ef`. Main's only separate commit is the
 v1.0.1 promotion merge. The ancestry reconciliation required no source conflict.
