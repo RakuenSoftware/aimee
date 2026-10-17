@@ -509,6 +509,76 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    return prov;
 }
 
+static aimee_wire_t history_wire(const char *provider)
+{
+   if (provider && strcmp(provider, "anthropic") == 0)
+      return AIMEE_WIRE_ANTHROPIC;
+   if (provider && strcmp(provider, "chatgpt") == 0)
+      return AIMEE_WIRE_RESPONSES;
+   return AIMEE_WIRE_OPENAI_CHAT;
+}
+
+cJSON *aimee_ir_convert_history(const char *messages_json, const char *from_provider,
+                                const char *to_provider)
+{
+   cJSON *history = messages_json ? cJSON_Parse(messages_json) : NULL;
+   if (!cJSON_IsArray(history))
+   {
+      cJSON_Delete(history);
+      return NULL;
+   }
+   aimee_wire_t from = history_wire(from_provider);
+   aimee_wire_t to = history_wire(to_provider);
+   if (from == to)
+      return history;
+
+   /* Wrap the stored array as the request body its frontend parses. */
+   const char *in_key = from == AIMEE_WIRE_RESPONSES ? "input" : "messages";
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+   {
+      cJSON_Delete(history);
+      return NULL;
+   }
+   cJSON_AddItemToObject(req, in_key, history);
+   aimee_request_t ir;
+   char err[128] = "";
+   int rc = from == AIMEE_WIRE_ANTHROPIC   ? anthropic_frontend_parse(req, &ir, err, sizeof err)
+            : from == AIMEE_WIRE_RESPONSES ? responses_frontend_parse(req, &ir, err, sizeof err)
+                                           : openai_frontend_parse(req, &ir, err, sizeof err);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, from);
+      return NULL;
+   }
+
+   cJSON *built = to == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
+                  : to == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
+                                               : openai_backend_build(&ir);
+   aimee_request_free(&ir);
+   cJSON *out = built ? cJSON_DetachItemFromObjectCaseSensitive(
+                            built, to == AIMEE_WIRE_RESPONSES ? "input" : "messages")
+                      : NULL;
+   cJSON_Delete(built);
+   if (!cJSON_IsArray(out))
+   {
+      cJSON_Delete(out);
+      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, to);
+      return NULL;
+   }
+   /* Chat Completions renders IR system blocks as leading system messages; the
+    * per-turn system prompt replaces them, so a converted history carries none. */
+   while (to == AIMEE_WIRE_OPENAI_CHAT && cJSON_GetArraySize(out) > 0)
+   {
+      const char *role = jo_str(cJSON_GetArrayItem(out, 0), "role");
+      if (!role || strcmp(role, "system") != 0)
+         break;
+      cJSON_DeleteItemFromArray(out, 0);
+   }
+   return out;
+}
+
 /* aimee_ir_resp_path_enabled -- Slice 3 gate (config-only: AIMEE_IR_RESP_PATH env,
  * DEFAULT-OFF). When on, the OPENAI-WIRE buffered response parse on the /v1/messages
  * ingress runs provider-JSON -> openai_backend_parse -> IR -> aimee_ir_response_to_parsed,
