@@ -94,7 +94,8 @@ static int json_int64(const cJSON *v, int64_t *out)
 static int text_only_ir(const aimee_request_t *ir)
 {
    if (!ir || !ir->model || !ir->model[0] || !ir->has_max_tokens || ir->max_tokens < 1 ||
-       ir->stream || ir->n_messages < 1 || ir->n_tools || ir->tool_choice || ir->metadata ||
+       ir->stream || ir->n_messages < 1 || ir->n_tools ||
+       ir->tool_choice != AIMEE_TOOL_CHOICE_UNSET || ir->has_parallel_tool_calls || ir->metadata ||
        ir->service_tier || ir->thinking || ir->has_top_k)
       return 0;
    for (int i = 0; i < ir->n_system; i++)

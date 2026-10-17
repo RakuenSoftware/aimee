@@ -202,6 +202,7 @@ static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out)
       snprintf(out->model, sizeof(out->model), "%s", ir->model);
    if (ir->raw_stop_reason)
       snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", ir->raw_stop_reason);
+   out->stop = ir->stop_reason;
    out->prompt_tokens = (int)ir->usage_in;
    out->completion_tokens = (int)ir->usage_out;
    out->cache_write_tokens = (int)ir->usage_cache_write;

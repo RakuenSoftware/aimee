@@ -29,7 +29,8 @@
     "src/tests/test_aimee_backend_bedrock.c",
     "src/tests/test_aimee_converse_stream.c",
     "src/tests/test_aimee_frontend.c",
-    "src/tests/test_aimee_ir_stream.c"
+    "src/tests/test_aimee_ir_stream.c",
+    "src/tests/test_aimee_tool_choice.c"
   ],
   "docs": [
     "docs/modules/translation.md"

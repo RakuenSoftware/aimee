@@ -420,6 +420,60 @@ cJSON *anthropic_tools_to_responses(const cJSON *anthropic_tools)
    return out;
 }
 
+/* Normalize the RAW provider stop reason into an ANTHROPIC stop_reason for the
+ * buffered replay. parsed_response_t.stop_reason is documented as the provider's own
+ * value "captured for the audit", so its dialect depends on the primary: Anthropic's
+ * own vocabulary on a native primary, an OpenAI-chat finish_reason, or a Responses
+ * status. It used to be emitted VERBATIM, which put e.g. "completed" (a Responses
+ * status) into an Anthropic message_delta -- observed live against a codex primary,
+ * and not a value any Anthropic client accepts.
+ *
+ * Only dialects we can RECOGNIZE are translated; anything else passes through. That
+ * way a native value is never mangled -- including one newer than this table, which
+ * a fixed allowlist would silently flatten to end_turn. The streaming path keeps its
+ * own map_stop_reason: there the input is always an OpenAI finish_reason, so its
+ * translate-everything default is correct and must not be widened. */
+static const char *replay_stop_reason(const char *raw)
+{
+   if (!raw || !raw[0])
+      return NULL;
+   /* OpenAI-chat finish_reason */
+   if (strcmp(raw, "tool_calls") == 0 || strcmp(raw, "function_call") == 0)
+      return "tool_use";
+   if (strcmp(raw, "length") == 0)
+      return "max_tokens";
+   if (strcmp(raw, "stop") == 0 || strcmp(raw, "content_filter") == 0)
+      return "end_turn";
+   /* Responses status */
+   if (strcmp(raw, "completed") == 0)
+      return "end_turn";
+   if (strcmp(raw, "incomplete") == 0)
+      return "max_tokens";
+   return raw; /* Anthropic-native (or an unrecognized value): leave it alone */
+}
+
+/* The Anthropic stop_reason for a parsed reply. The canonical value from the IR
+ * parse decides it, so a truncated reply says max_tokens whatever wire it came from;
+ * the raw string is consulted only when no IR parse set one. Surviving tool calls make
+ * it a tool turn, and a tool turn whose calls were all dropped ends the turn. */
+static const char *anthropic_stop_from_parsed(const parsed_response_t *p, int n_calls)
+{
+   switch (p ? p->stop : AIMEE_STOP_UNKNOWN)
+   {
+   case AIMEE_STOP_MAX_TOKENS:
+      return "max_tokens";
+   case AIMEE_STOP_STOP_SEQUENCE:
+      return "stop_sequence";
+   case AIMEE_STOP_UNKNOWN:
+      if (p && p->stop_reason[0])
+         return replay_stop_reason(p->stop_reason);
+      break;
+   default:
+      break;
+   }
+   return n_calls > 0 ? "tool_use" : "end_turn";
+}
+
 cJSON *anthropic_response_from_parsed(const char *resp_id, const char *model,
                                       const parsed_response_t *parsed)
 {
@@ -467,7 +521,7 @@ cJSON *anthropic_response_from_parsed(const char *resp_id, const char *model,
       cJSON_AddItemToArray(content, tb);
    }
 
-   cJSON_AddStringToObject(obj, "stop_reason", n_calls > 0 ? "tool_use" : "end_turn");
+   cJSON_AddStringToObject(obj, "stop_reason", anthropic_stop_from_parsed(parsed, n_calls));
    cJSON_AddNullToObject(obj, "stop_sequence");
 
    usage = cJSON_AddObjectToObject(obj, "usage");
@@ -858,38 +912,6 @@ static cJSON *make_content_block_delta_input_json(int index, const char *partial
    return o;
 }
 
-/* Normalize the RAW provider stop reason into an ANTHROPIC stop_reason for the
- * buffered replay. parsed_response_t.stop_reason is documented as the provider's own
- * value "captured for the audit", so its dialect depends on the primary: Anthropic's
- * own vocabulary on a native primary, an OpenAI-chat finish_reason, or a Responses
- * status. It used to be emitted VERBATIM, which put e.g. "completed" (a Responses
- * status) into an Anthropic message_delta -- observed live against a codex primary,
- * and not a value any Anthropic client accepts.
- *
- * Only dialects we can RECOGNIZE are translated; anything else passes through. That
- * way a native value is never mangled -- including one newer than this table, which
- * a fixed allowlist would silently flatten to end_turn. The streaming path keeps its
- * own map_stop_reason: there the input is always an OpenAI finish_reason, so its
- * translate-everything default is correct and must not be widened. */
-static const char *replay_stop_reason(const char *raw)
-{
-   if (!raw || !raw[0])
-      return NULL;
-   /* OpenAI-chat finish_reason */
-   if (strcmp(raw, "tool_calls") == 0 || strcmp(raw, "function_call") == 0)
-      return "tool_use";
-   if (strcmp(raw, "length") == 0)
-      return "max_tokens";
-   if (strcmp(raw, "stop") == 0 || strcmp(raw, "content_filter") == 0)
-      return "end_turn";
-   /* Responses status */
-   if (strcmp(raw, "completed") == 0)
-      return "end_turn";
-   if (strcmp(raw, "incomplete") == 0)
-      return "max_tokens";
-   return raw; /* Anthropic-native (or an unrecognized value): leave it alone */
-}
-
 /* Every other replayed event carries its own `type`; message_stop was emitted as a
  * bare {}, so the one event that tells a client the turn is over was the one event
  * it could not identify. The streaming translator has always set it (xlate_finish). */
@@ -904,8 +926,7 @@ static cJSON *make_message_delta(const parsed_response_t *p, int n_calls)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *u;
-   const char *stop = (p && p->stop_reason[0]) ? replay_stop_reason(p->stop_reason)
-                                               : (n_calls > 0 ? "tool_use" : "end_turn");
+   const char *stop = anthropic_stop_from_parsed(p, n_calls);
    cJSON_AddStringToObject(o, "type", "message_delta");
    cJSON *delta = cJSON_AddObjectToObject(o, "delta");
    cJSON_AddStringToObject(delta, "stop_reason", stop);

@@ -119,6 +119,8 @@ DB1_ONLY_TABLES = {
     "remote_client_grants",
     "project_clones",
     "server_sessions",
+    # Ordered canonical transcript, owned and retained with its DB1 session.
+    "session_ir_events",
     # Cross-store subject-erasure retry journal. It retains only an irreversible
     # subject digest and the committed DB1 deletion count.
     "db1_subject_erasure_request",
