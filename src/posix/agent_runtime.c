@@ -487,7 +487,7 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
    int rc = agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
                                               max_tokens, temperature, history, &updated, out);
    cJSON_Delete(history);
-   if (rc == 0 && server_session_log_history_save(updated))
+   if (rc == 0 && updated && server_session_log_history_save(updated))
    {
       rc = AGENT_RC_CAPTURE_FAILED;
       out->success = 0;

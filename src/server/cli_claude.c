@@ -1,5 +1,6 @@
 /* cli_claude.c: legacy Claude provider-CLI adapter. */
 #include "provider_cli_adapter.h"
+#include "claude_headless.h"
 
 #include <stddef.h>
 
@@ -286,6 +287,11 @@ static int claude_parse_line(const char *line, cli_event_t *event_out)
    return matched;
 }
 
+static int claude_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   return claude_headless_run(cfg, NULL, NULL, out);
+}
+
 const provider_cli_adapter_t claude_provider_cli_adapter = {
     .cli_kind = "claude",
     .display_name = "Claude CLI",
@@ -299,5 +305,5 @@ const provider_cli_adapter_t claude_provider_cli_adapter = {
     .is_write_event = provider_cli_event_is_write,
     .build_prompt = claude_build_prompt,
     .build_argv = claude_build_argv,
-    .execute = NULL,
+    .execute = claude_execute,
 };

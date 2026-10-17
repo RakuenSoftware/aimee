@@ -12,6 +12,7 @@
 #include "platform_test_util.h"
 #include "provider_cli_adapter.h"
 #include "runtime_secret.h"
+#include <aimee/ir/session_event.h>
 
 /* provider_cli_adapter now resolves an agent's key through the vault module
  * rather than reading agent_t.api_key directly, because config stores the
@@ -180,9 +181,11 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    assert(f != NULL);
    fputs("#!/bin/sh\n"
          "cat >/dev/null\n"
-         "printf '%s\\n' '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
-         "\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}}'\n"
-         "printf '%s\\n' '{\"type\":\"result\",\"result\":\"ok\",\"duration_ms\":5}'\n",
+         "printf '%s\\n' "
+         "'{\"type\":\"assistant\",\"message\":{\"id\":\"fixture\",\"role\":\"assistant\","
+         "\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'\n"
+         "printf '%s\\n' "
+         "'{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\",\"duration_ms\":5}'\n",
          f);
    fclose(f);
    chmod(path, 0700);
@@ -202,6 +205,46 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok") == 0);
    assert(out.turns == 1);
+   free(out.response);
+   unlink(path);
+}
+
+static int reject_live_capture(const aimee_session_event_t *event, void *context)
+{
+   int *count = context;
+   assert(event->kind == AIMEE_SESSION_MESSAGE && event->message &&
+          !strcmp(event->message->role, "assistant"));
+   ++*count;
+   return -1;
+}
+static void test_provider_cli_captures_before_child_completion(void)
+{
+   char path[512], marker[544];
+   snprintf(path, sizeof path, "%s/aimee-live-claude-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   snprintf(marker, sizeof marker, "%s.marker", path);
+   FILE *script = fdopen(fd, "w");
+   assert(script);
+   fputs("#!/bin/sh\ncat >/dev/null\n"
+         "printf '%s\\n' "
+         "'{\"type\":\"assistant\",\"message\":{\"id\":\"live\",\"role\":\"assistant\",\"content\":"
+         "[{\"type\":\"text\",\"text\":\"pending\"}]}}'\n"
+         "sleep 2\n",
+         script);
+   fprintf(script, "touch '%s'\n", marker);
+   fclose(script);
+   assert(chmod(path, 0700) == 0);
+   agent_t agent = {0};
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", path);
+   agent.timeout_ms = 5000;
+   int observed = 0;
+   aimee_ir_session_set_sink(reject_live_capture, &observed);
+   agent_result_t out;
+   assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "", "user",
+                                       &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(observed == 1 && !out.success && access(marker, F_OK) != 0);
+   aimee_ir_session_set_sink(NULL, NULL);
    free(out.response);
    unlink(path);
 }
@@ -318,6 +361,7 @@ int main(void)
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();
    test_claude_stream_json_does_not_duplicate_final_result();
+   test_provider_cli_captures_before_child_completion();
    test_provider_cli_honors_workflow_tool_loop_cap();
    test_mistral_native_adapter_execution();
    test_native_auth_cmd_uses_bearer_token_command();

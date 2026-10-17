@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
@@ -72,6 +73,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0] || !out)
       return -1;
    memset(out, 0, sizeof(*out));
+   uint64_t execution_started = mono_ms();
    const agent_t *agent = cfg->agent;
    const char *prompt = cfg->user_prompt;
    char bound[1025] = "";
@@ -164,10 +166,14 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
             length = strlen(input_line);
          }
       }
-      int idle = agent->cli_idle_timeout_ms > 0 ? agent->cli_idle_timeout_ms : 30 * 60 * 1000;
+      int idle = agent->cli_idle_timeout_ms > 0 ? agent->cli_idle_timeout_ms
+                 : agent->timeout_ms > 0        ? agent->timeout_ms
+                                                : 30 * 60 * 1000;
+      idle = agent_timeout_cap_ms(idle, agent->tool_loop_timeout_ms_cap);
       if (mono_ms() - last > (uint64_t)idle)
       {
-         snprintf(out->error, sizeof(out->error), "Claude structured stream became idle");
+         snprintf(out->error, sizeof(out->error), "Claude structured stream timed out after %d ms",
+                  idle);
          break;
       }
       struct pollfd fds[2] = {{.fd = output, .events = POLLIN},
@@ -327,34 +333,43 @@ stop:
    if (eof && initialized && prompt_sent && !capture_failed && !interrupted && saw_result == 1 &&
        WIFEXITED(status) && WEXITSTATUS(status) == 0)
    {
-      /* Compatibility result is rendered from IR; the browser consumes the sink. */
-      if (ir.claude_message)
+      /* Compatibility callers receive a projection of the admitted native
+       * snapshot. A terminal result alone cannot invent model history. */
+      aimee_response_t response = {0};
+      char error[128];
+      if (!ir.claude_message ||
+          anthropic_backend_parse(ir.claude_message, &response, error, sizeof error) != 0)
       {
-         aimee_response_t response = {0};
-         char error[128];
-         if (anthropic_backend_parse(ir.claude_message, &response, error, sizeof(error)) == 0)
-         {
-            size_t n = 1;
-            for (int i = 0; i < response.n_content; i++)
-               if (response.content[i].type == AIMEE_BLK_TEXT && response.content[i].text)
-                  n += strlen(response.content[i].text) + 1;
-            out->response = malloc(n);
-            if (out->response)
-               aimee_ir_response_text(&response, out->response, n);
-            out->prompt_tokens = (int)response.usage_in;
-            out->completion_tokens = (int)response.usage_out;
-            out->cache_read_tokens = (int)response.usage_cache_read;
-            out->cache_write_tokens = (int)response.usage_cache_write;
-            aimee_response_free(&response);
-         }
+         aimee_response_free(&response);
+         snprintf(out->error, sizeof out->error,
+                  "Claude completed without canonical assistant output");
+         capture_failed = 1;
+         goto finish;
+      }
+      out->response = aimee_ir_response_text_alloc(&response);
+      out->prompt_tokens = (int)response.usage_in;
+      out->completion_tokens = (int)response.usage_out;
+      out->cache_read_tokens = (int)response.usage_cache_read;
+      out->cache_write_tokens = (int)response.usage_cache_write;
+      aimee_response_free(&response);
+      if (!out->response)
+      {
+         snprintf(out->error, sizeof out->error, "cannot allocate canonical Claude response");
+         capture_failed = 1;
+         goto finish;
       }
       out->success = 1;
+      out->turns = 1;
       rc = 0;
    }
    else if (!out->error[0])
       snprintf(out->error, sizeof(out->error), "%s",
                interrupted ? "Claude turn interrupted" : "Claude structured turn failed");
 finish:
+{
+   uint64_t elapsed = mono_ms() - execution_started;
+   out->latency_ms = elapsed > INT_MAX ? INT_MAX : (int)elapsed;
+}
    if (capture_failed)
    {
       rc = AGENT_RC_CAPTURE_FAILED;

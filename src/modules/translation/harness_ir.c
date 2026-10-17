@@ -162,7 +162,15 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
          }
          return 0;
       }
-      return claude_snapshot(m, id);
+      int rc = claude_snapshot(m, id);
+      if (rc)
+         return rc;
+      cJSON *copy = cJSON_Duplicate(m, 1);
+      if (!copy)
+         return -1;
+      cJSON_Delete(s->claude_message);
+      s->claude_message = copy;
+      return 0;
    }
    if (!strcmp(type, "user"))
    {

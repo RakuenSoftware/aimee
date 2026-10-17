@@ -1,4 +1,3 @@
-#include <aimee/translation/harness_ir.h>
 /* provider_cli_adapter.c: shared provider-CLI delegate adapter registry. */
 #include "provider_cli_adapter.h"
 
@@ -842,8 +841,8 @@ static int provider_cli_collect_child(const provider_cli_adapter_t *adapter, int
    return 0;
 }
 
-static int provider_cli_parse_output_legacy(const provider_cli_adapter_t *adapter, char *output,
-                                            agent_result_t *out)
+static int provider_cli_parse_output(const provider_cli_adapter_t *adapter, char *output,
+                                     agent_result_t *out)
 {
    provider_cli_buf_t parsed = {0};
    provider_cli_buf_t raw = {0};
@@ -980,39 +979,6 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
          return adapters[i];
    }
    return NULL;
-}
-
-/* Preserve native Claude blocks before the legacy execution-result bridge.
- * Browser subscribers consume the typed sink, never the text-only result. */
-static int provider_cli_parse_output(const provider_cli_adapter_t *adapter, char *output,
-                                     agent_result_t *out)
-{
-   if (aimee_ir_session_get_sink(NULL) && !strcmp(adapter->cli_kind, "claude"))
-   {
-      aimee_harness_ir_t ir = {0};
-      char *copy = strdup(output ? output : "");
-      if (!copy)
-         return -1;
-      char *save = NULL;
-      int rc = 0;
-      for (char *line = strtok_r(copy, "\n", &save); line; line = strtok_r(NULL, "\n", &save))
-      {
-         cJSON *frame = cJSON_Parse(line);
-         if (cJSON_IsObject(frame))
-            rc = aimee_claude_frame_ir(frame, &ir);
-         cJSON_Delete(frame);
-         if (rc)
-            break;
-      }
-      free(copy);
-      aimee_harness_ir_free(&ir);
-      if (rc)
-      {
-         snprintf(out->error, sizeof(out->error), "Claude canonical capture failed");
-         return -1;
-      }
-   }
-   return provider_cli_parse_output_legacy(adapter, output, out);
 }
 
 int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const agent_t *agent,

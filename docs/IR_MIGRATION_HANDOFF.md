@@ -309,3 +309,22 @@ CI must still qualify the repaired path. The attribution gate remains intentiona
 The full migration is still incomplete. Global headless execution/tmux retirement, credential custody,
 remaining raw request/governance and response consumers, MCP elicitation forms and full Vault-backed
 browser/resume acceptance remain open. Do not interpret the passing focused checks as completion.
+
+### Continuation: non-browser Claude entry capture
+
+The registered Claude provider adapter now runs the same incremental headless reader as browser
+Claude, rather than collecting the entire subprocess output and decoding it afterward. Its timeout
+honors the configured workflow cap. A real subprocess fixture verifies that rejected live capture
+terminates the child before its later completion marker is written. Standalone native assistant
+snapshots also supply the legacy text projection from the owned decoded response.
+
+External harnesses do not produce a native-loop checkpoint array: their persisted canonical events
+are the history source. The native wrapper no longer tries to checkpoint a NULL array after a
+successful harness run. Conversely, a log owner cannot report success without a completed canonical
+model response. Capture failures remain sticky when a nested owner restores a NULL parent sink.
+Global tmux retirement, scoped runtime/resume unification and credential custody still remain.
+
+The complete local script suite passed all 69 tests. All 75 lint checks passed for 6edd36846.
+Fresh CI found two old fixtures whose contracts changed: default native cache preservation requires
+explicit stable-prefix policy in the cross-protocol normalization test; a stream ending with [DONE]
+requires a preceding native finish_reason. Both fixtures now test those explicit contracts.

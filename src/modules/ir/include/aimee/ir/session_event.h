@@ -49,6 +49,8 @@ struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
  * a failing installed sink is returned to the producer, never swallowed. */
 typedef int (*aimee_ir_session_sink_fn)(const aimee_session_event_t *event, void *context);
 void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context);
+/* Restore a nested execution owner without clearing its capture failure. */
+void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
 /* Capture failure is sticky for the installed task sink, including adapter

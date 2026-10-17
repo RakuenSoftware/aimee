@@ -220,6 +220,11 @@ int main(void)
    reject_after = 0;
    server_control_scope_close(scope);
    aimee_ir_session_set_sink(NULL, NULL);
+   cfg.control_channel = 0;
+   script(path,
+          "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"unobserved\"}'\n");
+   assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(!out.success && !out.response);
    unlink(path);
    puts("Claude headless lifecycle tests passed");
    return 0;

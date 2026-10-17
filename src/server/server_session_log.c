@@ -15,6 +15,7 @@ struct server_session_log
 {
    char session[128], turn[33], principal[128];
    unsigned long long counter;
+   unsigned long long model_completions;
    cJSON *tool_ids;
    aimee_ir_session_sink_fn previous_sink;
    void *previous_context;
@@ -103,6 +104,13 @@ static int log_event(const aimee_session_event_t *event, void *context)
                                          sequence)
                  : -1;
    free(wire);
+   const char *role =
+       event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
+   if (!rc && role && !strcmp(role, "assistant") &&
+       (event->kind == AIMEE_SESSION_MESSAGE ||
+        (event->kind == AIMEE_SESSION_DELTA && event->delta &&
+         event->delta->type == AIMEE_DELTA_TURN_STOP)))
+      scope->model_completions++;
    return rc;
 qualification_failed:
    cJSON_Delete(payload);
@@ -222,18 +230,23 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
 {
    if (!scope)
       return 0;
+   int missing = success && !scope->model_completions;
+   if (missing)
+   {
+      success = 0;
+      error = "execution completed without canonical model output";
+   }
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = agent_request_cancelled() ? "cancelled"
                                                          : success                 ? "completed"
                                                                                    : "failed",
                                      .execution_error = error && error[0] ? error : NULL};
    int failed = aimee_ir_session_emit(&finished) != 0 || aimee_ir_session_capture_failed();
+   failed = failed || missing;
    current = scope->previous;
-   aimee_ir_session_set_sink(scope->previous_sink, scope->previous_context);
+   aimee_ir_session_restore_sink(scope->previous_sink, scope->previous_context, failed);
    server_control_scope_bind(scope->previous_controls);
    cJSON_Delete(scope->tool_ids);
    free(scope);
-   if (failed)
-      aimee_ir_session_fail_capture();
    return failed ? -1 : 0;
 }

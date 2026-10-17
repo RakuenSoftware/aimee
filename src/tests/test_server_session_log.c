@@ -115,6 +115,14 @@ static void attest(const char *session, const char *actor)
    snprintf(credentials.session_id, sizeof credentials.session_id, "%s", session);
    snprintf(credentials.vault_principal, sizeof credentials.vault_principal, "%s", actor);
 }
+static void model_reply(void)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "canonical reply"};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "model", .message = &message};
+   assert(aimee_ir_session_emit(&event) == 0);
+}
 static void *worker(void *arg)
 {
    job = (int)(long)arg;
@@ -127,11 +135,13 @@ static void *worker(void *arg)
        "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"private child prompt\"}]}]");
    assert(server_session_log_history_save(history) == 0);
    cJSON_Delete(history);
+   model_reply();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    assert(!server_session_log_active());
    assert(server_session_log_begin("review", "continued", &scope) == 0);
    assert(server_session_log_history_load(&history) == 0 && cJSON_GetArraySize(history) == 1);
    cJSON_Delete(history);
+   model_reply();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    return NULL;
 }
@@ -148,6 +158,7 @@ int main(void)
    assert(server_session_log_begin("review", "private", &scope) == 0);
    assert(parent_events == 0 && count == 2 && !strcmp(rows[1].actor, "alice"));
    assert(strcmp(rows[1].id, "parent"));
+   model_reply();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = "completed"};
@@ -170,12 +181,18 @@ int main(void)
    assert(server_session_log_finish(scope, 0, "checkpoint failed") < 0);
    aimee_ir_session_set_sink(NULL, NULL);
    reject_checkpoint = 0;
+   job = 6;
+   assert(server_session_log_begin("review", "unconverted producer", &scope) == 0);
+   assert(server_session_log_finish(scope, 1, NULL) < 0);
+   assert(aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(NULL, NULL);
+   int before_workers = count;
    pthread_t threads[2];
    for (long i = 0; i < 2; i++)
       assert(pthread_create(&threads[i], NULL, worker, (void *)(i + 10)) == 0);
    for (int i = 0; i < 2; i++)
       assert(pthread_join(threads[i], NULL) == 0);
-   assert(count == 4); /* Deterministic durable jobs reuse their own private child. */
+   assert(count == before_workers + 2); /* Each durable job reuses its private child. */
    for (int i = 0; i < count; i++)
    {
       cJSON_Delete(rows[i].events);

@@ -600,6 +600,7 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
          saw_stop = 1;
    }
    assert(saw_start);
+   assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
    assert(saw_stop);
 
    reset_capture();
@@ -738,9 +739,8 @@ static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
    PASS("streaming_openai_police_on_no_tool_use_passthrough");
 }
 
-/* Policy OFF regression canary: today's OpenAI-via-translator per-block
- * translator runs unchanged (we send a synthetic OpenAI chunk payload and
- * assert the translator emits message_start + message_stop). */
+/* Policy OFF still runs the canonical incremental relay. A native completion
+ * event must precede [DONE], so EOF cannot invent a successful turn. */
 static void test_streaming_openai_policy_off_is_byte_neutral(void)
 {
    const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
@@ -751,6 +751,7 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    g_prevent = 0;
    g_stream_payload = "data: "
                       "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                      "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
                       "data: [DONE]\n\n";
 
    memset(&cap, 0, sizeof(cap));
