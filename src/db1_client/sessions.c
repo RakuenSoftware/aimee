@@ -891,9 +891,8 @@ int db1_server_session_persona_delivery_finish(const char *id, int delivered)
 
 /* clang-format on */
 
-int db1_session_ir_append(const char *session_id, const char *event_id,
-                         const char *turn_id, const char *actor,
-                         const char *payload, char out_sequence[32])
+int db1_session_ir_append(const char *session_id, const char *event_id, const char *turn_id,
+                          const char *actor, const char *payload, char out_sequence[32])
 {
    if (out_sequence)
       out_sequence[0] = '\0';
@@ -902,7 +901,8 @@ int db1_session_ir_append(const char *session_id, const char *event_id,
    const char *fields[] = {session_id, event_id, turn_id, actor, payload};
    char *const values[] = {out_sequence};
    const size_t caps[] = {32u};
-   return write_result(call_stage(AIMEE_DB1_OP_SESSION_IR_APPEND, fields, 5, values, caps, 1, NULL));
+   return write_result(
+       call_stage(AIMEE_DB1_OP_SESSION_IR_APPEND, fields, 5, values, caps, 1, NULL));
 }
 
 char *db1_session_ir_page(const char *session_id, const char *after, int limit)
@@ -917,7 +917,8 @@ char *db1_session_ir_page(const char *session_id, const char *after, int limit)
       return NULL;
    char *const values[] = {json};
    const size_t caps[] = {4u * 1024u * 1024u};
-   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 3, values, caps, 1, NULL) != AIMEE_DB1_STATUS_OK)
+   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 3, values, caps, 1, NULL) !=
+       AIMEE_DB1_STATUS_OK)
    {
       free(json);
       return NULL;
