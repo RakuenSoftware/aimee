@@ -1,6 +1,10 @@
 name: c-repository-pins
 
 on:
+  # Test GitHub's queued integration commit without updating the PR branch.
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
   # Standalone exports must build on integration changes as well as releases.
   # Bundled source snapshots and external dependency pins gate application releases.
   push:
