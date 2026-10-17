@@ -82,6 +82,18 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       out->metadata = cJSON_Duplicate(meta, 1);
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stream");
    out->stream = (stream && cJSON_IsTrue(stream)) ? 1 : 0;
+   switch (openai_family_tool_choice_parse(
+       cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tool_choice"),
+       cJSON_GetObjectItemCaseSensitive((cJSON *)req, "parallel_tool_calls"), 1, out, err, errn))
+   {
+   case 0:
+      break;
+   case -1:
+      aimee_request_free(out);
+      return -1;
+   default:
+      goto oom;
+   }
 
    /* instructions -> a single system text block */
    const char *instr = ostr(req, "instructions");

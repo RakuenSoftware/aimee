@@ -108,6 +108,56 @@ static int append_openai_content(const cJSON *content, aimee_block_t **blocks, i
    return 0;
 }
 
+int openai_family_tool_choice_parse(const cJSON *tc, const cJSON *parallel, int responses_shape,
+                                    aimee_request_t *out, char *err, size_t errn)
+{
+   if (cJSON_IsBool(parallel))
+   {
+      out->has_parallel_tool_calls = 1;
+      out->parallel_tool_calls = cJSON_IsTrue(parallel) ? 1 : 0;
+   }
+   if (!tc || cJSON_IsNull(tc))
+      return 0;
+   if (cJSON_IsString(tc))
+   {
+      const char *v = tc->valuestring;
+      if (strcmp(v, "auto") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      else if (strcmp(v, "none") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      else if (strcmp(v, "required") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_ANY;
+      else
+         goto unsupported;
+      return 0;
+   }
+   if (cJSON_IsObject(tc))
+   {
+      const char *type = ostr(tc, "type");
+      const char *name = NULL;
+      if (type && strcmp(type, "function") == 0)
+      {
+         if (responses_shape)
+            name = ostr(tc, "name");
+         else
+            name = ostr(cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "function"), "name");
+      }
+      if (!name || !name[0])
+         goto unsupported;
+      out->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+      out->tool_choice_name = dupstr(name);
+      return out->tool_choice_name ? 0 : -2;
+   }
+unsupported:
+   /* A hosted-tool, allowed_tools or custom choice names something the neutral IR
+    * has no field for. Refuse it rather than downgrade it: forcing a different tool
+    * set than the client asked for is a semantic change, not a translation. */
+   if (err && errn)
+      snprintf(err, errn, "%s_frontend_parse: unsupported tool_choice",
+               responses_shape ? "responses" : "openai");
+   return -1;
+}
+
 int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, size_t errn)
 {
    if (out)
@@ -267,8 +317,18 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       }
    }
 
-   const cJSON *tc = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tool_choice");
-   out->tool_choice = tc ? cJSON_Duplicate(tc, 1) : NULL;
+   switch (openai_family_tool_choice_parse(
+       cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tool_choice"),
+       cJSON_GetObjectItemCaseSensitive((cJSON *)req, "parallel_tool_calls"), 0, out, err, errn))
+   {
+   case 0:
+      break;
+   case -1:
+      aimee_request_free(out);
+      return -1;
+   default:
+      goto oom;
+   }
 
    /* stop: string OR array */
    const cJSON *stop = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stop");
