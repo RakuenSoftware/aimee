@@ -58,7 +58,12 @@ Live profiling also found roughly twelve seconds of SQL work per sixteen-file
 batch: about six selecting pending files, four sorting the entire verified-vector
 cache and two finding cutover candidates. Rebuild selection now handles ordinary
 missing/stale/invalid-shape work first, with a disjoint hash-only repair fallback
-when batch capacity remains. Cache reuse hashes only potential replacement inputs
+when batch capacity remains. Retry exclusions examine blocked jobs for the exact
+current input; old failures cannot block changed content. Dimension metadata is
+joined once instead of issuing a correlated lookup for every existing vector,
+and batch selection precedes fetching document bodies. On the production data,
+EXPLAIN ANALYZE returned the same sixteen-row batch in 148 ms versus 4,937 ms
+for the previous selection query. Cache reuse hashes only potential replacement inputs
 and sorts only matching verified sources. No schema migration or verification
 predicate at publication was removed. A PostgreSQL regression confirms that three
 ordinary inputs and one hash-only mismatch are repaired exactly once each.

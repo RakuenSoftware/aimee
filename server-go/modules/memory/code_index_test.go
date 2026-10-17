@@ -783,3 +783,36 @@ func TestCodeIndexRepairsHashOnlyMismatchWithoutDuplicatingOrdinaryWork(t *testi
 		t.Fatalf("valid=%d error=%v", valid, err)
 	}
 }
+
+func TestCodeIndexRetryExclusionsApplyOnlyToTheCurrentInput(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	e := &vectorTestEgress{serving: "retry-model"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	files := []CodeFile{{Path: "blocked.c", Content: "blocked content"}, {Path: "changed.c", Content: "changed content"}}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := p.prepareCodeGeneration(ctx, e.serving)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, `INSERT INTO user_code_embedding_jobs(project,path,generation,input_hash,state,attempts,next_attempt_at)
+ SELECT f.project,f.path,$1,CASE WHEN f.path='blocked.c' THEN `+codeEmbeddingInputHashSQL+` ELSE 'obsolete-input' END,'failed',8,clock_timestamp()+interval '1 hour' FROM user_code_files f`, generation); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.seen) != 1 || !strings.Contains(e.seen[0], "changed.c") {
+		t.Fatalf("blocked current input or obsolete retry state handled incorrectly: %v", e.seen)
+	}
+	if _, err = db.Exec(ctx, `UPDATE user_code_embedding_jobs SET attempts=1,next_attempt_at='-infinity' WHERE path='blocked.c'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.seen) != 2 || !strings.Contains(e.seen[1], "blocked.c") {
+		t.Fatalf("eligible retry did not resume: %v", e.seen)
+	}
+}

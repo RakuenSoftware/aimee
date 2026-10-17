@@ -63,19 +63,25 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 		if len(items) == 16 {
 			break
 		}
-		shape := "vector_dims(v.embedding)<>(SELECT dimension FROM user_code_embedding_generations g WHERE g.project=f.project AND g.generation=v.generation) OR vector_norm(v.embedding)=0"
+		shape := "vector_dims(v.embedding)<>cg.dimension OR vector_norm(v.embedding)=0"
 		mismatch := "v.path IS NULL OR v.content_fingerprint<>f.fingerprint OR " + shape
 		if hashOnly {
 			mismatch = "v.path IS NOT NULL AND v.content_fingerprint=f.fingerprint AND NOT (" + shape + ") AND v.input_hash<>" + codeEmbeddingInputHashSQL
 		}
-		rows, err := p.db.Query(ctx, `SELECT project,path,content,fingerprint,input_hash FROM (
- SELECT f.project,f.path,left(f.content,8192) AS content,f.fingerprint,`+codeEmbeddingInputHashSQL+` AS input_hash,
- row_number() OVER (PARTITION BY f.project ORDER BY f.path) AS project_turn
+		rows, err := p.db.Query(ctx, `WITH blocked_jobs AS MATERIALIZED (
+ SELECT project,path,input_hash FROM user_code_embedding_jobs
+ WHERE generation=$1 AND (attempts>=8 OR next_attempt_at>clock_timestamp())
+), selected AS MATERIALIZED (
+ SELECT f.project,f.path,f.fingerprint,row_number() OVER (PARTITION BY f.project ORDER BY f.path) AS project_turn
  FROM user_code_files f LEFT JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=$1
- LEFT JOIN user_code_embedding_jobs j ON j.project=f.project AND j.path=f.path AND j.generation=$1 AND j.input_hash=`+codeEmbeddingInputHashSQL+`
+ LEFT JOIN user_code_embedding_generations cg ON cg.project=f.project AND cg.generation=$1
  WHERE (`+mismatch+`)
- AND (j.path IS NULL OR (j.attempts<8 AND j.next_attempt_at<=clock_timestamp()))
- ) pending ORDER BY project_turn,project,path LIMIT $2`, generation, 16-len(items))
+ AND NOT EXISTS (SELECT 1 FROM blocked_jobs j WHERE j.project=f.project AND j.path=f.path AND j.input_hash=`+codeEmbeddingInputHashSQL+`)
+ ORDER BY project_turn,f.project,f.path LIMIT $2
+)
+SELECT f.project,f.path,left(f.content,8192),f.fingerprint,`+codeEmbeddingInputHashSQL+`
+ FROM selected s JOIN user_code_files f ON f.project=s.project AND f.path=s.path AND f.fingerprint=s.fingerprint
+ ORDER BY s.project_turn,s.project,s.path`, generation, 16-len(items))
 		if err != nil {
 			return err
 		}
