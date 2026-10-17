@@ -10,11 +10,12 @@ Hybrid code queries allow up to ten seconds for a CPU embedder already processin
 
 The obsolete three-record native-preview fixture was retired at the operator's request. Publisher, follower, delivery, gateway and the gateway refresh watcher are disabled. Its configuration and records were preserved; its expired grant was not extended. The configured Codex and native personal-memory paths remain active.
 
-The server has a stable container hostname. Its dashboard public certificate survived replacement unchanged, and the native API enrollment pin and instance identity were preserved. Optional graph expansion remains disabled because it exceeded the real repository query deadline during the initial deployment; lexical and semantic retrieval remain available.
+The server has a stable container hostname. Explicit dashboard SANs define the stable deployment identity alongside localhost; automatic hostname/interface discovery is used only when no SANs are configured. This prevents changing Docker bridge addresses from needlessly replacing a certificate trusted for the LAN address. The Vault-held key is preserved, and declaring an additional stable SAN still renews the public certificate. The native API enrollment pin and instance identity were preserved. Optional graph expansion remains disabled because it exceeded the real repository query deadline during the initial deployment; lexical and semantic retrieval remain available.
 
 ## Validation
 
-- Provider and memory Go suites pass.
+- Provider and memory Go suites pass. Canonical probes use the same current account slot as serving and do not borrow an account header from a stale OAuth import.
+- Four runtime-web TLS tests pass: Vault-only key custody, necessary legacy renewal, deployment SAN parsing, and stable configured identities with explicit SAN extension without rekeying.
 - C agent suite passes, including current-token selection and cross-process refresh serialization. Store-dependent tests were skipped in that isolated build; they are not claimed covered there.
 - Disposable PostgreSQL tests pass for busy-embedder retrieval, short caller deadlines, stale content/model rejection, graph lookup, and reuse of identical verified inputs with changed-path/model/content negative cases.
 - Live model probe: execution OK. A separate enrolled client's real Codex completion returns the exact expected assistant reply over its saved certificate pin and mTLS identity.

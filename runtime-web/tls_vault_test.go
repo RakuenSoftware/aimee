@@ -115,3 +115,35 @@ func TestCertSANsIncludeDeploymentOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestConfiguredTLSCertificateIgnoresEphemeralContainerAddresses(t *testing.T) {
+	t.Setenv("AIMEE_TLS_EXTRA_SAN", "")
+	t.Setenv("AIMEE_WEBCHAT_TLS_SANS", "DNS:stable.example,IP:192.0.2.45")
+	names, ips := certSANs()
+	if strings.Join(names, ",") != "localhost,stable.example" || len(ips) != 3 {
+		t.Fatalf("configured identity includes discovered container addresses: %v %v", names, ips)
+	}
+	dir := t.TempDir()
+	cfg := &config{port: 8443, dbPath: filepath.Join(dir, "webchat.db")}
+	vault := &fakeWebchatVault{}
+	first, err := ensureTLSCertificate(cfg, vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := vault.snapshot.TLSKey
+	second, err := ensureTLSCertificate(cfg, vault)
+	if err != nil || string(first.Certificate[0]) != string(second.Certificate[0]) {
+		t.Fatal("stable configured certificate was replaced", err)
+	}
+	// A newly configured deployment name still requires a new public cert,
+	// while retaining the Vault key and its identity.
+	t.Setenv("AIMEE_WEBCHAT_TLS_SANS", "DNS:stable.example,IP:192.0.2.45,DNS:added.example")
+	third, err := ensureTLSCertificate(cfg, vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(third.Certificate[0])
+	if err != nil || cert.VerifyHostname("added.example") != nil || string(first.Certificate[0]) == string(third.Certificate[0]) || key != vault.snapshot.TLSKey {
+		t.Fatal("explicit SAN extension did not preserve key and renew certificate", err)
+	}
+}

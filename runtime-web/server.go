@@ -466,10 +466,10 @@ func parseTLSPrivateKey(keyPEM []byte) (crypto.Signer, error) {
 // only DNS:localhost cannot validate for https://<LAN-IP>:8443, which (besides
 // the usual warning) makes browsers refuse to register VSCode's service worker
 // ("An SSL certificate error occurred when fetching the script") so the editor's
-// webviews break. We include localhost, every non-loopback interface IP, the
-// hostname, and any operator-supplied AIMEE_TLS_EXTRA_SAN or
-// AIMEE_WEBCHAT_TLS_SANS entries so an operator who trusts this cert gets a
-// fully valid context. AIMEE_TLS_EXTRA_SAN is the public deployment setting and
+// webviews break. Explicit AIMEE_TLS_EXTRA_SAN or AIMEE_WEBCHAT_TLS_SANS
+// entries define stable deployment identities alongside localhost. Without
+// explicit entries, discover the hostname and non-loopback interface IPs.
+// AIMEE_TLS_EXTRA_SAN is the public deployment setting and
 // accepts the same comma/space-separated DNS:/IP: syntax as the native server.
 func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 	dnsSeen := map[string]bool{}
@@ -491,19 +491,10 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 	addDNS("localhost")
 	addIP(net.ParseIP("127.0.0.1"))
 	addIP(net.ParseIP("::1"))
-	if h, err := os.Hostname(); err == nil {
-		addDNS(h)
-	}
-	if addrs, err := net.InterfaceAddrs(); err == nil {
-		for _, a := range addrs {
-			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				addIP(ipnet.IP)
-			}
-		}
-	}
 	// Operator overrides for names/IPs not derivable here (e.g. a reverse-proxy
 	// hostname). Keep the webchat-specific variable for compatibility, but honor
 	// the shared deployment setting used by Compose and SmoothNAS first.
+	configured := false
 	for _, envName := range []string{"AIMEE_TLS_EXTRA_SAN", "AIMEE_WEBCHAT_TLS_SANS"} {
 		for _, s := range strings.FieldsFunc(os.Getenv(envName), func(r rune) bool {
 			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
@@ -517,10 +508,26 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 			if s == "" {
 				continue
 			}
+			configured = true
 			if ip := net.ParseIP(s); ip != nil {
 				addIP(ip)
 			} else {
 				addDNS(s)
+			}
+		}
+	}
+	// Declared deployment identities are authoritative. Container hostnames
+	// and bridge IPs can change on replacement or cold boot; adding them would
+	// needlessly replace a public certificate already trusted by its users.
+	if !configured {
+		if h, err := os.Hostname(); err == nil {
+			addDNS(h)
+		}
+		if addrs, err := net.InterfaceAddrs(); err == nil {
+			for _, a := range addrs {
+				if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+					addIP(ipnet.IP)
+				}
 			}
 		}
 	}
