@@ -30,6 +30,16 @@ int openai_frontend_parse(const struct cJSON *req, aimee_request_t *out, char *e
  * (message/function_call/function_call_output/reasoning) -> messages + typed blocks. */
 int responses_frontend_parse(const struct cJSON *req, aimee_request_t *out, char *err, size_t errn);
 
+/* Parse the OpenAI-family tool_choice and parallel_tool_calls request fields into the
+ * typed IR. `tool_choice` is the request's value (NULL/null = unset); responses_shape
+ * selects the named-function object spelling ({type:function,name} on Responses,
+ * {type:function,function:{name}} on Chat). Returns 0 on success, -1 for a choice the
+ * IR cannot express (err filled), -2 on allocation failure. Shared by the Chat and
+ * Responses frontends, which spell everything else identically. */
+int openai_family_tool_choice_parse(const struct cJSON *tool_choice,
+                                    const struct cJSON *parallel_tool_calls, int responses_shape,
+                                    aimee_request_t *out, char *err, size_t errn);
+
 /* Render an IR response as a buffered client response, built PURELY from the IR
  * (ruling Q3: semantic correctness, NOT provider byte-parity). Returns a new cJSON
  * object the caller owns (cJSON_Delete), or NULL on bad args. The canonical

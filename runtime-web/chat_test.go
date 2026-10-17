@@ -524,10 +524,11 @@ func TestResolveProjectRootRejectsRelativePath(t *testing.T) {
 }
 
 func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
-	var gotPath, gotBody string
+	var gotPath, gotBody, gotWebuser string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWebuser = r.Header.Get("X-Aimee-Webuser")
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		w.Header().Set("Content-Type", "application/x-ndjson")
@@ -547,7 +548,7 @@ func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
 
 	var events []string
 	var text string
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "hi there friend", "web1", "", "", "",
+	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi there friend", "web1", "", "", "",
 		func(evt streamEvent) {
 			events = append(events, evt.Event)
 			if evt.Event == "text" {
@@ -556,6 +557,9 @@ func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
 		})
 	if err != nil {
 		t.Fatalf("chatStreamHTTP: %v", err)
+	}
+	if gotWebuser != "alice" {
+		t.Fatalf("chat actor = %q, want alice", gotWebuser)
 	}
 	if gotPath != "/v1/chat/stream" {
 		t.Fatalf("proxied path = %q", gotPath)
@@ -582,6 +586,9 @@ func TestHandleChatSendPersistsStableUserSession(t *testing.T) {
 		fmt.Fprintf(w, `{"root":%q}`, workspace)
 	})
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		if actor := r.Header.Get("X-Aimee-Webuser"); actor != "alice" {
+			t.Errorf("chat actor = %q, want alice", actor)
+		}
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode stream request: %v", err)
@@ -677,6 +684,59 @@ func TestHandleChatSendUsesOnlyServerBoundProviderSession(t *testing.T) {
 	}
 }
 
+func TestHandleChatSendForwardsToolLifecycle(t *testing.T) {
+	workspace := t.TempDir()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"root":%q}`, workspace)
+	})
+	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
+		if actor := r.Header.Get("X-Aimee-Webuser"); actor != "alice" {
+			t.Errorf("chat actor = %q, want alice", actor)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for _, event := range []string{
+			`{"event":"turn_start"}`,
+			`{"event":"tool_call.started","name":"delegate"}`,
+			`{"event":"tool_call.completed","name":"delegate"}`,
+			`{"event":"tool_start","name":"bash","args":"pwd"}`,
+			`{"event":"tool_result","name":"bash","result":"/workspace"}`,
+			`{"event":"text","content":"Finished"}`,
+			`{"event":"done"}`,
+			`{"status":"ok"}`,
+		} {
+			fmt.Fprintln(w, event)
+		}
+	})
+	s := newSessionTestServer(t)
+	s.cfg = startFakeV1(t, mux)
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
+		`{"aimee_session_id":"tool-session","message":"do work"}`)), "alice")
+	// An untrusted browser header must never override the authenticated actor.
+	req.Header.Set("X-Aimee-Webuser", "mallory")
+	s.handleChatSend(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	remaining := rr.Body.String()
+	for _, frame := range []string{
+		"event: turn_start\n",
+		"event: tool_call.started\ndata: {\"name\":\"delegate\"}\n",
+		"event: tool_call.completed\ndata: {\"name\":\"delegate\"}\n",
+		"event: tool_start\ndata: {\"args\":\"pwd\",\"name\":\"bash\"}\n",
+		"event: tool_result\ndata: {\"name\":\"bash\",\"result\":\"/workspace\"}\n",
+		"event: text\ndata: {\"content\":\"Finished\"}\n",
+		"event: done\n",
+	} {
+		index := strings.Index(remaining, frame)
+		if index < 0 {
+			t.Fatalf("missing or out-of-order frame %q in %q", frame, remaining)
+		}
+		remaining = remaining[index+len(frame):]
+	}
+}
+
 func TestChatStreamHTTPSurfacesStatusError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
@@ -685,7 +745,7 @@ func TestChatStreamHTTPSurfacesStatusError(t *testing.T) {
 	})
 	cfg := startFakeV1(t, mux)
 
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "hi", "", "", "", "",
+	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi", "", "", "", "",
 		func(evt streamEvent) {})
 	if err == nil || !strings.Contains(err.Error(), "no provider configured") {
 		t.Fatalf("expected status:error surfaced, got %v", err)
@@ -883,7 +943,7 @@ func TestChatStreamForwardsAttachID(t *testing.T) {
 		fmt.Fprint(w, "{\"event\":\"done\"}\n{\"status\":\"ok\"}\n")
 	})
 	cfg := startFakeV1(t, mux)
-	err := chatStreamHTTP(context.Background(), cfg.socketPath, "hi", "web1", "", "", "att-9",
+	err := chatStreamHTTP(context.Background(), cfg.socketPath, "alice", "hi", "web1", "", "", "att-9",
 		func(evt streamEvent) {})
 	if err != nil {
 		t.Fatalf("stream: %v", err)

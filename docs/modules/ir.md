@@ -10,8 +10,8 @@ route work, or define a provider's external JSON contract.
 
 ## Public contracts
 
-`src/modules/ir/module.yaml` is the complete module-local ownership inventory: two production
-translation units, three canonical public headers, three direct contract tests, and
+`src/modules/ir/module.yaml` is the complete module-local ownership inventory: production
+translation units, canonical public headers, direct contract tests, and
 `docs/modules/ir.md`.
 `ownership_complete: true` makes unlisted module-local C or private-header files and omission of the
 canonical document fail descriptor validation. Canonical public-header placement remains enforced by
@@ -41,6 +41,23 @@ they mix canonical operations with translation or comparison behavior. A later b
 must split those responsibilities before assigning them to IR or translation. IR does not own provider
 ingress parsing, provider-specific body construction, response composition outside the typed result, or
 `shadow_mirror.c` lifecycle behavior.
+
+### Canonical session contract (migration in progress)
+
+`aimee/ir/session_event.h` serializes typed IR messages and deltas without native provider
+sidecars. Messages carry roles and stable message identities; opaque tool IDs correlate uses
+and results across message boundaries. Harness control requests/responses are distinct events,
+so serializing a control never grants a model authority to approve it. Host execution lifecycle
+is separate from each model response's `TURN_STOP`. Session identity, actor, sequence, and
+producer retry identity belong to the transport envelope owned by Server sessions.
+
+Unknown blocks fail serialization until an entry adapter models them; they are not silently
+flattened into text. The optional thread-bound sink is scoped by its caller, which must restore
+the previous sink before releasing its context or returning a pooled worker. Sink failures
+propagate to the producer. IR owns no sockets, database handles, authorization, or persistence.
+
+These APIs and the frontend reducer are migration foundations. The current browser stream and
+native runtime paths have not yet switched to this contract. The canonical IR session stream proposal records the remaining cutover gates.
 
 ## Dependencies and consumers
 

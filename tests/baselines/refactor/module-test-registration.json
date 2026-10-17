@@ -249,6 +249,12 @@
     },
     {
       "ctest": false,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_ir_session_event.c"
+    },
+    {
+      "ctest": false,
       "make": false,
       "module": "ir",
       "test": "src/tests/test_panel_ir_contract.c"
@@ -654,6 +660,12 @@
       "make": true,
       "module": "translation",
       "test": "src/tests/test_aimee_ir_stream.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_tool_choice.c"
     },
     {
       "ctest": false,

@@ -2736,6 +2736,7 @@ export default function Chat() {
         streamRefs.toolId = null;
         break;
       }
+      case 'tool_call.started':
       case 'tool_start': {
         flushStreamAppends();
         streamRefs.assistantId = null;
@@ -2750,6 +2751,7 @@ export default function Chat() {
         }]);
         break;
       }
+      case 'tool_call.completed':
       case 'tool_result': {
         const tid = streamRefs.toolId;
         if (tid !== null) {

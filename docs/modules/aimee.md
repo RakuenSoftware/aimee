@@ -50,6 +50,20 @@ The descriptor lists embedded SQL in `go_assets`, separate from JSON event `cont
 Independent module exports copy these files and track them as CMake build dependencies;
 complete ownership validation rejects missing assets and paths outside the module Go directory.
 
+### Canonical session log (migration in progress)
+
+Migration 44 adds `session_ir_events`, owned by the existing session lifecycle, with cascade
+deletion on session removal/subject erasure. Session operations 28/29 append validated canonical
+events and return bounded replay pages. Append locks the session row inside the family transaction;
+retrying an identical producer event ID returns its original decimal sequence, while reusing
+that ID with different turn, actor, or payload fails. Sequence values remain decimal strings
+in transport envelopes. Authorization and authenticated actor derivation must occur in Server
+before these internal operations are exposed; there is no new browser-accessible route.
+
+This storage contract is not yet the live transcript owner. The cutover must commit each event
+before delivery, propagate storage failures, and replace the old transcript writer rather than
+dual-write competing histories.
+
 ## Security and privacy
 
 The module validates family arity and bounds before storage, derives actor identity from authenticated

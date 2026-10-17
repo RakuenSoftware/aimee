@@ -26,6 +26,11 @@ int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out, cha
  * system messages; tool_use -> assistant tool_calls; tools -> function tools).
  * Returns a new cJSON the caller owns, or NULL. */
 struct cJSON *openai_backend_build(const aimee_request_t *ir);
+/* Add the typed IR tool choice and parallel_tool_calls to an OpenAI-family request
+ * object. responses_shape selects {type:function,name} (Responses) over
+ * {type:function,function:{name}} (Chat). Shared by the Chat and Responses backends. */
+void openai_family_add_tool_choice(struct cJSON *out, const aimee_request_t *ir,
+                                   int responses_shape);
 /* Parse an OpenAI chat.completion response into the IR. */
 int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
 
