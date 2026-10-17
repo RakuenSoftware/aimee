@@ -1,46 +1,45 @@
 #include "agent_runtime_messages.h"
 #include <stdio.h>
+#include <aimee/ir/session_event.h>
+
+cJSON *agent_session_text_message(const char *role, const char *text)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_message_t message = {.role = (char *)role, .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   aimee_ir_classify_context(&request);
+   return aimee_ir_message_json(&message);
+}
+
+static void append_text(cJSON *messages, const char *role, const char *text)
+{
+   if (!messages || !text)
+      return;
+   cJSON *message = agent_session_text_message(role, text);
+   if (message && !cJSON_AddItemToArray(messages, message))
+      cJSON_Delete(message);
+}
 
 void agent_session_append_final_message(cJSON *messages, const char *content)
 {
-   if (!messages || !content || !content[0])
-      return;
-
-   cJSON *asst = cJSON_CreateObject();
-   if (!asst)
-      return;
-   cJSON_AddStringToObject(asst, "role", "assistant");
-   cJSON_AddStringToObject(asst, "content", content);
-   cJSON_AddItemToArray(messages, asst);
+   if (content && content[0])
+      append_text(messages, "assistant", content);
 }
 
 void agent_session_append_final_instruction(cJSON *messages)
 {
-   if (!messages)
-      return;
-
-   cJSON *msg = cJSON_CreateObject();
-   if (!msg)
-      return;
-   cJSON_AddStringToObject(msg, "role", "user");
-   cJSON_AddStringToObject(
-       msg, "content",
+   append_text(
+       messages, "user",
        "[FINAL RESPONSE REQUIRED] The tool turn budget is exhausted. Do not call tools, do not "
        "emit XML tool_call blocks, and do not request more inspection. Return the best final "
        "answer now from the evidence already gathered. Clearly note any uncertainty or missing "
        "verification.");
-   cJSON_AddItemToArray(messages, msg);
 }
 
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action)
 {
    if (!messages)
       return;
-
-   cJSON *msg = cJSON_CreateObject();
-   if (!msg)
-      return;
-   cJSON_AddStringToObject(msg, "role", "user");
    char content[1024];
    snprintf(content, sizeof(content),
             "[FINAL RESPONSE RETRY] Your previous response returned or attempted %s after the "
@@ -49,55 +48,33 @@ void agent_session_append_final_retry_instruction(cJSON *messages, const char *a
             "best final answer now from the evidence already gathered. Clearly note any "
             "uncertainty or missing verification.",
             attempted_action && attempted_action[0] ? attempted_action : "a tool action");
-   cJSON_AddStringToObject(msg, "content", content);
-   cJSON_AddItemToArray(messages, msg);
+   append_text(messages, "user", content);
 }
 
 void agent_session_append_degenerate_retry_instruction(cJSON *messages)
 {
-   if (!messages)
-      return;
-
-   cJSON *msg = cJSON_CreateObject();
-   if (!msg)
-      return;
-   cJSON_AddStringToObject(msg, "role", "user");
-   cJSON_AddStringToObject(
-       msg, "content",
-       "[DELEGATE RESPONSE RETRY] Your previous response was raw tool-call markup or "
-       "degenerate text before any tool executed. Aimee is retrying automatically. If "
-       "inspection is needed, use the available tool interface so Aimee can execute it. "
-       "Do not emit XML, bracket, or dollar-prefixed tool-call markup as plain text. If "
-       "no tool is needed, return a plain prose answer.");
-   cJSON_AddItemToArray(messages, msg);
+   append_text(messages, "user",
+               "[DELEGATE RESPONSE RETRY] Your previous response was raw tool-call markup or "
+               "degenerate text before any tool executed. Aimee is retrying automatically. If "
+               "inspection is needed, use the available tool interface so Aimee can execute it. "
+               "Do not emit XML, bracket, or dollar-prefixed tool-call markup as plain text. If "
+               "no tool is needed, return a plain prose answer.");
 }
 
 void agent_session_append_required_evidence_instruction(cJSON *messages)
 {
-   if (!messages)
-      return;
-
-   cJSON *msg = cJSON_CreateObject();
-   if (!msg)
-      return;
-   cJSON_AddStringToObject(msg, "role", "user");
-   cJSON_AddStringToObject(
-       msg, "content",
+   append_text(
+       messages, "user",
        "[REPOSITORY EVIDENCE REQUIRED] Your previous response did not produce a successful "
        "repository lookup. Do not return final review prose yet. Call one of the available "
        "read-only repository or index tools now. Aimee will accept a final response only after "
        "a successful tool result has been returned to you.");
-   cJSON_AddItemToArray(messages, msg);
 }
 
 void agent_session_append_repository_evidence(cJSON *messages, const char *tool_name,
                                               const char *arguments, const char *result)
 {
    if (!messages || !tool_name || !tool_name[0] || !result || !result[0])
-      return;
-
-   cJSON *msg = cJSON_CreateObject();
-   if (!msg)
       return;
    char content[12288];
    snprintf(content, sizeof(content),
@@ -110,9 +87,7 @@ void agent_session_append_repository_evidence(cJSON *messages, const char *tool_
             "does not establish.\n"
             "tool=%s arguments=%s\nBEGIN_TOOL_OUTPUT\n%.8192s\nEND_TOOL_OUTPUT",
             tool_name, arguments ? arguments : "{}", result);
-   cJSON_AddStringToObject(msg, "role", "user");
-   cJSON_AddStringToObject(msg, "content", content);
-   cJSON_AddItemToArray(messages, msg);
+   append_text(messages, "user", content);
 }
 
 int agent_session_retry_final_tool_violation(cJSON *messages, const char *attempted_action,

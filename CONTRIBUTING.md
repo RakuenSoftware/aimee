@@ -61,6 +61,29 @@ owner/replay checks use real restricted roles; SQLite fixtures cannot replace th
 
 The Makefile is canonical. Keep CMake in sync for Windows and macOS builds.
 
+## Merge into testing
+
+Use GitHub's merge queue after the PR checks pass. The queue creates a temporary integration
+commit containing the latest `testing` and queued changes. CI runs the full suite on that commit;
+GitHub merges it only after the required checks pass. Advancing `testing` does not require merging
+it into every feature branch. Resolve actual merge conflicts on the feature branch.
+
+Repository administration must enable **Require merge queue** for `testing` and disable
+**Require branches to be up to date before merging** on its existing required status checks.
+Keep all existing required check names and review requirements. The queue provides integration
+validation; disabling the update requirement without enabling the queue would permit stale results.
+Set the queue build concurrency to 1 and maximum merge group size to 1 initially, so unrelated
+changes do not repeatedly invalidate several candidates. Increase these after measuring queue time.
+
+The `CI`, `Release policy`, `core-c-package`, `c-repository-pins`, and `Audit storage regressions` workflows accept
+`merge_group: checks_requested` for `testing`. They check out GitHub's event SHA, which is the
+queued integration commit. Queue runs always take the full test path, including documentation-only
+changes. PR attribution checks remain admission checks on the original PR; the queue has no PR
+title or body. Publishing and release workflows do not run on the temporary queue branches.
+
+This workflow change does not activate repository settings. Until the queue requirement is enabled,
+the existing branch protection still applies. Promotion from `testing` to `main` is unchanged.
+
 ## Change contracts, not copies
 
 - Commands come from the command registry and CLI help data.

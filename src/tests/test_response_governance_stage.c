@@ -10,6 +10,7 @@
 #include "aimee.h"
 #include "agent_protocol.h"
 #include "gw_stage_governance.h"
+#include "cJSON.h"
 
 static int g_provider_calls;
 static int g_policy_active;
@@ -162,6 +163,7 @@ int main(void)
       assert(gw_response_run_governance(&pr, 1, 1) == 1);
       assert(pr.call_count == 0);
       assert(strcmp(pr.stop_reason, "end_turn") == 0);
+      assert(pr.stop == AIMEE_STOP_END_TURN);
    }
 
    gw_response_governance_register_provider(NULL);
@@ -183,6 +185,73 @@ int main(void)
       pr.call_count = AGENT_MAX_TOOL_CALLS + 1;
       assert(gw_response_run_governance(&pr, 1, 1) == AGENT_MAX_TOOL_CALLS);
       assert(pr.call_count == 0);
+   }
+
+   /* Typed execution uses the same decision owner without flattening reasoning,
+    * media or long IDs. Failed decisions remove tools, preserving other blocks. */
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   for (int failed = 0; failed < 3; failed++)
+   {
+      aimee_response_t response = {0};
+      response.n_content = 4;
+      response.content = calloc(4, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                            .text = copy_string("reason"),
+                                            .thinking_signature = copy_string("signature")};
+      response.content[1] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = copy_string("Agent"),
+                                            .tool_id = copy_string("deny")};
+      response.content[2] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                            .media_type = copy_string("image/png"),
+                                            .media_ref = copy_string("AA==")};
+      response.content[3] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = copy_string("read_file"),
+                                            .tool_id = copy_string("keep:opaque")};
+      response.stop_reason = AIMEE_STOP_TOOL_USE;
+      response.raw = cJSON_CreateObject();
+      g_provider_mode = failed;
+      g_provider_calls = 0;
+      assert(gw_ir_response_run_governance(&response, 0, 1) == 0);
+      assert(g_provider_calls == 0 && response.n_content == 4);
+      assert(gw_ir_response_run_governance(&response, 1, 1) == (failed ? 2 : 1));
+      assert(g_provider_calls == 1);
+      assert(response.n_content == (failed ? 2 : 3));
+      assert(!strcmp(response.content[0].thinking_signature, "signature"));
+      assert(response.content[1].type == AIMEE_BLK_IMAGE);
+      assert(response.raw == NULL);
+      assert(response.stop_reason == (failed ? AIMEE_STOP_END_TURN : AIMEE_STOP_TOOL_USE));
+      if (!failed)
+         assert(!strcmp(aimee_ir_response_tool(&response, 0)->tool_id, "keep:opaque"));
+      aimee_response_free(&response);
+   }
+
+   /* The old mask width must not limit the canonical response. Each policy
+    * batch decides real tool names; truncation remains visible after policing. */
+   {
+      aimee_response_t response = {0};
+      response.n_content = 18;
+      response.content = calloc(18, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                            .text = copy_string("reason"),
+                                            .thinking_signature = copy_string("sig")};
+      for (int i = 0; i < 17; i++)
+      {
+         char id[32];
+         snprintf(id, sizeof id, "opaque-%d", i);
+         response.content[i + 1] =
+             (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                             .tool_name = copy_string(i % 2 ? "read_file" : "Agent"),
+                             .tool_id = copy_string(id)};
+      }
+      response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+      g_provider_calls = g_provider_mode = 0;
+      assert(gw_ir_response_run_governance(&response, 1, 1) == 9);
+      assert(g_provider_calls == 2 && aimee_ir_response_tool_count(&response) == 8);
+      assert(response.stop_reason == AIMEE_STOP_MAX_TOKENS);
+      assert(!strcmp(response.content[0].thinking_signature, "sig"));
+      aimee_response_free(&response);
    }
 
    /* NULL-safe. */

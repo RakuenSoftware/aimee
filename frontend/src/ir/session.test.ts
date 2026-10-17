@@ -9,7 +9,7 @@ describe('canonical session projection', () => {
     const events = [
       envelope(1, message('u', 'user', [{ type: 'text', text: 'Investigate' }])),
       envelope(2, message('a', 'assistant', [
-        { type: 'thinking', text: 'Reason', signature: 'opaque' },
+        { type: 'thinking', text: 'Reason', signature: 'opaque', thinking_id: 'rs_1', encrypted_content: 'cipher', redacted_content: 'redacted', cache_control: 'ephemeral' },
         { type: 'tool_use', tool_id: 'b', name: 'read_file', input: { path: 'b' } },
         { type: 'tool_use', tool_id: 'a', name: 'read_file', input: { path: 'a' } },
       ])),
@@ -25,7 +25,24 @@ describe('canonical session projection', () => {
     expect(toolResults(live).get('a')?.[0].content).toBe('A');
     expect(toolResults(live).get('b')?.[0].content).toBe('B');
     expect(live.messages[1].blocks[0].signature).toBe('opaque');
+    expect(live.messages[1].blocks[0].encrypted_content).toBe('cipher');
+    expect(live.messages[1].blocks[0].redacted_content).toBe('redacted');
+    expect(live.messages[1].blocks[0].cache_control).toBe('ephemeral');
     expect(reduceSession(live, events[4])).toBe(live);
+  });
+  it('retains stop reason and cache usage for buffered typed responses', () => {
+    const events = [
+      envelope(1, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: { type: 'TURN_START' } }),
+      envelope(2, message('buffered', 'assistant', [{ type: 'text', text: 'partial answer' }])),
+      envelope(3, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: {
+        type: 'TURN_STOP', stop_reason: 'max_tokens', usage_in: 12, usage_out: 7,
+        usage_cache_read: 9, usage_cache_write: 3, usage_reasoning: 2,
+      } }),
+    ];
+    const state = events.reduce(reduceSession, emptySession('s'));
+    expect(state.messages[0].stopReason).toBe('max_tokens');
+    expect(state.messages[0].usage).toEqual({ input: 12, output: 7, cacheRead: 9, cacheWrite: 3, reasoning: 2 });
+    expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
   });
   it('accumulates tool JSON fragments and finalizes them only at block stop', () => {
     const delta = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'm', role: 'assistant', payload });

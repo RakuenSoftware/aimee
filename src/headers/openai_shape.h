@@ -128,6 +128,13 @@ extern "C"
    int openai_format_response(const char *id, const char *model, const char *output_text,
                               long created, int prompt_tokens, int completion_tokens,
                               int cached_tokens, char *resp, int cap);
+   /* As openai_format_response, but a non-NULL incomplete_reason (e.g.
+    * "max_output_tokens") marks the reply status "incomplete" with
+    * incomplete_details.reason, the way the Responses backend reports truncation. */
+   int openai_format_response_status(const char *id, const char *model, const char *output_text,
+                                     long created, int prompt_tokens, int completion_tokens,
+                                     int cached_tokens, const char *incomplete_reason, char *resp,
+                                     int cap);
 
    /* Build a `run` object (same message/usage shape as a response, with
     * "object":"run" and the given status, e.g. "completed"). Returns bytes
@@ -263,6 +270,11 @@ extern "C"
    int openai_format_chat_completion(const char *id, const char *model, const char *content,
                                      long created, int prompt_tokens, int completion_tokens,
                                      char *resp, int cap);
+   /* As openai_format_chat_completion with an explicit finish_reason ("stop",
+    * "length", "content_filter"); NULL means "stop". */
+   int openai_format_chat_completion_reason(const char *id, const char *model, const char *content,
+                                            long created, int prompt_tokens, int completion_tokens,
+                                            const char *finish_reason, char *resp, int cap);
 
    /* Build a legacy text_completion object into resp[cap]:
     * {"id":id,"object":"text_completion","created":created,"model":model,

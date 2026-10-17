@@ -895,6 +895,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
+    ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/session_event.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c

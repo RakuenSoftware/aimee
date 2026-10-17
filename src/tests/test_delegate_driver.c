@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
@@ -292,9 +293,53 @@ static void test_delegate_respond_xml_rescue_then_strip_pure(void)
    agent_free_parsed_response(&pr);
 }
 
+static void test_typed_delegate_respond(void)
+{
+   for (int mixed = 0; mixed <= 1; mixed++)
+   {
+      aimee_response_t response = {0};
+      response.n_content = mixed ? 5 : 4;
+      response.content = calloc((size_t)response.n_content, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                            .text = strdup("reason"),
+                                            .thinking_signature = strdup("sig")};
+      response.content[1] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("preamble")};
+      response.content[2] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_id = strdup("respond-id"),
+                                            .tool_name = strdup("respond"),
+                                            .tool_input = cJSON_Parse("{\"message\":\"answer\"}")};
+      response.content[3] = (aimee_block_t){
+          .type = AIMEE_BLK_IMAGE, .media_type = strdup("image/png"), .media_ref = strdup("AA==")};
+      if (mixed)
+         response.content[4] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                               .tool_id = strdup("keep-id"),
+                                               .tool_name = strdup("read_file"),
+                                               .tool_input = cJSON_Parse("{\"path\":\"a\"}")};
+      response.stop_reason = AIMEE_STOP_TOOL_USE;
+      assert(agent_ir_strip_delegate_respond(&response) == (mixed ? 2 : 1));
+      assert(!strcmp(response.content[0].thinking_signature, "sig"));
+      assert(response.content[mixed ? 2 : 2].type == AIMEE_BLK_IMAGE);
+      if (mixed)
+      {
+         assert(response.n_content == 4 && aimee_ir_response_tool_count(&response) == 1);
+         assert(!strcmp(aimee_ir_response_tool(&response, 0)->tool_id, "keep-id"));
+         assert(!strcmp(response.content[1].text, "preamble"));
+      }
+      else
+      {
+         assert(response.n_content == 3 && aimee_ir_response_tool_count(&response) == 0);
+         assert(!strcmp(response.content[1].text, "answer"));
+         assert(response.stop_reason == AIMEE_STOP_END_TURN);
+      }
+      aimee_response_free(&response);
+   }
+}
+
 int main(void)
 {
    printf("delegate_driver: ");
+   test_typed_delegate_respond();
    test_registry_init();
    printf("registry OK, ");
    test_driver_names();

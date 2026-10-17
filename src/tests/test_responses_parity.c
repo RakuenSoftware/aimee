@@ -47,9 +47,71 @@ static void expect(const char *label, const char *body, const char *want_content
    agent_free_parsed_response(&p);
 }
 
+static void test_owned_sse_boundary(void)
+{
+   char id[513];
+   memset(id, 'x', sizeof id - 1);
+   id[sizeof id - 1] = 0;
+   char body[2400];
+   snprintf(body, sizeof body,
+            "event: response.output_item.done\n"
+            "data: "
+            "{\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"%s\",\"name\":"
+            "\"read_file\",\"arguments\":\"{}\"}}\n\n"
+            "event: response.output_item.done\n"
+            "data: "
+            "{\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_"
+            "content\":\"cipher\",\"summary\":[]}}\n\n"
+            "event: response.completed\n"
+            "data: "
+            "{\"response\":{\"output\":[],\"usage\":{\"input_tokens\":8,\"output_tokens\":3}}}\n\n",
+            id);
+   aimee_response_t response = {0};
+   assert(agent_ir_decode_responses(body, -1, NULL, &response) == 0);
+   assert(response.n_content == 2 && response.content[0].type == AIMEE_BLK_THINKING);
+   assert(!strcmp(response.content[0].thinking_encrypted_content, "cipher"));
+   assert(!strcmp(response.content[0].thinking_id, "rs_1"));
+   assert(!strcmp(aimee_ir_response_tool(&response, 0)->tool_id, id));
+   assert(response.usage_in == 8 && response.usage_out == 3);
+   aimee_response_free(&response);
+
+   assert(agent_ir_decode_responses("event: response.incomplete\n"
+                                    "data: "
+                                    "{\"response\":{\"output\":[{\"type\":\"message\",\"content\":["
+                                    "{\"type\":\"output_text\",\"text\":\"partial\"}]}]}}\n\n",
+                                    -1, NULL, &response) == 0);
+   assert(response.stop_reason == AIMEE_STOP_MAX_TOKENS);
+   aimee_response_free(&response);
+   assert(agent_ir_decode_responses("event: error\ndata: {\"message\":\"quota exceeded\"}\n\n", -1,
+                                    NULL, &response) == 0);
+   assert(response.stop_reason == AIMEE_STOP_ERROR &&
+          !strcmp(response.error_message, "quota exceeded"));
+   aimee_response_free(&response);
+   assert(agent_ir_decode_responses("event: response.completed\n"
+                                    "data: "
+                                    "{\"response\":{\"output\":[{\"type\":\"message\",\"content\":["
+                                    "{\"type\":\"refusal\",\"refusal\":\"declined\"}]}]}}\n\n",
+                                    -1, NULL, &response) == 0);
+   assert(response.stop_reason == AIMEE_STOP_CONTENT_FILTER &&
+          !strcmp(response.content[0].text, "declined"));
+   aimee_response_free(&response);
+   assert(agent_ir_decode_responses(
+              "event: response.completed\n"
+              "data: {\"response\":{\"output\":[{\"type\":\"future_native_item\",\"data\":\"must "
+              "not vanish\"}]}}\n\n",
+              -1, NULL, &response) == -1);
+   assert(!response.content && response.n_content == 0);
+   assert(agent_ir_decode_responses(
+              "event: response.output_text.delta\ndata: {\"delta\":\"unfinished\"}\n\n", -1, NULL,
+              &response) == -1);
+   puts("  PASS: native SSE boundary retains ordered reasoning/opaque IDs and typed terminal "
+        "states");
+}
+
 int main(void)
 {
    printf("responses-parity:\n");
+   test_owned_sse_boundary();
 
    /* reasoning-only final turn -> empty content (reasoning routes to a THINKING block,
     * excluded from content). This is the "no content in final response" case: codex

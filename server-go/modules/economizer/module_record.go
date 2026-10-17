@@ -2,6 +2,7 @@ package economizer
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -28,38 +29,44 @@ type recordBuildResponse struct {
 }
 
 func recordMessageText(msg *JSONValue) string {
-	content := msg.Get("content")
-	if content == nil {
-		return ""
-	}
+	content := messageContent(msg)
 	if content.IsString() {
 		return content.Str
 	}
+	var text []string
 	if content.IsArray() {
 		for _, block := range content.Items {
-			if block.GetString("type") == "text" {
-				return block.GetString("text")
+			switch block.GetString("type") {
+			case "text", "input_text", "output_text":
+				text = append(text, block.GetString("text"))
+			case "tool_result":
+				result := block.Get("content")
+				if result.IsString() {
+					text = append(text, result.Str)
+				}
+				if result.IsArray() {
+					for _, part := range result.Items {
+						if part.GetString("type") == "text" {
+							text = append(text, part.GetString("text"))
+						}
+					}
+				}
 			}
 		}
 	}
-	return ""
+	return strings.Join(text, "\n")
 }
 
 func recordMessageIsToolResult(msg *JSONValue) bool {
-	role := msg.GetString("role")
-	if role == "" || role == "tool" {
+	if msg.GetString("type") == "function_call_output" || msg.GetString("role") == "tool" {
 		return true
 	}
-	if role != "user" {
-		return false
-	}
-	content := msg.Get("content")
-	if !content.IsArray() {
-		return false
-	}
-	for _, block := range content.Items {
-		if block.GetString("type") == "tool_result" {
-			return true
+	content := messageContent(msg)
+	if content.IsArray() {
+		for _, block := range content.Items {
+			if block.GetString("type") == "tool_result" {
+				return true
+			}
 		}
 	}
 	return false

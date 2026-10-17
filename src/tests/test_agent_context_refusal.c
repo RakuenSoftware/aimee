@@ -3,6 +3,7 @@
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include <aimee/ir/session_event.h>
 #include "config.h"
 #include "cJSON.h"
 #include "platform_test_util.h"
@@ -15,6 +16,42 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int wide_parallel, wide_uses, wide_results;
+static int wide_capture(const aimee_session_event_t *event, void *context)
+{
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   cJSON *pending = context;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type == AIMEE_BLK_TOOL_USE)
+      {
+         assert(strlen(block->tool_id) > 64 &&
+                !cJSON_GetObjectItemCaseSensitive(pending, block->tool_id));
+         assert(cJSON_AddTrueToObject(pending, block->tool_id));
+         wide_uses++;
+      }
+      else if (block->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         assert(cJSON_GetObjectItemCaseSensitive(pending, block->tool_id));
+         cJSON_DeleteItemFromObjectCaseSensitive(pending, block->tool_id);
+         wide_results++;
+      }
+   }
+   return 0;
+}
+
+static int capture_failure_mode, capture_events;
+static int refusing_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   capture_events++;
+   if (capture_failure_mode == 1)
+      return -1;
+   return event->kind == AIMEE_SESSION_MESSAGE && !strcmp(event->message->role, "tool") ? -1 : 0;
+}
 
 static const char *recall_reply;
 static int recalls;
@@ -43,6 +80,32 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (wide_parallel && provider_calls == 1)
+   {
+      cJSON *reply = cJSON_Parse("{\"choices\":[{\"finish_reason\":\"tool_calls\",\"message\":{"
+                                 "\"role\":\"assistant\",\"tool_calls\":[]}}]}");
+      assert(reply);
+      cJSON *message = cJSON_GetObjectItem(
+          cJSON_GetArrayItem(cJSON_GetObjectItem(reply, "choices"), 0), "message");
+      for (int i = 0; i < 17; i++)
+      {
+         cJSON *call = cJSON_CreateObject();
+         char id[280], arguments[96];
+         memset(id, 'x', 256);
+         snprintf(id + 256, sizeof id - 256, "-%d", i);
+         snprintf(arguments, sizeof arguments, "{\"path\":\"absent-wide-fixture-%d\"}", i);
+         cJSON_AddStringToObject(call, "id", id);
+         cJSON_AddStringToObject(call, "type", "function");
+         cJSON *function = cJSON_AddObjectToObject(call, "function");
+         cJSON_AddStringToObject(function, "name", "read_file");
+         cJSON_AddStringToObject(function, "arguments", arguments);
+         cJSON_AddItemToArray(cJSON_GetObjectItem(message, "tool_calls"), call);
+      }
+      *response_buf = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      assert(*response_buf);
+      return 200;
+   }
    if (final_response)
    {
       *response_buf = strdup("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
@@ -387,6 +450,41 @@ int main(void)
       free(result.response);
       request_context_clear();
    }
+   /* A durable capture loss is local and terminal, including after dispatch.
+    * The attempted tool must still be counted when publishing its result fails. */
+   for (int mode = 1; mode <= 2; mode++)
+   {
+      recalls = provider_calls = capture_events = 0;
+      refuse_after = transport_refuse = 0;
+      final_response = mode == 1;
+      capture_failure_mode = mode;
+      aimee_ir_session_set_sink(refusing_capture, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == AGENT_RC_CAPTURE_FAILED && !result.success);
+      assert(provider_calls == 1 && capture_events == (mode == 1 ? 1 : 4));
+      assert(result.tool_calls == (mode == 1 ? 0 : 1));
+      assert(!strcmp(result.stop_reason, "capture_failed"));
+      assert(!agent_rc_should_try_another(rc, "quota exhausted"));
+      assert(aimee_ir_session_capture_failed());
+      free(result.response);
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(!aimee_ir_session_capture_failed());
+   }
+   recalls = provider_calls = refuse_after = transport_refuse = 0;
+   final_response = wide_parallel = 1;
+   wide_uses = wide_results = 0;
+   cJSON *pending = cJSON_CreateObject();
+   assert(pending);
+   aimee_ir_session_set_sink(wide_capture, pending);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(result.tool_calls == 17 && wide_uses == 17 && wide_results == 17);
+   assert(pending->child == NULL && provider_calls <= 2);
+   free(result.response);
+   aimee_ir_session_set_sink(NULL, NULL);
+   cJSON_Delete(pending);
+   wide_parallel = 0;
    puts("agent context refusal: passed");
    return 0;
 }

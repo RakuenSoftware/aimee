@@ -202,6 +202,7 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
    if (p->stop_reason[0] == '\0' || w == 0)
    {
       snprintf(p->stop_reason, sizeof(p->stop_reason), "%s", w > 0 ? "tool_use" : "end_turn");
+      p->stop = w > 0 ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
    }
    return drops;
 }

@@ -490,3 +490,26 @@ func TestModuleEventKindMatchesContract(t *testing.T) {
 }
 
 var errStoreDown = errors.New("store is unreachable")
+
+func TestCanonicalRecordRetainsToolEvidence(t *testing.T) {
+	messages := ParseJSON(`[{"role":"user","blocks":[{"type":"text","text":"Change src/request.c"}]},{"role":"assistant","blocks":[{"type":"thinking","text":"hidden/secret.c"},{"type":"text","text":"DECISION: preserve caching"},{"type":"text","text":"and tool pairs"}]},{"role":"user","blocks":[{"type":"tool_result","tool_id":"opaque","content":"Updated src/adapter.c"}]}]`)
+	if got := recordMessageText(messages.At(1)); got != "DECISION: preserve caching\nand tool pairs" {
+		t.Fatalf("assistant evidence = %q", got)
+	}
+	if got := recordMessageText(messages.At(2)); got != "Updated src/adapter.c" {
+		t.Fatalf("tool evidence = %q", got)
+	}
+	if !recordMessageIsToolResult(messages.At(2)) || recordMessageIsToolResult(ParseJSON(`{"type":"reasoning"}`)) {
+		t.Fatal("tool-result classification lost structured type")
+	}
+	record := buildRecord(messages, 0, messages.Len())
+	found := false
+	for _, path := range record.Record.Files {
+		if path == "src/adapter.c" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tool result path lost: %#v", record.Record.Files)
+	}
+}

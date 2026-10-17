@@ -44,7 +44,7 @@ static int claude_snapshot(const cJSON *m, const char *id)
    return rc;
 }
 
-int aimee_claude_frame_ir(const cJSON *f, aimee_harness_ir_t *s)
+static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    if (!cJSON_IsObject(f) || !s)
       return -1;
@@ -225,7 +225,7 @@ static int codex_text(const cJSON *item, const char *id, const char *role)
    free(blocks);
    return rc;
 }
-int aimee_codex_frame_ir(const cJSON *f, aimee_harness_ir_t *s)
+static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    if (!cJSON_IsObject(f) || !s)
       return -1;
@@ -385,7 +385,7 @@ int aimee_codex_frame_ir(const cJSON *f, aimee_harness_ir_t *s)
    return rc;
 }
 
-int aimee_codex_reply_ir(const cJSON *f, aimee_harness_ir_t *s)
+static int aimee_codex_reply_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    const cJSON *rpcid = cJSON_GetObjectItemCaseSensitive(f, "id");
    if (rpcid && s->pending)
@@ -455,7 +455,7 @@ static int acp_chunk(aimee_harness_ir_t *s, const char *role, aimee_block_type_t
    aimee_delta_t d = {.type = AIMEE_DELTA_BLOCK_DELTA, .kind = kind, .text_delta = text};
    return acp_delta(s, &d);
 }
-int aimee_acp_frame_ir(const cJSON *f, aimee_harness_ir_t *s)
+static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    if (!cJSON_IsObject(f) || !s)
       return -1;
@@ -631,4 +631,36 @@ int aimee_acp_frame_ir(const cJSON *f, aimee_harness_ir_t *s)
        !strcmp(kind, "usage_update"))
       return 0;
    return -1;
+}
+
+int aimee_claude_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
+{
+   int rc = aimee_claude_frame_ir_decode(frame, state);
+   if (rc < 0)
+      aimee_ir_session_fail_capture();
+   return rc;
+}
+
+int aimee_codex_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
+{
+   int rc = aimee_codex_frame_ir_decode(frame, state);
+   if (rc < 0)
+      aimee_ir_session_fail_capture();
+   return rc;
+}
+
+int aimee_codex_reply_ir(const cJSON *frame, aimee_harness_ir_t *state)
+{
+   int rc = aimee_codex_reply_ir_decode(frame, state);
+   if (rc < 0)
+      aimee_ir_session_fail_capture();
+   return rc;
+}
+
+int aimee_acp_frame_ir(const cJSON *frame, aimee_harness_ir_t *state)
+{
+   int rc = aimee_acp_frame_ir_decode(frame, state);
+   if (rc < 0)
+      aimee_ir_session_fail_capture();
+   return rc;
 }

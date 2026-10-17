@@ -103,6 +103,12 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
       cJSON_AddStringToObject(el, "text", b->text ? b->text : "");
       break;
    case AIMEE_BLK_THINKING:
+      if (b->thinking_redacted)
+      {
+         cJSON_AddStringToObject(el, "type", "redacted_thinking");
+         cJSON_AddStringToObject(el, "data", b->thinking_redacted);
+         break;
+      }
       cJSON_AddStringToObject(el, "type", "thinking");
       cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
       if (b->thinking_signature)
@@ -127,17 +133,47 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
    {
       cJSON_AddStringToObject(el, "type", b->type == AIMEE_BLK_IMAGE ? "image" : "document");
       cJSON *src = cJSON_AddObjectToObject(el, "source");
-      /* a data: payload carries a media_type; a bare url does not */
-      if (b->media_type)
+      const char *ref = b->media_ref ? b->media_ref : "";
+      if (!strncmp(ref, "http://", 7) || !strncmp(ref, "https://", 8) ||
+          (!b->media_type && strncmp(ref, "data:", 5) && strncmp(ref, "file-", 5)))
       {
-         cJSON_AddStringToObject(src, "type", "base64");
-         cJSON_AddStringToObject(src, "media_type", b->media_type);
-         cJSON_AddStringToObject(src, "data", b->media_ref ? b->media_ref : "");
+         cJSON_AddStringToObject(src, "type", "url");
+         cJSON_AddStringToObject(src, "url", ref);
       }
       else
       {
-         cJSON_AddStringToObject(src, "type", "url");
-         cJSON_AddStringToObject(src, "url", b->media_ref ? b->media_ref : "");
+         const char *data = ref, *type = b->media_type;
+         char *owned_type = NULL;
+         if (!strncmp(ref, "data:", 5))
+         {
+            const char *comma = strchr(ref + 5, ',');
+            const char *separator = comma && comma - ref >= 12 ? comma - 7 : NULL;
+            if (!separator || strncmp(separator, ";base64", 7))
+            {
+               /* A delimiter inside the payload is not a base64 header. */
+               cJSON_AddStringToObject(src, "type", "url");
+               cJSON_AddStringToObject(src, "url", ref);
+               break;
+            }
+            owned_type = strndup(ref + 5, (size_t)(separator - ref - 5));
+            if (!owned_type)
+            {
+               cJSON_Delete(el);
+               return NULL;
+            }
+            type = owned_type;
+            data = separator + 8;
+         }
+         if (!type || !type[0] || !strncmp(ref, "file-", 5))
+         {
+            free(owned_type);
+            cJSON_Delete(el);
+            return NULL;
+         }
+         cJSON_AddStringToObject(src, "type", "base64");
+         cJSON_AddStringToObject(src, "media_type", type);
+         cJSON_AddStringToObject(src, "data", data);
+         free(owned_type);
       }
       break;
    }
@@ -159,8 +195,12 @@ static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n)
    for (int i = 0; i < n; i++)
    {
       cJSON *el = block_to_anthropic(&blocks[i]);
-      if (el)
-         cJSON_AddItemToArray(arr, el);
+      if (!el || !cJSON_AddItemToArray(arr, el))
+      {
+         cJSON_Delete(el);
+         cJSON_Delete(arr);
+         return NULL;
+      }
    }
    return arr;
 }
@@ -236,6 +276,11 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
    if (ir->n_system > 0)
    {
       cJSON *sys = blocks_to_anthropic(ir->system, ir->n_system);
+      if (!sys)
+      {
+         cJSON_Delete(out);
+         return NULL;
+      }
       cJSON_AddItemToObject(out, "system", sys);
       mark_cache_prefix(sys); /* uniform policy: cache the stable system prefix */
    }
@@ -243,8 +288,15 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
    for (int i = 0; i < ir->n_messages; i++)
    {
       cJSON *m = cJSON_CreateObject();
-      cJSON_AddStringToObject(m, "role", ir->messages[i].role ? ir->messages[i].role : "user");
+      const char *role = ir->messages[i].role;
+      cJSON_AddStringToObject(m, "role", role && strcmp(role, "tool") ? role : "user");
       cJSON *content = blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks);
+      if (!content)
+      {
+         cJSON_Delete(m);
+         cJSON_Delete(out);
+         return NULL;
+      }
       strip_cache_control(content); /* uniform policy: no client markers on messages */
       cJSON_AddItemToObject(m, "content", content);
       cJSON_AddItemToArray(msgs, m);
@@ -295,6 +347,20 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (failure && !cJSON_IsNull(failure))
+   {
+      const char *message =
+          cJSON_IsString(failure) ? failure->valuestring : ostr(failure, "message");
+      out->error_message = dupstr(message ? message : "upstream API error");
+      out->stop_reason = AIMEE_STOP_ERROR;
+      if (!out->error_message)
+      {
+         aimee_response_free(out);
+         return -1;
+      }
+      return 0;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
    out->role = dupstr(ostr(resp, "role"));
@@ -319,32 +385,7 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          cJSON_ArrayForEach(el, content)
          {
             aimee_block_t *b = &out->content[i++];
-            b->raw = cJSON_Duplicate(el, 1);
-            const char *type = ostr(el, "type");
-            if (type && strcmp(type, "tool_use") == 0)
-            {
-               b->type = AIMEE_BLK_TOOL_USE;
-               b->tool_id = dupstr(ostr(el, "id"));
-               b->tool_name = dupstr(ostr(el, "name"));
-               const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)el, "input");
-               b->tool_input = in ? cJSON_Duplicate(in, 1) : NULL;
-            }
-            else if (type && strcmp(type, "thinking") == 0)
-            {
-               b->type = AIMEE_BLK_THINKING;
-               b->text = dupstr(ostr(el, "thinking"));
-               /* Anthropic REQUIRES the signature echoed back verbatim on a
-                * resubmitted thinking turn, so it belongs on the typed block -- the
-                * request-direction parser (anthropic_frontend_parse) and egress
-                * (block_to_anthropic) already model it; the response direction did
-                * not, leaving anything rebuilt from these blocks unresubmittable. */
-               b->thinking_signature = dupstr(ostr(el, "signature"));
-            }
-            else /* text (default) */
-            {
-               b->type = AIMEE_BLK_TEXT;
-               b->text = dupstr(ostr(el, "text"));
-            }
+            anthropic_ir_parse_block(el, b);
          }
          out->n_content = n;
       }

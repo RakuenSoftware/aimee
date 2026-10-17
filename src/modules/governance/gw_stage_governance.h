@@ -5,6 +5,7 @@
 #define DEC_GW_STAGE_GOVERNANCE_H 1
 
 #include <aimee/governance/module_api.h>
+struct aimee_response;
 
 struct parsed_response;
 
@@ -33,5 +34,9 @@ int gw_response_governance_enabled(void);
  * pending tool call (fail closed); there is no local policy fallback. Returns the intervention
  * count (>=0), or 0 when governance is disabled or `parsed` is NULL. */
 int gw_response_run_governance(struct parsed_response *parsed, int enabled, int policy_active);
+
+/* Canonical response path: preserve every non-tool block and opaque tool ID.
+ * The same bus policy owner makes the decision; no legacy response bridge. */
+int gw_ir_response_run_governance(struct aimee_response *response, int enabled, int policy_active);
 
 #endif /* DEC_GW_STAGE_GOVERNANCE_H */

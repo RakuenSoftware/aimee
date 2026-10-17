@@ -124,6 +124,14 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
  * routing/fallback and not a provider-health failure. */
 #define AGENT_RC_CONTEXT_REFUSED (-3)
 
+/* Durable capture failed. Execution may already have run tools, so retrying on
+ * another provider or credential is forbidden and must not affect health. */
+#define AGENT_RC_CAPTURE_FAILED (-4)
+static inline int agent_rc_is_local_refusal(int rc)
+{
+   return rc == AGENT_RC_CONTEXT_REFUSED || rc == AGENT_RC_CAPTURE_FAILED;
+}
+
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.
  * Acquires the agent's slot, runs the turn (use_tools -> the tool loop

@@ -129,9 +129,9 @@ static int run_delegate_attempt(agent_config_t *cfg, const char *role, const cha
 
 static int result_failed_for_pool(const agent_result_t *result, int rc)
 {
-   /* A Go context refusal is not evidence against a provider credential, even
-    * if its diagnostic contains an auth/rate-limit string. */
-   return rc != AGENT_RC_CONTEXT_REFUSED && (rc != 0 || !result || !result->success);
+   /* Local context/capture refusals are not evidence against a provider
+    * credential, even if a diagnostic contains an auth/rate-limit string. */
+   return !agent_rc_is_local_refusal(rc) && (rc != 0 || !result || !result->success);
 }
 
 static void result_add_prior_metrics(agent_result_t *result, const agent_result_t *prior)

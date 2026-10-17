@@ -22,6 +22,7 @@
 #include "kb_client.h"
 #include "agent.h"
 #include "agent_protocol.h"
+#include <aimee/ir/session_event.h>
 #include "agent_request_shaping.h"
 #include "agent_request_build.h" /* agent_build_request + provider predicates */
 #include <aimee/tools/agent_tools.h>
@@ -321,9 +322,17 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
                                                           max_tokens, temperature, out)
                       : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
    agent_admission_release(admit_slot);
+   if (aimee_ir_session_capture_failed())
+   {
+      rc = AGENT_RC_CAPTURE_FAILED;
+      out->success = 0;
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+      if (!out->error[0])
+         snprintf(out->error, sizeof out->error, "canonical capture failed");
+   }
    if (rc == 0)
       provider_catalog_record_success(ag->name);
-   else if (rc != AGENT_RC_CONTEXT_REFUSED)
+   else if (!agent_rc_is_local_refusal(rc))
    {
       const char *ec = agent_error_is_registration_failure(out->error) ? "registration_error"
                        : agent_error_is_retryable(out->error)          ? "retryable"
@@ -453,7 +462,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
       }
-      if (rc == AGENT_RC_CONTEXT_REFUSED)
+      if (agent_rc_is_local_refusal(rc))
          return rc;
       if (cfg->route_pinned)
       {
@@ -750,7 +759,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
                 ag->name, cfg->fallback_count);
 
-      for (int fi = 0; fi < cfg->fallback_count && rc != 0 && rc != AGENT_RC_CONTEXT_REFUSED; fi++)
+      for (int fi = 0; fi < cfg->fallback_count && rc != 0 && !agent_rc_is_local_refusal(rc); fi++)
       {
          if (agent_request_cancelled())
             break; /* stop trying fallbacks once the turn is cancelled */
@@ -923,333 +932,67 @@ static void track_simple_anthropic_payload_rewrite(const delegate_driver_t *driv
                                  caps.context_limit);
 }
 
-static int parse_error(cJSON *root, agent_result_t *out)
+/* All native output crosses the same entry adapters as the tool runtime. The
+ * legacy result API receives a final text projection only after IR publication. */
+static void parse_response(const char *body, const agent_t *agent, agent_result_t *out)
 {
-   cJSON *err = cJSON_GetObjectItem(root, "error");
-   if (!err || cJSON_IsNull(err))
-      return 0;
-
-   if (cJSON_IsObject(err))
-   {
-      cJSON *msg = cJSON_GetObjectItem(err, "message");
-      if (msg && cJSON_IsString(msg))
-         snprintf(out->error, sizeof(out->error), "%s", msg->valuestring);
-      else
-         snprintf(out->error, sizeof(out->error), "API error");
-   }
-   else if (cJSON_IsString(err))
-   {
-      snprintf(out->error, sizeof(out->error), "%s", err->valuestring);
-   }
+   aimee_response_t response = {0};
+   int rc;
+   if (is_chatgpt_provider(agent))
+      rc = agent_ir_decode_responses(body, -1, NULL, &response);
    else
    {
-      snprintf(out->error, sizeof(out->error), "API error");
+      cJSON *root = cJSON_Parse(body);
+      if (!root)
+      {
+         snprintf(out->error, sizeof out->error, "invalid JSON response");
+         return;
+      }
+      rc = agent_ir_decode_json_response(root, is_anthropic_provider(agent), -1, NULL, &response);
+      cJSON_Delete(root);
    }
-   return 1;
-}
-
-static void parse_response_openai(cJSON *root, agent_result_t *out)
-{
-   parsed_response_t parsed;
-   /* IR is the sole parser for the openai wire (zeroed *parsed on failure). This
-    * simple-completion runtime has no tool loop, so no XML rescue (rescue_mode < 0). */
-   agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, &parsed);
-
-   out->prompt_tokens = parsed.prompt_tokens;
-   out->completion_tokens = parsed.completion_tokens;
-   out->cache_write_tokens = parsed.cache_write_tokens;
-   out->cache_read_tokens = parsed.cache_read_tokens;
-   /* Prefer the provider-reported model over the served alias set at entry. */
-   if (parsed.model[0])
-      snprintf(out->model, MAX_MODEL_LEN, "%s", parsed.model);
-   if (parsed.stop_reason[0])
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", parsed.stop_reason);
-
-   if (parsed.content && parsed.content[0])
+   if (rc != 0)
    {
-      out->response = parsed.content;
-      parsed.content = NULL;
+      snprintf(out->error, sizeof out->error, "%s",
+               rc == AGENT_IR_CAPTURE_FAILED ? "canonical response persistence failed"
+                                             : "provider response could not be admitted as IR");
+      if (rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed())
+         snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+      return;
+   }
+   if (response.error_message)
+   {
+      snprintf(out->error, sizeof out->error, "%s", response.error_message);
+      snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+               aimee_stop_reason_name(response.stop_reason));
+      aimee_response_free(&response);
+      return;
+   }
+   out->prompt_tokens = response.usage_in;
+   out->completion_tokens = response.usage_out;
+   out->cache_read_tokens = response.usage_cache_read;
+   out->cache_write_tokens = response.usage_cache_write;
+   if (response.model && response.model[0])
+      snprintf(out->model, sizeof out->model, "%s", response.model);
+   snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+            response.raw_stop_reason ? response.raw_stop_reason
+                                     : aimee_stop_reason_name(response.stop_reason));
+   char *text = aimee_ir_response_text_alloc(&response);
+   if (text && text[0])
+   {
+      free(out->response);
+      out->response = text;
       out->success = 1;
    }
-
+   else
+      free(text);
    if (out->cache_read_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache hit: %d tokens read from cache",
                 out->cache_read_tokens);
    else if (out->cache_write_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache miss: %d tokens written to cache",
                 out->cache_write_tokens);
-
-   agent_free_parsed_response(&parsed);
-}
-
-/* Read a Responses-API `usage` object: the two flat counters AND the cached-input
- * detail.
- *
- * The chat-completions wire reaches `agent_result_t` through the canonical IR
- * parser, which already carries cached tokens across. The Responses wire does
- * not -- it is hand-parsed here, in three places that each read exactly
- * input_tokens and output_tokens. `cached_tokens` lives one level down, in the
- * `input_tokens_details` sibling, so reading only the flat pair loses it with no
- * error: cache_read_tokens simply stays 0, which is indistinguishable from a
- * real cache miss.
- *
- * Factored out rather than patched in triplicate because three copies is how the
- * field came to be missing from all three in the first place. */
-static void read_responses_usage(cJSON *usage, agent_result_t *out)
-{
-   if (!usage)
-      return;
-   cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-   cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-   if (it && cJSON_IsNumber(it))
-      out->prompt_tokens = it->valueint;
-   if (ot && cJSON_IsNumber(ot))
-      out->completion_tokens = ot->valueint;
-
-   cJSON *details = cJSON_GetObjectItem(usage, "input_tokens_details");
-   if (details && cJSON_IsObject(details))
-   {
-      cJSON *cached = cJSON_GetObjectItem(details, "cached_tokens");
-      if (cached && cJSON_IsNumber(cached))
-         out->cache_read_tokens = cached->valueint;
-   }
-}
-
-static void parse_response_object(cJSON *root, agent_result_t *out)
-{
-   /* Responses API: output[].content[].text where type == "output_text" */
-   cJSON *output = cJSON_GetObjectItem(root, "output");
-   if (output && cJSON_IsArray(output))
-   {
-      int n = cJSON_GetArraySize(output);
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *item = cJSON_GetArrayItem(output, i);
-         cJSON *type = cJSON_GetObjectItem(item, "type");
-         if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
-            continue;
-
-         cJSON *content = cJSON_GetObjectItem(item, "content");
-         if (!content || !cJSON_IsArray(content))
-            continue;
-
-         int cn = cJSON_GetArraySize(content);
-         for (int j = 0; j < cn; j++)
-         {
-            cJSON *part = cJSON_GetArrayItem(content, j);
-            cJSON *pt = cJSON_GetObjectItem(part, "type");
-            if (!pt || !cJSON_IsString(pt) || strcmp(pt->valuestring, "output_text") != 0)
-               continue;
-
-            cJSON *text = cJSON_GetObjectItem(part, "text");
-            if (text && cJSON_IsString(text))
-            {
-               out->response = strdup(text->valuestring);
-               out->success = 1;
-               break;
-            }
-         }
-         if (out->success)
-            break;
-      }
-   }
-
-   read_responses_usage(cJSON_GetObjectItem(root, "usage"), out);
-}
-
-/* Parse SSE stream body for the Responses API.
- *
- * Strategy:
- * 1. Scan response.output_item.done events — these carry the completed output items
- *    with full content arrays (item.content[].text where type == "output_text").
- * 2. Fall back to response.completed if output_item.done yields nothing (the
- *    completed event includes a full response object but the API sometimes sends
- *    it with an empty output[] array, so this is a secondary check).
- * 3. If neither has content, try parsing as plain JSON (non-SSE fallback). */
-static void parse_response_responses(const char *body, agent_result_t *out)
-{
-   if (!body)
-      return;
-
-   /* Pass 1: collect text from all response.output_item.done events */
-   const char *p = body;
-   while ((p = strstr(p, "event: response.output_item.done\n")) != NULL)
-   {
-      const char *data = strstr(p, "data: ");
-      if (!data)
-         break;
-      data += 6;
-      cJSON *ev = cJSON_Parse(data);
-      if (ev)
-      {
-         cJSON *item = cJSON_GetObjectItem(ev, "item");
-         if (item)
-         {
-            cJSON *content = cJSON_GetObjectItem(item, "content");
-            if (content && cJSON_IsArray(content))
-            {
-               int cn = cJSON_GetArraySize(content);
-               for (int j = 0; j < cn; j++)
-               {
-                  cJSON *part = cJSON_GetArrayItem(content, j);
-                  cJSON *pt = cJSON_GetObjectItem(part, "type");
-                  if (!pt || !cJSON_IsString(pt) || strcmp(pt->valuestring, "output_text") != 0)
-                     continue;
-                  cJSON *text = cJSON_GetObjectItem(part, "text");
-                  if (text && cJSON_IsString(text) && text->valuestring[0])
-                  {
-                     free(out->response);
-                     out->response = strdup(text->valuestring);
-                     out->success = 1;
-                  }
-               }
-            }
-         }
-         cJSON_Delete(ev);
-      }
-      p++; /* advance past current match */
-   }
-
-   if (out->success)
-   {
-      /* Collect usage from response.completed even if we already have content */
-      const char *completed = strstr(body, "event: response.completed\n");
-      if (completed)
-      {
-         const char *dl = strstr(completed, "data: ");
-         if (dl)
-         {
-            cJSON *ev = cJSON_Parse(dl + 6);
-            if (ev)
-            {
-               cJSON *resp = cJSON_GetObjectItem(ev, "response");
-               if (resp)
-               {
-                  read_responses_usage(cJSON_GetObjectItem(resp, "usage"), out);
-               }
-               cJSON_Delete(ev);
-            }
-         }
-      }
-      return;
-   }
-
-   /* Pass 2: try response.completed (output[] may be populated in some versions) */
-   const char *completed = strstr(body, "event: response.completed\n");
-   if (completed)
-   {
-      const char *dl = strstr(completed, "data: ");
-      if (dl)
-      {
-         cJSON *ev = cJSON_Parse(dl + 6);
-         if (ev)
-         {
-            cJSON *resp = cJSON_GetObjectItem(ev, "response");
-            if (resp)
-            {
-               if (!parse_error(resp, out))
-                  parse_response_object(resp, out);
-            }
-            cJSON_Delete(ev);
-         }
-      }
-      if (out->success)
-         return;
-   }
-
-   /* Pass 3: plain JSON fallback (non-SSE response) */
-   cJSON *root = cJSON_Parse(body);
-   if (root)
-   {
-      if (!parse_error(root, out))
-         parse_response_object(root, out);
-      cJSON_Delete(root);
-   }
-   else if (!out->error[0])
-   {
-      snprintf(out->error, sizeof(out->error), "no content in response stream");
-   }
-}
-
-static void parse_response_anthropic(cJSON *root, agent_result_t *out)
-{
-   /* Anthropic: {"content":[{"type":"text","text":"..."}],"usage":{...}} */
-   cJSON *content = cJSON_GetObjectItem(root, "content");
-   if (content && cJSON_IsArray(content))
-   {
-      int n = cJSON_GetArraySize(content);
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *block = cJSON_GetArrayItem(content, i);
-         cJSON *type = cJSON_GetObjectItem(block, "type");
-         if (type && cJSON_IsString(type) && strcmp(type->valuestring, "text") == 0)
-         {
-            cJSON *text = cJSON_GetObjectItem(block, "text");
-            if (text && cJSON_IsString(text))
-            {
-               out->response = strdup(text->valuestring);
-               out->success = 1;
-               break;
-            }
-         }
-      }
-   }
-
-   cJSON *usage = cJSON_GetObjectItem(root, "usage");
-   if (usage)
-   {
-      cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-      cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-      if (it && cJSON_IsNumber(it))
-         out->prompt_tokens = it->valueint;
-      if (ot && cJSON_IsNumber(ot))
-         out->completion_tokens = ot->valueint;
-      /* Anthropic spells cached input as two FLAT siblings, not a details
-       * object, so this cannot share the Responses reader above. */
-      cJSON *cr = cJSON_GetObjectItem(usage, "cache_read_input_tokens");
-      if (cr && cJSON_IsNumber(cr))
-         out->cache_read_tokens = cr->valueint;
-      cJSON *cw = cJSON_GetObjectItem(usage, "cache_creation_input_tokens");
-      if (cw && cJSON_IsNumber(cw))
-         out->cache_write_tokens = cw->valueint;
-   }
-
-   /* Prefer the provider-reported model over the served alias set at entry. */
-   cJSON *mdl = cJSON_GetObjectItem(root, "model");
-   if (mdl && cJSON_IsString(mdl) && mdl->valuestring)
-      snprintf(out->model, MAX_MODEL_LEN, "%s", mdl->valuestring);
-   cJSON *sr = cJSON_GetObjectItem(root, "stop_reason");
-   if (sr && cJSON_IsString(sr) && sr->valuestring)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", sr->valuestring);
-}
-
-static void parse_response(const char *body, const agent_t *agent, agent_result_t *out)
-{
-   if (is_chatgpt_provider(agent))
-   {
-      /* SSE stream or plain JSON, handled internally */
-      parse_response_responses(body, out);
-      return;
-   }
-
-   cJSON *root = cJSON_Parse(body);
-   if (!root)
-   {
-      snprintf(out->error, sizeof(out->error), "invalid JSON response");
-      return;
-   }
-
-   if (parse_error(root, out))
-   {
-      cJSON_Delete(root);
-      return;
-   }
-
-   if (is_anthropic_provider(agent))
-      parse_response_anthropic(root, out);
-   else
-      parse_response_openai(root, out);
-   cJSON_Delete(root);
+   aimee_response_free(&response);
 }
 
 /* --- Simple (non-tool) execution --- */
@@ -1426,7 +1169,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
          snprintf(out->error, sizeof(out->error), "HTTP %d (non-JSON body): %s", http_status,
                   snippet);
       free(response_body);
-      return -1;
+      return !strcmp(out->stop_reason, "capture_failed") ? AGENT_RC_CAPTURE_FAILED : -1;
    }
 
    parse_response(response_body, agent, out);
@@ -1437,6 +1180,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->error, sizeof(out->error), "provider returned 200 with a non-JSON body: %.180s",
                response_body ? response_body : "");
    free(response_body);
+
+   if (!strcmp(out->stop_reason, "capture_failed"))
+      return AGENT_RC_CAPTURE_FAILED;
 
    agent_reject_degenerate_plain_response(out, agent->name);
 

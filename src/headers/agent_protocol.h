@@ -3,6 +3,7 @@
 #define DEC_AGENT_PROTOCOL_H 1
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 struct cJSON;
 
@@ -48,8 +49,14 @@ typedef struct parsed_response
     * the requested/served alias, e.g. a dated version). Empty when absent. */
    char model[MAX_MODEL_LEN];
    /* Provider stop/finish reason (Anthropic stop_reason / OpenAI finish_reason),
-    * captured for the audit. Empty when absent. */
+    * captured for the audit. Empty when absent. Its vocabulary is whatever the
+    * provider (or a policy stage) wrote, so never compare it against one wire's
+    * words to decide behaviour -- use `stop`. */
    char stop_reason[32];
+   /* The canonical stop reason, carried from the IR parse. AIMEE_STOP_UNKNOWN (the
+    * zero value) when no IR parse produced this response. Emitters render it in
+    * their own client's vocabulary. */
+   aimee_stop_reason_t stop;
 } parsed_response_t;
 
 /* --- Request builders --- */
@@ -63,6 +70,12 @@ struct cJSON *agent_build_request_responses(const agent_t *agent, struct cJSON *
 struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *messages,
                                             struct cJSON *tools, const char *system_prompt,
                                             int max_tokens, double temperature);
+
+/* The runtime stores canonical {role,blocks} messages. Native history is accepted
+ * only by this migration adapter, and native requests are built only at egress. */
+struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *messages,
+                                     struct cJSON *tools, const char *system_prompt, int max_tokens,
+                                     double temperature, aimee_wire_t wire);
 
 /* Set the Anthropic `system` field on an outbound request (§3 cache-aware
  * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
@@ -88,6 +101,14 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
  * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
  * cJSON the caller owns, or NULL. */
 struct cJSON *agent_responses_sse_response_object(const char *body);
+
+/* Native response entry adapters. The caller owns the full typed response until
+ * tool dispatch and history append finish. No text/tool projection occurs here. */
+#define AGENT_IR_CAPTURE_FAILED (-2)
+int agent_ir_decode_json_response(const struct cJSON *root, int anthropic, int rescue_mode,
+                                  int *n_rescued, aimee_response_t *out);
+int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
+                              aimee_response_t *out);
 
 /* Parse a provider JSON response through the canonical IR and bridge it into a
  * parsed_response_t (the sole response parser for the JSON wires).

@@ -18,7 +18,8 @@
     "src/modules/translation/aimee_frontend_openai.c",
     "src/modules/translation/aimee_frontend_responses.c",
     "src/modules/translation/aimee_ir_stream.c",
-    "src/modules/translation/harness_ir.c"
+    "src/modules/translation/harness_ir.c",
+    "src/modules/translation/history_ir.c"
   ],
   "public_headers": [
     "src/modules/translation/include/aimee/translation/aimee_backend.h",

@@ -40,6 +40,12 @@ int openai_family_tool_choice_parse(const struct cJSON *tool_choice,
                                     const struct cJSON *parallel_tool_calls, int responses_shape,
                                     aimee_request_t *out, char *err, size_t errn);
 
+/* Import a complete legacy native history at its entry boundary, or validate an
+ * already canonical {role,blocks} history. Returns an owned canonical array;
+ * NULL on malformed/mixed shapes. Lifted legacy system blocks are excluded:
+ * the runtime supplies its current authoritative system separately. */
+struct cJSON *aimee_frontend_history_import(const struct cJSON *messages, aimee_wire_t legacy_wire);
+
 /* Render an IR response as a buffered client response, built PURELY from the IR
  * (ruling Q3: semantic correctness, NOT provider byte-parity). Returns a new cJSON
  * object the caller owns (cJSON_Delete), or NULL on bad args. The canonical

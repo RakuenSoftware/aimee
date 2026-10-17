@@ -4,6 +4,10 @@ export type Block = {
   type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image' | 'document';
   text?: string;
   signature?: string;
+  thinking_id?: string;
+  encrypted_content?: string;
+  redacted_content?: string;
+  cache_control?: string;
   tool_id?: string;
   name?: string;
   namespace?: string;
@@ -26,6 +30,9 @@ export type Delta = {
   stop_reason?: string;
   usage_in?: number;
   usage_out?: number;
+  usage_cache_read?: number;
+  usage_cache_write?: number;
+  usage_reasoning?: number;
   error_message?: string;
 };
 export type SessionEvent =
@@ -45,7 +52,7 @@ export type ProjectedMessage = Message & {
   error?: string;
   cancelled?: boolean;
   stopReason?: string;
-  usage?: { input: number; output: number };
+  usage?: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number };
 };
 export type Control = {
   kind: string; request: Record<string, unknown>; response?: Record<string, unknown>;
@@ -73,13 +80,17 @@ function validateBlock(block: Block): void {
     throw new Error('Text block requires text');
   if (block.signature !== undefined && typeof block.signature !== 'string')
     throw new Error('Invalid thinking signature');
+  for (const field of ['thinking_id', 'encrypted_content', 'redacted_content', 'cache_control'] as const) {
+    if (block[field] !== undefined && typeof block[field] !== 'string')
+      throw new Error(`Invalid block ${field}`);
+  }
   if ((block.type === 'tool_use' || block.type === 'tool_result') && !nonempty(block.tool_id))
     throw new Error('Tool block requires tool_id');
   if (block.type === 'tool_use' && !nonempty(block.name)) throw new Error('Tool use requires name');
   if (block.is_error !== undefined && typeof block.is_error !== 'boolean')
     throw new Error('Invalid tool result status');
   if ((block.type === 'image' || block.type === 'document') &&
-      (!nonempty(block.media_type) || !nonempty(block.media_ref))) throw new Error('Invalid media reference');
+      (!nonempty(block.media_ref) || (block.media_type !== undefined && !nonempty(block.media_type)))) throw new Error('Invalid media reference');
 }
 export function reduceSession(state: SessionState, envelope: Envelope): SessionState {
   if (envelope.version !== 1 || envelope.session_id !== state.session || !nonempty(envelope.event_id) ||
@@ -100,12 +111,16 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         throw new Error('Invalid canonical message');
       event.payload.blocks.forEach(validateBlock);
       const message: ProjectedMessage = { ...event.payload, id: event.message_id,
-        turn: envelope.turn_id, complete: true, argumentFragments: {}, stoppedBlocks: [] };
+        turn: envelope.turn_id, complete: true, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index) };
       const index = state.messages.findIndex(m => m.id === event.message_id);
       if (index >= 0) {
         if (state.messages[index].role !== message.role || state.messages[index].turn !== message.turn)
           throw new Error('Message identity changed');
         const previous = state.messages[index];
+        // A complete block snapshot inside a started model turn still awaits
+        // TURN_STOP, which owns stop reason and usage. Standalone messages and
+        // snapshots after TURN_STOP are already complete.
+        message.complete = previous.complete;
         message.usage = previous.usage;
         message.stopReason = previous.stopReason;
         message.error = previous.error;
@@ -147,11 +162,14 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (d.type === 'TURN_STOP') {
         if (message.stoppedBlocks.length !== message.blocks.length)
           throw new Error('Message has open blocks');
-        for (const value of [d.usage_in, d.usage_out]) {
+        for (const value of [d.usage_in, d.usage_out, d.usage_cache_read, d.usage_cache_write, d.usage_reasoning]) {
           if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
             throw new Error('Invalid model usage');
         }
-        message.usage = { input: d.usage_in || 0, output: d.usage_out || 0 };
+        message.usage = { input: d.usage_in || 0, output: d.usage_out || 0,
+          ...(d.usage_cache_read !== undefined ? { cacheRead: d.usage_cache_read } : {}),
+          ...(d.usage_cache_write !== undefined ? { cacheWrite: d.usage_cache_write } : {}),
+          ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) };
         message.stopReason = d.stop_reason;
         message.complete = true;
         return next;

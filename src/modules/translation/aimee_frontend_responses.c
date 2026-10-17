@@ -148,8 +148,8 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             b->type = AIMEE_BLK_TOOL_RESULT;
             b->raw = cJSON_Duplicate(item, 1);
             b->tool_id = dupstr(ostr(item, "call_id"));
-            const char *o = ostr(item, "output");
-            b->tool_result = o ? cJSON_CreateString(o) : NULL;
+            const cJSON *result = cJSON_GetObjectItemCaseSensitive(item, "output");
+            b->tool_result = result ? cJSON_Duplicate(result, 1) : NULL;
             continue;
          }
          tool_run = -1; /* any non-output item ends the tool run */
@@ -184,6 +184,8 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
             b->text = responses_reasoning_summary_text(item);
+            b->thinking_id = dupstr(ostr(item, "id"));
+            b->thinking_encrypted_content = dupstr(ostr(item, "encrypted_content"));
          }
          else /* "message" (default) */
          {
@@ -206,6 +208,32 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
                         goto oom;
                      b->type = AIMEE_BLK_TEXT;
                      b->text = dupstr(ostr(part, "text"));
+                  }
+                  else if (pt && (!strcmp(pt, "input_image") || !strcmp(pt, "input_file")))
+                  {
+                     aimee_block_t *b =
+                         grow1((void **)&m->blocks, &m->n_blocks, sizeof(aimee_block_t));
+                     if (!b)
+                        goto oom;
+                     b->type = !strcmp(pt, "input_image") ? AIMEE_BLK_IMAGE : AIMEE_BLK_DOCUMENT;
+                     const char *ref =
+                         ostr(part, b->type == AIMEE_BLK_IMAGE ? "image_url" : "file_data");
+                     if (!ref)
+                        ref = ostr(part, "file_url");
+                     if (!ref)
+                        ref = ostr(part, "file_id");
+                     b->media_ref = dupstr(ref);
+                     if (!b->media_ref)
+                        goto oom;
+                  }
+                  else
+                  {
+                     aimee_block_t *b =
+                         grow1((void **)&m->blocks, &m->n_blocks, sizeof(aimee_block_t));
+                     if (!b)
+                        goto oom;
+                     b->type = AIMEE_BLK_UNKNOWN;
+                     b->raw = cJSON_Duplicate(part, 1);
                   }
                }
             else if (cJSON_IsString(content))
@@ -272,6 +300,18 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
 {
    if (!r)
       return NULL;
+   if (r->error_message)
+   {
+      cJSON *failure = cJSON_CreateObject();
+      cJSON *error = cJSON_AddObjectToObject(failure, "error");
+      if (!failure || !error || !cJSON_AddStringToObject(error, "type", "upstream_error") ||
+          !cJSON_AddStringToObject(error, "message", r->error_message))
+      {
+         cJSON_Delete(failure);
+         return NULL;
+      }
+      return failure;
+   }
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "id", r->id ? r->id : "");
    cJSON_AddStringToObject(out, "object", "response");
@@ -313,6 +353,10 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
       {
          cJSON *item = cJSON_CreateObject();
          cJSON_AddStringToObject(item, "type", "reasoning");
+         if (b->thinking_id)
+            cJSON_AddStringToObject(item, "id", b->thinking_id);
+         if (b->thinking_encrypted_content)
+            cJSON_AddStringToObject(item, "encrypted_content", b->thinking_encrypted_content);
          cJSON_AddStringToObject(item, "summary", b->text ? b->text : "");
          cJSON_AddItemToArray(output, item);
       }

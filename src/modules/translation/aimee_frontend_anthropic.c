@@ -1,6 +1,7 @@
 /* aimee_frontend_anthropic.c -- Anthropic Messages API (/v1/messages) <-> IR.
  * Parse only in this slice; render lands with the response path. See aimee_frontend.h. */
 #include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 
@@ -31,7 +32,7 @@ static char *parse_cache_control(const cJSON *block)
 }
 
 /* Parse one Anthropic content block into `b`. */
-static void parse_block(const cJSON *el, aimee_block_t *b)
+void anthropic_ir_parse_block(const cJSON *el, aimee_block_t *b)
 {
    memset(b, 0, sizeof *b);
    b->raw = cJSON_Duplicate(el, 1);
@@ -52,6 +53,11 @@ static void parse_block(const cJSON *el, aimee_block_t *b)
       b->type = AIMEE_BLK_THINKING;
       b->text = dupstr(ostr(el, "thinking"));
       b->thinking_signature = dupstr(ostr(el, "signature"));
+   }
+   else if (strcmp(type, "redacted_thinking") == 0)
+   {
+      b->type = AIMEE_BLK_THINKING;
+      b->thinking_redacted = dupstr(ostr(el, "data"));
    }
    else if (strcmp(type, "tool_use") == 0)
    {
@@ -118,7 +124,7 @@ static int parse_content(const cJSON *content, aimee_block_t **out, int *n)
    const cJSON *el = NULL;
    cJSON_ArrayForEach(el, content)
    {
-      parse_block(el, &arr[i++]);
+      anthropic_ir_parse_block(el, &arr[i++]);
    }
    *out = arr;
    *n = cnt;
@@ -315,6 +321,18 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
 {
    if (!r)
       return NULL;
+   if (r->error_message)
+   {
+      cJSON *failure = cJSON_CreateObject();
+      cJSON *error = cJSON_AddObjectToObject(failure, "error");
+      if (!failure || !error || !cJSON_AddStringToObject(error, "type", "upstream_error") ||
+          !cJSON_AddStringToObject(error, "message", r->error_message))
+      {
+         cJSON_Delete(failure);
+         return NULL;
+      }
+      return failure;
+   }
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "id", r->id ? r->id : "");
    cJSON_AddStringToObject(out, "type", "message");
@@ -333,6 +351,13 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
       }
       else if (b->type == AIMEE_BLK_THINKING)
       {
+         if (b->thinking_redacted)
+         {
+            cJSON_AddStringToObject(el, "type", "redacted_thinking");
+            cJSON_AddStringToObject(el, "data", b->thinking_redacted);
+            cJSON_AddItemToArray(content, el);
+            continue;
+         }
          cJSON_AddStringToObject(el, "type", "thinking");
          cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
          /* Without the signature the client cannot echo the block back on the next

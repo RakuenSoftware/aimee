@@ -9,7 +9,7 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
-`src/modules/translation/module.yaml` is the complete module-local ownership inventory: nine shipping
+`src/modules/translation/module.yaml` is the complete module-local ownership inventory: ten shipping
 translation units, four canonical public headers, seven direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
 canonical document. Canonical public-header placement remains enforced by the descriptor-derived
@@ -58,6 +58,22 @@ contains legacy `translate_request` and `build_provider_body` paths beside the t
 `openai_chat.c` has its own builder. The mixed `aimee_ir_serve.c` implementation remains explicitly
 deferred: it owns rollout gates, memory-stage configuration and registration, and a transitional legacy
 response bridge. `router_advise.c` is workflow-owned despite its name and is outside translation.
+
+### Native runtime entry boundaries
+
+Native tool execution and simple completions use owned IR response decoders. Anthropic request
+and response parsing share one block adapter, including signed and redacted thinking. Responses
+SSE framing lives in `aimee_backend_responses.c`; it preserves completed output items, native item
+order, encrypted reasoning and full opaque tool IDs when the terminal response omits streamed
+items. Incomplete/error terminal events become typed IR outcomes. Unknown content and unfinished
+streams fail admission; execution does not re-parse provider JSON or recover calls from text.
+
+`history_ir.c` owns legacy-history entry conversion through the three frontend adapters.
+Canonical persisted histories decode through the IR message codec and are rendered only when
+building an outbound request. Media and reasoning remain in that history even where a target
+wire cannot replay foreign opaque reasoning state. Native Responses requests request encrypted
+reasoning so stateless continuation can retain it. Tool results retain structured content through
+the canonical history; protocol-specific representation limits apply at egress.
 
 ## Dependencies and consumers
 

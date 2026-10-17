@@ -31,6 +31,8 @@
 
 struct cJSON;
 
+#define AIMEE_IR_MAX_BLOCKS 4096
+
 /* Which wire protocol an adapter speaks (frontend: the client; backend: provider). */
 typedef enum
 {
@@ -117,6 +119,9 @@ typedef struct
     * REQUIRES it echoed back verbatim on a resubmitted assistant thinking turn, so it
     * must be modeled (not lost to the raw sidecar) for the canonical egress. Owned. */
    char *thinking_signature;
+   char *thinking_id;
+   char *thinking_encrypted_content;
+   char *thinking_redacted;
    /* TOOL_USE: id = the call id (stable, links to the matching TOOL_RESULT);
     * name = opaque tool name; input = opaque argument JSON (borrowed sidecar view,
     * preserved verbatim). TOOL_RESULT: id = the tool_use id it answers;
@@ -245,7 +250,7 @@ typedef enum
    AIMEE_STOP_ERROR
 } aimee_stop_reason_t;
 
-typedef struct
+typedef struct aimee_response
 {
    char *id;
    char *model;
@@ -253,6 +258,7 @@ typedef struct
    aimee_block_t *content;
    int n_content;
    aimee_stop_reason_t stop_reason;
+   char *error_message;   /* typed provider failure; NULL on ordinary responses */
    char *raw_stop_reason; /* provider-specific string (e.g. "stop_sequence") */
    long usage_in;
    long usage_out;
@@ -287,12 +293,15 @@ typedef struct
    const char *tool_args_delta;     /* BLOCK_DELTA for tool_use argument JSON fragment */
    aimee_stop_reason_t stop_reason; /* TURN_STOP */
    long usage_in, usage_out;        /* TURN_STOP */
-   const char *error_message;       /* ERROR */
+   long usage_cache_read, usage_cache_write, usage_reasoning;
+   const char *error_message; /* ERROR */
 } aimee_delta_t;
 
 /* ---- lifecycle ---- */
+void aimee_message_free(aimee_message_t *message);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
+int aimee_ir_block_valid(const aimee_block_t *block);
 void aimee_block_free_contents(aimee_block_t *b);
 
 /* Set metadata on one block. Content ownership is unchanged. */
@@ -353,6 +362,16 @@ size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n);
 /* Non-zero if the response carries at least one TOOL_USE block — the IR spelling
  * of parsed_response_t.is_tool_call. */
 int aimee_ir_response_has_tool_use(const aimee_response_t *r);
+/* Tool ordinals count TOOL_USE blocks only; other blocks retain their order.
+ * Returned tool blocks are borrowed from the response, never projected copies. */
+int aimee_ir_response_tool_count(const aimee_response_t *response);
+aimee_block_t *aimee_ir_response_tool(aimee_response_t *response, int ordinal);
+int aimee_ir_response_drop_tool(aimee_response_t *response, int ordinal);
+/* Allocate a text projection only at a consumer that requires flat text.
+ * The owned IR retains thinking, tools, media and all other block types. */
+/* Owned URI for media: inline base64 plus MIME becomes a data URI. */
+char *aimee_ir_media_url(const aimee_block_t *block);
+char *aimee_ir_response_text_alloc(const aimee_response_t *response);
 
 /* Concatenate the response's THINKING blocks into `buf`. The reasoning is handed
  * back rather than discarded, so callers that want to log or audit it can. */

@@ -99,11 +99,20 @@ static int append_openai_content(const cJSON *content, aimee_block_t **blocks, i
 #undef B64_SUFFIX
 #undef B64_SUFFIX_LEN
       }
-      else /* text (default) */
+      else if (type && !strcmp(type, "file"))
+      {
+         b->type = AIMEE_BLK_DOCUMENT;
+         const cJSON *file = cJSON_GetObjectItemCaseSensitive(el, "file");
+         const char *ref = ostr(file, "file_id");
+         b->media_ref = dupstr(ref ? ref : ostr(file, "file_data"));
+      }
+      else if (type && !strcmp(type, "text"))
       {
          b->type = AIMEE_BLK_TEXT;
          b->text = dupstr(ostr(el, "text"));
       }
+      else
+         b->type = AIMEE_BLK_UNKNOWN;
    }
    return 0;
 }
@@ -260,6 +269,22 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
             goto oom;
          msg->role = dupstr(role);
          msg->raw = cJSON_Duplicate(m, 1);
+         /* Some Chat-compatible providers return assistant reasoning separately
+          * from content. Preserve it at entry, before visible content and calls. */
+         const char *reasoning =
+             role && !strcmp(role, "assistant") ? ostr(m, "reasoning_content") : NULL;
+         if (!reasoning && role && !strcmp(role, "assistant"))
+            reasoning = ostr(m, "reasoning");
+         if (reasoning && reasoning[0])
+         {
+            aimee_block_t *block = grow1((void **)&msg->blocks, &msg->n_blocks, sizeof(*block));
+            if (!block)
+               goto oom;
+            block->type = AIMEE_BLK_THINKING;
+            block->text = dupstr(reasoning);
+            if (!block->text)
+               goto oom;
+         }
          if (append_openai_content(content, &msg->blocks, &msg->n_blocks) != 0)
             goto oom;
          /* assistant tool_calls -> TOOL_USE blocks. tool_input is the PARSED object
@@ -385,6 +410,18 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
 {
    if (!r)
       return NULL;
+   if (r->error_message)
+   {
+      cJSON *failure = cJSON_CreateObject();
+      cJSON *error = cJSON_AddObjectToObject(failure, "error");
+      if (!failure || !error || !cJSON_AddStringToObject(error, "type", "upstream_error") ||
+          !cJSON_AddStringToObject(error, "message", r->error_message))
+      {
+         cJSON_Delete(failure);
+         return NULL;
+      }
+      return failure;
+   }
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "id", r->id ? r->id : "");
    cJSON_AddStringToObject(out, "object", "chat.completion");

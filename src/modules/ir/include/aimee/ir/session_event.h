@@ -36,6 +36,11 @@ typedef struct
  * Raw provider sidecars are deliberately not serialized into session events. */
 struct cJSON *aimee_ir_block_json(const aimee_block_t *block);
 struct cJSON *aimee_ir_message_json(const aimee_message_t *message);
+/* Decode canonical persisted content, never a provider protocol. On failure out
+ * is empty; on success it owns its fields (aimee_message_free). */
+int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
+/* Repair canonical tool cycles in order; -1 leaves the original untouched. */
+int aimee_ir_history_repair(struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
 
@@ -46,7 +51,15 @@ typedef int (*aimee_ir_session_sink_fn)(const aimee_session_event_t *event, void
 void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+/* Capture failure is sticky for the installed task sink, including adapter
+ * admission failures. Clearing the sink ends the scope and resets the latch. */
+void aimee_ir_session_fail_capture(void);
+int aimee_ir_session_capture_failed(void);
+/* Snapshot for a response whose native stream already supplies lifecycle. */
 int aimee_ir_session_emit_response(const aimee_response_t *response, const char *message_id);
+/* Buffered response: TURN_START, complete typed message, TURN_STOP with usage. */
+int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
+                                            const char *message_id);
 
 int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error);
 

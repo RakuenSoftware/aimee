@@ -73,6 +73,63 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
       cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
 }
 
+/* Content arrays retain the ordering of text and media. Unrepresentable files
+ * fail at this egress boundary rather than silently disappearing from history. */
+static cJSON *media_content(const aimee_message_t *message)
+{
+   cJSON *parts = cJSON_CreateArray();
+   if (!parts)
+      return NULL;
+   for (int i = 0; i < message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
+          block->type != AIMEE_BLK_DOCUMENT)
+         continue;
+      cJSON *part = cJSON_CreateObject();
+      if (!part)
+         goto fail;
+      if (block->type == AIMEE_BLK_TEXT)
+      {
+         cJSON_AddStringToObject(part, "type", "text");
+         cJSON_AddStringToObject(part, "text", block->text ? block->text : "");
+      }
+      else
+      {
+         char *ref = aimee_ir_media_url(block);
+         if (!ref)
+         {
+            cJSON_Delete(part);
+            goto fail;
+         }
+         if (block->type == AIMEE_BLK_IMAGE)
+         {
+            cJSON_AddStringToObject(part, "type", "image_url");
+            cJSON *image = cJSON_AddObjectToObject(part, "image_url");
+            cJSON_AddStringToObject(image, "url", ref);
+         }
+         else
+         {
+            if (strncmp(ref, "file-", 5) && strncmp(ref, "data:", 5))
+            {
+               free(ref);
+               cJSON_Delete(part);
+               goto fail;
+            }
+            cJSON_AddStringToObject(part, "type", "file");
+            cJSON *file = cJSON_AddObjectToObject(part, "file");
+            cJSON_AddStringToObject(file, !strncmp(ref, "file-", 5) ? "file_id" : "file_data", ref);
+         }
+         free(ref);
+      }
+      cJSON_AddItemToArray(parts, part);
+   }
+   return parts;
+fail:
+   cJSON_Delete(parts);
+   return NULL;
+}
+
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
@@ -171,7 +228,24 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          free(args);
          cJSON_AddItemToArray(tool_calls, call);
       }
-      if (text && text[0])
+      int has_media = 0;
+      for (int j = 0; j < im->n_blocks; j++)
+         has_media |=
+             im->blocks[j].type == AIMEE_BLK_IMAGE || im->blocks[j].type == AIMEE_BLK_DOCUMENT;
+      if (has_media)
+      {
+         cJSON *parts = media_content(im);
+         if (!parts)
+         {
+            cJSON_Delete(m);
+            cJSON_Delete(tool_calls);
+            free(text);
+            cJSON_Delete(out);
+            return NULL;
+         }
+         cJSON_AddItemToObject(m, "content", parts);
+      }
+      else if (text && text[0])
          cJSON_AddStringToObject(m, "content", text);
       else if (tool_calls)
          cJSON_AddNullToObject(m, "content");
@@ -332,6 +406,20 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (failure && !cJSON_IsNull(failure))
+   {
+      const char *message =
+          cJSON_IsString(failure) ? failure->valuestring : ostr(failure, "message");
+      out->error_message = dupstr(message ? message : "upstream API error");
+      out->stop_reason = AIMEE_STOP_ERROR;
+      if (!out->error_message)
+      {
+         aimee_response_free(out);
+         return -1;
+      }
+      return 0;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
 

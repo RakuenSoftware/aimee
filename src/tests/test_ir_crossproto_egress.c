@@ -11,6 +11,7 @@
 #include <stdlib.h>
 
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
@@ -51,9 +52,165 @@ static void same(const char *label, const char *anth_wire, const char *oai_wire)
    free(o);
 }
 
+static void test_canonical_replay_egress(void)
+{
+   cJSON *native =
+       cJSON_Parse("{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":["
+                   "{\"type\":\"reasoning\",\"id\":\"rs_opaque\",\"encrypted_content\":"
+                   "\"ciphertext\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"reason\"}]},"
+                   "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_"
+                   "text\",\"text\":\"before\"}]},"
+                   "{\"type\":\"function_call\",\"call_id\":\"opaque-call\",\"name\":\"read_file\","
+                   "\"namespace\":\"functions\",\"arguments\":\"{\\\"path\\\":\\\"a.c\\\"}\"},"
+                   "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_"
+                   "text\",\"text\":\"after\"}]}]}");
+   assert(native);
+   aimee_response_t response = {0};
+   char error[128];
+   assert(responses_backend_parse(native, &response, error, sizeof error) == 0);
+   cJSON_Delete(native);
+   aimee_message_t view = {
+       .role = response.role, .blocks = response.content, .n_blocks = response.n_content};
+   cJSON *persisted = aimee_ir_message_json(&view);
+   assert(persisted);
+   aimee_response_free(&response);
+   aimee_message_t message = {0};
+   assert(aimee_ir_message_parse(persisted, &message) == 0);
+   cJSON_Delete(persisted);
+   aimee_request_t request = {.model = "m", .messages = &message, .n_messages = 1};
+   cJSON *wire = responses_backend_build(&request);
+   assert(wire);
+   cJSON *items = cJSON_GetObjectItem(wire, "input");
+   assert(cJSON_GetArraySize(items) == 4);
+   cJSON *reasoning = cJSON_GetArrayItem(items, 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reasoning, "id")), "rs_opaque"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reasoning, "encrypted_content")),
+                  "ciphertext"));
+   cJSON *call = cJSON_GetArrayItem(items, 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(call, "call_id")), "opaque-call"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(call, "namespace")), "functions"));
+   cJSON_Delete(wire);
+   aimee_message_free(&message);
+
+   /* URL media has no intrinsic MIME type. Inline files retain their data URI. */
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "look"},
+       {.type = AIMEE_BLK_IMAGE, .media_ref = "https://example.test/image.png"},
+       {.type = AIMEE_BLK_DOCUMENT,
+        .media_type = "application/pdf",
+        .media_ref = "data:application/pdf;base64,AA=="}};
+   view = (aimee_message_t){.role = "user", .blocks = blocks, .n_blocks = 3};
+   persisted = aimee_ir_message_json(&view);
+   assert(persisted && aimee_ir_message_parse(persisted, &message) == 0);
+   cJSON_Delete(persisted);
+   request.messages = &message;
+   wire = openai_backend_build(&request);
+   assert(wire);
+   cJSON *parts =
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(wire, "messages"), 0), "content");
+   assert(cJSON_GetArraySize(parts) == 3);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetObjectItem(cJSON_GetArrayItem(parts, 1), "image_url"), "url")),
+                  "https://example.test/image.png"));
+   cJSON_Delete(wire);
+   wire = responses_backend_build(&request);
+   assert(wire && cJSON_GetArraySize(cJSON_GetObjectItem(wire, "input")) == 3);
+   cJSON_Delete(wire);
+   wire = anthropic_backend_build(&request);
+   assert(wire);
+   parts =
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(wire, "messages"), 0), "content");
+   cJSON *source = cJSON_GetObjectItem(cJSON_GetArrayItem(parts, 2), "source");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(source, "data")), "AA=="));
+   cJSON_Delete(wire);
+   aimee_message_free(&message);
+
+   native = cJSON_Parse("{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\","
+                        "\"data\":\"opaque-redacted\"}]}");
+   assert(anthropic_backend_parse(native, &response, error, sizeof error) == 0);
+   assert(response.n_content == 1 && response.content[0].type == AIMEE_BLK_THINKING);
+   assert(!strcmp(response.content[0].thinking_redacted, "opaque-redacted"));
+   view = (aimee_message_t){
+       .role = "assistant", .blocks = response.content, .n_blocks = response.n_content};
+   persisted = aimee_ir_message_json(&view);
+   assert(persisted && aimee_ir_message_parse(persisted, &message) == 0);
+   request.messages = &message;
+   wire = anthropic_backend_build(&request);
+   assert(wire);
+   parts =
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(wire, "messages"), 0), "content");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(parts, 0), "data")),
+                  "opaque-redacted"));
+   cJSON_Delete(wire);
+   cJSON_Delete(persisted);
+   cJSON_Delete(native);
+   aimee_response_free(&response);
+   aimee_message_free(&message);
+   puts("  canonical persisted reasoning/media replay OK");
+}
+
+static void test_history_entry_migration(void)
+{
+   const char *native[] = {
+       "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"reason\","
+       "\"signature\":\"signed\"},{\"type\":\"tool_use\",\"id\":\"opaque-call\",\"name\":\"read\","
+       "\"input\":{}}]},"
+       "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"opaque-call\","
+       "\"content\":\"result\"}]}]",
+       "[{\"role\":\"assistant\",\"reasoning_content\":\"reason\",\"content\":null,\"tool_calls\":["
+       "{\"id\":\"opaque-call\",\"type\":\"function\",\"function\":{\"name\":\"read\","
+       "\"arguments\":\"{}\"}}]},"
+       "{\"role\":\"tool\",\"tool_call_id\":\"opaque-call\",\"content\":\"result\"}]",
+       "[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"cipher\",\"summary\":[{"
+       "\"type\":\"summary_text\",\"text\":\"reason\"}]},"
+       "{\"type\":\"function_call\",\"call_id\":\"opaque-call\",\"name\":\"read\",\"arguments\":\"{"
+       "}\"},"
+       "{\"type\":\"function_call_output\",\"call_id\":\"opaque-call\",\"output\":\"result\"}]"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   for (int wire = 0; wire < 3; wire++)
+   {
+      cJSON *input = cJSON_Parse(native[wire]);
+      assert(input);
+      cJSON *history = aimee_frontend_history_import(input, wires[wire]);
+      assert(history);
+      int calls = 0, results = 0, thinking = 0;
+      const cJSON *item;
+      cJSON_ArrayForEach(item, history)
+      {
+         assert(!cJSON_GetObjectItemCaseSensitive(item, "content"));
+         aimee_message_t message = {0};
+         assert(aimee_ir_message_parse(item, &message) == 0);
+         for (int j = 0; j < message.n_blocks; j++)
+         {
+            const aimee_block_t *b = &message.blocks[j];
+            if (b->type == AIMEE_BLK_TOOL_USE || b->type == AIMEE_BLK_TOOL_RESULT)
+               assert(!strcmp(b->tool_id, "opaque-call"));
+            calls += b->type == AIMEE_BLK_TOOL_USE;
+            results += b->type == AIMEE_BLK_TOOL_RESULT;
+            thinking += b->type == AIMEE_BLK_THINKING;
+         }
+         aimee_message_free(&message);
+      }
+      assert(calls == 1 && results == 1 && thinking == 1);
+      cJSON *reloaded = aimee_frontend_history_import(history, wires[wire]);
+      assert(reloaded && cJSON_Compare(history, reloaded, 1));
+      cJSON_Delete(reloaded);
+      cJSON *mixed = cJSON_Duplicate(history, 1);
+      cJSON_AddItemToArray(mixed, cJSON_Duplicate(cJSON_GetArrayItem(input, 0), 1));
+      assert(!aimee_frontend_history_import(mixed, wires[wire]));
+      cJSON_Delete(mixed);
+      cJSON_Delete(history);
+      cJSON_Delete(input);
+   }
+   printf("  native-history-entry-retains-reasoning-and-tool-pairs OK\n");
+}
+
 int main(void)
 {
+   test_history_entry_migration();
    printf("cross-protocol anthropic egress byte-identity:\n");
+   test_canonical_replay_egress();
 
    /* Text-only turn: same served model, system, and user content in each wire.
     * The anthropic client sends its own cache_control; the openai client sends none.
@@ -152,9 +309,7 @@ int main(void)
       free(e);
    }
 
-   /* redacted_thinking blocks (opaque base64 data) have no typed IR arm, so they are
-    * preserved verbatim via the UNKNOWN/raw replay path -- confirm the canonical
-    * rebuild does not drop them (required to resubmit an extended-thinking turn). */
+   /* Redacted thinking is typed and must retain its opaque state at egress. */
    {
       char *e = egress("{\"model\":\"m\",\"max_tokens\":8,\"messages\":[{\"role\":\"assistant\","
                        "\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"Er0Bopaque\"}]}]}",

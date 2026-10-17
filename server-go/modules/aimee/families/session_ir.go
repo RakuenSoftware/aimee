@@ -42,24 +42,30 @@ func validSessionIREvent(encoded []byte) bool {
 		return true
 	case "delta":
 		var d struct {
-			Type       string  `json:"type"`
-			BlockID    *int    `json:"block_id"`
-			Kind       string  `json:"kind"`
-			ToolID     string  `json:"tool_id"`
-			Name       string  `json:"name"`
-			Text       *string `json:"text_delta"`
-			Arguments  *string `json:"tool_args_delta"`
-			StopReason string  `json:"stop_reason"`
-			UsageIn    *int64  `json:"usage_in"`
-			UsageOut   *int64  `json:"usage_out"`
-			Error      string  `json:"error_message"`
+			Type            string  `json:"type"`
+			BlockID         *int    `json:"block_id"`
+			Kind            string  `json:"kind"`
+			ToolID          string  `json:"tool_id"`
+			Name            string  `json:"name"`
+			Text            *string `json:"text_delta"`
+			Arguments       *string `json:"tool_args_delta"`
+			StopReason      string  `json:"stop_reason"`
+			UsageIn         *int64  `json:"usage_in"`
+			UsageOut        *int64  `json:"usage_out"`
+			UsageCacheRead  *int64  `json:"usage_cache_read"`
+			UsageCacheWrite *int64  `json:"usage_cache_write"`
+			UsageReasoning  *int64  `json:"usage_reasoning"`
+			Error           string  `json:"error_message"`
 		}
 		if e.MessageID == "" || e.Role == "" || !decodeIR(e.Payload, &d) {
 			return false
 		}
 		switch d.Type {
 		case "TURN_START", "TURN_STOP", "ERROR":
-			return (d.UsageIn == nil || *d.UsageIn >= 0) && (d.UsageOut == nil || *d.UsageOut >= 0)
+			return (d.UsageIn == nil || *d.UsageIn >= 0) && (d.UsageOut == nil || *d.UsageOut >= 0) &&
+				(d.UsageCacheRead == nil || *d.UsageCacheRead >= 0) &&
+				(d.UsageCacheWrite == nil || *d.UsageCacheWrite >= 0) &&
+				(d.UsageReasoning == nil || *d.UsageReasoning >= 0)
 		case "BLOCK_START", "BLOCK_DELTA", "BLOCK_STOP":
 			if d.BlockID == nil || *d.BlockID < 0 || *d.BlockID > 4095 || (d.Kind != "text" && d.Kind != "thinking" && d.Kind != "tool_use") {
 				return false
@@ -108,18 +114,22 @@ func irBlockKind(kind string) bool {
 }
 func validIRBlock(encoded []byte) bool {
 	var b struct {
-		Type      string          `json:"type"`
-		Text      *string         `json:"text"`
-		Signature *string         `json:"signature"`
-		ToolID    string          `json:"tool_id"`
-		Name      string          `json:"name"`
-		Namespace string          `json:"namespace"`
-		Input     json.RawMessage `json:"input"`
-		Content   json.RawMessage `json:"content"`
-		IsError   *bool           `json:"is_error"`
-		MediaType string          `json:"media_type"`
-		MediaRef  string          `json:"media_ref"`
-		Context   *struct {
+		Type             string          `json:"type"`
+		Text             *string         `json:"text"`
+		Signature        *string         `json:"signature"`
+		RedactedContent  *string         `json:"redacted_content"`
+		ThinkingID       *string         `json:"thinking_id"`
+		EncryptedContent *string         `json:"encrypted_content"`
+		CacheControl     *string         `json:"cache_control"`
+		ToolID           string          `json:"tool_id"`
+		Name             string          `json:"name"`
+		Namespace        string          `json:"namespace"`
+		Input            json.RawMessage `json:"input"`
+		Content          json.RawMessage `json:"content"`
+		IsError          *bool           `json:"is_error"`
+		MediaType        string          `json:"media_type"`
+		MediaRef         string          `json:"media_ref"`
+		Context          *struct {
 			Origin         int    `json:"origin"`
 			Authority      int    `json:"authority"`
 			Trust          int    `json:"trust"`
@@ -141,7 +151,7 @@ func validIRBlock(encoded []byte) bool {
 	case "tool_result":
 		return b.ToolID != ""
 	case "image", "document":
-		return b.MediaRef != "" && b.MediaType != ""
+		return b.MediaRef != ""
 	default:
 		return false
 	}

@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "aimee_ir_shadow.h"
+#include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
 #include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
@@ -47,6 +48,60 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+static void delegate_response_release(aimee_response_t *response, char *text, char **arguments,
+                                      int count)
+{
+   if (arguments)
+   {
+      for (int i = 0; i < count; i++)
+         free(arguments[i]);
+      free(arguments);
+   }
+   free(text);
+   aimee_response_free(response);
+}
+
+static void delegate_capture_stop(agent_result_t *out, int *failed)
+{
+   *failed = 1;
+   out->success = 0;
+   snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+}
+
+static int delegate_append_response(cJSON *messages, const aimee_response_t *response)
+{
+   aimee_message_t message = {.role = response->role ? response->role : "assistant",
+                              .blocks = response->content,
+                              .n_blocks = response->n_content};
+   cJSON *item = aimee_ir_message_json(&message);
+   if (!item || !cJSON_AddItemToArray(messages, item))
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   return 0;
+}
+
+static int delegate_append_tool_result(cJSON *messages, const char *id, const char *text,
+                                       int failed)
+{
+   aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
+                          .tool_id = (char *)id,
+                          .tool_is_error = failed,
+                          .tool_result = cJSON_CreateString(text ? text : "")};
+   aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   aimee_ir_classify_context(&request);
+   cJSON *item = block.tool_result ? aimee_ir_message_json(&message) : NULL;
+   cJSON_Delete(block.tool_result);
+   if (!item || !cJSON_AddItemToArray(messages, item))
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   return 0;
+}
 
 static void finish_final_tool_violation(agent_result_t *out, const agent_t *agent,
                                         const char *attempted_tool, const char *partial_text,
@@ -589,6 +644,7 @@ native_provider_http:
       return AGENT_RC_CONTEXT_REFUSED;
    }
    int context_refused = 0;
+   int capture_failed = 0;
    const char *sys = assembled_sys;
    if (!sys || !sys[0])
       sys = current_code_only
@@ -652,46 +708,42 @@ native_provider_http:
    if (!chatgpt && !anthropic)
       agent_tools_sanitize_for_agent(tools, agent);
 
-   /* Build conversation history. Primary sessions pass structured provider
-    * history here; delegate runs start empty and remain single-task. */
-   cJSON *messages = initial_messages ? cJSON_Duplicate(initial_messages, 1) : cJSON_CreateArray();
-
-   /* For OpenAI, system prompt goes in messages array.
-    * For Anthropic and ChatGPT it goes in the request body, handled by the
-    * respective request builder. */
-   if (!chatgpt && !anthropic)
+   /* Legacy transcripts cross an explicit entry adapter once. Every message
+    * admitted after this point is canonical {role,blocks}, including host text. */
+   aimee_wire_t wire = chatgpt     ? AIMEE_WIRE_RESPONSES
+                       : anthropic ? AIMEE_WIRE_ANTHROPIC
+                                   : AIMEE_WIRE_OPENAI_CHAT;
+   cJSON *messages = aimee_frontend_history_import(initial_messages, wire);
+   if (!messages)
    {
-      /* History carries the preceding turn's system context. Its replacement
-       * must match the current Go assembly and source receipt. */
-      cJSON *first = cJSON_GetArrayItem(messages, 0);
-      const char *first_role =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "role"));
-      if (first_role && strcmp(first_role, "system") == 0)
-      {
-         cJSON *replacement = cJSON_CreateString(sys);
-         if (!replacement || !cJSON_ReplaceItemInObjectCaseSensitive(first, "content", replacement))
-         {
-            cJSON_Delete(replacement);
-            (void)request_context_refuse_assembly("unavailable");
-         }
-      }
-      else
-      {
-         cJSON *sys_msg = cJSON_CreateObject();
-         if (!sys_msg || !cJSON_AddStringToObject(sys_msg, "role", "system") ||
-             !cJSON_AddStringToObject(sys_msg, "content", sys) ||
-             !cJSON_InsertItemInArray(messages, 0, sys_msg))
-         {
-            cJSON_Delete(sys_msg);
-            (void)request_context_refuse_assembly("unavailable");
-         }
-      }
+      cJSON_Delete(tools);
+      agent_tools_set_dispatch_role(NULL);
+      free(assembled_sys);
+      free(task_instructions);
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      snprintf(out->error, sizeof out->error, "session history could not be admitted as IR");
+      return -1;
    }
-
-   cJSON *user_msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(user_msg, "role", "user");
-   cJSON_AddStringToObject(user_msg, "content", user_prompt);
-   cJSON_AddItemToArray(messages, user_msg);
+   /* System context is assembled per request, never persisted in the session. */
+   cJSON *user_msg = agent_session_text_message("user", user_prompt);
+   if (!user_msg || !cJSON_AddItemToArray(messages, user_msg))
+   {
+      cJSON_Delete(user_msg);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      agent_tools_set_dispatch_role(NULL);
+      free(assembled_sys);
+      free(task_instructions);
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      snprintf(out->error, sizeof out->error, "cannot retain user message IR");
+      return -1;
+   }
 
    int turn = 0;
    int total_calls = 0;
@@ -843,10 +895,9 @@ native_provider_http:
 
          if (mw_res.action == MW_INJECT && mw_res.message[0])
          {
-            cJSON *inject_msg = cJSON_CreateObject();
-            cJSON_AddStringToObject(inject_msg, "role", "user");
-            cJSON_AddStringToObject(inject_msg, "content", mw_res.message);
-            cJSON_AddItemToArray(messages, inject_msg);
+            cJSON *inject_ir = agent_session_text_message("user", mw_res.message);
+            if (inject_ir)
+               cJSON_AddItemToArray(messages, inject_ir);
          }
       }
 
@@ -873,23 +924,19 @@ native_provider_http:
                free(assembled_sys);
                assembled_sys = refreshed;
                sys = assembled_sys;
-
-               /* Update system message in conversation for OpenAI providers */
-               if (!chatgpt && !anthropic)
-               {
-                  cJSON *first = cJSON_GetArrayItem(messages, 0);
-                  if (first)
-                     cJSON_ReplaceItemInObject(first, "content", cJSON_CreateString(sys));
-               }
             }
          }
       }
 
       /* Repair inconsistent history (orphaned tool calls/results) then compact */
-      message_history_repair(messages);
+      if (message_history_repair(messages) < 0)
+      {
+         snprintf(out->error, sizeof out->error, "canonical history repair failed");
+         break;
+      }
       messages_compact_consecutive(messages);
 
-      maybe_compact_before_request(&fb_agent, messages, (chatgpt || anthropic) ? sys : NULL);
+      maybe_compact_before_request(&fb_agent, messages, sys);
 
       /* Primary sessions never close the tool budget — the user can always send
        * another message.  budget_role is NULL for them (including the webchat
@@ -1035,15 +1082,17 @@ native_provider_http:
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
       if (chatgpt)
-         req = agent_build_request_responses(&fb_agent, eff_messages, active_tools, sys);
+         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
+                                      AIMEE_WIRE_RESPONSES);
       else if (anthropic)
       {
          track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
-         req = agent_build_request_anthropic(&fb_agent, eff_messages, active_tools, sys, tok,
-                                             temperature);
+         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
+                                      AIMEE_WIRE_ANTHROPIC);
       }
       else
-         req = agent_build_request_openai(&fb_agent, eff_messages, active_tools, tok, temperature);
+         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
+                                      AIMEE_WIRE_OPENAI_CHAT);
 
       /* Universal-gateway P4: run aimee's own outbound call through the same request
        * pipeline the proxy ingresses use, so a config-enabled tool-policing policy
@@ -1162,16 +1211,17 @@ native_provider_http:
 
          cJSON *fb_req;
          if (chatgpt)
-            fb_req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
+            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
+                                            temperature, AIMEE_WIRE_RESPONSES);
          else if (anthropic)
          {
             track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-            fb_req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
-                                                   temperature);
+            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
+                                            temperature, AIMEE_WIRE_ANTHROPIC);
          }
          else
-            fb_req =
-                agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
+            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
+                                            temperature, AIMEE_WIRE_OPENAI_CHAT);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
          cJSON_Delete(fb_req);
          if (fb_body)
@@ -1277,121 +1327,51 @@ native_provider_http:
 
       /* (transient retries handled by http_retry_post) */
 
-      /* Parse response */
-      parsed_response_t parsed;
-      /* XML tool-call rescue gate (models without native function-calling embed
-       * <tool_call> blocks in text). Computed up front because the IR parser now
-       * OWNS the rescue: rescue_mode<0 disables it, 0 rescues dialect calls, 1 also
-       * rescues bare JSON. ir_primary/n_rescued carry the parse outcome down to the
-       * rescue-policy step below. */
+      /* Native output ends here. Execution retains the owned typed response;
+       * text and argument strings below are views for existing consumer APIs. */
+      aimee_response_t response = {0};
+      char *response_text = NULL;
+      char **tool_arguments = NULL;
       int rescue_enabled = !fb_agent.ablation.configured || fb_agent.ablation.rescue;
-      int allow_json_rescue = rescue_enabled ? agent_allows_json_content_rescue(&fb_agent) : 0;
-      int rescue_mode = rescue_enabled ? allow_json_rescue : -1;
-      int ir_primary = 0;
+      int rescue_mode = rescue_enabled ? agent_allows_json_content_rescue(&fb_agent) : -1;
       int n_rescued = 0;
+      int decode_rc;
       if (chatgpt)
-      {
-         /* IR is the SOLE parser for the responses/SSE (codex) wire -- the legacy SSE
-          * parser is gone (shadow-proven at parity on live .254 traffic). It owns the
-          * XML rescue (via rescue_mode); ir_primary / n_rescued carry the outcome to
-          * the rescue-policy step below. A parse failure yields an empty response. */
-         ir_primary =
-             agent_ir_parse_responses(response_body, rescue_mode, &n_rescued, &parsed) == 0;
-         if (!ir_primary)
-         {
-            /* An unparseable body used to become an indistinguishable "empty
-             * response": the turn reported no content and no tool calls, the
-             * body was freed, and nothing said whether the provider returned an
-             * error, an unknown event shape, or genuinely nothing. Every codex
-             * failure looked identical and could not be told apart from a model
-             * that simply said nothing. Log a bounded excerpt so the wire is
-             * recoverable from the log alone. */
-            LOG_WARN("agent", "delegate '%s': responses body did not parse; first %d bytes: %.400s",
-                     agent->name, (int)(response_body ? strlen(response_body) : 0),
-                     response_body ? response_body : "(null)");
-            memset(&parsed, 0, sizeof(parsed));
-         }
-         else if (!parsed.content && parsed.call_count == 0)
-         {
-            /* Parsed cleanly yet carries neither text nor a tool call. The head
-             * of the stream says nothing useful here -- it is always
-             * response.created -- so report the SHAPE instead: which event types
-             * arrived, and the tail, where response.completed carries the final
-             * output array. That names the item types we are failing to extract
-             * rather than leaving it to be guessed. */
-            const char *b = response_body ? response_body : "";
-            size_t blen = strlen(b);
-            int n_item_done = 0, n_delta = 0, n_completed = 0, n_reasoning = 0, n_failed = 0;
-            for (const char *q = b; (q = strstr(q, "event: ")) != NULL; q++)
-            {
-               if (strncmp(q + 7, "response.output_item.done", 25) == 0)
-                  n_item_done++;
-               else if (strncmp(q + 7, "response.output_text.delta", 26) == 0)
-                  n_delta++;
-               else if (strncmp(q + 7, "response.completed", 18) == 0)
-                  n_completed++;
-               else if (strncmp(q + 7, "response.failed", 15) == 0)
-                  n_failed++;
-            }
-            for (const char *q = b; (q = strstr(q, "\"type\":\"reasoning\"")) != NULL; q++)
-               n_reasoning++;
-            /* Name the item types actually arriving: counting only "reasoning"
-             * left four items per turn unaccounted for once reasoning intent was
-             * declared. Collect the item.type of every output_item.done. */
-            char types[512] = "";
-            for (const char *q = b; (q = strstr(q, "event: response.output_item.done")) != NULL;
-                 q++)
-            {
-               const char *it = strstr(q, "\"item\":{");
-               if (!it)
-                  break;
-               const char *ty = strstr(it, "\"type\":\"");
-               if (!ty)
-                  continue;
-               ty += 8;
-               const char *end = strchr(ty, '"');
-               if (!end || end - ty > 40)
-                  continue;
-               char one[64];
-               snprintf(one, sizeof(one), "%.*s,", (int)(end - ty), ty);
-               if (strlen(types) + strlen(one) < sizeof(types) - 1)
-                  strcat(types, one);
-            }
-            const char *tail = blen > 600 ? b + blen - 600 : b;
-            LOG_WARN("agent",
-                     "delegate '%s': responses body parsed but yielded no content and no tool "
-                     "call; %zu bytes, events: output_item.done=%d output_text.delta=%d "
-                     "completed=%d failed=%d reasoning_items=%d; item_types=[%s]; tail: %.400s",
-                     agent->name, blen, n_item_done, n_delta, n_completed, n_failed, n_reasoning,
-                     types, tail);
-         }
-      }
+         decode_rc = agent_ir_decode_responses(response_body, rescue_mode, &n_rescued, &response);
       else
       {
          cJSON *root = cJSON_Parse(response_body);
-         if (root)
-         {
-            /* IR is the SOLE response parser for the JSON wires -- the legacy
-             * translators are gone (shadow-proven at parity, 0 fallbacks on live
-             * traffic). It also owns the XML rescue (via rescue_mode); ir_primary /
-             * n_rescued carry the outcome to the rescue-policy step below. A parse
-             * failure yields an empty response, the same as an unparseable body. */
-            ir_primary = agent_ir_parse_json_response(root, anthropic, rescue_mode, &n_rescued,
-                                                      &parsed) == 0;
-            if (!ir_primary)
-               memset(&parsed, 0, sizeof(parsed));
-            cJSON_Delete(root);
-         }
-         else
-         {
-            memset(&parsed, 0, sizeof(parsed));
-         }
+         decode_rc = root ? agent_ir_decode_json_response(root, anthropic, rescue_mode, &n_rescued,
+                                                          &response)
+                          : -1;
+         cJSON_Delete(root);
       }
       free(response_body);
-
+      if (decode_rc != 0)
+      {
+         capture_failed = decode_rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed();
+         snprintf(out->error, sizeof(out->error), "%s",
+                  decode_rc == AGENT_IR_CAPTURE_FAILED
+                      ? "canonical response persistence failed"
+                      : "provider response could not be admitted as IR");
+         if (capture_failed)
+            snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+         break;
+      }
+      if (response.error_message)
+      {
+         snprintf(out->error, sizeof out->error, "%s", response.error_message);
+         snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+                  aimee_stop_reason_name(response.stop_reason));
+         aimee_response_free(&response);
+         break;
+      }
+      snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+               aimee_stop_reason_name(response.stop_reason));
+      int call_count = aimee_ir_response_tool_count(&response);
       /* Universal-gateway P4 (response side): ask the event-bus governance module
        * about a denied tool_use the model emitted anyway. Shape-agnostic — the
-       * returned decision is applied to normalized parsed_response_t. This stays
+       * returned decision is applied to the typed IR blocks. This stays
        * gated to delegate calls: the primary spawns delegates via the very
        * Task/Subagent tool this policy would drop, so applying it to the primary's
        * response would neuter aimee's own delegation. */
@@ -1399,34 +1379,45 @@ native_provider_http:
       char denied_tool[64] = "";
       if (role != NULL)
       {
-         int original_call_count = parsed.call_count;
-         if (original_call_count < 0)
-            original_call_count = 0;
-         else if (original_call_count > AGENT_MAX_TOOL_CALLS)
-            original_call_count = AGENT_MAX_TOOL_CALLS;
-         char original_tool_names[AGENT_MAX_TOOL_CALLS][sizeof(parsed.calls[0].name)];
+         int original_call_count =
+             call_count > AGENT_MAX_TOOL_CALLS ? AGENT_MAX_TOOL_CALLS : call_count;
+         /* Only the denial diagnostic is bounded; every typed call is governed. */
+         char *original_tool_names[AGENT_MAX_TOOL_CALLS] = {0};
+         int names_ok = 1;
          for (int i = 0; i < original_call_count; i++)
-            snprintf(original_tool_names[i], sizeof(original_tool_names[i]), "%s",
-                     parsed.calls[i].name);
-
-         int governance_tri = config_present() ? config_module_governance() : -1;
-         denied_calls = gw_response_run_governance(
-             &parsed, config_module_enabled(governance_tri, gw_response_governance_enabled()),
-             gateway_prevent_subagents_enabled());
-
-         int kept_index = 0;
-         for (int i = 0; i < original_call_count && !denied_tool[0]; i++)
          {
-            if (kept_index < parsed.call_count &&
-                strcmp(original_tool_names[i], parsed.calls[kept_index].name) == 0)
-               kept_index++;
-            else
-               snprintf(denied_tool, sizeof denied_tool, "%s", original_tool_names[i]);
+            original_tool_names[i] = safe_strdup(aimee_ir_response_tool(&response, i)->tool_name);
+            if (!original_tool_names[i])
+               names_ok = 0;
          }
+         int governance_tri = config_present() ? config_module_governance() : -1;
+         denied_calls = gw_ir_response_run_governance(
+             &response, config_module_enabled(governance_tri, gw_response_governance_enabled()),
+             gateway_prevent_subagents_enabled());
+         call_count = aimee_ir_response_tool_count(&response);
+         int kept_index = 0;
+         for (int i = 0; i < original_call_count; i++)
+         {
+            if (names_ok && kept_index < call_count &&
+                strcmp(original_tool_names[i],
+                       aimee_ir_response_tool(&response, kept_index)->tool_name) == 0)
+               kept_index++;
+            else if (!denied_tool[0] && original_tool_names[i])
+               snprintf(denied_tool, sizeof denied_tool, "%s", original_tool_names[i]);
+            free(original_tool_names[i]);
+         }
+      }
+      response_text = aimee_ir_response_text_alloc(&response);
+      if (!response_text)
+      {
+         delegate_response_release(&response, NULL, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof(out->error), "cannot materialize response text");
+         break;
       }
 
       /* Log response trace */
-      agent_trace_log(0, turn, "response", parsed.content ? parsed.content : "(tool_calls)", NULL,
+      agent_trace_log(0, turn, "response", response_text ? response_text : "(tool_calls)", NULL,
                       NULL, NULL, NULL);
 
       if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
@@ -1441,7 +1432,7 @@ native_provider_http:
        * output to that same seat. */
       /* This value is intentionally captured after policy compaction. A mixed
        * [denied, allowed] response retains its allowed call and never falls back. */
-      int remaining_calls_after_policy = parsed.call_count;
+      int remaining_calls_after_policy = call_count;
       if (agent_required_evidence_needs_fallback(agent->require_initial_tool_call,
                                                  successful_tool_calls, chatgpt,
                                                  remaining_calls_after_policy))
@@ -1463,149 +1454,118 @@ native_provider_http:
             if (turn >= max_t - 1 && max_t < initial_max_t + 1)
                max_t++;
             turn++;
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             continue;
          }
          consecutive_errors++;
       }
 
       /* Accumulate tokens */
-      out->prompt_tokens += parsed.prompt_tokens;
-      out->completion_tokens += parsed.completion_tokens;
-      out->cache_write_tokens += parsed.cache_write_tokens;
-      out->cache_read_tokens += parsed.cache_read_tokens;
+      out->prompt_tokens += response.usage_in;
+      out->completion_tokens += response.usage_out;
+      out->cache_write_tokens += response.usage_cache_write;
+      out->cache_read_tokens += response.usage_cache_read;
 
       /* XML tool-call rescue: models without native function-calling embed
-       * <tool_call>...</tool_call> blocks in their text. When the IR was primary it
-       * ALREADY rescued -- the parser owns it now (aimee_ir_rescue_tool_calls) -- so
-       * parsed already carries any recovered calls and n_rescued reports the count.
-       * The legacy path (chatgpt wire + any IR fallback) keeps its own post-parse
-       * rescue in the else branch. */
-      if (ir_primary)
+       * <tool_call>...</tool_call> blocks in their text. The entry adapter owns
+       * recovery; no downstream native/text parser repeats the conversion. */
       {
          /* A FINAL text-only turn that smuggled a tool call (rescued from prose) is a
           * policy violation: it should have answered, not called a tool. Detected via
           * n_rescued instead of re-scanning the text. */
          if (final_text_only_turn && n_rescued > 0)
          {
-            const char *attempted_tool = (parsed.call_count > 0 && parsed.calls[0].name[0])
-                                             ? parsed.calls[0].name
-                                             : "XML tool_call block";
+            char attempted_tool[256];
+            snprintf(attempted_tool, sizeof attempted_tool, "%s",
+                     call_count > 0 ? aimee_ir_response_tool(&response, 0)->tool_name
+                                    : "XML tool_call block");
             /* If the smuggled call was actually the respond tool, it IS a final
              * answer -- strip it and finish successfully. */
-            if (inject_respond_tool && agent_tools_strip_delegate_respond(&parsed) == 1 &&
-                parsed.content && !liveness_is_degenerate_response(parsed.content))
+            int stripped = inject_respond_tool ? agent_ir_strip_delegate_respond(&response) : 0;
+            if (stripped < 0)
             {
-               agent_session_append_final_message(messages, parsed.content);
-               out->response = parsed.content;
-               parsed.content = NULL;
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
+               delegate_capture_stop(out, &capture_failed);
+               snprintf(out->error, sizeof out->error, "cannot retain final response IR");
+               break;
+            }
+            if (stripped)
+            {
+               call_count = aimee_ir_response_tool_count(&response);
+               free(response_text);
+               response_text = aimee_ir_response_text_alloc(&response);
+            }
+            if (stripped == 1 && response_text && !liveness_is_degenerate_response(response_text))
+            {
+               if (delegate_append_response(messages, &response) != 0)
+               {
+                  delegate_response_release(&response, response_text, tool_arguments, call_count);
+                  delegate_capture_stop(out, &capture_failed);
+                  snprintf(out->error, sizeof out->error, "cannot retain final response IR");
+                  break;
+               }
+               snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+                        aimee_stop_reason_name(response.stop_reason));
+               out->response = response_text;
+               response_text = NULL;
                out->rescue_recoveries++;
                out->success = 1;
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                break;
             }
             if (agent_session_retry_final_tool_violation(messages, attempted_tool, &turn, &max_t,
                                                          initial_max_t, &final_tool_retry_count,
                                                          out->error, sizeof(out->error)))
             {
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                continue;
             }
-            finish_final_tool_violation(out, agent, attempted_tool, parsed.content, last_tool_name,
+            finish_final_tool_violation(out, agent, attempted_tool, response_text, last_tool_name,
                                         last_tool_result, total_calls);
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             break;
          }
          if (n_rescued > 0)
             out->rescue_recoveries++;
       }
-      else if (rescue_enabled && !parsed.is_tool_call && parsed.content &&
-               delegate_rescue_has_tool_calls_with_json(parsed.content, allow_json_rescue))
+      int respond_strip = inject_respond_tool ? agent_ir_strip_delegate_respond(&response) : 0;
+      if (respond_strip < 0)
       {
-         if (final_text_only_turn)
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof(out->error), "cannot retain final response IR");
+         break;
+      }
+      if (respond_strip)
+      {
+         call_count = aimee_ir_response_tool_count(&response);
+         free(response_text);
+         response_text = aimee_ir_response_text_alloc(&response);
+         if (!response_text)
          {
-            const char *attempted_tool = "XML tool_call block";
-            parsed_response_t xml_final;
-            memset(&xml_final, 0, sizeof(xml_final));
-            if (delegate_rescue_parse_tool_calls(parsed.content, &xml_final, allow_json_rescue) >
-                    0 &&
-                xml_final.call_count > 0 && xml_final.calls[0].name[0])
-               attempted_tool = xml_final.calls[0].name;
-
-            if (inject_respond_tool && agent_tools_strip_delegate_respond(&xml_final) == 1 &&
-                xml_final.content && !liveness_is_degenerate_response(xml_final.content))
-            {
-               agent_session_append_final_message(messages, xml_final.content);
-               out->response = xml_final.content;
-               xml_final.content = NULL;
-               out->rescue_recoveries++;
-               out->success = 1;
-               agent_free_parsed_response(&xml_final);
-               agent_free_parsed_response(&parsed);
-               break;
-            }
-
-            if (agent_session_retry_final_tool_violation(messages, attempted_tool, &turn, &max_t,
-                                                         initial_max_t, &final_tool_retry_count,
-                                                         out->error, sizeof(out->error)))
-            {
-               agent_free_parsed_response(&xml_final);
-               agent_free_parsed_response(&parsed);
-               continue;
-            }
-            finish_final_tool_violation(out, agent, attempted_tool, xml_final.content,
-                                        last_tool_name, last_tool_result, total_calls);
-            agent_free_parsed_response(&xml_final);
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, NULL, tool_arguments, call_count);
+            delegate_capture_stop(out, &capture_failed);
+            snprintf(out->error, sizeof out->error, "cannot retain final response text");
             break;
          }
-
-         parsed_response_t xml_parsed;
-         memset(&xml_parsed, 0, sizeof(xml_parsed));
-         if (delegate_rescue_parse_tool_calls(parsed.content, &xml_parsed, allow_json_rescue) > 0)
-         {
-            free(parsed.content);
-            parsed.content = xml_parsed.content;
-            parsed.is_tool_call = 1;
-            parsed.call_count = xml_parsed.call_count;
-            memcpy(parsed.calls, xml_parsed.calls,
-                   (size_t)xml_parsed.call_count * sizeof(xml_parsed.calls[0]));
-            /* Original assistant_message has no tool_calls; clear it so the
-             * conversation-history append doesn't record a malformed turn. */
-            if (parsed.assistant_message)
-            {
-               cJSON_Delete(parsed.assistant_message);
-               parsed.assistant_message = NULL;
-            }
-            if (!chatgpt && !anthropic)
-               parsed.assistant_message = agent_build_openai_assistant_message_from_calls(&parsed);
-            out->rescue_recoveries++;
-         }
       }
 
-      int respond_strip = inject_respond_tool ? agent_tools_strip_delegate_respond(&parsed) : 0;
-      if (respond_strip == 2 && !chatgpt && !anthropic)
+      if (final_text_only_turn && (call_count > 0))
       {
-         if (parsed.assistant_message)
-            cJSON_Delete(parsed.assistant_message);
-         parsed.assistant_message = agent_build_openai_assistant_message_from_calls(&parsed);
-      }
-
-      if (final_text_only_turn && parsed.is_tool_call)
-      {
-         const char *attempted_tool = (parsed.call_count > 0 && parsed.calls[0].name[0])
-                                          ? parsed.calls[0].name
-                                          : "tool call";
+         const char *attempted_tool =
+             (call_count > 0 && aimee_ir_response_tool(&response, 0)->tool_name[0])
+                 ? aimee_ir_response_tool(&response, 0)->tool_name
+                 : "tool call";
          if (agent_session_retry_final_tool_violation(messages, attempted_tool, &turn, &max_t,
                                                       initial_max_t, &final_tool_retry_count,
                                                       out->error, sizeof(out->error)))
          {
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             continue;
          }
-         finish_final_tool_violation(out, agent, attempted_tool, parsed.content, last_tool_name,
+         finish_final_tool_violation(out, agent, attempted_tool, response_text, last_tool_name,
                                      last_tool_result, total_calls);
-         agent_free_parsed_response(&parsed);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
       }
 
@@ -1615,39 +1575,39 @@ native_provider_http:
        * response. Neither is repository evidence. Retry with an explicit
        * instruction, then fail closed after the bounded retry budget. */
       if (agent_required_evidence_reject_response(agent->require_initial_tool_call,
-                                                  successful_tool_calls, parsed.is_tool_call,
-                                                  parsed.call_count))
+                                                  successful_tool_calls, (call_count > 0),
+                                                  call_count))
       {
          if (agent_session_retry_required_evidence(messages, &turn, &max_t, initial_max_t,
                                                    &required_evidence_retry_count, out->error,
                                                    sizeof(out->error)))
          {
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             continue;
          }
          out->success = 0;
-         agent_free_parsed_response(&parsed);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
       }
 
-      if (!parsed.is_tool_call)
+      if (!(call_count > 0))
       {
          /* Final text response */
-         if (parsed.content)
+         if (response_text)
          {
-            if (liveness_is_degenerate_response(parsed.content))
+            if (liveness_is_degenerate_response(response_text))
             {
                if (total_calls == 0 && agent_session_retry_degenerate_response(
                                            messages, &turn, &degenerate_retry_count))
                {
-                  agent_free_parsed_response(&parsed);
+                  delegate_response_release(&response, response_text, tool_arguments, call_count);
                   continue;
                }
                /* Empty or punctuation-only response — replace with explicit failure diagnostic. */
                char diag[512];
                liveness_format_empty_diagnostic(agent->name, diag, sizeof(diag));
-               free(parsed.content);
-               parsed.content = NULL;
+               free(response_text);
+               response_text = NULL;
                out->response = safe_strdup(diag);
                out->success = 0;
                snprintf(out->error, sizeof(out->error),
@@ -1655,9 +1615,17 @@ native_provider_http:
             }
             else
             {
-               agent_session_append_final_message(messages, parsed.content);
-               out->response = parsed.content;
-               parsed.content = NULL; /* prevent agent_free_parsed_response from freeing it */
+               if (delegate_append_response(messages, &response) != 0)
+               {
+                  delegate_response_release(&response, response_text, tool_arguments, call_count);
+                  delegate_capture_stop(out, &capture_failed);
+                  snprintf(out->error, sizeof out->error, "cannot retain final response IR");
+                  break;
+               }
+               snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+                        aimee_stop_reason_name(response.stop_reason));
+               out->response = response_text;
+               response_text = NULL; /* transfer the text projection to the result API */
                out->success = 1;
             }
          }
@@ -1670,7 +1638,7 @@ native_provider_http:
             if (total_calls == 0 &&
                 agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
             {
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                continue;
             }
             if (total_calls > 0 &&
@@ -1678,13 +1646,13 @@ native_provider_http:
                     messages, "an empty final response", &turn, &max_t, initial_max_t,
                     &final_tool_retry_count, out->error, sizeof(out->error)))
             {
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                continue;
             }
             out->success = 0;
             snprintf(out->error, sizeof(out->error), "no content in final response");
          }
-         agent_free_parsed_response(&parsed);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
       }
 
@@ -1695,97 +1663,57 @@ native_provider_http:
          {
             snprintf(out->error, sizeof(out->error), "%s before tool execution at turn %d",
                      cancel_reason, turn + 1);
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             break;
          }
       }
 
-      if (anthropic && parsed.assistant_message)
+      if (delegate_append_response(messages, &response) != 0)
       {
-         /* Anthropic: assistant_message is the content array itself */
-         cJSON *asst = cJSON_CreateObject();
-         cJSON_AddStringToObject(asst, "role", "assistant");
-         cJSON_AddItemToObject(asst, "content", cJSON_Duplicate(parsed.assistant_message, 1));
-         cJSON_AddItemToArray(messages, asst);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof(out->error), "cannot retain assistant response");
+         break;
       }
-      else if (!chatgpt && parsed.assistant_message)
-      {
-         /* OpenAI: append the assistant message (with tool_calls) to conversation */
-         cJSON *asst = cJSON_CreateObject();
-         cJSON_AddStringToObject(asst, "role", "assistant");
-
-         cJSON *tc_arr = cJSON_GetObjectItem(parsed.assistant_message, "tool_calls");
-         if (tc_arr)
-            cJSON_AddItemToObject(asst, "tool_calls", cJSON_Duplicate(tc_arr, 1));
-
-         cJSON *asst_content = cJSON_GetObjectItem(parsed.assistant_message, "content");
-         if (asst_content && !cJSON_IsNull(asst_content))
-            cJSON_AddItemToObject(asst, "content", cJSON_Duplicate(asst_content, 1));
-         else
-            cJSON_AddNullToObject(asst, "content");
-
-         cJSON_AddItemToArray(messages, asst);
-      }
-      else if (chatgpt && parsed.assistant_message)
-      {
-         /* Responses API: append only the function_call items we will actually
-          * process (i.e. up to parsed.call_count). Appending calls beyond that
-          * would cause the API to expect function_call_output for IDs we never
-          * return, resulting in HTTP 400. */
-         for (int i = 0; i < parsed.call_count; i++)
-         {
-            int n = cJSON_GetArraySize(parsed.assistant_message);
-            for (int j = 0; j < n; j++)
-            {
-               cJSON *item = cJSON_GetArrayItem(parsed.assistant_message, j);
-               cJSON *itype = cJSON_GetObjectItem(item, "type");
-               cJSON *cid = cJSON_GetObjectItem(item, "call_id");
-               if (itype && cJSON_IsString(itype) &&
-                   strcmp(itype->valuestring, "function_call") == 0 && cid && cJSON_IsString(cid) &&
-                   strcmp(cid->valuestring, parsed.calls[i].id) == 0)
-               {
-                  cJSON_AddItemToArray(messages, cJSON_Duplicate(item, 1));
-                  break;
-               }
-            }
-         }
-      }
-
-      /* For Anthropic, collect all tool_result blocks into one user message */
-      cJSON *anth_results = anthropic ? cJSON_CreateArray() : NULL;
 
       /* Notify auto-snapshot context of the current turn so file writes can be grouped */
       agent_tools_begin_turn(turn);
 
       liveness_progress_action_t progress_action = LIVENESS_PROGRESS_NONE;
 
-      /* Canonicalize each call's arguments ONCE, here, before anything reads
-       * them.
-       *
-       * The alternative is what this replaced: validation normalized a copy it
-       * discarded, the dispatcher normalized differently and executed THAT, and
-       * in between execution-policy and the audit record both saw the raw
-       * arguments. So the authorizer could permit one shape while the tool ran
-       * another, and the ledger recorded a call that never executed.
-       *
-       * Rewriting in place is what makes that structural rather than a rule to
-       * remember: `arguments` is owned by parsed_response_t and freed by
-       * agent_free_parsed_response, so every reader below — the rounds-to-resume
-       * observer, tool_validate, policy_check_tool, directive_check_tool, the
-       * executor, the audit record and the stuck-detection signature — sees the
-       * same bytes without each having to opt in. A reader added later cannot
-       * miss it.
-       *
-       * The assistant message keeps the model's original arguments: that is the
-       * model's own turn in the transcript, not a description of what ran. */
-      for (int i = 0; i < parsed.call_count; i++)
+      /* Serialization happens only at the string-based tool service boundary.
+       * The model's typed input and opaque IDs remain in the response. Every
+       * validator, authorizer, executor and audit consumer sees the same bytes. */
+      tool_arguments = calloc((size_t)call_count, sizeof *tool_arguments);
+      if (!tool_arguments)
       {
-         char *canonical = tool_args_canonicalize_json(
-             agent_tool_get_schema_cached(parsed.calls[i].name), parsed.calls[i].arguments);
-         if (!canonical)
-            continue; /* unparseable JSON: leave it for tool_validate to report */
-         free(parsed.calls[i].arguments);
-         parsed.calls[i].arguments = canonical;
+         delegate_response_release(&response, response_text, NULL, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof out->error, "cannot retain tool argument views");
+         break;
+      }
+      int arguments_ok = 1;
+      for (int i = 0; i < call_count; i++)
+      {
+         aimee_block_t *tool = aimee_ir_response_tool(&response, i);
+         char *original =
+             tool->tool_input ? cJSON_PrintUnformatted(tool->tool_input) : safe_strdup("{}");
+         tool_arguments[i] = original ? tool_args_canonicalize_json(
+                                            agent_tool_get_schema_cached(tool->tool_name), original)
+                                      : NULL;
+         if (!tool_arguments[i])
+            tool_arguments[i] = original;
+         else
+            free(original);
+         if (!tool_arguments[i])
+            arguments_ok = 0;
+      }
+      if (!arguments_ok)
+      {
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof(out->error), "cannot serialize typed tool arguments");
+         break;
       }
 
       /* Rounds-to-resume accounting: judge what the model ASKED for, before the
@@ -1793,133 +1721,109 @@ native_provider_http:
        * succeeds. Observation only; nothing here steers the loop. */
       if (rtr.active)
       {
-         const char *rtr_names[AGENT_MAX_TOOL_CALLS];
-         const char *rtr_args[AGENT_MAX_TOOL_CALLS];
-         int rtr_n =
-             parsed.call_count < AGENT_MAX_TOOL_CALLS ? parsed.call_count : AGENT_MAX_TOOL_CALLS;
-         for (int i = 0; i < rtr_n; i++)
+         const char **views = calloc((size_t)call_count * 2, sizeof *views);
+         if (views)
          {
-            rtr_names[i] = parsed.calls[i].name;
-            rtr_args[i] = parsed.calls[i].arguments;
+            const char **rtr_names = views, **rtr_args = views + call_count;
+            for (int i = 0; i < call_count; i++)
+            {
+               rtr_names[i] = aimee_ir_response_tool(&response, i)->tool_name;
+               rtr_args[i] = tool_arguments[i];
+            }
+            if (rtr_observe_turn(&rtr, rtr_names, rtr_args, call_count))
+               aimee_log(LOG_INFO, "agent",
+                         "rounds_to_resume=%d rederived_calls=%d basis_sigs=%d basis_dropped=%d",
+                         rtr.rounds_to_resume, rtr.rederived_calls, rtr.sig_count,
+                         rtr.sigs_dropped);
+            free(views);
          }
-         if (rtr_observe_turn(&rtr, rtr_names, rtr_args, rtr_n))
-            aimee_log(LOG_INFO, "agent",
-                      "rounds_to_resume=%d rederived_calls=%d basis_sigs=%d basis_dropped=%d",
-                      rtr.rounds_to_resume, rtr.rederived_calls, rtr.sig_count, rtr.sigs_dropped);
       }
 
-      for (int i = 0; i < parsed.call_count; i++)
+      for (int i = 0; i < call_count; i++)
       {
          char cancel_reason[128];
          if (agent_durable_cancelled(cancel_reason, sizeof(cancel_reason)))
          {
             snprintf(out->error, sizeof(out->error), "%s before tool %d/%d at turn %d",
-                     cancel_reason, i + 1, parsed.call_count, turn + 1);
+                     cancel_reason, i + 1, call_count, turn + 1);
             break;
          }
 
+         total_calls++;
+
          /* Validate arguments against tool registry */
          char val_err[256] = {0};
-         if (tool_validate(parsed.calls[i].name, parsed.calls[i].arguments, val_err,
-                           sizeof(val_err)) != 0)
+         if (tool_validate(aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i],
+                           val_err, sizeof(val_err)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
             {
-               total_calls++;
                continue;
             }
             snprintf(err_result, 512, "error: validation failed: %s", val_err);
             consecutive_errors++;
             /* Send error back to LLM so it can self-correct */
-            if (anthropic)
-            {
-               cJSON *tr = cJSON_CreateObject();
-               cJSON_AddStringToObject(tr, "type", "tool_result");
-               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tr, "content", err_result);
-               cJSON_AddItemToArray(anth_results, tr);
-            }
-            else if (!chatgpt)
-            {
-               cJSON *tool_msg = cJSON_CreateObject();
-               cJSON_AddStringToObject(tool_msg, "role", "tool");
-               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tool_msg, "content", err_result);
-               cJSON_AddItemToArray(messages, tool_msg);
-            }
-            else
-            {
-               cJSON *out_item = cJSON_CreateObject();
-               cJSON_AddStringToObject(out_item, "type", "function_call_output");
-               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(out_item, "output", err_result);
-               cJSON_AddItemToArray(messages, out_item);
-            }
-            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
-            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
-            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
+                                            err_result, 1) != 0)
             {
                free(err_result);
-               cJSON_Delete(anth_results);
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
+               snprintf(out->error, sizeof out->error, "cannot retain tool result IR");
+               delegate_capture_stop(out, &capture_failed);
+               goto ir_capture_failed;
+            }
+            snprintf(last_tool_name, sizeof(last_tool_name), "%s",
+                     aimee_ir_response_tool(&response, i)->tool_name);
+            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
+                                                  err_result, 1) != 0)
+            {
+               free(err_result);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               delegate_capture_stop(out, &capture_failed);
                goto ir_capture_failed;
             }
             free(err_result);
-            total_calls++;
             continue;
          }
 
          /* Check hard directives */
          char directive_reason[256] = {0};
-         if (directive_check_tool(parsed.calls[i].name, parsed.calls[i].arguments, directive_reason,
+         if (directive_check_tool(aimee_ir_response_tool(&response, i)->tool_name,
+                                  tool_arguments[i], directive_reason,
                                   sizeof(directive_reason)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
             {
-               total_calls++;
                continue;
             }
             snprintf(err_result, 512, "error: blocked by directive: %s", directive_reason);
             consecutive_errors++;
-            if (anthropic)
-            {
-               cJSON *tr = cJSON_CreateObject();
-               cJSON_AddStringToObject(tr, "type", "tool_result");
-               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tr, "content", err_result);
-               cJSON_AddItemToArray(anth_results, tr);
-            }
-            else if (!chatgpt)
-            {
-               cJSON *tool_msg = cJSON_CreateObject();
-               cJSON_AddStringToObject(tool_msg, "role", "tool");
-               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tool_msg, "content", err_result);
-               cJSON_AddItemToArray(messages, tool_msg);
-            }
-            else
-            {
-               cJSON *out_item = cJSON_CreateObject();
-               cJSON_AddStringToObject(out_item, "type", "function_call_output");
-               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(out_item, "output", err_result);
-               cJSON_AddItemToArray(messages, out_item);
-            }
-            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
-            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
-            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
+                                            err_result, 1) != 0)
             {
                free(err_result);
-               cJSON_Delete(anth_results);
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
+               snprintf(out->error, sizeof out->error, "cannot retain tool result IR");
+               delegate_capture_stop(out, &capture_failed);
+               goto ir_capture_failed;
+            }
+            snprintf(last_tool_name, sizeof(last_tool_name), "%s",
+                     aimee_ir_response_tool(&response, i)->tool_name);
+            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
+                                                  err_result, 1) != 0)
+            {
+               free(err_result);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               delegate_capture_stop(out, &capture_failed);
                goto ir_capture_failed;
             }
             free(err_result);
-            total_calls++;
             continue;
          }
 
@@ -1927,80 +1831,70 @@ native_provider_http:
           * accounting to this host-observed turn too, so another turn cannot
           * reuse an old admission while a retry of this dispatch stays stable. */
          char exploration_attempt[96];
-         snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%s", api_call_count,
-                  parsed.calls[i].id);
+         snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%d", api_call_count, i);
          /* Check policy */
          char policy_reason[256] = {0};
-         const char *se = tool_side_effect(parsed.calls[i].name);
-         if (policy_check_tool_attempt(parsed.calls[i].name, se, parsed.calls[i].arguments,
-                                       exploration_attempt, policy_reason,
+         const char *se = tool_side_effect(aimee_ir_response_tool(&response, i)->tool_name);
+         if (policy_check_tool_attempt(aimee_ir_response_tool(&response, i)->tool_name, se,
+                                       tool_arguments[i], exploration_attempt, policy_reason,
                                        sizeof(policy_reason)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
             {
-               total_calls++;
                continue;
             }
             snprintf(err_result, 512, "error: blocked by policy: %s", policy_reason);
             consecutive_errors++;
-            if (anthropic)
-            {
-               cJSON *tr = cJSON_CreateObject();
-               cJSON_AddStringToObject(tr, "type", "tool_result");
-               cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tr, "content", err_result);
-               cJSON_AddItemToArray(anth_results, tr);
-            }
-            else if (!chatgpt)
-            {
-               cJSON *tool_msg = cJSON_CreateObject();
-               cJSON_AddStringToObject(tool_msg, "role", "tool");
-               cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(tool_msg, "content", err_result);
-               cJSON_AddItemToArray(messages, tool_msg);
-            }
-            else
-            {
-               cJSON *out_item = cJSON_CreateObject();
-               cJSON_AddStringToObject(out_item, "type", "function_call_output");
-               cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-               cJSON_AddStringToObject(out_item, "output", err_result);
-               cJSON_AddItemToArray(messages, out_item);
-            }
-            snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
-            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
-            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
+                                            err_result, 1) != 0)
             {
                free(err_result);
-               cJSON_Delete(anth_results);
-               agent_free_parsed_response(&parsed);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
+               snprintf(out->error, sizeof out->error, "cannot retain tool result IR");
+               delegate_capture_stop(out, &capture_failed);
+               goto ir_capture_failed;
+            }
+            snprintf(last_tool_name, sizeof(last_tool_name), "%s",
+                     aimee_ir_response_tool(&response, i)->tool_name);
+            snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
+                                                  err_result, 1) != 0)
+            {
+               free(err_result);
+               delegate_response_release(&response, response_text, tool_arguments, call_count);
                snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               delegate_capture_stop(out, &capture_failed);
                goto ir_capture_failed;
             }
             free(err_result);
-            total_calls++;
             continue;
          }
 
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
-               db1_agent_job_heartbeat_ext(dj, parsed.calls[i].name, api_call_count);
+               db1_agent_job_heartbeat_ext(dj, aimee_ir_response_tool(&response, i)->tool_name,
+                                           api_call_count);
          }
          agent_tools_set_effect_authorized(1);
-         char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
-                                                   agent->timeout_ms);
+         char *result_str = dispatch_tool_call_ctx(aimee_ir_response_tool(&response, i)->tool_name,
+                                                   tool_arguments[i], agent->timeout_ms);
          agent_tools_set_effect_authorized(0);
-         result_str = policy_annotate_indexed(parsed.calls[i].name, parsed.calls[i].arguments,
-                                              exploration_attempt, result_str);
-         if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, result_str,
+         result_str = policy_annotate_indexed(aimee_ir_response_tool(&response, i)->tool_name,
+                                              tool_arguments[i], exploration_attempt, result_str);
+         snprintf(last_tool_name, sizeof last_tool_name, "%s",
+                  aimee_ir_response_tool(&response, i)->tool_name);
+         snprintf(last_tool_result, sizeof last_tool_result, "%.500s",
+                  result_str ? result_str : "");
+         if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
+                                               result_str,
                                                !agent_tool_result_usable(result_str)) != 0)
          {
             free(result_str);
-            cJSON_Delete(anth_results);
-            agent_free_parsed_response(&parsed);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
             snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+            delegate_capture_stop(out, &capture_failed);
             goto ir_capture_failed;
          }
          result_str = agent_economize_fresh_tool_result(result_str);
@@ -2009,7 +1903,6 @@ native_provider_http:
             if (dj > 0)
                db1_agent_job_heartbeat_ext(dj, "", api_call_count);
          }
-         total_calls++;
 
          /* An attempted lookup is not evidence. Validation/policy/directive
           * failures never reach this branch; dispatch failures conventionally
@@ -2022,11 +1915,13 @@ native_provider_http:
          {
             char target[LIVENESS_PROGRESS_TARGET_MAX];
             int range_start = 0, range_end = 0, has_range = 0;
-            agent_progress_retrieval(parsed.calls[i].name, parsed.calls[i].arguments, target,
-                                     sizeof(target), &range_start, &range_end, &has_range);
+            agent_progress_retrieval(aimee_ir_response_tool(&response, i)->tool_name,
+                                     tool_arguments[i], target, sizeof(target), &range_start,
+                                     &range_end, &has_range);
             liveness_progress_action_t observed = liveness_progress_observe(
-                &progress, parsed.calls[i].name, target, range_start, range_end, has_range,
-                usable_tool_result, agent_progress_tool_is_mutation(parsed.calls[i].name));
+                &progress, aimee_ir_response_tool(&response, i)->tool_name, target, range_start,
+                range_end, has_range, usable_tool_result,
+                agent_progress_tool_is_mutation(aimee_ir_response_tool(&response, i)->tool_name));
             if (observed > progress_action)
                progress_action = observed;
          }
@@ -2038,38 +1933,23 @@ native_provider_http:
             consecutive_errors = 0;
 
          /* Log trace */
-         agent_trace_log(0, turn, "tool_call", NULL, parsed.calls[i].name,
-                         parsed.calls[i].arguments, result_str, NULL);
-         snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
+         agent_trace_log(0, turn, "tool_call", NULL,
+                         aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i],
+                         result_str, NULL);
+         snprintf(last_tool_name, sizeof(last_tool_name), "%s",
+                  aimee_ir_response_tool(&response, i)->tool_name);
          snprintf(last_tool_result, sizeof(last_tool_result), "%.500s",
                   result_str ? result_str : "");
 
-         if (anthropic)
+         if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
+                                         result_str,
+                                         result_str && strncmp(result_str, "error:", 6) == 0) != 0)
          {
-            /* Anthropic: tool_result content block */
-            cJSON *tr = cJSON_CreateObject();
-            cJSON_AddStringToObject(tr, "type", "tool_result");
-            cJSON_AddStringToObject(tr, "tool_use_id", parsed.calls[i].id);
-            cJSON_AddStringToObject(tr, "content", result_str ? result_str : "");
-            cJSON_AddItemToArray(anth_results, tr);
-         }
-         else if (!chatgpt)
-         {
-            /* OpenAI format: role=tool, tool_call_id */
-            cJSON *tool_msg = cJSON_CreateObject();
-            cJSON_AddStringToObject(tool_msg, "role", "tool");
-            cJSON_AddStringToObject(tool_msg, "tool_call_id", parsed.calls[i].id);
-            cJSON_AddStringToObject(tool_msg, "content", result_str ? result_str : "");
-            cJSON_AddItemToArray(messages, tool_msg);
-         }
-         else
-         {
-            /* Responses API: function_call_output */
-            cJSON *out_item = cJSON_CreateObject();
-            cJSON_AddStringToObject(out_item, "type", "function_call_output");
-            cJSON_AddStringToObject(out_item, "call_id", parsed.calls[i].id);
-            cJSON_AddStringToObject(out_item, "output", result_str ? result_str : "");
-            cJSON_AddItemToArray(messages, out_item);
+            free(result_str);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
+            snprintf(out->error, sizeof out->error, "cannot retain tool result IR");
+            delegate_capture_stop(out, &capture_failed);
+            goto ir_capture_failed;
          }
 
          free(result_str);
@@ -2077,25 +1957,8 @@ native_provider_http:
 
       if (out->error[0] && strstr(out->error, "delegate cancelled"))
       {
-         cJSON_Delete(anth_results);
-         agent_free_parsed_response(&parsed);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
-      }
-
-      /* Anthropic: append all tool results as a single user message */
-      if (anth_results)
-      {
-         if (cJSON_GetArraySize(anth_results) > 0)
-         {
-            cJSON *user_tr = cJSON_CreateObject();
-            cJSON_AddStringToObject(user_tr, "role", "user");
-            cJSON_AddItemToObject(user_tr, "content", anth_results);
-            cJSON_AddItemToArray(messages, user_tr);
-         }
-         else
-         {
-            cJSON_Delete(anth_results);
-         }
       }
 
       if (!out->error[0])
@@ -2107,7 +1970,7 @@ native_provider_http:
                   "no-progress circuit breaker tripped after %d successful calls without an "
                   "edit (%d repeated or overlapping retrievals)",
                   progress.calls_since_mutation, progress.duplicate_hits);
-         agent_free_parsed_response(&parsed);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
       }
       if (progress_action == LIVENESS_PROGRESS_CHECKPOINT ||
@@ -2116,10 +1979,9 @@ native_provider_http:
          char progress_hint[768];
          liveness_format_progress_hint(&progress, progress_action, progress_hint,
                                        sizeof(progress_hint));
-         cJSON *hint = cJSON_CreateObject();
-         cJSON_AddStringToObject(hint, "role", "user");
-         cJSON_AddStringToObject(hint, "content", progress_hint);
-         cJSON_AddItemToArray(messages, hint);
+         cJSON *hint_ir = agent_session_text_message("user", progress_hint);
+         if (hint_ir)
+            cJSON_AddItemToArray(messages, hint_ir);
          aimee_log(LOG_WARN, "agent.progress",
                    "checkpoint=%d calls_without_edit=%d duplicate_retrievals=%d",
                    progress.checkpoints, progress.calls_since_mutation, progress.duplicate_hits);
@@ -2130,11 +1992,12 @@ native_provider_http:
       /* Stuck detection: if the agent calls the same tool with the same args
        * LIVENESS_REPEAT_WARN_THRESHOLD times in a row, inject a warning.
        * Circuit breaker trips after LIVENESS_REPEAT_ABORT_THRESHOLD warnings. */
-      if (parsed.call_count > 0)
+      if (call_count > 0)
       {
          char tool_sig[256];
-         snprintf(tool_sig, sizeof(tool_sig), "%s:%.*s", parsed.calls[0].name, 200,
-                  parsed.calls[0].arguments ? parsed.calls[0].arguments : "");
+         snprintf(tool_sig, sizeof(tool_sig), "%s:%.*s",
+                  aimee_ir_response_tool(&response, 0)->tool_name, 200,
+                  tool_arguments[0] ? tool_arguments[0] : "");
          if (strcmp(tool_sig, last_tool_sig) == 0)
          {
             repeat_count++;
@@ -2147,17 +2010,16 @@ native_provider_http:
                   snprintf(out->error, sizeof(out->error),
                            "circuit breaker tripped: repeated identical tool calls "
                            "(%d warning cycles, tool: %.100s)",
-                           total_repeat_triggers, parsed.calls[0].name);
-                  agent_free_parsed_response(&parsed);
+                           total_repeat_triggers, aimee_ir_response_tool(&response, 0)->tool_name);
+                  delegate_response_release(&response, response_text, tool_arguments, call_count);
                   break;
                }
                /* Inject a hint to the LLM that it appears stuck */
-               cJSON *hint = cJSON_CreateObject();
-               cJSON_AddStringToObject(hint, "role", "user");
-               cJSON_AddStringToObject(hint, "content",
-                                       "Warning: You appear to be repeating the same operation. "
-                                       "Try a different approach or summarize your findings.");
-               cJSON_AddItemToArray(messages, hint);
+               cJSON *hint_ir = agent_session_text_message(
+                   "user", "Warning: You appear to be repeating the same operation. "
+                           "Try a different approach or summarize your findings.");
+               if (hint_ir)
+                  cJSON_AddItemToArray(messages, hint_ir);
                repeat_count = 0;
                /* Also increase refresh frequency to give more context */
                if (refresh_interval > 2)
@@ -2175,7 +2037,7 @@ native_provider_http:
             refresh_interval = 3;
       }
 
-      agent_free_parsed_response(&parsed);
+      delegate_response_release(&response, response_text, tool_arguments, call_count);
       turn++;
 
       /* Update durable job cursor and heartbeat */
@@ -2294,5 +2156,7 @@ ir_capture_failed:
    /* Store execution outcome as feedback for future context */
    agent_store_feedback(out, "", user_prompt);
 
-   return context_refused ? AGENT_RC_CONTEXT_REFUSED : (out->success ? 0 : -1);
+   return context_refused  ? AGENT_RC_CONTEXT_REFUSED
+          : capture_failed ? AGENT_RC_CAPTURE_FAILED
+                           : (out->success ? 0 : -1);
 }

@@ -117,6 +117,20 @@ int main(void)
       assert(strstr(resp, "\"total_tokens\":7"));
    }
 
+   /* --- truncation reaches the client in its own vocabulary --- */
+   {
+      assert(openai_format_chat_completion_reason("cmpl-t", "aimee", "part", 123, 5, 2, "length",
+                                                  resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "\"finish_reason\":\"length\""));
+      assert(openai_format_response_status("resp-t", "aimee", "part", 123, 5, 2, 0,
+                                           "max_output_tokens", resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "\"status\":\"incomplete\""));
+      assert(strstr(resp, "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}"));
+      assert(openai_format_response_status("resp-c", "aimee", "all", 123, 5, 2, 0, NULL, resp,
+                                           sizeof(resp)) > 0);
+      assert(strstr(resp, "\"status\":\"completed\"") && !strstr(resp, "incomplete_details"));
+   }
+
    /* --- text_completion envelope --- */
    {
       int len = openai_format_text_completion("cmpl-2", "aimee", "hi there", 123, 1, 1, resp,

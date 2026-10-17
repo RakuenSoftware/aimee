@@ -56,8 +56,23 @@ flattened into text. The optional thread-bound sink is scoped by its caller, whi
 the previous sink before releasing its context or returning a pooled worker. Sink failures
 propagate to the producer. IR owns no sockets, database handles, authorization, or persistence.
 
-These APIs and the frontend reducer are migration foundations. The current browser stream and
-native runtime paths have not yet switched to this contract. The canonical IR session stream proposal records the remaining cutover gates.
+Browser chat uses this contract for live delivery and durable replay. Native delegate execution
+retains owned IR through governance and tool dispatch; its persisted history contains canonical
+`role`/`blocks` messages. Provider request histories are rendered at the egress boundary. Legacy
+provider arrays cross an explicit migration adapter before execution; mixed or unknown content
+fails admission rather than becoming an empty response.
+
+Buffered responses publish `TURN_START`, a complete message, and `TURN_STOP`, retaining canonical
+stop reasons and input/output, cache-read/write and reasoning usage. Provider failures publish
+`ERROR` with a typed error message. Streamed harness snapshots use the existing native stream's
+lifecycle and do not manufacture another turn. Canonical message decoding preserves opaque tool
+IDs, signatures, encrypted/redacted reasoning, media references and context metadata. MIME type
+is optional for URL media. Tool input is opaque JSON; completed API function calls additionally
+require an object at their entry adapter.
+
+The migration remains incomplete: legacy ingress/result APIs, publication from every delegate
+worker, historical transcript migration and interactive harness-control replies still require
+cutover. The canonical IR session stream proposal records those remaining boundaries.
 
 ## Dependencies and consumers
 

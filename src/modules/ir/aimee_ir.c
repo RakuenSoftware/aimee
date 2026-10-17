@@ -5,6 +5,7 @@
 #include "cJSON.h"
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -101,12 +102,30 @@ static void free_str(char *s)
    free(s);
 }
 
+int aimee_ir_block_valid(const aimee_block_t *block)
+{
+   if (!block || block->type < AIMEE_BLK_TEXT || block->type >= AIMEE_BLK_UNKNOWN)
+      return 0;
+   if ((block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TOOL_RESULT) &&
+       (!block->tool_id || !block->tool_id[0]))
+      return 0;
+   if (block->type == AIMEE_BLK_TOOL_USE && (!block->tool_name || !block->tool_name[0]))
+      return 0;
+   if ((block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT) &&
+       (!block->media_ref || !block->media_ref[0]))
+      return 0;
+   return 1;
+}
+
 void aimee_block_free_contents(aimee_block_t *b)
 {
    if (!b)
       return;
    free_str(b->text);
    free_str(b->thinking_signature);
+   free_str(b->thinking_id);
+   free_str(b->thinking_encrypted_content);
+   free_str(b->thinking_redacted);
    free_str(b->tool_id);
    free_str(b->tool_name);
    free_str(b->tool_namespace);
@@ -128,13 +147,14 @@ static void free_blocks(aimee_block_t *blocks, int n)
    free(blocks);
 }
 
-static void free_message(aimee_message_t *m)
+void aimee_message_free(aimee_message_t *m)
 {
    if (!m)
       return;
    free_str(m->role);
    free_blocks(m->blocks, m->n_blocks);
    cJSON_Delete(m->raw);
+   memset(m, 0, sizeof(*m));
 }
 
 void aimee_request_free(aimee_request_t *r)
@@ -146,7 +166,7 @@ void aimee_request_free(aimee_request_t *r)
    if (r->messages)
    {
       for (int i = 0; i < r->n_messages; i++)
-         free_message(&r->messages[i]);
+         aimee_message_free(&r->messages[i]);
       free(r->messages);
    }
    if (r->tools)
@@ -184,6 +204,7 @@ void aimee_response_free(aimee_response_t *r)
    free_str(r->role);
    free_blocks(r->content, r->n_content);
    free_str(r->raw_stop_reason);
+   free_str(r->error_message);
    cJSON_Delete(r->raw);
    memset(r, 0, sizeof *r);
 }
@@ -309,7 +330,10 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    case AIMEE_BLK_TEXT:
       return str_eq(a->text, b->text);
    case AIMEE_BLK_THINKING:
-      return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
+      return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature) &&
+             str_eq(a->thinking_id, b->thinking_id) &&
+             str_eq(a->thinking_encrypted_content, b->thinking_encrypted_content) &&
+             str_eq(a->thinking_redacted, b->thinking_redacted);
    case AIMEE_BLK_TOOL_USE:
       /* The namespace is part of the call's identity: two calls to the same bare
        * name in different groups are different calls. */
@@ -498,6 +522,78 @@ int aimee_ir_response_has_tool_use(const aimee_response_t *r)
       if (r->content[i].type == AIMEE_BLK_TOOL_USE)
          return 1;
    return 0;
+}
+
+int aimee_ir_response_tool_count(const aimee_response_t *response)
+{
+   int count = 0;
+   if (response)
+      for (int i = 0; i < response->n_content; i++)
+         count += response->content[i].type == AIMEE_BLK_TOOL_USE;
+   return count;
+}
+
+aimee_block_t *aimee_ir_response_tool(aimee_response_t *response, int ordinal)
+{
+   if (!response || ordinal < 0)
+      return NULL;
+   for (int i = 0; i < response->n_content; i++)
+      if (response->content[i].type == AIMEE_BLK_TOOL_USE && ordinal-- == 0)
+         return &response->content[i];
+   return NULL;
+}
+
+int aimee_ir_response_drop_tool(aimee_response_t *response, int ordinal)
+{
+   aimee_block_t *block = aimee_ir_response_tool(response, ordinal);
+   if (!block)
+      return -1;
+   int index = (int)(block - response->content);
+   aimee_block_free_contents(block);
+   memmove(block, block + 1, (size_t)(response->n_content - index - 1) * sizeof(*block));
+   response->n_content--;
+   memset(&response->content[response->n_content], 0, sizeof(*block));
+   /* An edited response must not replay its native sidecar. */
+   cJSON_Delete(response->raw);
+   response->raw = NULL;
+   return 0;
+}
+
+char *aimee_ir_media_url(const aimee_block_t *block)
+{
+   if (!block || !block->media_ref)
+      return NULL;
+   const char *ref = block->media_ref;
+   if (!block->media_type || !strncmp(ref, "http://", 7) || !strncmp(ref, "https://", 8) ||
+       !strncmp(ref, "data:", 5) || !strncmp(ref, "file-", 5))
+      return strdup(ref);
+   size_t type_len = strlen(block->media_type), ref_len = strlen(ref);
+   if (type_len > SIZE_MAX - 16 || ref_len > SIZE_MAX - type_len - 16)
+      return NULL;
+   size_t size = type_len + ref_len + 16;
+   char *url = malloc(size);
+   if (url)
+      snprintf(url, size, "data:%s;base64,%s", block->media_type, ref);
+   return url;
+}
+
+char *aimee_ir_response_text_alloc(const aimee_response_t *response)
+{
+   size_t length = 1;
+   if (!response)
+      return NULL;
+   for (int i = 0; i < response->n_content; i++)
+      if (response->content[i].type == AIMEE_BLK_TEXT && response->content[i].text)
+      {
+         size_t n = strlen(response->content[i].text);
+         if (n > SIZE_MAX - length)
+            return NULL;
+         length += n;
+      }
+   char *text = malloc(length);
+   if (text)
+      aimee_ir_response_text(response, text, length);
+   return text;
 }
 
 void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *stages, size_t n)

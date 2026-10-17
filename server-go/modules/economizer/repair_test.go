@@ -462,3 +462,25 @@ func TestRepairSanitizesArgumentsOnConsistentHistory(t *testing.T) {
 		t.Fatalf("arguments = %+v, want the string {}", args)
 	}
 }
+
+func TestCanonicalRepairReusedIDs(t *testing.T) {
+	messages := ParseJSON(`[
+		{"role":"assistant","blocks":[{"type":"thinking","text":"reason","signature":"sig"},{"type":"tool_use","tool_id":"same","name":"read_file","input":{}}]},
+		{"role":"tool","blocks":[{"type":"tool_result","tool_id":"same","content":"ok","is_error":false}]},
+		{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"same","name":"read_file","input":{}}]},
+		{"role":"user","blocks":[{"type":"text","text":"next"}]},
+		{"role":"tool","blocks":[{"type":"tool_result","tool_id":"orphan","content":"bad","is_error":false}]}
+	]`)
+	if n := MessageHistoryRepair(messages); n != 2 {
+		t.Fatalf("repairs=%d, want 2", n)
+	}
+	if messages.Len() != 5 || messages.At(3).Get("blocks").At(0).GetString("tool_id") != "same" {
+		t.Fatal("missing result was not inserted before next user turn")
+	}
+	if n := MessageHistoryRepair(messages); n != 0 {
+		t.Fatalf("repair is not idempotent: %d", n)
+	}
+	if messages.At(0).Get("blocks").At(0).GetString("signature") != "sig" {
+		t.Fatal("reasoning was changed")
+	}
+}

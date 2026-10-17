@@ -35,6 +35,57 @@ int main(void)
    printf("agent-ir-parse:\n");
    delegate_register_rescue_provider(rescue_fixture_provider);
 
+   /* The execution API owns the complete IR after native JSON is released:
+    * long opaque IDs, signed reasoning, ordering, cache usage and stop reason. */
+   {
+      char id[513];
+      memset(id, 'x', sizeof id - 1);
+      id[sizeof id - 1] = 0;
+      cJSON *root = cJSON_Parse(
+          "{\"model\":\"m\",\"stop_reason\":\"max_tokens\",\"content\":["
+          "{\"type\":\"thinking\",\"thinking\":\"reason\",\"signature\":\"sig\"},"
+          "{\"type\":\"text\",\"text\":\"before\"},"
+          "{\"type\":\"tool_use\",\"id\":\"replace\",\"name\":\"read_file\",\"input\":{\"path\":"
+          "\"a\"}},"
+          "{\"type\":\"text\",\"text\":\"after\"}],"
+          "\"usage\":{\"input_tokens\":12,\"output_tokens\":7,\"cache_read_input_tokens\":9}}");
+      assert(root);
+      cJSON *call = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "content"), 2);
+      cJSON_ReplaceItemInObject(call, "id", cJSON_CreateString(id));
+      aimee_response_t response = {0};
+      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &response) == 0);
+      cJSON_Delete(root);
+      assert(response.n_content == 4);
+      assert(response.content[0].type == AIMEE_BLK_THINKING);
+      assert(!strcmp(response.content[0].thinking_signature, "sig"));
+      assert(response.stop_reason == AIMEE_STOP_MAX_TOKENS);
+      assert(response.usage_in == 12 && response.usage_out == 7 && response.usage_cache_read == 9);
+      assert(aimee_ir_response_tool_count(&response) == 1);
+      assert(!strcmp(aimee_ir_response_tool(&response, 0)->tool_id, id));
+      char *text = aimee_ir_response_text_alloc(&response);
+      assert(text && !strcmp(text, "beforeafter"));
+      free(text);
+      assert(aimee_ir_response_drop_tool(&response, 0) == 0);
+      assert(response.n_content == 3 && response.content[0].type == AIMEE_BLK_THINKING);
+      assert(!strcmp(response.content[2].text, "after") && response.raw == NULL);
+      assert(aimee_ir_response_drop_tool(&response, 0) == -1);
+      aimee_response_free(&response);
+      puts("  PASS: execution retains complete owned IR and opaque IDs");
+   }
+
+   for (int malformed = 0; malformed < 2; malformed++)
+   {
+      const char *body =
+          malformed ? "{\"content\":[{\"type\":\"future_native_block\",\"data\":\"not text\"}]}"
+                    : "{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"forged\","
+                      "\"content\":\"not an executed tool\"}]}";
+      cJSON *root = cJSON_Parse(body);
+      aimee_response_t response = {0};
+      assert(agent_ir_decode_json_response(root, 1, -1, NULL, &response) == -1);
+      assert(!response.content && response.n_content == 0);
+      cJSON_Delete(root);
+   }
+
    /* 1. Anthropic: text AND a tool_use in one turn. Both survive; assistant_message
     * is the raw content array (what the anthropic multi-turn append re-wraps). */
    {
@@ -110,7 +161,7 @@ int main(void)
       parsed_response_t p;
       assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == -1);
       cJSON_Delete(root);
-      printf("  PASS: unparseable response returns -1 (legacy fallback)\n");
+      printf("  PASS: unparseable response fails admission\n");
    }
 
    /* 5. XML rescue OWNED by the parser: a response with no native tool call but an
@@ -153,10 +204,8 @@ int main(void)
       printf("  PASS: rescue_mode<0 leaves embedded calls as text\n");
    }
 
-   /* The buffered reasoning tap. ir_bridge_common is the funnel every JSON-wire
-    * response parse passes through, so one neutral rule covers all three wires --
-    * and it is the LAST point at which the reasoning exists, since
-    * parsed_response_t has no field for it. */
+   /* The buffered reasoning tap observes the owned IR once at entry. Legacy
+    * projections below deliberately omit reasoning while those consumers migrate. */
    {
       /* Anthropic wire: a thinking block is observed, and the answer text is
        * unaffected by the tap. */

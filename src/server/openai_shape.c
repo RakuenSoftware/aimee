@@ -774,6 +774,14 @@ int openai_format_chat_completion(const char *id, const char *model, const char 
                                   long created, int prompt_tokens, int completion_tokens,
                                   char *resp, int cap)
 {
+   return openai_format_chat_completion_reason(id, model, content, created, prompt_tokens,
+                                               completion_tokens, NULL, resp, cap);
+}
+
+int openai_format_chat_completion_reason(const char *id, const char *model, const char *content,
+                                         long created, int prompt_tokens, int completion_tokens,
+                                         const char *finish_reason, char *resp, int cap)
+{
    if (!resp || cap <= 0)
       return -1;
 
@@ -813,7 +821,8 @@ int openai_format_chat_completion(const char *id, const char *model, const char 
    cJSON_AddStringToObject(msg, "content", content ? content : "");
    cJSON_AddItemToObject(choice, "message", msg);
 
-   cJSON_AddStringToObject(choice, "finish_reason", "stop");
+   cJSON_AddStringToObject(choice, "finish_reason",
+                           finish_reason && finish_reason[0] ? finish_reason : "stop");
 
    cJSON *usage = cJSON_CreateObject();
    if (!usage)
@@ -1352,11 +1361,26 @@ int openai_format_response(const char *id, const char *model, const char *output
                            int prompt_tokens, int completion_tokens, int cached_tokens, char *resp,
                            int cap)
 {
+   return openai_format_response_status(id, model, output_text, created, prompt_tokens,
+                                        completion_tokens, cached_tokens, NULL, resp, cap);
+}
+
+int openai_format_response_status(const char *id, const char *model, const char *output_text,
+                                  long created, int prompt_tokens, int completion_tokens,
+                                  int cached_tokens, const char *incomplete_reason, char *resp,
+                                  int cap)
+{
    if (!resp || cap <= 0)
       return -1;
-   cJSON *root =
-       build_response_object(id, model, output_text, created, prompt_tokens, completion_tokens,
-                             cached_tokens, "completed", 1, "response");
+   cJSON *root = build_response_object(
+       id, model, output_text, created, prompt_tokens, completion_tokens, cached_tokens,
+       incomplete_reason ? "incomplete" : "completed", 1, "response");
+   if (root && incomplete_reason)
+   {
+      cJSON *det = cJSON_AddObjectToObject(root, "incomplete_details");
+      if (det)
+         cJSON_AddStringToObject(det, "reason", incomplete_reason);
+   }
    return emit_json(root, resp, cap);
 }
 

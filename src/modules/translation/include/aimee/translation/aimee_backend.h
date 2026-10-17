@@ -12,6 +12,10 @@
 #include <aimee/ir/aimee_ir.h>
 
 struct cJSON;
+/* Shared Anthropic block entry adapter used by request/response boundaries.
+ * Unknown native types retain UNKNOWN + sidecar; canonical admission rejects
+ * them until an explicit typed mapping exists. */
+void anthropic_ir_parse_block(const struct cJSON *native, aimee_block_t *out);
 
 /* Build an Anthropic Messages API request from the IR. Returns a new cJSON object
  * the caller owns (cJSON_Delete), or NULL on bad args. */
@@ -38,6 +42,8 @@ int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *
  * `instructions`; messages -> `input` items (message / function_call); tools ->
  * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
+/* Owned native snapshot assembled at the Responses SSE entry boundary. */
+struct cJSON *responses_backend_sse_object(const char *body);
 /* Reasoning text out of a Responses `reasoning` output item, from its `summary`.
  * SHARED by the backend (provider response) and frontend (client request) parsers,
  * which had independently assumed `summary` is a bare string.

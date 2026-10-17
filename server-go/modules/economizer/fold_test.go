@@ -312,3 +312,36 @@ func TestFoldExcerptUTF8Boundary(t *testing.T) {
 		t.Errorf("truncation must be marked: %q", got)
 	}
 }
+
+func TestCanonicalFoldAndCompression(t *testing.T) {
+	messages := ParseJSON(`[{"role":"user","blocks":[{"type":"text","text":"keep my exact constraints"}]}]`)
+	for i := 0; i < 8; i++ {
+		call := ParseJSON(fmt.Sprintf(`{"role":"assistant","blocks":[{"type":"thinking","text":"reason","signature":"sig"},{"type":"tool_use","tool_id":"call-%d","name":"read_file","input":{"path":"src/main.c"}}]}`, i))
+		result := ParseJSON(fmt.Sprintf(`{"role":"tool","blocks":[{"type":"tool_result","tool_id":"call-%d","is_error":false,"content":%q}]}`, i, strings.Repeat("line of tool output src/main.c\n", 100)))
+		messages.Append(call)
+		messages.Append(result)
+	}
+	messages.Append(ParseJSON(`{"role":"user","blocks":[{"type":"text","text":"continue"}]}`))
+	original := PrintJSONUnformatted(messages)
+	cfg := &FoldConfig{Enabled: true, RetainedMsgs: 4, MinFoldMsgs: 2,
+		ReasoningExcerptBytes: 80, CompactHeadBytes: 40, Closet: ClosetConfig{Enabled: true}}
+	for _, result := range []FoldResult{FoldView(messages, cfg, nil), CompressView(messages, cfg)} {
+		if !result.Folded || result.Messages == nil {
+			t.Fatal("canonical transcript was not reduced")
+		}
+		for _, message := range result.Messages.Items {
+			if !message.Get("blocks").IsArray() || message.Get("content") != nil {
+				t.Fatalf("native message escaped into canonical history: %s", PrintJSONUnformatted(message))
+			}
+		}
+		if n := MessageHistoryRepair(result.Messages.Clone()); n != 0 {
+			t.Fatalf("reduction broke tool pairing: %d", n)
+		}
+		if !protectedContextPreserved(messages, result.Messages) {
+			t.Fatal("user instructions changed")
+		}
+	}
+	if PrintJSONUnformatted(messages) != original {
+		t.Fatal("reduction changed persisted history")
+	}
+}

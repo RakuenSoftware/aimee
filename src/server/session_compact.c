@@ -8,6 +8,7 @@
 #include "agent_protocol.h"
 #include "economizer.h" /* event-bus client for the Go-owned record path */
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -39,13 +40,15 @@ static int chars_to_tokens(size_t chars)
 }
 
 /* Extract the text content from a single message item.
- * Handles both plain string content and array content (Anthropic multi-part).
- * Returns a pointer to the static string (do not free) or NULL. */
+ * Handles plain string content and array content: Anthropic/OpenAI "text" parts and
+ * Responses "input_text"/"output_text" parts. Returns a borrowed pointer or NULL. */
 static const char *msg_text(const cJSON *msg)
 {
    if (!msg)
       return NULL;
-   cJSON *content = cJSON_GetObjectItem(msg, "content");
+   cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+   if (!content)
+      content = cJSON_GetObjectItem(msg, "content");
    if (!content)
       return NULL;
    if (cJSON_IsString(content))
@@ -57,7 +60,8 @@ static const char *msg_text(const cJSON *msg)
       cJSON_ArrayForEach(block, content)
       {
          const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-         if (type && strcmp(type, "text") == 0)
+         if (type && (strcmp(type, "text") == 0 || strcmp(type, "input_text") == 0 ||
+                      strcmp(type, "output_text") == 0))
          {
             const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
             if (text)
@@ -73,12 +77,18 @@ static int msg_is_tool_call(const cJSON *msg)
 {
    if (!msg)
       return 0;
+   /* Responses: a top-level function_call item (no role) */
+   const char *item_type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
+   if (item_type && strcmp(item_type, "function_call") == 0)
+      return 1;
    /* OpenAI: tool_calls array present */
    cJSON *tc = cJSON_GetObjectItem(msg, "tool_calls");
    if (tc && cJSON_IsArray(tc) && cJSON_GetArraySize(tc) > 0)
       return 1;
    /* Anthropic: content array with a tool_use block */
-   cJSON *content = cJSON_GetObjectItem(msg, "content");
+   cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+   if (!content)
+      content = cJSON_GetObjectItem(msg, "content");
    if (content && cJSON_IsArray(content))
    {
       cJSON *block;
@@ -97,13 +107,21 @@ static int msg_is_tool_result(const cJSON *msg)
 {
    if (!msg)
       return 0;
+   /* Responses: a top-level function_call_output item. Other role-less Responses
+    * items (function_call, reasoning) are not results; treating every role-less item
+    * as one counted the assistant's own calls as tool output. */
+   const char *item_type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
+   if (item_type && strcmp(item_type, "function_call_output") == 0)
+      return 1;
    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-   if (!role || strcmp(role, "tool") == 0)
+   if (role && strcmp(role, "tool") == 0)
       return 1; /* OpenAI role=tool */
    /* Anthropic: role=user with content array containing tool_result blocks */
-   if (strcmp(role, "user") == 0)
+   if (role && strcmp(role, "user") == 0)
    {
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
+      cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+      if (!content)
+         content = cJSON_GetObjectItem(msg, "content");
       if (content && cJSON_IsArray(content))
       {
          cJSON *block;
@@ -373,13 +391,12 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
             last_user_text = text;
          }
       }
-      if (!role)
-         continue;
       if (msg_is_tool_call(msg))
       {
          tool_call_count++;
+         continue;
       }
-      else if (strcmp(role, "assistant") == 0)
+      if (role && strcmp(role, "assistant") == 0)
       {
          const char *text = msg_text(msg);
          if (text && text[0])
@@ -596,7 +613,9 @@ static void capture_readonly_sigs(cJSON *messages, int start, int end,
       }
 
       /* Anthropic content-block shape */
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
+      cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+      if (!content)
+         content = cJSON_GetObjectItem(msg, "content");
       if (cJSON_IsArray(content))
       {
          cJSON *block = NULL;
@@ -616,7 +635,268 @@ static void capture_readonly_sigs(cJSON *messages, int start, int end,
    }
 }
 
+/* ------------------------------------------------------------------ tool pairing */
+
+/* Record the tool-call ids a message issues into `calls` and the ids it answers into
+ * `results`, for the three wire shapes history is kept in: OpenAI (tool_calls[].id /
+ * role=tool tool_call_id), Anthropic (tool_use.id / tool_result.tool_use_id) and
+ * Responses (function_call.call_id / function_call_output.call_id). */
+static void msg_tool_ids(const cJSON *msg, cJSON *calls, cJSON *results)
+{
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
+   const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
+   if (type && strcmp(type, "function_call") == 0)
+   {
+      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
+      if (id && !cJSON_HasObjectItem(calls, id))
+         cJSON_AddBoolToObject(calls, id, 1);
+      return;
+   }
+   if (type && strcmp(type, "function_call_output") == 0)
+   {
+      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
+      if (id && !cJSON_HasObjectItem(results, id))
+         cJSON_AddBoolToObject(results, id, 1);
+      return;
+   }
+   if (!role)
+      return;
+   if (strcmp(role, "tool") == 0)
+   {
+      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
+      if (id && !cJSON_HasObjectItem(results, id))
+         cJSON_AddBoolToObject(results, id, 1);
+      return;
+   }
+   const cJSON *tcs = cJSON_GetObjectItem(msg, "tool_calls");
+   const cJSON *tc = NULL;
+   if (cJSON_IsArray(tcs))
+      cJSON_ArrayForEach(tc, tcs)
+      {
+         const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id"));
+         if (id && !cJSON_HasObjectItem(calls, id))
+            cJSON_AddBoolToObject(calls, id, 1);
+      }
+   const cJSON *content = cJSON_GetObjectItem(msg, "content");
+   const cJSON *block = NULL;
+   if (cJSON_IsArray(content))
+      cJSON_ArrayForEach(block, content)
+      {
+         const char *bt = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
+         const char *id = NULL;
+         cJSON *into = NULL;
+         if (bt && strcmp(bt, "tool_use") == 0)
+         {
+            id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "id"));
+            into = calls;
+         }
+         else if (bt && strcmp(bt, "tool_result") == 0)
+         {
+            id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_use_id"));
+            into = results;
+         }
+         if (id && into && !cJSON_HasObjectItem(into, id))
+            cJSON_AddBoolToObject(into, id, 1);
+      }
+}
+
+/* Whether messages[from..] answers a tool call it does not itself contain. */
+static int tail_has_orphan_result(const cJSON *messages, int from)
+{
+   cJSON *calls = cJSON_CreateObject();
+   cJSON *results = cJSON_CreateObject();
+   if (!calls || !results)
+   {
+      cJSON_Delete(calls);
+      cJSON_Delete(results);
+      return 1; /* cannot prove the cut safe: treat it as unsafe */
+   }
+   int n = cJSON_GetArraySize(messages);
+   for (int i = from; i < n; i++)
+      msg_tool_ids(cJSON_GetArrayItem(messages, i), calls, results);
+   int orphan = 0;
+   const cJSON *r = NULL;
+   cJSON_ArrayForEach(r, results)
+   {
+      if (!cJSON_HasObjectItem(calls, r->string))
+      {
+         orphan = 1;
+         break;
+      }
+   }
+   cJSON_Delete(calls);
+   cJSON_Delete(results);
+   return orphan;
+}
+
+/* Move the compaction cut earlier until the kept tail holds every call its tool
+ * results answer. The cut is a message count, so it used to land between a call and
+ * its result; the call was summarised away and the result sent alone, which every
+ * provider rejects (a tool result must follow its call). Returns the aligned cut,
+ * never below `lo`. */
+static int align_cut_to_tool_pairs(const cJSON *messages, int lo, int cut)
+{
+   while (cut > lo && tail_has_orphan_result(messages, cut))
+      cut--;
+   return cut;
+}
+
 /* ------------------------------------------------------------------ public API */
+
+/* Move a canonical compaction cut back to the oldest call answered in the
+ * retained suffix. Opaque IDs are compared in full; no fixed-size registry. */
+static int canonical_pair_cut(const cJSON *messages, int cut)
+{
+   int adjusted;
+   do
+   {
+      adjusted = cut;
+      for (int i = cut; i < cJSON_GetArraySize(messages); i++)
+      {
+         const cJSON *results =
+             cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, i), "blocks");
+         const cJSON *result;
+         cJSON_ArrayForEach(result, results)
+         {
+            const char *type =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "type"));
+            const char *id =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "tool_id"));
+            if (!type || strcmp(type, "tool_result") || !id)
+               continue;
+            /* The nearest preceding occurrence owns a reused native tool ID. */
+            int found = -1;
+            for (int j = i; j >= 0 && found < 0; j--)
+            {
+               const cJSON *blocks =
+                   cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, j), "blocks");
+               const cJSON *block;
+               cJSON_ArrayForEach(block, blocks)
+               {
+                  const char *kind =
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "type"));
+                  const char *call =
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "tool_id"));
+                  if (kind && !strcmp(kind, "tool_use") && call && !strcmp(call, id))
+                  {
+                     found = j;
+                     break;
+                  }
+               }
+            }
+            if (found >= 0 && found < adjusted)
+               adjusted = found;
+         }
+      }
+      if (adjusted == cut)
+         return cut;
+      cut = adjusted;
+   } while (cut > 0);
+   return cut;
+}
+
+static int canonical_protected(const cJSON *message)
+{
+   const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(message, "role"));
+   if (!role)
+      return 0;
+   if (!strcmp(role, "system") || !strcmp(role, "developer"))
+      return 1;
+   if (strcmp(role, "user"))
+      return 0;
+   const cJSON *block;
+   cJSON_ArrayForEach(block, cJSON_GetObjectItemCaseSensitive(message, "blocks"))
+   {
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "type"));
+      if (!kind || strcmp(kind, "tool_result"))
+         return 1;
+   }
+   return 0;
+}
+
+static int append_canonical_summary(cJSON *rebuilt, const cJSON *messages, int start, int end,
+                                    const session_compact_config_t *cfg)
+{
+   if (start == end)
+      return 0;
+   char text[SESSION_COMPACT_SUMMARY_MAX];
+   build_summary(messages, start, end, text, sizeof text, cfg ? cfg->from_record : 0);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   cJSON *item = aimee_ir_message_json(&message);
+   if (!item || !cJSON_AddBoolToObject(item, "_compaction_boundary", 1) ||
+       !cJSON_AddItemToArray(rebuilt, item))
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   return 0;
+}
+
+/* Canonical compaction retains user/policy messages exactly and folds the
+ * evidence between them. Build the complete replacement before changing history. */
+static int compact_canonical(cJSON *messages, int start, int end,
+                             const session_compact_config_t *cfg, session_compact_result_t *out)
+{
+   int n = cJSON_GetArraySize(messages);
+   out->messages_after = n;
+   for (int i = start; i < end; i++)
+   {
+      const cJSON *message = cJSON_GetArrayItem(messages, i);
+      if (canonical_protected(message) && msg_is_tool_result(message))
+         return 0; /* A mixed protected result keeps its preceding cycle intact. */
+   }
+   cJSON *rebuilt = cJSON_CreateArray();
+   if (!rebuilt)
+      return -1;
+   int segment = start;
+   for (int i = 0; i < n; i++)
+   {
+      const cJSON *message = cJSON_GetArrayItem(messages, i);
+      int keep = i < start || i >= end || canonical_protected(message);
+      if (i >= start && (keep || i == end))
+      {
+         if (append_canonical_summary(rebuilt, messages, segment, i < end ? i : end, cfg))
+            goto fail;
+         segment = i + 1;
+      }
+      if (keep)
+      {
+         cJSON *copy = cJSON_Duplicate(message, 1);
+         if (!copy || !cJSON_AddItemToArray(rebuilt, copy))
+         {
+            cJSON_Delete(copy);
+            goto fail;
+         }
+      }
+      if (i >= end)
+         segment = end;
+   }
+   int after = cJSON_GetArraySize(rebuilt);
+   if (after >= n)
+   {
+      cJSON_Delete(rebuilt);
+      return 0;
+   }
+   capture_readonly_sigs(messages, start, end, out);
+   build_summary(messages, start, end, out->summary, sizeof out->summary,
+                 cfg ? cfg->from_record : 0);
+   while (messages->child)
+      cJSON_Delete(cJSON_DetachItemViaPointer(messages, messages->child));
+   while (rebuilt->child)
+      cJSON_AddItemToArray(messages, cJSON_DetachItemViaPointer(rebuilt, rebuilt->child));
+   cJSON_Delete(rebuilt);
+   out->messages_after = after;
+   out->messages_removed = n - after;
+   out->compacted = 1;
+   return 0;
+fail:
+   cJSON_Delete(rebuilt);
+   return -1;
+}
 
 int session_compact(cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *out)
@@ -649,6 +929,12 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
 
    /* Step 1: repair orphaned tool pairs */
    local_out.repairs = message_history_repair(messages);
+   if (local_out.repairs < 0)
+   {
+      if (out)
+         *out = local_out;
+      return -1;
+   }
 
    /* Refresh count after repair (repair may add synthetic results) */
    n = cJSON_GetArraySize(messages);
@@ -658,6 +944,18 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
     * Summarise: messages[1 .. n-retain-1]. */
    int summary_start = 1;        /* first message after the anchor */
    int summary_end = n - retain; /* exclusive: last `retain` messages are kept */
+   int canonical =
+       cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "blocks"));
+   if (canonical)
+   {
+      summary_end = canonical_pair_cut(messages, summary_end);
+      if (msg_is_tool_call(cJSON_GetArrayItem(messages, 0)))
+         while (summary_start < summary_end &&
+                msg_is_tool_result(cJSON_GetArrayItem(messages, summary_start)))
+            summary_start++;
+   }
+   else if (summary_end > summary_start)
+      summary_end = align_cut_to_tool_pairs(messages, summary_start, summary_end);
 
    if (summary_end <= summary_start)
    {
@@ -666,6 +964,14 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
       if (out)
          *out = local_out;
       return 0;
+   }
+
+   if (canonical)
+   {
+      int rc = compact_canonical(messages, summary_start, summary_end, cfg, &local_out);
+      if (out)
+         *out = local_out;
+      return rc;
    }
 
    /* Step 2a: capture the read-only tool signatures about to be destroyed.
