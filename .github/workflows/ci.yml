@@ -1058,6 +1058,11 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
       - name: Verify persisted erasure state upgrade and idempotence
         run: python3 tests/e2e/knowledge-schema-upgrade.py
+      - name: Replay canonical session log and harness resume ownership
+        working-directory: server-go
+        env:
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIRLiveConcurrentReplayAndDeletion$'
       - name: Replay memory ownership and PostgreSQL sessions
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
       - name: Replay Go memory ownership and isolated evaluator contracts

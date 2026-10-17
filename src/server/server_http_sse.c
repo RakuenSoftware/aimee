@@ -5,6 +5,9 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "agent_config.h"
+#include "db1_client/server_sessions.h"
+#include "db1_client/primary_sessions.h"
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -46,6 +49,94 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
+
+/* SSE event streams (handle_session_events / handle_run_events) are long-lived:
+ * running them inline in handle_conn would block the single listener thread for
+ * the stream's whole lifetime, starving every other /v1 connection (a presence
+ * subscriber would freeze the entire HTTP surface). Offload each to a detached
+ * thread on a dup'd fd — mirroring the chat.send_stream worker — so the listener
+ * returns immediately. The listener's close(fd) only drops its own reference;
+ * the worker streams on the dup until the client disconnects, then closes it. A
+ * modest cap bounds concurrent streams against fd/thread exhaustion. */
+typedef void (*sse_stream_fn)(int fd, const char *id, const char *request_id);
+typedef struct
+{
+   int fd;
+   sse_stream_fn fn;
+   char id[256];
+   char request_id[64];
+   char principal[VAULT_PRINCIPAL_MAX];
+} sse_offload_t;
+
+static atomic_int g_sse_live = 0;
+#define SSE_LIVE_DEFAULT 256
+static int g_sse_max = SSE_LIVE_DEFAULT; /* configurable via aimee.api.max_event_streams */
+
+/* Set the cap on concurrent SSE event streams. n <= 0 restores the default.
+ * Called once at startup (server_http_start) before any stream is accepted. */
+void server_http_set_max_event_streams(int n)
+{
+   g_sse_max = (n > 0) ? n : SSE_LIVE_DEFAULT;
+}
+
+static void *sse_offload_thread(void *arg)
+{
+   sse_offload_t *o = (sse_offload_t *)arg;
+   agent_set_request_vault_principal(o->principal);
+   o->fn(o->fd, o->id, o->request_id);
+   agent_set_request_vault_principal(NULL);
+   close(o->fd);
+   atomic_fetch_sub(&g_sse_live, 1);
+   free(o);
+   return NULL;
+}
+
+/* Hand an SSE stream to a detached worker on a dup'd fd. Returns 0 on success
+ * (the caller must not touch fd afterward beyond the listener's own close).
+ * Returns -1 if the live-stream cap is hit or resources are exhausted, in which
+ * case the caller should send an error on fd and not stream. */
+int server_http_sse_offload(int fd, sse_stream_fn fn, const char *id, const char *request_id)
+{
+   /* SSE offload dups the fd to a detached thread; a TLS conn's SSL is owned by
+    * this conn's worker and cannot be shared with the dup (and the dup has no SSL
+    * registered → it would emit plaintext on the TLS socket). Refuse over TLS; the
+    * caller turns this into a 503. SSE-over-TLS is phase 1c. */
+   if (server_conn_io_has_ssl(fd))
+      return -1;
+   if (atomic_fetch_add(&g_sse_live, 1) >= g_sse_max)
+   {
+      atomic_fetch_sub(&g_sse_live, 1);
+      return -1;
+   }
+   int dfd = dup(fd);
+   if (dfd < 0)
+   {
+      atomic_fetch_sub(&g_sse_live, 1);
+      return -1;
+   }
+   sse_offload_t *o = (sse_offload_t *)calloc(1, sizeof(*o));
+   if (!o)
+   {
+      close(dfd);
+      atomic_fetch_sub(&g_sse_live, 1);
+      return -1;
+   }
+   snprintf(o->principal, sizeof(o->principal), "%s", server_http_identity_principal());
+   o->fd = dfd;
+   o->fn = fn;
+   snprintf(o->id, sizeof(o->id), "%s", id ? id : "");
+   snprintf(o->request_id, sizeof(o->request_id), "%s", request_id ? request_id : "");
+   pthread_t t;
+   if (pthread_create(&t, NULL, sse_offload_thread, o) != 0)
+   {
+      close(dfd);
+      free(o);
+      atomic_fetch_sub(&g_sse_live, 1);
+      return -1;
+   }
+   pthread_detach(t);
+   return 0;
+}
 
 typedef struct
 {
@@ -110,8 +201,99 @@ void server_http_sse_live_run(int fd, const char *body, server_http_responses_st
    pthread_mutex_destroy(&live.mu);
 }
 
+static void handle_session_ir_events(int fd, const char *input, const char *request_id)
+{
+   char session[128], after[32] = "0";
+   const char *query = strchr(input, '?');
+   size_t n = query ? (size_t)(query - input) : strlen(input);
+   if (!n || n >= sizeof(session))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid session\"}", request_id);
+      return;
+   }
+   memcpy(session, input, n);
+   session[n] = '\0';
+   const char *cursor = query ? strstr(query, "cursor=") : NULL;
+   if (cursor)
+      snprintf(after, sizeof(after), "%s", cursor + 7);
+   const char *actor = agent_get_request_vault_principal();
+   db1_server_session_t row;
+   if (!actor || !actor[0])
+   {
+      send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
+      return;
+   }
+   if (db1_server_session_get(session, &row) == 0 && strcmp(row.principal, actor))
+   {
+      send_response(fd, 403, "{\"error\":\"session ownership mismatch\"}", request_id);
+      return;
+   }
+   write_sse_headers(fd, request_id);
+   int seen = 0, quiet = 0;
+   for (;;)
+   {
+      if (db1_server_session_get(session, &row) == 0)
+      {
+         if (strcmp(row.principal, actor))
+            break;
+         seen = 1;
+         char *json = db1_session_ir_page(session, after, 64, actor);
+         if (!json)
+            break;
+         cJSON *page = cJSON_Parse(json);
+         free(json);
+         if (!cJSON_IsArray(page))
+         {
+            cJSON_Delete(page);
+            break;
+         }
+         int count = cJSON_GetArraySize(page), failed = 0;
+         const cJSON *event = NULL;
+         cJSON_ArrayForEach(event, page)
+         {
+            const cJSON *seq = cJSON_GetObjectItemCaseSensitive(event, "sequence");
+            char *line = cJSON_PrintUnformatted(event);
+            if (!cJSON_IsString(seq) || !line)
+            {
+               free(line);
+               failed = 1;
+               break;
+            }
+            if (write_all_fd(fd, "id: ", 4) < 0 ||
+                write_all_fd(fd, seq->valuestring, strlen(seq->valuestring)) < 0 ||
+                write_all_fd(fd, "\nevent: ir\ndata: ", 17) < 0 ||
+                write_all_fd(fd, line, strlen(line)) < 0 || write_all_fd(fd, "\n\n", 2) < 0)
+               failed = 1;
+            free(line);
+            if (failed)
+               break;
+            snprintf(after, sizeof(after), "%s", seq->valuestring);
+         }
+         cJSON_Delete(page);
+         if (failed)
+            break;
+         if (count)
+         {
+            quiet = 0;
+            continue;
+         }
+      }
+      else if (seen)
+         break; /* deletion/store outage never becomes an empty successful replay */
+      if ((quiet++ % 25) == 0 && write_all_fd(fd, ": keep-alive\n\n", 14) < 0)
+         break;
+      struct timespec pause = {0, 200000000L};
+      nanosleep(&pause, NULL);
+   }
+}
+
 void handle_session_events(int fd, const char *id_in, const char *request_id)
 {
+   if (strstr(id_in, "?format=ir&"))
+   {
+      handle_session_ir_events(fd, id_in, request_id);
+      return;
+   }
    /* id_in may carry a resume position as "<sid>?cursor=N" (threaded from the
     * dispatcher's query string). Split it: `id` is the bare session id, `cursor`
     * the absolute ring position to resume from (0 = replay from oldest retained,

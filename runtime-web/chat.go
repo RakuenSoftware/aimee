@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -115,8 +114,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	// cwd containment: the agent runs server-side with file/exec tools, and cwd
 	// comes from the browser — so it MUST stay within the caller's own scoped
-	// workspace. aimee-server can't enforce this (the chat stream carries no
-	// webuser identity), so webchat (the trust boundary) does it. Default to the
+	// workspace. The attested web user is also forwarded to aimee-server. Default to the
 	// user's workspace when no project is selected; refuse anything outside it
 	// (fail closed: a selected cwd we can't verify is also refused).
 	if root, rerr := s.webuserWorkspaceRoot(r.Context(), currentUser(r)); rerr == nil && root != "" {
@@ -133,14 +131,11 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 	username := currentUser(r)
 	stableSID := strings.TrimSpace(req.AimeeSessionID)
-	providerSessionID := ""
-	// Bind the stable aimee session handle to the authenticated user before it
-	// crosses the trusted UDS boundary. A provider-native session event is a
-	// different id and must never replace this ownership key. The browser's
-	// claude_session_id field is retained for wire compatibility but is never a
-	// source of authority: resume metadata is loaded only from this user's
-	// server-side stable-session record.
-	if s.db != nil && stableSID != "" {
+	if stableSID == "" {
+		writeJSONError(w, http.StatusBadRequest, "aimee_session_id required")
+		return
+	}
+	if s.db != nil {
 		owned, exists, oerr := s.chatSessionOwned(username, stableSID)
 		if oerr != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
@@ -150,17 +145,8 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
 			return
 		}
-		if err := s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to persist session")
-			return
-		}
-		providerSessionID, err = s.chatSessionProviderID(username, stableSID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to load session runtime")
-			return
-		}
-		if err := s.appendChatMessage(username, stableSID, "user", req.Message); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to persist message")
+		if err = s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to persist session metadata")
 			return
 		}
 	}
@@ -170,94 +156,26 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	doneSent := false
-	var runtimePersistErr error
-	var assistantText strings.Builder
-	// Stream the chat over aimee-server's /v1 HTTP transport (native
-	// POST /v1/chat/stream); the legacy NDJSON socket helper (chatStream)
-	// remains available as a fallback.
-	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, username, req.Message, stableSID,
-		providerSessionID, cwd, req.AttachID, func(evt streamEvent) {
-			switch evt.Event {
-			case "turn_start":
-				sseWrite(w, "turn_start", map[string]any{})
-			case "text":
-				assistantText.WriteString(evt.Content)
-				sseWrite(w, "text", map[string]string{"content": evt.Content})
-			case "thinking":
-				sseWrite(w, "thinking", map[string]string{"content": evt.Content})
-			case "tool_call.started", "tool_call.completed":
-				sseWrite(w, evt.Event, map[string]string{"name": evt.Name})
-			case "tool_start":
-				sseWrite(w, evt.Event, map[string]string{"name": evt.Name, "args": evt.Args})
-			case "tool_result":
-				sseWrite(w, evt.Event, map[string]string{"name": evt.Name, "result": evt.Result})
-			case "turn_end":
-				sseWrite(w, "turn_end", map[string]any{})
-			case "session":
-				if evt.ID != "" {
-					// The streamed id is trusted server output. Bind it before
-					// exposing the session event (and therefore before `done`) so
-					// an immediately queued next turn cannot race into a fresh
-					// provider conversation.
-					if stableSID != "" {
-						if uerr := s.setChatSessionRuntime(username, stableSID, evt.ID); uerr != nil {
-							runtimePersistErr = uerr
-							log.Printf("aimee-webchat: persist runtime for %q: %v", stableSID, uerr)
-							sseWrite(w, "error", map[string]string{"message": "failed to persist session runtime"})
-							return
-						}
-					}
-					providerSessionID = evt.ID
-				}
-				sseWrite(w, "session", map[string]string{"id": evt.ID})
-			case "usage":
-				kind := evt.Kind
-				if kind == "" {
-					kind = "realized"
-				}
-				sseWrite(w, "usage", map[string]any{
-					"in":         evt.In,
-					"out":        evt.Out,
-					"cost":       evt.Cost,
-					"usage_kind": kind,
-				})
-			case "done":
-				if runtimePersistErr == nil {
-					doneSent = true
-					sseWrite(w, "done", map[string]any{})
-				}
-			case "error":
-				msg := evt.Message
-				if msg == "" {
-					msg = evt.Error
-				}
-				if msg == "" {
-					msg = "server error"
-				}
-				sseWrite(w, "error", map[string]string{"message": msg})
-			}
-		})
-
-	// Store the visible assistant turn and the provider-native resume id under
-	// the stable, user-owned aimee session id. This is best-effort because the
-	// response may already have streamed, but failures are visible in logs.
-	if stableSID != "" {
-		if text := assistantText.String(); text != "" {
-			if uerr := s.appendChatMessage(username, stableSID, "assistant", text); uerr != nil {
-				log.Printf("aimee-webchat: persist reply for %q: %v", stableSID, uerr)
-			}
+	err = chatIRHTTP(r.Context(), s.cfg.socketPath, username, req.Message, stableSID, cwd, req.AttachID, func(line []byte) error {
+		if _, err := w.Write([]byte("event: ir\ndata: ")); err != nil {
+			return err
 		}
-	}
-	if r.Context().Err() != nil {
-		return
-	}
-	if err != nil {
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\n\n")); err != nil {
+			return err
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return nil
+	})
+	if err != nil && r.Context().Err() == nil {
+		// Transport failures are not model content and are never persisted as IR.
 		sseWrite(w, "error", map[string]string{"message": err.Error()})
 	}
-	if !doneSent && runtimePersistErr == nil {
-		sseWrite(w, "done", map[string]any{})
-	}
+
 }
 
 // handleChatProjects returns indexed projects plus the webchat process cwd fallback.

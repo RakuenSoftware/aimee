@@ -48,4 +48,6 @@ aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
 int aimee_ir_session_emit_response(const aimee_response_t *response, const char *message_id);
 
+int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error);
+
 #endif

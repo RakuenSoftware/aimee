@@ -27840,7 +27840,8 @@
       "c_params": [
         "session_id",
         "after",
-        "limit"
+        "limit",
+        "principal"
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
@@ -27867,6 +27868,11 @@
             "name": "limit",
             "type": "text",
             "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
           }
         ]
       },
@@ -27878,6 +27884,107 @@
           }
         ],
         "max_bytes": 4194304
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 30,
+      "name": "session_harness_get",
+      "c_name": "db1_session_harness_get",
+      "c_params": [
+        "session_id",
+        "harness",
+        "out_native_id",
+        "capacity",
+        "principal"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "harness",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "native_id",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 31,
+      "name": "session_harness_bind",
+      "c_name": "db1_session_harness_bind",
+      "c_params": [
+        "session_id",
+        "harness",
+        "native_id",
+        "principal"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "harness",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "native_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 65536
       }
     }
   ]

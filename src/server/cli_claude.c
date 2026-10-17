@@ -97,6 +97,17 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
     * strip, which only removes Task from the API request, not from the CLI's own
     * built-in tool registry. Mirrors guardrails' Task->Subagent canonicalization. */
    CLAUDE_ADD_ARG("AskUserQuestion,Task,Agent,RemoteTrigger");
+   if (cfg && cfg->primary && !strstr(cmd, "--permission-mode") &&
+       !strstr(cmd, "--dangerously-skip-permissions"))
+   {
+      CLAUDE_ADD_ARG("--permission-mode");
+      CLAUDE_ADD_ARG("bypassPermissions");
+   }
+   if (cfg && cfg->resume_id && cfg->resume_id[0])
+   {
+      CLAUDE_ADD_ARG("--resume");
+      CLAUDE_ADD_ARG(cfg->resume_id);
+   }
    if (cfg && cfg->system_prompt && cfg->system_prompt[0])
    {
       CLAUDE_ADD_ARG("--append-system-prompt");

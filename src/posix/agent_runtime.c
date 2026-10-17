@@ -1,3 +1,4 @@
+#include <aimee/ir/session_event.h>
 /* posix/agent_runtime.c: POSIX execution engine — agent loop, context assembly, and eval */
 /* ================================================================
  * From: agent.c
@@ -1857,6 +1858,14 @@ native_provider_http:
             }
             snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
             snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            {
+               free(err_result);
+               cJSON_Delete(anth_results);
+               agent_free_parsed_response(&parsed);
+               snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               goto ir_capture_failed;
+            }
             free(err_result);
             total_calls++;
             continue;
@@ -1901,6 +1910,14 @@ native_provider_http:
             }
             snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
             snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            {
+               free(err_result);
+               cJSON_Delete(anth_results);
+               agent_free_parsed_response(&parsed);
+               snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               goto ir_capture_failed;
+            }
             free(err_result);
             total_calls++;
             continue;
@@ -1953,6 +1970,14 @@ native_provider_http:
             }
             snprintf(last_tool_name, sizeof(last_tool_name), "%s", parsed.calls[i].name);
             snprintf(last_tool_result, sizeof(last_tool_result), "%.500s", err_result);
+            if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, err_result, 1) != 0)
+            {
+               free(err_result);
+               cJSON_Delete(anth_results);
+               agent_free_parsed_response(&parsed);
+               snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+               goto ir_capture_failed;
+            }
             free(err_result);
             total_calls++;
             continue;
@@ -1969,6 +1994,15 @@ native_provider_http:
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(parsed.calls[i].name, parsed.calls[i].arguments,
                                               exploration_attempt, result_str);
+         if (aimee_ir_session_emit_tool_result(parsed.calls[i].id, result_str,
+                                               !agent_tool_result_usable(result_str)) != 0)
+         {
+            free(result_str);
+            cJSON_Delete(anth_results);
+            agent_free_parsed_response(&parsed);
+            snprintf(out->error, sizeof(out->error), "canonical tool result persistence failed");
+            goto ir_capture_failed;
+         }
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
@@ -2165,6 +2199,7 @@ native_provider_http:
       }
    }
 
+ir_capture_failed:
    /* If we exhausted turns without a final response, set a clear error */
    if (!out->success && !out->response && turn >= max_t)
    {

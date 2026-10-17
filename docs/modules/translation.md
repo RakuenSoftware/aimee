@@ -9,8 +9,8 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
-`src/modules/translation/module.yaml` is the complete module-local ownership inventory: eight shipping
-translation units, three canonical public headers, five direct tests, and this module document.
+`src/modules/translation/module.yaml` is the complete module-local ownership inventory: nine shipping
+translation units, four canonical public headers, six direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
 canonical document. Canonical public-header placement remains enforced by the descriptor-derived
 header-layout gate. This physical ownership claim does not imply that every exported adapter helper is
@@ -41,6 +41,14 @@ machines convert OpenAI Chat chunks and decoded Bedrock ConverseStream event JSO
 render IR deltas as Anthropic stream events. They do not decode Bedrock binary framing, write HTTP/SSE
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
+
+Native harness conversion lives in `src/modules/translation/harness_ir.c`, exposed by
+`src/modules/translation/include/aimee/translation/harness_ir.h`. Claude stream-json, Codex
+app-server and ACP session/update frames are converted at their reader boundaries, before legacy execution callbacks.
+The adapter emits canonical typed session events synchronously; it does not load credentials,
+choose a session owner, persist, or deliver browser events. Host execution code owns those steps.
+`src/tests/test_harness_ir.c` covers typed tools/results, thinking signatures, streamed text,
+control correlation, unknown items, and sink failure propagation.
 
 Remaining translation seams include the `aimee_ir_build_provider_body` entry point in
 `src/headers/aimee_ir_serve.h`.

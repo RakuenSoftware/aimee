@@ -4,6 +4,9 @@ import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolB
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
+import IRTranscript from '../ir/Transcript';
+import { emptySession, reduceSession } from '../ir/session';
+import type { Envelope, SessionState } from '../ir/session';
 import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
@@ -128,11 +131,6 @@ const STREAM_PERSIST_DEBOUNCE_MS = 1000;
 // window, not the whole conversation. Scrolling/"show earlier" reveals the rest.
 const TRANSCRIPT_WINDOW = 150;
 const TRANSCRIPT_WINDOW_STEP = 150;
-// Cap how often streamed deltas trigger a React re-render. Each flush reconciles
-// the whole message list and re-parses the streaming message's markdown, so a
-// per-token (or per-frame) cadence pegs a CPU core during long/continuous turns.
-// ~100 ms (≈10 fps) is visually smooth for text while cutting render work ~6×.
-const STREAM_FLUSH_THROTTLE_MS = 100;
 
 function loadActiveChannel(): string | null {
   try { return localStorage.getItem(CHANNEL_KEY); } catch { return null; }
@@ -1306,6 +1304,37 @@ export default function Chat() {
   const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
   const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
   const [streamMsgs, setStreamMsgs] = useState<StreamMsg[]>([]);
+  const irSessions = useRef<Record<string, SessionState>>({});
+  const irPending = useRef<Record<string, Map<string, Envelope>>>({});
+  const irFlush = useRef<number | null>(null);
+  const [, setIRRevision] = useState(0);
+  const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  function ingestIR(owner: string, raw: Record<string, unknown>) {
+    if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
+    const envelope = raw as unknown as Envelope;
+    if (envelope.version !== 1 || envelope.session_id !== owner || typeof envelope.sequence !== 'string' || !/^[1-9][0-9]*$/.test(envelope.sequence))
+      throw new Error('Invalid canonical session envelope');
+    let state = irSessions.current[owner] ?? emptySession(owner);
+    if (BigInt(envelope.sequence) <= BigInt(state.sequence)) return;
+    const pending = irPending.current[owner] ?? new Map<string, Envelope>();
+    const previous = pending.get(envelope.sequence);
+    if (previous && previous.event_id !== envelope.event_id) throw new Error('Conflicting session sequence');
+    pending.set(envelope.sequence, envelope);
+    if (pending.size > 4096) throw new Error('Session replay gap exceeds buffer limit');
+    for (;;) {
+      const next = String(BigInt(state.sequence) + 1n);
+      const event = pending.get(next);
+      if (!event) break;
+      state = reduceSession(state, event); pending.delete(next);
+    }
+    irPending.current[owner] = pending;
+    irSessions.current[owner] = state;
+    if (irFlush.current === null) irFlush.current = window.setTimeout(() => {
+      irFlush.current = null; setIRRevision(n => n + 1);
+    }, 50);
+  }
+  useEffect(() => () => { if (irFlush.current !== null) window.clearTimeout(irFlush.current); }, []);
+
   // Work (in-flight/queued sends + iteration progress) keyed by the owning tab's
   // aimeeSid, so the busy indicator reflects the ACTIVE tab alone — sending on one
   // tab no longer shows "working" on every other tab. Derived values below.
@@ -1326,7 +1355,6 @@ export default function Chat() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [lastUsage, setLastUsage] = useState<{ in: number; out: number; cost: number } | null>(null);
   const [sessionUsage, setSessionUsage] = useState<{ in: number; out: number; cost: number; kind: string }>({ in: 0, out: 0, cost: 0, kind: 'realized' });
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
@@ -1351,7 +1379,8 @@ export default function Chat() {
         const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
         if (existing) {
           const messages = existing.aimeeSid === s.aimeeSid
-            ? reconcileSessionMessages(existing.messages, s.messages) : s.messages;
+            ? irSessions.current[s.aimeeSid]?.messages.length ? existing.messages
+              : reconcileSessionMessages(existing.messages, s.messages) : s.messages;
           if (existing.sessionId === s.id && existing.title === s.name &&
               existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
               (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
@@ -1466,7 +1495,6 @@ export default function Chat() {
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
   // re-appending the same observed turn. Survives effect re-runs (component ref).
-  const persistedTurnsRef = useRef<Set<string>>(new Set());
   /* Stream-token batching: text/thinking deltas arrive far faster than the
    * screen refreshes. Rather than a setStreamMsgs (→ full re-render) per token,
    * we accumulate deltas here and flush them in a single state update per
@@ -1570,143 +1598,32 @@ export default function Chat() {
    * can show when aimee is responding on another surface (CLI/TUI, another
    * tab). Only meaningful once the tab has attached (presence exists). */
   const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
-  const activeAttachId = tabs[activeIdx]?.attachId ?? '';
   useEffect(() => {
-    if (presenceSseRef.current) { presenceSseRef.current.close(); presenceSseRef.current = null; }
-    setRemoteTurnActive(false);
-    setRemoteTurnText('');
-    if (!activeAimeeSid || !activeAttachId) return;
-
-    // Resume from the last cursor this surface persisted for the session so a
-    // fresh mount (hard refresh / nav back) does NOT replay the ring from 0
-    // (which would re-surface already-seen turns). EventSource handles its own
-    // auto-reconnect resume via Last-Event-ID; this covers the remount case.
-    const cursorKey = `aimeeCursor:${activeAimeeSid}`;
-    const savedCursor = (() => { try { return localStorage.getItem(cursorKey) || ''; } catch { return ''; } })();
-    // Persist the cursor MONOTONICALLY: only ever advance it. Two tabs sharing a
-    // session write the same key, so a stale writer must not move it backward
-    // (which would replay already-seen events). Compare as integers.
-    const saveCursor = (ev: MessageEvent<string>) => {
-      if (!ev.lastEventId) return;
-      try {
-        const next = Number(ev.lastEventId);
-        if (!Number.isFinite(next)) return;
-        const cur = Number(localStorage.getItem(cursorKey) || '0');
-        if (!Number.isFinite(cur) || next > cur) localStorage.setItem(cursorKey, String(next));
-      } catch { /* quota / private browsing → degrade to cold-start replay */ }
-    };
-    const url = `/api/chat/session-events?sid=${encodeURIComponent(activeAimeeSid)}` +
-      (savedCursor ? `&cursor=${encodeURIComponent(savedCursor)}` : '');
-    const es = new EventSource(url);
+    if (!activeAimeeSid) return;
+    const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
+    const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
-    // Full text of the turn observed on the stream this subscription, used to
-    // persist a turn that ran/completed while this tab was detached (the live
-    // ring replays turn_started→deltas→turn_done from the start on reconnect).
-    // Per-turn observation state for this subscription. turn_id drives dedup;
-    // wasWorking is captured ONCE at turn_started (whether THIS surface
-    // originated the turn) and is immutable for the turn, so a new local send
-    // mid-observation can't make us drop a foreign turn.
-    let observed = '';
-    let curTurnId = '';
-    let wasWorking = false;
-    // Throttle the live remote-turn preview: deltas accumulate into `observed`
-    // (a cheap string) and the visible text is flushed to React state at most
-    // ~10×/s, not per delta — a per-token setState here forces a whole-Chat
-    // re-render at provider token rate and pegs a core during long remote turns.
-    let remoteFlushTimer: number | null = null;
-    const scheduleRemoteFlush = () => {
-      if (remoteFlushTimer !== null) return;
-      remoteFlushTimer = window.setTimeout(() => {
-        remoteFlushTimer = null;
-        setRemoteTurnText(observed.slice(-2000));
-      }, STREAM_FLUSH_THROTTLE_MS);
-    };
-    const clearRemoteFlush = () => {
-      if (remoteFlushTimer !== null) { window.clearTimeout(remoteFlushTimer); remoteFlushTimer = null; }
-    };
-    const turnIdOf = (raw: string): string => {
-      try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
-    };
-    // Did THIS surface originate the turn? Read the send refs directly rather
-    // than the `working` render state: `working` is derived from workBySid
-    // (recomputeWorkCounts -> setWorkBySid -> re-render), so a ref synced to it
-    // in a useEffect lags the POST by a render + effect flush. turn_started
-    // routinely arrives inside that window, the surface's OWN turn was then
-    // classified as foreign, and turn_done appended a SECOND assistant message
-    // beside the one the POST stream was already rendering — the doubled replies.
-    // activeSendAbortRefs is populated synchronously before the POST, so it is
-    // already accurate when the first ring event lands.
-    const hasLocalSendFor = (sid: string): boolean => {
-      for (const owner of activeSendAbortRefs.current.values())
-        if (owner === sid) return true;
-      for (const q of sendQueuesRef.current.values())
-        for (const it of q) if (it.originSid === sid) return true;
-      return false;
-    };
-    es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = hasLocalSendFor(activeAimeeSid);
-      // A steer continuation is server-initiated: render it even if this surface
-      // still looks "working" from the just-cancelled turn's closing stream. Only
-      // for the session this events stream is bound to (the one we steered).
-      if (expectSteerRef.current && expectSteerRef.current === activeAimeeSid) {
-        wasWorking = false; expectSteerRef.current = '';
-      }
-      // Self-echo suppression: the server now ALWAYS mirrors the full turn to the
-      // presence ring (durable source of truth for detached recovery), so the
-      // surface that ORIGINATED the turn receives an echo of its own stream here.
-      // Driving remoteTurn* from that echo is pure wasted work — the indicator is
-      // hidden while `working` (see render: remoteTurnActive && !working) and the
-      // native POST stream already renders the turn — and one full re-render per
-      // token, on top of the native one, pegs a core during every response. Only
-      // touch the live UI for a turn THIS surface did not originate.
-      if (!wasWorking) { clearRemoteFlush(); remoteTurnActiveRef.current = true; setRemoteTurnActive(true); setRemoteTurnText(''); }
-    });
-    es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      if (wasWorking) return; // own turn echo: don't accumulate or re-render (see turn_started)
+    es.addEventListener('ir', (event: MessageEvent<string>) => {
       try {
-        // Phase 1 ring schema: { turn_id, kind, content? }. Only text kinds feed
-        // the visible turn body; thinking/tool_call/usage are not shown here.
-        const d = JSON.parse(ev.data) as { kind?: string; content?: string };
-        if ((d.kind === undefined || d.kind === 'text') && d.content) {
-          observed += d.content;
-          scheduleRemoteFlush();
-        }
-      } catch { /* ignore malformed frame */ }
-    });
-    es.addEventListener('turn_done', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
-      const text = observed;
-      // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
-      //  - wasWorking: snapshot at turn_started (see hasLocalSendFor) — THIS
-      //    surface originated the turn, and its own send path already renders and
-      //    stores the assistant message. This is the sole "did I originate it"
-      //    gate, and it is snapshotted, not re-read: a NEW local send mid-
-      //    observation must NOT make us drop a foreign turn.
-      //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
-      //    replay already-seen turns, so the ring no longer re-emits a completed
-      //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain
-      //    as belt-and-suspenders for the cursor-0 cold-start case. The dedup
-      //    add/has stays OUTSIDE the updater so it stays pure (React strict-mode
-      //    double-invokes updaters; turn_done events are sequential so it is race-free).
-      if (tid && text.trim() && !wasWorking && !persistedTurnsRef.current.has(tid)) {
-        persistedTurnsRef.current.add(tid);
-        setStreamMsgs(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.type === 'assistant' && last.text === text) return prev;
-          return [...prev, { id: nextId(), type: 'assistant', text }];
-        });
+        ingestIR(activeAimeeSid, JSON.parse(event.data) as Record<string, unknown>);
+        setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
+      } catch (error) {
+        setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
+        es.close();
       }
-      observed = ''; curTurnId = ''; wasWorking = false;
-      clearRemoteFlush();
-      remoteTurnActiveRef.current = false;
-      setRemoteTurnActive(false); setRemoteTurnText('');
     });
-    es.onerror = () => { clearRemoteFlush(); remoteTurnActiveRef.current = false; setRemoteTurnActive(false); setRemoteTurnText(''); };
-    return () => { clearRemoteFlush(); es.close(); presenceSseRef.current = null; };
-  }, [activeAimeeSid, activeAttachId]);
+    return () => { es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
+  }, [activeAimeeSid]);
+  const canonicalState = irSessions.current[activeAimeeSid];
+  const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
+  const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
+  useEffect(() => {
+    const running = !!canonicalState?.activeTurns.length;
+    remoteTurnActiveRef.current = running;
+    setRemoteTurnActive(running);
+    setRemoteTurnText('');
+    scrollToBottom();
+  }, [canonicalState, scrollToBottom]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
@@ -1740,14 +1657,6 @@ export default function Chat() {
           a.iterCur === b.iterCur && a.iterMax === b.iterMax;
       })) return prev;
       return next;
-    });
-  }
-
-  function setSidIter(sid: string, iterCur: number, iterMax: number): void {
-    if (!sid) return;
-    setWorkBySid(prev => {
-      const cur = prev[sid] ?? { pending: 0, queued: 0, iterCur: 0, iterMax: 0 };
-      return { ...prev, [sid]: { ...cur, iterCur, iterMax } };
     });
   }
 
@@ -2112,7 +2021,7 @@ export default function Chat() {
     const serverMessages = activeSession?.messages;
     if (!serverMessages) return;
     const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
-    if (!tab || tab.aimeeSid !== renderedSidRef.current) return;
+    if (!tab || tab.aimeeSid !== renderedSidRef.current || irSessions.current[tab.aimeeSid]?.messages.length) return;
     // A live reply owns its message ids. Replacing it with a snapshot would
     // orphan the stream's ids, causing later deltas to lose their target.
     for (const owner of activeSendAbortRefs.current.values()) {
@@ -2427,7 +2336,7 @@ export default function Chat() {
     if (sid && (clientInflight || remoteTurnActiveRef.current)) {
       // Optimistically show the steer in the transcript and re-stick to bottom.
       atBottomRef.current = true;
-      setStreamMsgs(prev => [...prev, { id: nextId(), type: 'user', text }]);
+      // The admitted user message arrives through the canonical session log.
       void steerInterrupt(sid, text);
       return;
     }
@@ -2454,13 +2363,13 @@ export default function Chat() {
       const resp = await fetch('/api/chat/interrupt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ aimee_session_id: sid, message: text }),
+        body: JSON.stringify({ aimee_session_id: sid }),
       });
       if (resp.status === 401) { window.location.href = '/login'; return; }
       const j = resp.ok ? (await resp.json().catch(() => ({})) as { interrupted?: boolean }) : {};
       // No turn was actually in flight (or the steer couldn't be queued): send it
       // as an ordinary turn instead so the message is never lost.
-      if (!j.interrupted) sendNormally();
+      void j; sendNormally();
     } catch {
       sendNormally();
     }
@@ -2489,7 +2398,7 @@ export default function Chat() {
     // Sending is an explicit intent to follow the conversation: re-stick to the
     // bottom even if the user had scrolled up to read back.
     atBottomRef.current = true;
-    setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
+    void userMsgId; // canonical admission owns the user message
 
     const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
     pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid,
@@ -2623,11 +2532,19 @@ export default function Chat() {
           } else if (line.startsWith('data: ') && evtType) {
             try {
               const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              if (evtType === 'ir') {
+                ingestIR(streamRefs.originSid, data);
+                evtType = null;
+                continue;
+              }
+
               if (controller.signal.aborted || !activeSendAbortRefs.current.has(controller)) {
                 return false;
               }
-              handleSseEvent(evtType, data, streamRefs);
-            } catch { /* ignore */ }
+              throw new Error(evtType === 'error' ? String(data.message || 'Chat transport failed') : `Unsupported chat event: ${evtType}`);
+            } catch (error) {
+              throw error instanceof Error ? error : new Error('Invalid session event');
+            }
             evtType = null;
           }
         }
@@ -2648,19 +2565,12 @@ export default function Chat() {
     } catch (e) {
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
-      flushStreamAppends(); // land buffered text before appending the error
-      applyToOwnerStream(streamRefs.originSid, prev => {
-        const aid = streamRefs.assistantId;
-        if (aid !== null) {
-          return prev.map(m =>
-            m.id === aid ? { ...m, text: m.text + `\n\n**Connection error:** ${errMsg}` } : m
-          );
-        }
-        return [...prev, { id: nextId(), type: 'assistant', text: `**Connection error:** ${errMsg}` }];
-      });
+      setIRTransportErrors(prev => ({ ...prev, [aimeeSid]: errMsg }));
     } finally {
-      // The POST stream owns the transcript. Flush even on EOF/error so the
-      // last batch is visible without waiting for another event or a live row.
+      // The durable IR log owns the transcript; keep local tab metadata current.
+      fetch('/api/lsp/diagnostics/summary').then(r => r.json()).then((d: { errors: number; warnings: number; active_servers: number }) => {
+        setLspDiag(d.active_servers > 0 ? d : null);
+      }).catch(() => {});
       if (!controller.signal.aborted) saveOwnerStream(streamRefs.originSid);
       flushStreamAppends();
       activeSendAbortRefs.current.delete(controller);
@@ -2721,181 +2631,6 @@ export default function Chat() {
     };
     for (const [owner, byId] of byOwner) {
       applyToOwnerStream(owner, prev => applyDeltas(prev, byId));
-    }
-  }
-
-  function handleSseEvent(type: string, data: Record<string, unknown>, streamRefs: ActiveStreamRefs) {
-    switch (type) {
-      case 'turn_start': {
-        flushStreamAppends();
-        // Defer creating the assistant bubble until real text arrives (the
-        // 'text' case creates it lazily). A turn that emits only tool calls,
-        // only thinking, or nothing at all then leaves no empty message box.
-        streamRefs.assistantId = null;
-        streamRefs.thinkId = null;
-        streamRefs.toolId = null;
-        break;
-      }
-      case 'tool_call.started':
-      case 'tool_start': {
-        flushStreamAppends();
-        streamRefs.assistantId = null;
-        streamRefs.thinkId = null;
-        const toolName = String(data.name ?? '');
-        const toolArgs = String(data.args ?? '');
-        const tid = nextId();
-        streamRefs.toolId = tid;
-        applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-          id: tid, type: 'tool', text: '',
-          toolName, toolArgs, toolResult: undefined,
-        }]);
-        break;
-      }
-      case 'tool_call.completed':
-      case 'tool_result': {
-        const tid = streamRefs.toolId;
-        if (tid !== null) {
-          const toolResult = String(data.result ?? '');
-          applyToOwnerStream(streamRefs.originSid, prev => prev.map(m =>
-            m.id === tid ? { ...m, toolResult } : m
-          ));
-          streamRefs.toolId = null;
-        }
-        break;
-      }
-      case 'thinking':
-      case 'text': {
-        const delta = String(data.content ?? '');
-        if (!delta) break;
-        const thinking = type === 'thinking';
-        const field = thinking ? 'thinkText' : 'text';
-        let id = thinking ? streamRefs.thinkId : streamRefs.assistantId;
-        if (id === null) {
-          // Assign ids outside React's updater: multiple events can arrive in
-          // one read, and StrictMode may replay state updaters.
-          flushStreamAppends();
-          id = nextId();
-          if (thinking) {
-            streamRefs.thinkId = id;
-            streamRefs.assistantId = null;
-          } else {
-            streamRefs.assistantId = id;
-            streamRefs.thinkId = null;
-          }
-          const msg: StreamMsg = thinking
-            ? { id, type: 'thinking', text: '', thinkText: delta }
-            : { id, type: 'assistant', text: delta };
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, msg]);
-        } else {
-          pendingAppendsRef.current.push({ owner: streamRefs.originSid, id, field, delta });
-          if (flushTimerRef.current === null) {
-            flushTimerRef.current = window.setTimeout(flushStreamAppends, STREAM_FLUSH_THROTTLE_MS);
-          }
-        }
-        break;
-      }
-      case 'turn_end': {
-        // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
-        // whatever tab is active now if the user switched tabs mid-turn.
-        saveOwnerStream(streamRefs.originSid);
-        // Keep the reply id until the next message starts so any trailing
-        // text events append to the same bubble.
-        streamRefs.thinkId = null;
-        streamRefs.toolId = null;
-        break;
-      }
-      case 'error': {
-        flushStreamAppends(); // land buffered text before appending the error
-        const msg = String(data.message ?? 'Unknown error');
-        applyToOwnerStream(streamRefs.originSid, prev => {
-          const aid = streamRefs.assistantId;
-          if (aid !== null) {
-            return prev.map(m =>
-              m.id === aid ? { ...m, text: m.text + `\n\n**Error:** ${msg}` } : m
-            );
-          }
-          return [...prev, { id: nextId(), type: 'assistant', text: `**Error:** ${msg}` }];
-        });
-        break;
-      }
-      case 'session': {
-        const sid = String(data.id ?? '');
-        // Apply the provider session id to the tab that OWNS this stream, located
-        // by its stable aimeeSid — not activeIdxRef, which may have moved if the
-        // user switched tabs mid-turn. This is display/cache metadata only; the
-        // backend resumes from its authenticated server-side binding.
-        const owner = streamRefs.originSid;
-        if (owner) {
-          const sessionId = tabsRef.current.find(t => t.aimeeSid === owner)?.sessionId;
-          setTabs(prev => {
-            const idx = prev.findIndex(t => t.aimeeSid === owner);
-            if (idx < 0) return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], sid };
-            tabsRef.current = next;
-            return next;
-          });
-          if (sessionId && sid) patchSession(sessionId, { claudeSid: sid });
-        }
-        break;
-      }
-      case 'iteration': {
-        setSidIter(streamRefs.originSid, Number(data.iteration ?? 0), Number(data.max ?? 0));
-        break;
-      }
-      case 'usage': {
-        const u = {
-          in: Number(data.in ?? 0),
-          out: Number(data.out ?? 0),
-          cost: Number(data.cost ?? 0),
-        };
-        // usage_kind distinguishes realized (provider-reported, billable) spend
-        // from estimated/avoided/partial; default realized for the chat path.
-        const kind = typeof data.usage_kind === 'string' && data.usage_kind ? data.usage_kind : 'realized';
-        setLastUsage(u);
-        setSessionUsage(prev => ({ in: prev.in + u.in, out: prev.out + u.out, cost: prev.cost + u.cost, kind }));
-        break;
-      }
-      case 'turn_summary': {
-        const text = String(data.text ?? '');
-        if (text) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: nextId(), type: 'narration', text }]);
-        }
-        break;
-      }
-      case 'diff_output': {
-        const path = String(data.path ?? '');
-        const diff = String(data.diff ?? '');
-        if (diff) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-            id: nextId(), type: 'diff', text: '',
-            diffPath: path || undefined, diffContent: diff,
-          }]);
-        }
-        break;
-      }
-      case 'checkpoint': {
-        const snapshotId = Number(data.snapshot_id ?? 0);
-        if (snapshotId > 0) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-            id: nextId(), type: 'checkpoint', text: '', snapshotId,
-          }]);
-        }
-        break;
-      }
-      case 'done': {
-        saveOwnerStream(streamRefs.originSid);
-        void refreshWorkflow();
-        /* Refresh LSP diagnostic badge after each completed turn */
-        fetch('/api/lsp/diagnostics/summary')
-          .then(r => r.json())
-          .then((d: { errors: number; warnings: number; active_servers: number }) => {
-            if (d.active_servers > 0) setLspDiag(d);
-            else setLspDiag(null);
-          })
-          .catch(() => {});
-        break;
-      }
     }
   }
 
@@ -3009,7 +2744,13 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
+        {canonicalState?.messages.length ? <>
+          {windowedMsgs.length > 0 && <details><summary>Earlier text-only history</summary>
+            <Transcript messages={windowedMsgs} working={false} activeSid={activeAimeeSid} />
+          </details>}
+          <IRTranscript state={canonicalState} /></> :
+          <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
+        {irTransportErrors[activeAimeeSid] && <div role="alert">{irTransportErrors[activeAimeeSid]}</div>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
         {remoteTurnActive && !working && (
           <div style={{

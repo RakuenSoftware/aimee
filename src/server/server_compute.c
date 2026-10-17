@@ -254,6 +254,27 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
 /* Write response and free context */
 void compute_respond(compute_ctx_t *cctx, cJSON *resp)
 {
+   if (cctx->ir_enabled)
+   {
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      int failed =
+          cctx->ir_failed || (cJSON_IsString(status) && !strcmp(status->valuestring, "error"));
+      if (server_chat_ir_finish(cctx, failed
+                                          ? (cJSON_IsString(message) ? message->valuestring
+                                                                     : "canonical capture failed")
+                                          : NULL) == 0)
+      {
+         cJSON_Delete(resp);
+         return;
+      }
+      /* No successful completion after a storage failure. The transport error
+       * is deliberately outside the persisted content protocol. */
+      cJSON_Delete(resp);
+      resp = cJSON_CreateObject();
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
+   }
    compute_update_background_job(cctx, resp);
    compute_update_coord_task(cctx, resp);
 
@@ -337,6 +358,12 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
 
 void compute_ctx_free(compute_ctx_t *cctx)
 {
+   if (cctx->ir_enabled)
+   {
+      if (!cctx->ir_completed)
+         server_chat_ir_finish(cctx, "execution ended without completion");
+      aimee_ir_session_set_sink(cctx->ir_previous_sink, cctx->ir_previous_context);
+   }
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)
@@ -345,6 +372,7 @@ void compute_ctx_free(compute_ctx_t *cctx)
    }
    if (cctx->req)
       cJSON_Delete(cctx->req);
+   cJSON_Delete(cctx->ir_tool_ids);
    free(cctx->delta_buf); /* presence-ring text-coalescing buffer (WP-1) */
    free(cctx->live_text); /* db1 live-turn mirror accumulator */
    if (cctx->write_mutex)

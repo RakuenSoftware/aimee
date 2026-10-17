@@ -31,6 +31,12 @@ int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len)
    return 1;
 }
 
+/* Minimal harnesses have no bound server turn to cancel. */
+int agent_request_cancelled(void)
+{
+   return 0;
+}
+
 static agent_t g_seen_agent;
 static char g_seen_system[256];
 static char g_seen_user[256];

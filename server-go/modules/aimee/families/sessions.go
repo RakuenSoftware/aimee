@@ -46,6 +46,8 @@ const (
 	opServerSessionErasureReceipt uint32 = 27
 	opSessionIRAppend             uint32 = 28
 	opSessionIRPage               uint32 = 29
+	opSessionHarnessGet           uint32 = 30
+	opSessionHarnessBind          uint32 = 31
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -960,14 +962,16 @@ var Sessions = store.Family{
 		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
 		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
-		opSessionIRPage:               {Name: "session_ir_page", Args: 3, Run: sessionIRPage},
+		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
+		opSessionHarnessGet:           {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
+		opSessionHarnessBind:          {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
 	},
 }
 
 // The existing session row is the append lock. Appends and retry checks run in
 // one transaction, so concurrent producers cannot allocate the same sequence.
 // Sequence strings remain exact when consumed by a JavaScript browser.
-const sessionIRLockSQL = `SELECT id FROM server_sessions WHERE id = $1 FOR UPDATE`
+const sessionIRLockSQL = `SELECT principal FROM server_sessions WHERE id = $1 FOR UPDATE`
 const sessionIRExistingSQL = `SELECT sequence, turn_id, actor, payload FROM session_ir_events
  WHERE session_id = $1 AND event_id = $2`
 const sessionIRInsertSQL = `INSERT INTO session_ir_events
@@ -975,7 +979,9 @@ const sessionIRInsertSQL = `INSERT INTO session_ir_events
  VALUES ($1, (SELECT coalesce(max(sequence), 0) + 1 FROM session_ir_events WHERE session_id = $1),
  $2, $3, $4, $5) RETURNING sequence`
 const sessionIRPageSQL = `SELECT sequence, event_id, turn_id, actor, payload
- FROM session_ir_events WHERE session_id = $1 AND sequence > $2 ORDER BY sequence LIMIT $3`
+ FROM session_ir_events WHERE session_id = $1 AND sequence > $2
+ AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$4)
+ ORDER BY sequence LIMIT $3`
 
 func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	for _, identity := range f[:4] {
@@ -992,6 +998,9 @@ func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, 
 			return store.StatusMissing, nil, nil
 		}
 		return 0, nil, err
+	}
+	if locked != f[3] {
+		return store.StatusInvalid, nil, nil
 	}
 	var sequence int64
 	var turn, actor, payload string
@@ -1014,10 +1023,10 @@ func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, 
 func sessionIRPage(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	after, err := strconv.ParseInt(f[1], 10, 64)
 	limit, limitErr := strconv.Atoi(f[2])
-	if f[0] == "" || len(f[0]) > 1024 || err != nil || after < 0 || strconv.FormatInt(after, 10) != f[1] || limitErr != nil || limit < 1 || limit > 128 {
+	if f[0] == "" || len(f[0]) > 1024 || err != nil || after < 0 || strconv.FormatInt(after, 10) != f[1] || limitErr != nil || limit < 1 || limit > 128 || f[3] == "" || len(f[3]) > 1024 {
 		return store.StatusInvalid, nil, nil
 	}
-	rows, err := q.Query(ctx, sessionIRPageSQL, f[0], after, limit)
+	rows, err := q.Query(ctx, sessionIRPageSQL, f[0], after, limit, f[3])
 	if err != nil {
 		return 0, nil, err
 	}
@@ -1060,4 +1069,51 @@ func sessionIRPage(ctx context.Context, q store.Queryer, f []string) (uint32, []
 		return 0, nil, err
 	}
 	return store.StatusOK, []string{string(encoded)}, nil
+}
+
+// Harness handles cannot be adopted by another session. The canonical session
+// owner authorizes the caller before invoking this runtime-metadata contract.
+const sessionHarnessGetSQL = `SELECT native_id FROM session_harness_handles WHERE session_id=$1 AND harness=$2 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$3)`
+const sessionHarnessBindSQL = `INSERT INTO session_harness_handles(session_id,harness,native_id)
+ VALUES($1,$2,$3) ON CONFLICT(session_id,harness) DO UPDATE SET native_id=excluded.native_id`
+
+func validHarnessIdentity(f []string) bool {
+	for _, value := range f {
+		if value == "" || len(value) > 1024 {
+			return false
+		}
+	}
+	return len(f[1]) <= 128
+}
+func sessionHarnessGet(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if !validHarnessIdentity(f) {
+		return store.StatusInvalid, nil, nil
+	}
+	var id string
+	if err := q.QueryRow(ctx, sessionHarnessGetSQL, f[0], f[1], f[2]).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{id}, nil
+}
+func sessionHarnessBind(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if !validHarnessIdentity(f) {
+		return store.StatusInvalid, nil, nil
+	}
+	var id string
+	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	if id != f[3] {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, err := q.Exec(ctx, sessionHarnessBindSQL, f[0], f[1], f[2]); err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, nil, nil
 }

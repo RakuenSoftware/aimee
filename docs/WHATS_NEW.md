@@ -1,10 +1,18 @@
 # What's new
 
-## Canonical IR session migration (in progress)
+## Browser chat uses the canonical IR session log
 
-Adds typed session-event serialization, an ordered Server-owned event log, and a shared frontend
-projection for live/replayed messages, tools, thinking, attachments, and harness controls. These are
-migration foundations; the live browser/runtime paths have not yet switched to the new contract.
+The existing web GUI now renders canonical model messages, thinking, tool arguments and results
+from an ordered Server-owned log. Live delivery and replay use the same reducer; reconnecting
+from another machine replays committed events, and closing a tab does not cancel the running turn.
+The web backend forwards canonical bytes without rebuilding model events.
+
+Claude browser turns use `claude -p` with structured streaming instead of tmux capture. Claude,
+Codex app-server and ACP frames are converted at their native entry adapters. Claude and Codex
+resume handles are stored separately for each Aimee session; their runtime homes receive
+credentials from the Vault. Existing text-only history remains explicitly marked as legacy.
+Harness permission events are typed and displayed; interactive browser approval controls and
+removing the remaining legacy execution bridges are still migration work.
 
 ## Browser chat repairs
 

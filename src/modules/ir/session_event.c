@@ -255,10 +255,37 @@ int aimee_ir_session_emit_response(const aimee_response_t *response, const char 
 {
    if (!response)
       return -1;
+   static _Thread_local unsigned long long counter;
+   char generated[64];
+   if (!message_id)
+   {
+      snprintf(generated, sizeof(generated), "response-%llu", ++counter);
+      message_id = generated;
+   }
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,
                               .n_blocks = response->n_content};
    aimee_session_event_t event = {
        .kind = AIMEE_SESSION_MESSAGE, .message = &message, .message_id = message_id};
    return aimee_ir_session_emit(&event);
+}
+
+int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error)
+{
+   static _Thread_local unsigned long long counter;
+   char id[64];
+   snprintf(id, sizeof(id), "tool-result-%llu", ++counter);
+   cJSON *content = cJSON_CreateString(result ? result : "");
+   if (!content)
+      return -1;
+   aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
+                          .tool_id = (char *)tool_id,
+                          .tool_result = content,
+                          .tool_is_error = is_error};
+   aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &message};
+   int rc = aimee_ir_session_emit(&event);
+   cJSON_Delete(content);
+   return rc;
 }

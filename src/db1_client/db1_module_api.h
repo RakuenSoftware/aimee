@@ -263,6 +263,8 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT         27u
 #define AIMEE_DB1_OP_SESSION_IR_APPEND                      28u
 #define AIMEE_DB1_OP_SESSION_IR_PAGE                        29u
+#define AIMEE_DB1_OP_SESSION_HARNESS_GET 30u
+#define AIMEE_DB1_OP_SESSION_HARNESS_BIND 31u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

@@ -27,6 +27,12 @@ int agent_execute_with_tools(const agent_t *a, const agent_network_t *n, const c
    return 0;
 }
 
+/* Minimal harnesses have no bound server turn to cancel. */
+int agent_request_cancelled(void)
+{
+   return 0;
+}
+
 static void test_acp_adapter_registered(void)
 {
    const provider_cli_adapter_t *acp = provider_cli_adapter_get("acp");

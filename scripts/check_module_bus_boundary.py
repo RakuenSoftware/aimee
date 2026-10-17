@@ -30,6 +30,8 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # the pipeline's shared data contract rather than a peer service call; retiring
 # them depends on docs/proposals/pending/ir-sole-path-and-pluggable-stages.md,
 # not on moving a call onto the bus.
+# Harness translation also consumes the canonical session envelope: this is the
+# same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
     ("src/modules/delegates/aimee_ir_rescue.c", "aimee/ir/aimee_ir_metrics.h"),
     ("src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h", "aimee/ir/aimee_ir.h"),
@@ -37,6 +39,7 @@ IR_SHARED_TYPE = {
     ("src/modules/translation/include/aimee/translation/aimee_backend.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_frontend.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_ir_stream.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/translation/include/aimee/translation/harness_ir.h", "aimee/ir/session_event.h"),
 }
 # A peer service called directly in process. Each one must become bus traffic.
 PENDING_BUS_MIGRATION = {

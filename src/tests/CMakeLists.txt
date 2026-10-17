@@ -496,3 +496,21 @@ endif()
 add_test(NAME test_conversation_context COMMAND test_conversation_context)
 set_tests_properties(test_conversation_context PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Native harness conversion and the POSIX print-mode lifecycle.
+aimee_add_test(test_harness_ir test_harness_ir.c
+  ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
+  ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
+  ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+if(NOT WIN32)
+  aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c
+    ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
+    ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+endif()
+
+if(NOT WIN32)
+  aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+  target_link_libraries(test_server_chat_ir PRIVATE OpenSSL::Crypto)
+endif()

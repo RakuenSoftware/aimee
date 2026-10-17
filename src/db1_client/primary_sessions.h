@@ -7,6 +7,8 @@
 #ifndef DEC_DB1_PRIMARY_SESSIONS_H
 #define DEC_DB1_PRIMARY_SESSIONS_H 1
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -30,10 +32,16 @@ extern "C"
    /* Canonical ordered session log. Append returns an exact decimal sequence
     * into out_sequence[32]; retrying an event ID is idempotent only when every
     * immutable field matches. Page returns owned canonical envelope-array JSON. */
-   int db1_session_ir_append(const char *session_id, const char *event_id,
-                              const char *turn_id, const char *actor,
-                              const char *payload, char out_sequence[32]);
-   char *db1_session_ir_page(const char *session_id, const char *after, int limit);
+   int db1_session_ir_append(const char *session_id, const char *event_id, const char *turn_id,
+                             const char *actor, const char *payload, char out_sequence[32]);
+   char *db1_session_ir_page(const char *session_id, const char *after, int limit,
+                             const char *principal);
+
+   /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
+   int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,
+                               size_t capacity, const char *principal);
+   int db1_session_harness_bind(const char *session_id, const char *harness, const char *native_id,
+                                const char *principal);
 
    /* Upsert the provider-formatted message array JSON for one primary
     * conversation session. Returns 0 on success. */

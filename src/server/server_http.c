@@ -1254,90 +1254,6 @@ static void handle_run_events(int fd, const char *id, const char *request_id)
 /* handle_session_events lives in server_http_sse.inc (textual include) to keep
  * this file under the 2000-line cap; it shares this TU's static SSE helpers. */
 
-/* SSE event streams (handle_session_events / handle_run_events) are long-lived:
- * running them inline in handle_conn would block the single listener thread for
- * the stream's whole lifetime, starving every other /v1 connection (a presence
- * subscriber would freeze the entire HTTP surface). Offload each to a detached
- * thread on a dup'd fd — mirroring the chat.send_stream worker — so the listener
- * returns immediately. The listener's close(fd) only drops its own reference;
- * the worker streams on the dup until the client disconnects, then closes it. A
- * modest cap bounds concurrent streams against fd/thread exhaustion. */
-typedef void (*sse_stream_fn)(int fd, const char *id, const char *request_id);
-typedef struct
-{
-   int fd;
-   sse_stream_fn fn;
-   char id[160];
-   char request_id[64];
-} sse_offload_t;
-
-static atomic_int g_sse_live = 0;
-#define SSE_LIVE_DEFAULT 256
-static int g_sse_max = SSE_LIVE_DEFAULT; /* configurable via aimee.api.max_event_streams */
-
-/* Set the cap on concurrent SSE event streams. n <= 0 restores the default.
- * Called once at startup (server_http_start) before any stream is accepted. */
-void server_http_set_max_event_streams(int n)
-{
-   g_sse_max = (n > 0) ? n : SSE_LIVE_DEFAULT;
-}
-
-static void *sse_offload_thread(void *arg)
-{
-   sse_offload_t *o = (sse_offload_t *)arg;
-   o->fn(o->fd, o->id, o->request_id);
-   close(o->fd);
-   atomic_fetch_sub(&g_sse_live, 1);
-   free(o);
-   return NULL;
-}
-
-/* Hand an SSE stream to a detached worker on a dup'd fd. Returns 0 on success
- * (the caller must not touch fd afterward beyond the listener's own close).
- * Returns -1 if the live-stream cap is hit or resources are exhausted, in which
- * case the caller should send an error on fd and not stream. */
-static int sse_offload(int fd, sse_stream_fn fn, const char *id, const char *request_id)
-{
-   /* SSE offload dups the fd to a detached thread; a TLS conn's SSL is owned by
-    * this conn's worker and cannot be shared with the dup (and the dup has no SSL
-    * registered → it would emit plaintext on the TLS socket). Refuse over TLS; the
-    * caller turns this into a 503. SSE-over-TLS is phase 1c. */
-   if (server_conn_io_has_ssl(fd))
-      return -1;
-   if (atomic_fetch_add(&g_sse_live, 1) >= g_sse_max)
-   {
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   int dfd = dup(fd);
-   if (dfd < 0)
-   {
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   sse_offload_t *o = (sse_offload_t *)calloc(1, sizeof(*o));
-   if (!o)
-   {
-      close(dfd);
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   o->fd = dfd;
-   o->fn = fn;
-   snprintf(o->id, sizeof(o->id), "%s", id ? id : "");
-   snprintf(o->request_id, sizeof(o->request_id), "%s", request_id ? request_id : "");
-   pthread_t t;
-   if (pthread_create(&t, NULL, sse_offload_thread, o) != 0)
-   {
-      close(dfd);
-      free(o);
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   pthread_detach(t);
-   return 0;
-}
-
 /* Extract a request header value (case-insensitive name match) from the raw
  * request `buf` into out[n], trimmed of leading whitespace and the trailing
  * CR/LF. Returns 1 if found, 0 otherwise (out gets ""). */
@@ -1769,7 +1685,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
             id[idlen] = '\0';
             /* Offload to a detached worker so the long-lived SSE stream does not
              * block the listener thread; fall back to a 503 if the cap is hit. */
-            if (sse_offload(fd, handle_run_events, id, request_id) != 0)
+            if (server_http_sse_offload(fd, handle_run_events, id, request_id) != 0)
                send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
             LOG_INFO("server.http", "GET %s -> events req_id=%s", path, request_id);
             return;
@@ -1798,7 +1714,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
              * EventSource auto-reconnect sends the native Last-Event-ID header
              * (most recent); a fresh remount has no header and instead passes
              * ?cursor=<persisted> in the query. Absent/0 = replay from oldest. */
-            char idc[160];
+            char idc[256];
             char leid[40] = "";
             const char *src = NULL;
             if (http_header(buf, "Last-Event-ID", leid, sizeof(leid)) && leid[0])
@@ -1828,10 +1744,19 @@ void handle_conn(int fd, int is_tcp, int is_management)
                snprintf(idc, sizeof(idc), "%s?cursor=%llu", id, n);
             else
                snprintf(idc, sizeof(idc), "%s", id);
+            if (strstr(query, "format=ir"))
+            {
+               if (!server_http_identity_principal()[0])
+               {
+                  send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
+                  return;
+               }
+               snprintf(idc, sizeof(idc), "%s?format=ir&cursor=%llu", id, n);
+            }
             /* Offload to a detached worker so the long-lived presence SSE stream
              * does not block the listener thread (a subscriber would otherwise
              * freeze the whole /v1 surface); 503 if the live-stream cap is hit. */
-            if (sse_offload(fd, handle_session_events, idc, request_id) != 0)
+            if (server_http_sse_offload(fd, handle_session_events, idc, request_id) != 0)
                send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
             LOG_INFO("server.http", "GET %s -> presence events req_id=%s", path, request_id);
             return;
@@ -1850,7 +1775,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
          idlen = idlen < sizeof(id) ? idlen : sizeof(id) - 1;
          memcpy(id, path + 16, idlen);
          id[idlen] = '\0';
-         if (sse_offload(fd, handle_cli_session_stream, id, request_id) != 0)
+         if (server_http_sse_offload(fd, handle_cli_session_stream, id, request_id) != 0)
             send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
          return;
       }

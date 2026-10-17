@@ -7,6 +7,7 @@
 #include "coord_jobs.h"
 #include "server.h"
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
@@ -39,6 +40,14 @@ typedef struct
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
    cJSON *req; /* owned by this context */
+   int ir_enabled, ir_failed, ir_completed;
+   unsigned long long ir_counter;
+   unsigned long long ir_model_events;
+   cJSON *ir_tool_ids;
+   char ir_session[128], ir_turn[128];
+   char ir_harness[32];
+   aimee_ir_session_sink_fn ir_previous_sink;
+   void *ir_previous_context;
    /* Unified-presence turn arbitration. When a chat request carries an
     * attach_id and a presence exists for the session, handle_chat_send_stream
     * acquires the per-session turn lock before dispatch; the pooled worker
@@ -91,6 +100,8 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
  * (enforce-delegate-only). Call once at server startup. */
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
+int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);

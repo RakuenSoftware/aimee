@@ -1,3 +1,6 @@
+#include <aimee/translation/harness_ir.h>
+#include "agent_config.h"
+#include "aimee_home.h"
 /* cli_codex.c: see cli_codex.h. Spawns `codex app-server`, drives the
  * JSON-RPC handshake (initialize → thread/start → turn/start), reads
  * notifications until turn/completed, and assembles the final
@@ -74,6 +77,9 @@ typedef struct
    int child_reaped;
    int child_status;
    cli_codex_read_status_t last_read_status;
+   aimee_harness_ir_t ir;
+   const char *home;
+   const char *session_id;
 } cli_codex_t;
 
 /* Read whatever stderr has buffered without blocking, append to the
@@ -265,6 +271,9 @@ static void cli_codex_exit_status_desc(const cli_codex_t *c, char *out, size_t o
 static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
                            const char *sandbox_config)
 {
+   char aimee_root[4096] = "";
+   if (c->home && c->home[0])
+      snprintf(aimee_root, sizeof(aimee_root), "%s", aimee_home());
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
@@ -321,6 +330,28 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
       const char *sandbox = (sandbox_config && sandbox_config[0])
                                 ? sandbox_config
                                 : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
+      if (c->home && c->home[0])
+      {
+         char codex_home[4096];
+         if (snprintf(codex_home, sizeof(codex_home), "%s/.codex", c->home) >=
+             (int)sizeof(codex_home))
+            _exit(126);
+         setenv("AIMEE_HOME", aimee_root, 1);
+         char endpoint[4140];
+         if (snprintf(endpoint, sizeof(endpoint), "unix:%s/aimee-http.sock", aimee_root) >=
+             (int)sizeof(endpoint))
+            _exit(126);
+         setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+         setenv("HOME", c->home, 1);
+         setenv("CODEX_HOME", codex_home, 1);
+         unsetenv("OPENAI_API_KEY");
+         if (c->session_id && c->session_id[0])
+            setenv("AIMEE_SESSION_ID", c->session_id, 1);
+         execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox, "-c",
+                "model_provider=\"openai\"", "-c", "mcp_servers.aimee.command=\"aimee\"", "-c",
+                "mcp_servers.aimee.args=[\"mcp\",\"serve\"]", (char *)NULL);
+         _exit(127);
+      }
       execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox,
              (char *)NULL);
       _exit(127);
@@ -426,6 +457,7 @@ static void cli_codex_close(cli_codex_t *c)
    }
    free(c->buf);
    c->buf = NULL;
+   aimee_harness_ir_free(&c->ir);
 }
 
 static int cli_codex_reserve_stdout(cli_codex_t *c, size_t need, cli_codex_read_status_t *status)
@@ -532,6 +564,8 @@ static int cli_codex_write_all(cli_codex_t *c, const char *data, size_t total)
 
 static int cli_codex_send(cli_codex_t *c, cJSON *msg)
 {
+   if (aimee_ir_session_get_sink(NULL) && aimee_codex_reply_ir(msg, &c->ir) != 0)
+      return -1;
    char *s = cJSON_PrintUnformatted(msg);
    if (!s)
       return -1;
@@ -558,8 +592,15 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          *status = CLI_CODEX_READ_EOF;
       return NULL;
    }
+   long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
+      if (agent_request_cancelled())
+      {
+         if (status)
+            *status = CLI_CODEX_READ_READ_ERR;
+         return NULL;
+      }
       /* Look for newline in current buffer. */
       char *nl = c->buf ? memchr(c->buf, '\n', c->buf_len) : NULL;
       if (nl)
@@ -572,6 +613,18 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          size_t consumed = (size_t)(nl - c->buf) + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
+         if (line_dup && aimee_ir_session_get_sink(NULL))
+         {
+            cJSON *frame = cJSON_Parse(line_dup);
+            int rc = aimee_codex_frame_ir(frame, &c->ir);
+            cJSON_Delete(frame);
+            if (rc != 0)
+            {
+               if (status)
+                  *status = CLI_CODEX_READ_READ_ERR;
+               return NULL;
+            }
+         }
          return line_dup;
       }
 
@@ -599,12 +652,17 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          if (c->err_fd > max_fd)
             max_fd = c->err_fd;
       }
+      /* Poll cancellation while preserving the caller's complete line budget. */
+      if (ms > 100 && aimee_ir_session_get_sink(NULL))
+         ms = 100;
       struct timeval tv;
       tv.tv_sec = ms / 1000;
       tv.tv_usec = (ms % 1000) * 1000;
       int sel = select(max_fd + 1, &rfds, NULL, NULL, &tv);
       if (sel == 0)
       {
+         if (aimee_ir_session_get_sink(NULL) && (!line_deadline || util_now_ms() < line_deadline))
+            continue;
          if (status)
             *status = CLI_CODEX_READ_LINE_TIMEOUT;
          return NULL;
@@ -1367,6 +1425,9 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    c.err_fd = -1;
    c.err_log_fd = -1;
    c.autonomous = req->autonomous;
+   c.home = req->home;
+   c.session_id = req->session_id;
+   c.ir.admitted_prompt = req->user_prompt;
    const char *sandbox_config =
        req->autonomous ? CLI_CODEX_SANDBOX_DANGER_CONFIG : CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG;
    if (cli_codex_spawn(&c, NULL, req->cwd, sandbox_config) != 0)

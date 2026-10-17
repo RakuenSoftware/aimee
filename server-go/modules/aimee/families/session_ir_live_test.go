@@ -64,7 +64,7 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_session_harness.sql"} {
 		body, err := schemaFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -75,6 +75,33 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 	}
 	if _, err = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES ('s','operator'),('other','other')`); err != nil {
 		t.Fatal(err)
+	}
+
+	// Equal opaque IDs from different harnesses are distinct. Another session
+	// cannot adopt a handle already bound to the same harness.
+	for _, binding := range []struct {
+		sid, harness string
+		ok           bool
+	}{{"s", "claude", true}, {"s", "codex", true}, {"other", "claude", false}} {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, _, err := sessionHarnessBind(ctx, sessionIRLiveTx{tx}, []string{binding.sid, binding.harness, "same-native-id", map[string]string{"s": "operator", "other": "other"}[binding.sid]})
+		if binding.ok {
+			if err != nil || status != store.StatusOK {
+				tx.Rollback(ctx)
+				t.Fatalf("bind: %d %v", status, err)
+			}
+			if err = tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err == nil {
+				t.Fatal("cross-session adoption succeeded")
+			}
+			tx.Rollback(ctx)
+		}
 	}
 	payload := `{"kind":"message","message_id":"m","payload":{"role":"assistant","blocks":[{"type":"text","text":"hello"}]}}`
 	appendEvent := func(event string) (string, error) {
@@ -143,7 +170,7 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 	q := sessionIRLiveTx{tx}
-	status, cells, err := sessionIRPage(ctx, q, []string{"s", "0", "128"})
+	status, cells, err := sessionIRPage(ctx, q, []string{"s", "0", "128", "operator"})
 	if err != nil || status != store.StatusOK {
 		t.Fatalf("page: %d %v", status, err)
 	}
@@ -161,9 +188,26 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 			t.Fatal("replay order changed")
 		}
 	}
-	status, cells, err = sessionIRPage(ctx, q, []string{"other", "0", "128"})
+	status, cells, err = sessionIRPage(ctx, q, []string{"other", "0", "128", "other"})
 	if err != nil || status != store.StatusOK || cells[0] != "[]" {
 		t.Fatalf("foreign session inherited events: %v %v", cells, err)
+	}
+
+	status, cells, err = sessionIRPage(ctx, q, []string{"s", "0", "128", "other"})
+	if err != nil || status != store.StatusOK || cells[0] != "[]" {
+		t.Fatal("foreign principal read the transcript")
+	}
+	status, _, err = sessionIRAppend(ctx, q, []string{"s", "forged", "turn", "other", payload})
+	if err != nil || status != store.StatusInvalid {
+		t.Fatal("foreign principal appended to session")
+	}
+	status, _, err = sessionHarnessGet(ctx, q, []string{"s", "claude", "other"})
+	if err != nil || status != store.StatusMissing {
+		t.Fatal("foreign principal read a resume handle")
+	}
+	status, _, err = sessionHarnessBind(ctx, q, []string{"s", "claude", "forged", "other"})
+	if err != nil || status != store.StatusInvalid {
+		t.Fatal("foreign principal changed a resume handle")
 	}
 	if _, err = q.Exec(ctx, `DELETE FROM server_sessions WHERE id='s'`); err != nil {
 		t.Fatal(err)
@@ -175,6 +219,10 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 	status, _, err = sessionIRAppend(ctx, q, []string{"s", "late", "turn", "operator", payload})
 	if err != nil || status != store.StatusMissing {
 		t.Fatalf("deleted session accepted append: %d %v", status, err)
+	}
+
+	if err = q.QueryRow(ctx, `SELECT count(*) FROM session_harness_handles`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("harness metadata did not cascade: %d %v", remaining, err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
