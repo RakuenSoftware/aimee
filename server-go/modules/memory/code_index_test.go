@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -571,5 +573,246 @@ func TestPrivateCodePublishedSpanBoundsAndDrift(t *testing.T) {
 	raw, err = s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "spans", FilePath: "short.c", LineStart: 1, LineEnd: 1})
 	if err != nil || !strings.Contains(string(raw), `"content":"changed\n"`) || !strings.Contains(string(raw), `"generation":2`) {
 		t.Fatalf("new generation not visible: %s (%v)", raw, err)
+	}
+}
+
+func TestCodeQueryWaitsForBusyEmbedderWithinCallerBudget(t *testing.T) {
+	t.Setenv("AIMEE_GRAPH_FUSION", "off")
+	ctx, s, db := codeFixture(t)
+	_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: []CodeFile{{Path: "worker.c", Content: "void worker() {}"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &vectorTestEgress{serving: "model-a"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A document ahead of this query takes longer than the previous 1.5s cap.
+	executor.delay = 2 * time.Second
+	raw, err := s.searchCode(ctx, "alpha", "semantic question", 10)
+	var diagnostic struct {
+		DenseState string `json:"dense_state"`
+	}
+	if err != nil || json.Unmarshal(raw, &diagnostic) != nil || diagnostic.DenseState != "query_executed" {
+		t.Fatalf("busy healthy embedder lost semantic retrieval: %s (%v)", raw, err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	raw, err = s.searchCode(bounded, "alpha", "worker", 10)
+	if err != nil || json.Unmarshal(raw, &diagnostic) != nil || diagnostic.DenseState != "unavailable" || time.Since(started) >= 500*time.Millisecond {
+		t.Fatalf("short caller budget was not preserved for lexical SQL: %s (%v)", raw, err)
+	}
+}
+
+func TestCodeRebuildReusesOnlyIdenticalVerifiedInputs(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	publish := func(project, path, content string) {
+		t.Helper()
+		if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: project, Root: "/fixture/" + project, Files: []CodeFile{{Path: path, Content: content}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("alpha", "worker.c", "void worker() {}")
+	identity := fixtureEmbeddingIdentity()
+	identity.Dimensions = 3
+	executor := &vectorTestEgress{identity: &identity}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := len(executor.seen)
+	publish("beta", "worker.c", "void worker() {}")
+	publish("gamma", "different.c", "void worker() {}")
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 1 {
+		t.Fatalf("identical input was recomputed or a different path reused it: %v", executor.seen[before:])
+	}
+	var active int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_embedding_active WHERE project IN ('alpha','beta','gamma')`).Scan(&active); err != nil || active != 3 {
+		t.Fatal(active, err)
+	}
+	// Model identity changes invalidate every old cached vector.
+	identity.ArtifactRevision = strings.Repeat("c", 40)
+	before = len(executor.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 3 {
+		t.Fatal("a different generation borrowed cached vectors")
+	}
+	// A real content change also requires a fresh embedding.
+	publish("beta", "worker.c", "void changed() {}")
+	before = len(executor.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 1 {
+		t.Fatal("changed input borrowed a stale vector")
+	}
+}
+
+// Hold the first two requests until both are in flight. A serial worker times
+// out; an unbounded worker exceeds the measured concurrency limit.
+type codePairEgress struct {
+	base    vectorTestEgress
+	entered chan struct{}
+	release chan struct{}
+	active  atomic.Int32
+	peak    atomic.Int32
+	calls   atomic.Int32
+}
+
+func (e *codePairEgress) Do(ctx context.Context, trace uint64, r egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if r.Purpose != "embedding-health" {
+		n := e.active.Add(1)
+		defer e.active.Add(-1)
+		for old := e.peak.Load(); n > old; old = e.peak.Load() {
+			if e.peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		if e.calls.Add(1) <= 2 {
+			e.entered <- struct{}{}
+			select {
+			case <-e.release:
+			case <-ctx.Done():
+				return egress.HTTPResponse{}, ctx.Err()
+			}
+		}
+	}
+	return e.base.Do(ctx, trace, r)
+}
+func TestCodeIndexBoundsParallelEmbeddingAndPublishesAllFiles(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	files := make([]CodeFile, 5)
+	for i := range files {
+		files[i] = CodeFile{Path: fmt.Sprintf("file%d.c", i), Content: fmt.Sprintf("unique content %d", i)}
+	}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "parallel", Root: "/fixture/parallel", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	e := &codePairEgress{base: vectorTestEgress{serving: "pair-model"}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	done := make(chan error, 1)
+	go func() { done <- p.indexCodeBatch(ctx) }()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-e.entered:
+		case <-ctx.Done():
+			close(e.release)
+			<-done
+			t.Fatal("document requests did not overlap")
+		}
+	}
+	close(e.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if e.peak.Load() != 2 || e.calls.Load() != 5 {
+		t.Fatalf("peak=%d calls=%d", e.peak.Load(), e.calls.Load())
+	}
+	var count int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_embedding_versions`).Scan(&count); err != nil || count != 5 {
+		t.Fatalf("published=%d error=%v", count, err)
+	}
+}
+func TestCodeIndexSharesWorkAndDoesNotStarveReadyProjects(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("busy-%02d", i)
+		files := make([]CodeFile, 20)
+		for j := range files {
+			files[j] = CodeFile{Path: fmt.Sprintf("file-%02d.c", j), Content: fmt.Sprintf("unique %s %d", name, j)}
+		}
+		if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: name, Root: "/fixture/" + name, Files: files}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A complete empty repository sorts behind more than sixteen unfinished ones.
+	if _, err := db.Exec(ctx, `INSERT INTO user_code_projects(name,root) VALUES('zz-ready','/fixture/ready')`); err != nil {
+		t.Fatal(err)
+	}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: &vectorTestEgress{serving: "fair-model"}, db: db, code: s}
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var projects int
+	if err := db.QueryRow(ctx, `SELECT count(DISTINCT project) FROM user_code_embedding_versions`).Scan(&projects); err != nil || projects != 16 {
+		t.Fatalf("projects advanced=%d error=%v", projects, err)
+	}
+	var ready bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_code_embedding_active WHERE project='zz-ready')`).Scan(&ready); err != nil || !ready {
+		t.Fatalf("completed project starved: ready=%v error=%v", ready, err)
+	}
+}
+
+func TestCodeIndexRepairsHashOnlyMismatchWithoutDuplicatingOrdinaryWork(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	e := &vectorTestEgress{serving: "hash-repair"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: []CodeFile{{Path: "old.c", Content: "original content"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE user_code_embedding_versions SET input_hash='damaged' WHERE project='alpha'`); err != nil {
+		t.Fatal(err)
+	}
+	files := []CodeFile{{Path: "one.c", Content: "new one"}, {Path: "two.c", Content: "new two"}, {Path: "three.c", Content: "new three"}}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "beta", Root: "/fixture/beta", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(e.seen) - before; got != 4 {
+		t.Fatalf("expected three ordinary inputs and one hash repair, got %d", got)
+	}
+	var valid int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_files f JOIN user_code_embedding_versions v USING(project,path) WHERE v.input_hash=`+codeEmbeddingInputHashSQL).Scan(&valid); err != nil || valid != 4 {
+		t.Fatalf("valid=%d error=%v", valid, err)
+	}
+}
+
+func TestCodeIndexRetryExclusionsApplyOnlyToTheCurrentInput(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	e := &vectorTestEgress{serving: "retry-model"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	files := []CodeFile{{Path: "blocked.c", Content: "blocked content"}, {Path: "changed.c", Content: "changed content"}}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := p.prepareCodeGeneration(ctx, e.serving)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(ctx, `INSERT INTO user_code_embedding_jobs(project,path,generation,input_hash,state,attempts,next_attempt_at)
+ SELECT f.project,f.path,$1,CASE WHEN f.path='blocked.c' THEN `+codeEmbeddingInputHashSQL+` ELSE 'obsolete-input' END,'failed',8,clock_timestamp()+interval '1 hour' FROM user_code_files f`, generation); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.seen) != 1 || !strings.Contains(e.seen[0], "changed.c") {
+		t.Fatalf("blocked current input or obsolete retry state handled incorrectly: %v", e.seen)
+	}
+	if _, err = db.Exec(ctx, `UPDATE user_code_embedding_jobs SET attempts=1,next_attempt_at='-infinity' WHERE path='blocked.c'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.seen) != 2 || !strings.Contains(e.seen[1], "blocked.c") {
+		t.Fatalf("eligible retry did not resume: %v", e.seen)
 	}
 }

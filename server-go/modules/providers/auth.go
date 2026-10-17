@@ -89,6 +89,14 @@ func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, e
 	if err != nil {
 		return "", "", err
 	}
+	if token == "" && name == "codex" {
+		// The server connection uses serving's refresh-aware Vault resolver.
+		// Named connections must never borrow the server account's credential.
+		token, err = m.resources.Credential(ctx, "get", name, "codex_oauth_current", "")
+		if err != nil {
+			return "", "", err
+		}
+	}
 	if token == "" {
 		document, err := m.resources.Credential(ctx, "get", name, "oauth", "")
 		if err != nil {
@@ -96,7 +104,9 @@ func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, e
 		}
 		var doc object
 		if json.Unmarshal([]byte(document), &doc) == nil {
-			token = str(doc, "access_token")
+			if token == "" {
+				token = str(doc, "access_token")
+			}
 			if account == "" {
 				account = str(doc, "account_id")
 			}

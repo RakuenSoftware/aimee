@@ -5,6 +5,7 @@
 #include "vault_store.h"
 #include "vault_crypto.h"
 #include "config.h"
+#include "agent_config.h"
 #include "platform_path.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -716,10 +717,15 @@ int vault_env_module_resource(void)
    const char *cred = cJSON_GetStringValue(cJSON_GetObjectItem(req, "credential"));
    char *secret = (char *)cJSON_GetStringValue(cJSON_GetObjectItem(req, "secret"));
    vault_status_t st = VAULT_ERR_BADARG;
-   if (op && agent && agent[0] && strlen(agent) < 64 && cred &&
-       (strcmp(cred, "api_key") == 0 || strcmp(cred, "codex_oauth_token") == 0 ||
-        strcmp(cred, "codex_account_id") == 0 || strcmp(cred, "oauth") == 0 ||
-        (strcmp(agent, "environment") == 0 && vault_env_name_is_credential(cred))))
+   /* A read-only computed credential, not an additional stored token. The
+    * canonical server connection is the only namespace this resolver owns. */
+   if (op && strcmp(op, "get") == 0 && agent && strcmp(agent, "codex") == 0 && cred &&
+       strcmp(cred, "codex_oauth_current") == 0)
+      st = agent_codex_oauth_current_token(value, sizeof(value)) == 0 ? VAULT_OK : VAULT_ERR_BADARG;
+   else if (op && agent && agent[0] && strlen(agent) < 64 && cred &&
+            (strcmp(cred, "api_key") == 0 || strcmp(cred, "codex_oauth_token") == 0 ||
+             strcmp(cred, "codex_account_id") == 0 || strcmp(cred, "oauth") == 0 ||
+             (strcmp(agent, "environment") == 0 && vault_env_name_is_credential(cred))))
    {
       if (strcmp(op, "get") == 0)
          st = vault_service_get_server_principal(agent, cred, value, sizeof(value));

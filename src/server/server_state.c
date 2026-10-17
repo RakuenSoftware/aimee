@@ -2033,11 +2033,29 @@ int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_AddStringToObject(resp, "live_verify", status);
       cJSON_AddStringToObject(resp, "recovery_epoch", epoch);
-      cJSON_AddStringToObject(resp, "historical_verify", "red");
-      cJSON_AddStringToObject(
-          resp, "detail",
-          "Historical audit continuity is broken; original evidence is preserved separately.");
-      status = "red";
+      char history_error[256] = "";
+      long history_head = 0, history_checkpoint = 0;
+      int history = audit_worm_verify_restored_history(history_error, sizeof history_error,
+                                                       &history_head, &history_checkpoint);
+      cJSON_AddStringToObject(resp, "historical_verify",
+                              history == AUDIT_WORM_VERIFY_GREEN
+                                  ? "green"
+                                  : (history == AUDIT_WORM_VERIFY_AMBER ? "amber" : "red"));
+      cJSON_AddNumberToObject(resp, "historical_head_seq", history_head);
+      cJSON_AddNumberToObject(resp, "historical_checkpoint_seq", history_checkpoint);
+      if (history == AUDIT_WORM_VERIFY_RED)
+      {
+         cJSON_AddStringToObject(resp, "historical_detail", history_error);
+         status = "red";
+      }
+      else
+      {
+         cJSON_AddStringToObject(
+             resp, "historical_detail",
+             "Restored historical archive verified separately; recovery epoch remains distinct.");
+         if (history == AUDIT_WORM_VERIFY_AMBER && st != AUDIT_WORM_VERIFY_RED)
+            status = "amber";
+      }
    }
    cJSON_AddStringToObject(resp, "verify", status);
    cJSON_AddNumberToObject(resp, "head_seq", head);

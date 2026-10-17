@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <sys/wait.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -15,6 +18,7 @@ void test_oauth_tokens_reset(void);
 #include "db1_client/execution_trace.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "oauth_flow.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/tools/agent_tools.h>
@@ -1019,6 +1023,49 @@ static void test_codex_oauth_reads_vault_only(void)
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strstr(auth, "Bearer VAULT-ACCESS-3f9c1") != NULL);
    assert(strstr(auth, "DISK-MUST-NOT-WIN") == NULL);
+
+   /* Diagnostics must read the same refreshed canonical token as serving,
+    * even when the original imported document still contains an old token. */
+   oauth_token_response_t refreshed = {0};
+   snprintf(refreshed.access_token, sizeof(refreshed.access_token), "%s", "REFRESHED-ACCESS");
+   assert(oauth_token_store("codex", &refreshed) == 0);
+   char current[4096];
+   assert(agent_codex_oauth_current_token(current, sizeof(current)) == 0);
+   assert(strcmp(current, "REFRESHED-ACCESS") == 0);
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strcmp(auth, "Authorization: Bearer REFRESHED-ACCESS") == 0);
+
+   /* Another process must wait for a refresh already owned by serving. */
+   char lock_path[1024];
+   snprintf(lock_path, sizeof(lock_path), "%s/.vault/.codex-oauth.lock", config_default_dir());
+   int lock_fd = open(lock_path, O_RDWR);
+   assert(lock_fd >= 0 && flock(lock_fd, LOCK_EX) == 0);
+   int result_pipe[2];
+   assert(pipe(result_pipe) == 0);
+   pid_t reader = fork();
+   assert(reader >= 0);
+   if (reader == 0)
+   {
+      close(lock_fd);
+      close(result_pipe[0]);
+      char child_token[4096];
+      int rc = agent_codex_oauth_current_token(child_token, sizeof(child_token));
+      char result = rc == 0 && strcmp(child_token, "REFRESHED-ACCESS") == 0 ? 'Y' : 'N';
+      (void)write(result_pipe[1], &result, 1);
+      _exit(0);
+   }
+   close(result_pipe[1]);
+   struct pollfd pending = {.fd = result_pipe[0], .events = POLLIN};
+   assert(poll(&pending, 1, 100) == 0);
+   assert(flock(lock_fd, LOCK_UN) == 0);
+   close(lock_fd);
+   assert(poll(&pending, 1, 5000) == 1);
+   char child_result = 'N';
+   assert(read(result_pipe[0], &child_result, 1) == 1 && child_result == 'Y');
+   close(result_pipe[0]);
+   int child_status;
+   assert(waitpid(reader, &child_status, 0) == reader && WIFEXITED(child_status) &&
+          WEXITSTATUS(child_status) == 0);
 
    /* With Vault cleared, even an otherwise valid HOME credential is ignored. */
    test_oauth_tokens_reset();
