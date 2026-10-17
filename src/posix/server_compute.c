@@ -1058,7 +1058,9 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    char session_id[128];
    agent_result_t result;
    memset(&result, 0, sizeof(result));
+   agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
    int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   agent_tools_set_tool_event_cb(NULL, NULL);
    if (result.clean_retry_attempt[0])
       stream_event(cctx, "retry_attempt", "id", result.clean_retry_attempt);
    workspace_turn_unbind_active();
