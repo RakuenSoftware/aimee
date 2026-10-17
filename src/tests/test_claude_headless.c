@@ -106,7 +106,8 @@ int main(void)
    assert(fd >= 0);
    close(fd);
    agent_t agent = {0};
-   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
+   assert(strlen(path) < sizeof(agent.cli_cmd));
+   memcpy(agent.cli_cmd, path, strlen(path) + 1);
    agent.cli_idle_timeout_ms = 2000;
    provider_cli_cfg_t cfg = {.agent = &agent,
                              .user_prompt = "hello",
