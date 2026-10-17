@@ -54,6 +54,16 @@ watermark checks. Cutover candidates must be complete, and the existing
 transactional validation repeats that check under the project publication lock.
 Incomplete generations are never marked ready to clear a backlog.
 
+Live profiling also found roughly twelve seconds of SQL work per sixteen-file
+batch: about six selecting pending files, four sorting the entire verified-vector
+cache and two finding cutover candidates. Rebuild selection now handles ordinary
+missing/stale/invalid-shape work first, with a disjoint hash-only repair fallback
+when batch capacity remains. Cache reuse hashes only potential replacement inputs
+and sorts only matching verified sources. No schema migration or verification
+predicate at publication was removed. A PostgreSQL regression confirms that three
+ordinary inputs and one hash-only mismatch are repaired exactly once each.
+
+
 ## Tests and production qualification
 
 The C audit suite passes locally and in the deployment-image builder. Regressions

@@ -753,3 +753,33 @@ func TestCodeIndexSharesWorkAndDoesNotStarveReadyProjects(t *testing.T) {
 		t.Fatalf("completed project starved: ready=%v error=%v", ready, err)
 	}
 }
+
+func TestCodeIndexRepairsHashOnlyMismatchWithoutDuplicatingOrdinaryWork(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	e := &vectorTestEgress{serving: "hash-repair"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: []CodeFile{{Path: "old.c", Content: "original content"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE user_code_embedding_versions SET input_hash='damaged' WHERE project='alpha'`); err != nil {
+		t.Fatal(err)
+	}
+	files := []CodeFile{{Path: "one.c", Content: "new one"}, {Path: "two.c", Content: "new two"}, {Path: "three.c", Content: "new three"}}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "beta", Root: "/fixture/beta", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(e.seen) - before; got != 4 {
+		t.Fatalf("expected three ordinary inputs and one hash repair, got %d", got)
+	}
+	var valid int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_files f JOIN user_code_embedding_versions v USING(project,path) WHERE v.input_hash=`+codeEmbeddingInputHashSQL).Scan(&valid); err != nil || valid != 4 {
+		t.Fatalf("valid=%d error=%v", valid, err)
+	}
+}
