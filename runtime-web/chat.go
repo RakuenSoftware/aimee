@@ -176,7 +176,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	// Stream the chat over aimee-server's /v1 HTTP transport (native
 	// POST /v1/chat/stream); the legacy NDJSON socket helper (chatStream)
 	// remains available as a fallback.
-	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, req.Message, stableSID,
+	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, username, req.Message, stableSID,
 		providerSessionID, cwd, req.AttachID, func(evt streamEvent) {
 			switch evt.Event {
 			case "turn_start":
@@ -186,6 +186,12 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 				sseWrite(w, "text", map[string]string{"content": evt.Content})
 			case "thinking":
 				sseWrite(w, "thinking", map[string]string{"content": evt.Content})
+			case "tool_call.started", "tool_call.completed":
+				sseWrite(w, evt.Event, map[string]string{"name": evt.Name})
+			case "tool_start":
+				sseWrite(w, evt.Event, map[string]string{"name": evt.Name, "args": evt.Args})
+			case "tool_result":
+				sseWrite(w, evt.Event, map[string]string{"name": evt.Name, "result": evt.Result})
 			case "turn_end":
 				sseWrite(w, "turn_end", map[string]any{})
 			case "session":

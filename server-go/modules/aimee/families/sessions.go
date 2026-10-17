@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strconv"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -41,6 +44,8 @@ const (
 	opServerSessionListBySubject  uint32 = 25
 	opServerSessionEraseSubject   uint32 = 26
 	opServerSessionErasureReceipt uint32 = 27
+	opSessionIRAppend             uint32 = 28
+	opSessionIRPage               uint32 = 29
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -954,5 +959,105 @@ var Sessions = store.Family{
 		opServerSessionListBySubject:  {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
 		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
 		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
+		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
+		opSessionIRPage:               {Name: "session_ir_page", Args: 3, Run: sessionIRPage},
 	},
+}
+
+// The existing session row is the append lock. Appends and retry checks run in
+// one transaction, so concurrent producers cannot allocate the same sequence.
+// Sequence strings remain exact when consumed by a JavaScript browser.
+const sessionIRLockSQL = `SELECT id FROM server_sessions WHERE id = $1 FOR UPDATE`
+const sessionIRExistingSQL = `SELECT sequence, turn_id, actor, payload FROM session_ir_events
+ WHERE session_id = $1 AND event_id = $2`
+const sessionIRInsertSQL = `INSERT INTO session_ir_events
+ (session_id, sequence, event_id, turn_id, actor, payload)
+ VALUES ($1, (SELECT coalesce(max(sequence), 0) + 1 FROM session_ir_events WHERE session_id = $1),
+ $2, $3, $4, $5) RETURNING sequence`
+const sessionIRPageSQL = `SELECT sequence, event_id, turn_id, actor, payload
+ FROM session_ir_events WHERE session_id = $1 AND sequence > $2 ORDER BY sequence LIMIT $3`
+
+func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	for _, identity := range f[:4] {
+		if identity == "" || len(identity) > 1024 {
+			return store.StatusInvalid, nil, nil
+		}
+	}
+	if !validSessionIREvent([]byte(f[4])) {
+		return store.StatusInvalid, nil, nil
+	}
+	var locked string
+	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&locked); err != nil {
+		if store.IsNoRows(err) {
+			return store.StatusMissing, nil, nil
+		}
+		return 0, nil, err
+	}
+	var sequence int64
+	var turn, actor, payload string
+	err := q.QueryRow(ctx, sessionIRExistingSQL, f[0], f[1]).Scan(&sequence, &turn, &actor, &payload)
+	if err == nil {
+		if turn != f[2] || actor != f[3] || payload != f[4] {
+			return store.StatusInvalid, nil, nil
+		}
+		return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
+	}
+	if !store.IsNoRows(err) {
+		return 0, nil, err
+	}
+	if err = q.QueryRow(ctx, sessionIRInsertSQL, f[0], f[1], f[2], f[3], f[4]).Scan(&sequence); err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
+}
+
+func sessionIRPage(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	after, err := strconv.ParseInt(f[1], 10, 64)
+	limit, limitErr := strconv.Atoi(f[2])
+	if f[0] == "" || len(f[0]) > 1024 || err != nil || after < 0 || strconv.FormatInt(after, 10) != f[1] || limitErr != nil || limit < 1 || limit > 128 {
+		return store.StatusInvalid, nil, nil
+	}
+	rows, err := q.Query(ctx, sessionIRPageSQL, f[0], after, limit)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	events := make([]json.RawMessage, 0)
+	total := 2
+	for rows.Next() {
+		var sequence int64
+		var eventID, turnID, actor, payload string
+		if err := rows.Scan(&sequence, &eventID, &turnID, &actor, &payload); err != nil {
+			return 0, nil, err
+		}
+		envelope := struct {
+			Version   int             `json:"version"`
+			SessionID string          `json:"session_id"`
+			Sequence  string          `json:"sequence"`
+			EventID   string          `json:"event_id"`
+			TurnID    string          `json:"turn_id"`
+			Actor     string          `json:"actor"`
+			Event     json.RawMessage `json:"event"`
+		}{1, f[0], strconv.FormatInt(sequence, 10), eventID, turnID, actor, json.RawMessage(payload)}
+		encoded, err := encodeSessionIR(envelope)
+		if err != nil {
+			return 0, nil, err
+		}
+		if total+len(encoded)+1 > 3<<20 {
+			if len(events) == 0 {
+				return 0, nil, fmt.Errorf("canonical session event exceeds replay page budget")
+			}
+			break
+		}
+		events = append(events, encoded)
+		total += len(encoded) + 1
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
+	}
+	encoded, err := encodeSessionIR(events)
+	if err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{string(encoded)}, nil
 }

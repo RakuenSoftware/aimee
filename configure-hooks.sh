@@ -148,7 +148,10 @@ except Exception:
     fi
 
     mkdir -p "$(dirname "$config_path")"
-    if echo "$new_settings" | grep -qF -- "---MCP---"; then
+    # Output shape is determined by the paths above. Do not probe it through
+    # grep -q: under pipefail an early match can SIGPIPE echo and select the
+    # wrong branch, writing both documents into the hooks JSON file.
+    if [ "$mcp_path" != "$config_path" ]; then
         echo "$new_settings" | sed -n '/---MCP---/,/---CONFIG---/p' | sed '1d;$d' > "$mcp_path"
         echo "$new_settings" | sed -n '/---CONFIG---/,$p' | sed '1d' > "$config_path"
     else

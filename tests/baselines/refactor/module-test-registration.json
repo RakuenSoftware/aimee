@@ -249,6 +249,12 @@
     },
     {
       "ctest": false,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_ir_session_event.c"
+    },
+    {
+      "ctest": false,
       "make": false,
       "module": "ir",
       "test": "src/tests/test_panel_ir_contract.c"

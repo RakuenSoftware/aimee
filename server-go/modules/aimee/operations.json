@@ -27769,6 +27769,116 @@
         ],
         "max_bytes": 65536
       }
+    },
+    {
+      "family": "sessions",
+      "id": 28,
+      "name": "session_ir_append",
+      "c_name": "db1_session_ir_append",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn_id",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 29,
+      "name": "session_ir_page",
+      "c_name": "db1_session_ir_page",
+      "c_params": [
+        "session_id",
+        "after",
+        "limit"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "after",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "limit",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "events_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      }
     }
   ]
 }

@@ -72,6 +72,19 @@ afterEach(() => {
 });
 
 describe('webchat intermediate messages', () => {
+  it('shows Runtime tool lifecycle events and clears the running state on completion', async () => {
+    await start();
+    await emit(['turn_start'], ['tool_call.started', { name: 'delegate' }]);
+    expect(screen.getByText('Running: delegate')).toBeTruthy();
+    await emit(['tool_call.completed', { name: 'delegate' }]);
+    expect(screen.queryByText('Running: delegate')).toBeNull();
+    expect(screen.getByText('Tool: delegate')).toBeTruthy();
+    expect(screen.queryByText('Output')).toBeNull();
+    await emit(['text', { content: 'Finished' }], ['done']);
+    await close();
+    expect(screen.getByText('Finished')).toBeTruthy();
+  });
+
   it('shows text before completion and batches subsequent tokens', async () => {
     await start();
     await emit(['turn_start'], ['text', { content: 'Checking' }]);

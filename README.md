@@ -61,8 +61,9 @@ negative tests and limits.
 Aimee's state belongs to your runtime, independent of the harness that calls it. A coding client
 can use MCP tools over stdio; an agent UI can use the ACP bridge; a model-facing application can
 connect through OpenAI Chat Completions or Responses, or Anthropic Messages ingress. A custom
-application can call the named HTTP API or use a generated SDK. The browser is another client of
-that same runtime.
+application can call the named HTTP API or use a generated SDK. Browser chat carries the signed-in
+actor to Runtime and displays tool start/completion activity; provider credentials stay in Vault.
+The browser is another client of that same runtime.
 
 This is the basis of compatibility with any harness or UI that implements one of those contracts.
 It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,

@@ -95,6 +95,11 @@ type streamEvent struct {
 	// text/thinking/session events
 	Content string `json:"content,omitempty"`
 	ID      string `json:"id,omitempty"`
+	// Tool lifecycle events contain a name; legacy rich events may also carry
+	// arguments/results. Preserve these fields on the browser transport.
+	Name   string `json:"name,omitempty"`
+	Args   string `json:"args,omitempty"`
+	Result string `json:"result,omitempty"`
 	// status (final message)
 	Status  string `json:"status,omitempty"`
 	Error   string `json:"error,omitempty"`
@@ -114,7 +119,7 @@ type streamEvent struct {
 // newline-delimited JSON event stream (application/x-ndjson), calling cb for each
 // intermediate event. The public config still calls its historical socket field
 // `socketPath`; the HTTP UDS lives beside that path.
-func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
+func chatStreamHTTP(ctx context.Context, socketPath, username, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
 	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
 
 	reqBody := map[string]string{"message": message}
@@ -151,6 +156,9 @@ func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, cl
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// The authenticated browser actor crosses only the kernel-attested local
+	// socket, just as it does for the other Runtime web requests.
+	req.Header.Set("X-Aimee-Webuser", username)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
