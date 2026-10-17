@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -661,5 +663,142 @@ func TestListReadsAreTotallyOrdered(t *testing.T) {
 		if strings.Count(sql[strings.Index(sql, "ORDER BY"):], ",") == 0 {
 			t.Fatalf("the ordering has no tiebreaker: %s", sql)
 		}
+	}
+}
+
+// The append boundary must fail before touching storage for malformed content;
+// model/harness conversion belongs upstream of the session log.
+func TestSessionIRRejectsInvalidFramesAndCursors(t *testing.T) {
+	for _, fields := range [][]string{
+		{"", "e", "t", "actor", `{"kind":"message","payload":{}}`},
+		{"s", "", "t", "actor", `{"kind":"message","payload":{}}`},
+		{"s", "e", "t", "actor", `{"kind":"native","payload":{}}`},
+		{"s", "e", "t", "actor", `{"kind":"message"}`},
+		{"s", "e", "t", "actor", `not JSON`},
+		{"s", "e", "t", "actor", strings.Repeat("x", (1<<20)+1)},
+	} {
+		db := &sessDB{}
+		status, _ := sessCall(t, db, opSessionIRAppend, fields)
+		if status != store.StatusInvalid {
+			t.Fatalf("invalid append status %d", status)
+		}
+		if len(db.executed) != 0 {
+			t.Fatal("malformed event reached storage")
+		}
+	}
+	for _, fields := range [][]string{{"s", "-1", "1"}, {"s", "0", "129"}, {"s", "not-a-cursor", "1"}, {"s", "0", "0"}} {
+		status, _ := sessCall(t, &sessDB{}, opSessionIRPage, fields)
+		if status != store.StatusInvalid {
+			t.Fatalf("invalid page status %d", status)
+		}
+	}
+}
+
+func TestSessionIRPagePreservesRolesToolsAndExactSequence(t *testing.T) {
+	db := &sessDB{rows: [][]any{
+		{int64(9007199254740993), "event-1", "turn-1", "operator",
+			`{"kind":"message","message_id":"m1","payload":{"role":"user","blocks":[{"type":"text","text":"hello"}]}}`},
+		{int64(9007199254740994), "event-2", "turn-1", "tool-runtime",
+			`{"kind":"message","message_id":"m2","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"opaque:42","content":"done"}]}}`},
+	}}
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"session-1", "9007199254740992", "128"})
+	if status != store.StatusOK || len(cells) != 1 {
+		t.Fatalf("page %d %v", status, cells)
+	}
+	var envelopes []struct {
+		Version  int             `json:"version"`
+		Session  string          `json:"session_id"`
+		Sequence string          `json:"sequence"`
+		Event    json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal([]byte(cells[0]), &envelopes); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelopes) != 2 || envelopes[0].Sequence != "9007199254740993" || envelopes[1].Sequence != "9007199254740994" {
+		t.Fatalf("sequence precision lost: %s", cells[0])
+	}
+	if envelopes[0].Version != 1 || envelopes[0].Session != "session-1" || !strings.Contains(string(envelopes[1].Event), `"tool_id":"opaque:42"`) {
+		t.Fatalf("canonical envelope lost content: %s", cells[0])
+	}
+}
+
+type irAppendFixture struct {
+	*sessDB
+	existing  []any
+	inserted  int64
+	lockErr   error
+	insertErr error
+	reads     []string
+}
+
+func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
+	d.reads = append(d.reads, sql)
+	switch sql {
+	case sessionIRLockSQL:
+		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"session-1"}}
+	case sessionIRExistingSQL:
+		return sessRow{db: &sessDB{}, values: d.existing}
+	case sessionIRInsertSQL:
+		return sessRow{db: &sessDB{scanErr: d.insertErr}, values: []any{d.inserted}}
+	default:
+		return d.sessDB.QueryRow(ctx, sql, args...)
+	}
+}
+func TestSessionIRAppendRetryAndFailure(t *testing.T) {
+	payload := `{"kind":"message","message_id":"m","payload":{"role":"assistant","blocks":[]}}`
+	fields := []string{"session-1", "event-1", "turn-1", "actor", payload}
+	db := &irAppendFixture{sessDB: &sessDB{}, inserted: 42}
+	status, cells, err := sessionIRAppend(context.Background(), db, fields)
+	if err != nil || status != store.StatusOK || len(cells) != 1 || cells[0] != "42" {
+		t.Fatalf("append %d %v %v", status, cells, err)
+	}
+	if len(db.reads) != 3 || db.reads[0] != sessionIRLockSQL || db.reads[2] != sessionIRInsertSQL {
+		t.Fatal("append was not serialized under session lock")
+	}
+	db = &irAppendFixture{sessDB: &sessDB{}, existing: []any{int64(42), "turn-1", "actor", payload}}
+	status, cells, err = sessionIRAppend(context.Background(), db, fields)
+	if err != nil || status != store.StatusOK || cells[0] != "42" || len(db.reads) != 2 {
+		t.Fatal("retry inserted another event")
+	}
+	for _, index := range []int{2, 3, 4} {
+		changed := append([]string{}, fields...)
+		changed[index] += " "
+		status, _, err = sessionIRAppend(context.Background(), db, changed)
+		if err != nil || status != store.StatusInvalid {
+			t.Fatal("conflicting retry was accepted")
+		}
+	}
+	db = &irAppendFixture{sessDB: &sessDB{}, insertErr: errors.New("disk unavailable")}
+	_, _, err = sessionIRAppend(context.Background(), db, fields)
+	if err == nil {
+		t.Fatal("storage failure was hidden")
+	}
+}
+
+func TestSessionIRPageBoundsIncludeEncoding(t *testing.T) {
+	// HTML-sensitive text is common in code/tool results. JSON transport must not
+	// expand this into an oversized envelope or an empty, non-advancing page.
+	text := strings.Repeat("<>&", 240000)
+	payload := `{"kind":"message","message_id":"m","payload":{"role":"assistant","blocks":[{"type":"text","text":"` + text + `"}]}}`
+	db := &sessDB{}
+	for n := 1; n <= 5; n++ {
+		db.rows = append(db.rows, []any{int64(n), fmt.Sprintf("e%d", n), "turn", "actor", payload})
+	}
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"s", "0", "128"})
+	if status != store.StatusOK || len(cells) != 1 || len(cells[0]) > 3<<20 {
+		t.Fatalf("invalid page: %d cells=%d", status, len(cells))
+	}
+	var page []struct {
+		Sequence string          `json:"sequence"`
+		Event    json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal([]byte(cells[0]), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 4 || page[0].Sequence != "1" || page[3].Sequence != "4" {
+		t.Fatalf("page did not advance to bounded cursor: %d records", len(page))
+	}
+	if !strings.Contains(string(page[0].Event), "<>&") {
+		t.Fatal("transport unexpectedly HTML-escaped code")
 	}
 }
