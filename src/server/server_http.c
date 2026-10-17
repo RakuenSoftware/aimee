@@ -1667,6 +1667,16 @@ void handle_conn(int fd, int is_tcp, int is_management)
        http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
        strcasestr(accept_encoding, "gzip") != NULL);
 
+   /* Capture before any streaming handoff too. Connection workers clear this
+    * request-owned identity on every exit, including early streaming returns. */
+   /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
+    * or a root-UDS-gated webuser assertion) into thread-locals, live until
+    * loopback_rpc copies it into the synthesized conn. Cleared after the route so
+    * a reused worker thread cannot leak it into the next request. */
+   server_http_identity_capture(fd, is_tcp, buf);
+   if (first_user_principal[0])
+      server_http_identity_override_principal(first_user_principal);
+   server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
    {
@@ -1989,14 +1999,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * CAPS_ALL, TCP => bearer-scoped) so loopback_rpc / server_dispatch re-check
     * per-method capability. Reset to the read-only default afterward. */
    g_rpc_conn_caps = effective_caps;
-   /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
-    * or a root-UDS-gated webuser assertion) into thread-locals, live until
-    * loopback_rpc copies it into the synthesized conn. Cleared after the route so
-    * a reused worker thread cannot leak it into the next request. */
-   server_http_identity_capture(fd, is_tcp, buf);
-   if (first_user_principal[0])
-      server_http_identity_override_principal(first_user_principal);
-   server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
    server_http_identity_clear();

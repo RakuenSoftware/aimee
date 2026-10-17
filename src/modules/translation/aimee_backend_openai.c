@@ -275,8 +275,16 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          const cJSON *raw = ir->tools[i].raw;
          const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
          int raw_is_function =
-             !rtype || (cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0);
-         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+             !rtype ||
+             (cJSON_IsString(rtype) &&
+              (!strcmp(rtype->valuestring, "function") ||
+               (ir->frontend == AIMEE_WIRE_ANTHROPIC && !strcmp(rtype->valuestring, "custom"))));
+         if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !raw_is_function)
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
+         if (raw && !raw_is_function)
          {
             cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
             if (verbatim)

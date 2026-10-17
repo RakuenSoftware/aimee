@@ -20,8 +20,8 @@ static const char *ostr(const cJSON *o, const char *k)
    return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
 }
 
-/* Anthropic cache_control is {"type":"ephemeral"}; keep the type string as the
- * opaque marker (full fidelity lives in the block's raw sidecar). */
+/* Cache mode and lifetime enter IR explicitly; the original block retains
+ * native extensions for verified same-protocol replay. */
 static char *parse_cache_control(const cJSON *block)
 {
    const cJSON *cc = cJSON_GetObjectItemCaseSensitive((cJSON *)block, "cache_control");
@@ -37,6 +37,7 @@ void anthropic_ir_parse_block(const cJSON *el, aimee_block_t *b)
    memset(b, 0, sizeof *b);
    b->raw = cJSON_Duplicate(el, 1);
    b->cache_control = parse_cache_control(el);
+   b->cache_ttl = dupstr(ostr(cJSON_GetObjectItemCaseSensitive(el, "cache_control"), "ttl"));
    const char *type = ostr(el, "type");
    if (!type)
    {
@@ -229,6 +230,9 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             out->tools[i].name = dupstr(ostr(t, "name"));
             out->tools[i].description = dupstr(ostr(t, "description"));
             out->tools[i].cache_control = parse_cache_control(t);
+            out->tools[i].cache_ttl =
+                dupstr(ostr(cJSON_GetObjectItemCaseSensitive(t, "cache_control"), "ttl"));
+            out->tools[i].raw = cJSON_Duplicate(t, 1);
             const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
             out->tools[i].schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
             i++;

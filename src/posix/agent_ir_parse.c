@@ -245,15 +245,11 @@ static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out)
    out->cache_write_tokens = (int)ir->usage_cache_write;
    out->cache_read_tokens = (int)ir->usage_cache_read;
 
-   size_t need = 1;
-   for (int i = 0; i < ir->n_content; i++)
-      if (ir->content[i].type == AIMEE_BLK_TEXT && ir->content[i].text)
-         need += strlen(ir->content[i].text);
-   if (need > 1)
+   out->content = aimee_ir_response_text_alloc(ir);
+   if (out->content && !out->content[0])
    {
-      out->content = malloc(need);
-      if (out->content)
-         aimee_ir_response_text(ir, out->content, need);
+      free(out->content);
+      out->content = NULL;
    }
 
    for (int i = 0; i < ir->n_content && out->call_count < AGENT_MAX_TOOL_CALLS; i++)

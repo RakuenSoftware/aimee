@@ -104,7 +104,8 @@ static void free_str(char *s)
 
 int aimee_ir_block_valid(const aimee_block_t *block)
 {
-   if (!block || block->type < AIMEE_BLK_TEXT || block->type >= AIMEE_BLK_UNKNOWN)
+   if (!block || block->type < AIMEE_BLK_TEXT || block->type >= AIMEE_BLK_UNKNOWN ||
+       block->message_group < 0 || block->message_group > 4096)
       return 0;
    if ((block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TOOL_RESULT) &&
        (!block->tool_id || !block->tool_id[0]))
@@ -134,6 +135,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    free_str(b->media_type);
    free_str(b->media_ref);
    free_str(b->cache_control);
+   free_str(b->cache_ttl);
    cJSON_Delete(b->raw);
    memset(b, 0, sizeof *b);
 }
@@ -177,6 +179,7 @@ void aimee_request_free(aimee_request_t *r)
          free_str(r->tools[i].description);
          cJSON_Delete(r->tools[i].schema);
          free_str(r->tools[i].cache_control);
+         free_str(r->tools[i].cache_ttl);
          cJSON_Delete(r->tools[i].raw);
       }
       free(r->tools);
@@ -192,6 +195,7 @@ void aimee_request_free(aimee_request_t *r)
       free(r->stop_sequences);
    }
    cJSON_Delete(r->raw);
+   free(r->raw_bytes);
    memset(r, 0, sizeof *r);
 }
 
@@ -232,12 +236,16 @@ int aimee_ir_remove_tools(aimee_request_t *request, const cJSON *indices)
       free(request->tools[i].description);
       cJSON_Delete(request->tools[i].schema);
       free(request->tools[i].cache_control);
+      free(request->tools[i].cache_ttl);
       cJSON_Delete(request->tools[i].raw);
       memmove(&request->tools[i], &request->tools[i + 1],
               (size_t)(request->n_tools - i - 1) * sizeof(request->tools[0]));
       request->n_tools--;
+      memset(&request->tools[request->n_tools], 0, sizeof request->tools[0]);
       removed++;
    }
+   if (removed)
+      request->mutated = 1;
    return removed;
 }
 
@@ -314,7 +322,7 @@ static int json_eq(const struct cJSON *a, const struct cJSON *b)
 
 static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
 {
-   if (a->type != b->type)
+   if (a->type != b->type || a->message_group != b->message_group)
       return 0;
    if (a->context.origin != b->context.origin || a->context.authority != b->context.authority ||
        a->context.trust != b->context.trust || a->context.sensitivity != b->context.sensitivity ||
@@ -323,7 +331,7 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
        strcmp(a->context.revision_scope, b->context.revision_scope) != 0 ||
        a->context.revision_epoch != b->context.revision_epoch)
       return 0;
-   if (!str_eq(a->cache_control, b->cache_control))
+   if (!str_eq(a->cache_control, b->cache_control) || !str_eq(a->cache_ttl, b->cache_ttl))
       return 0;
    switch (a->type)
    {
@@ -367,6 +375,8 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
       return 1;
    if (!a || !b)
       return 0;
+   if (a->cache_policy != b->cache_policy)
+      return 0;
    if (!blocks_eq(a->system, a->n_system, b->system, b->n_system))
       return 0;
    if (a->n_messages != b->n_messages)
@@ -386,6 +396,7 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
       if (!str_eq(a->tools[i].name, b->tools[i].name) ||
           !str_eq(a->tools[i].description, b->tools[i].description) ||
           !str_eq(a->tools[i].cache_control, b->tools[i].cache_control) ||
+          !str_eq(a->tools[i].cache_ttl, b->tools[i].cache_ttl) ||
           !json_eq(a->tools[i].schema, b->tools[i].schema))
          return 0;
    }
@@ -449,11 +460,17 @@ static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_
                                char *buf, size_t n)
 {
    size_t used = 0;
+   int previous_group = 0;
    for (int i = 0; i < n_blocks && used + 1 < n; i++)
    {
       const aimee_block_t *b = &blocks[i];
-      if (b->type != want || !b->text)
+      if (b->type != want || !b->text || !b->text[0])
          continue;
+      if (want == AIMEE_BLK_TEXT && used && previous_group > 0 && b->message_group > 0 &&
+          previous_group != b->message_group)
+         for (int newline = 0; newline < 2 && used + 1 < n; newline++)
+            buf[used++] = '\n';
+      previous_group = b->message_group;
       size_t l = strlen(b->text);
       if (l > n - 1 - used)
          l = n - 1 - used;
@@ -582,13 +599,21 @@ char *aimee_ir_response_text_alloc(const aimee_response_t *response)
    size_t length = 1;
    if (!response)
       return NULL;
+   int previous_group = 0;
    for (int i = 0; i < response->n_content; i++)
-      if (response->content[i].type == AIMEE_BLK_TEXT && response->content[i].text)
+      if (response->content[i].type == AIMEE_BLK_TEXT && response->content[i].text &&
+          response->content[i].text[0])
       {
-         size_t n = strlen(response->content[i].text);
-         if (n > SIZE_MAX - length)
+         const aimee_block_t *block = &response->content[i];
+         size_t separator = length > 1 && previous_group > 0 && block->message_group > 0 &&
+                                    previous_group != block->message_group
+                                ? 2
+                                : 0;
+         size_t n = strlen(block->text);
+         if (separator > SIZE_MAX - length || n > SIZE_MAX - length - separator)
             return NULL;
-         length += n;
+         length += separator + n;
+         previous_group = block->message_group;
       }
    char *text = malloc(length);
    if (text)

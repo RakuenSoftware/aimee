@@ -232,8 +232,9 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    free(g_last_body);
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
-   if (g_stream_payload && callback)
-      assert(callback(g_stream_payload, strlen(g_stream_payload), userdata) == 0);
+   if (g_stream_payload && callback &&
+       callback(g_stream_payload, strlen(g_stream_payload), userdata) != 0)
+      return -1;
    return g_stream_status;
 }
 
@@ -1100,6 +1101,10 @@ static void test_messages_stream_openai_family_translates(void)
    memset(&cap, 0, sizeof(cap));
    g_driver = &openai;
    g_stream_payload = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                      "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                      "data: "
+                      "{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,"
+                      "\"prompt_tokens_details\":{\"cached_tokens\":12}}}\n\n"
                       "data: [DONE]\n\n";
    assert(messages_stream("{\"model\":\"ignored\",\"system\":\"SYS\","
                           "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
@@ -1113,7 +1118,18 @@ static void test_messages_stream_openai_family_translates(void)
    assert(cJSON_IsTrue(obj(sent, "stream")));
    assert(cap.count >= 2);
    assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
+   assert(strstr(cap.data[cap.count - 2], "\"input_tokens\":20") &&
+          strstr(cap.data[cap.count - 2], "\"cache_read_input_tokens\":12"));
    cJSON_Delete(sent);
+   memset(&cap, 0, sizeof cap);
+   g_stream_payload = "data: {\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}]}\n\n";
+   assert(messages_stream("{\"model\":\"ignored\",\"messages\":[{\"role\":\"user\",\"content\":"
+                          "\"hi\"}],\"stream\":true}",
+                          cap_emit, &cap) == 0);
+   assert(!strcmp(cap.events[cap.count - 1], "error"));
+   for (int i = 0; i < cap.count; i++)
+      assert(strcmp(cap.events[i], "message_stop"));
    reset_capture();
    PASS("messages_stream_openai_family_translates");
 }

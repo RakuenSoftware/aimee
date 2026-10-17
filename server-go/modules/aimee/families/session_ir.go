@@ -44,20 +44,24 @@ func validSessionIREvent(encoded []byte) bool {
 		return true
 	case "delta":
 		var d struct {
-			Type            string  `json:"type"`
-			BlockID         *int    `json:"block_id"`
-			Kind            string  `json:"kind"`
-			ToolID          string  `json:"tool_id"`
-			Name            string  `json:"name"`
-			Text            *string `json:"text_delta"`
-			Arguments       *string `json:"tool_args_delta"`
-			StopReason      string  `json:"stop_reason"`
-			UsageIn         *int64  `json:"usage_in"`
-			UsageOut        *int64  `json:"usage_out"`
-			UsageCacheRead  *int64  `json:"usage_cache_read"`
-			UsageCacheWrite *int64  `json:"usage_cache_write"`
-			UsageReasoning  *int64  `json:"usage_reasoning"`
-			Error           string  `json:"error_message"`
+			Type            string          `json:"type"`
+			BlockID         *int            `json:"block_id"`
+			Kind            string          `json:"kind"`
+			ToolID          string          `json:"tool_id"`
+			Name            string          `json:"name"`
+			Text            *string         `json:"text_delta"`
+			Arguments       *string         `json:"tool_args_delta"`
+			Signature       *string         `json:"signature_delta"`
+			Redacted        *string         `json:"redacted_content"`
+			Namespace       string          `json:"namespace"`
+			Input           json.RawMessage `json:"input"`
+			StopReason      string          `json:"stop_reason"`
+			UsageIn         *int64          `json:"usage_in"`
+			UsageOut        *int64          `json:"usage_out"`
+			UsageCacheRead  *int64          `json:"usage_cache_read"`
+			UsageCacheWrite *int64          `json:"usage_cache_write"`
+			UsageReasoning  *int64          `json:"usage_reasoning"`
+			Error           string          `json:"error_message"`
 		}
 		if e.MessageID == "" || e.Role == "" || !decodeIR(e.Payload, &d) {
 			return false
@@ -75,7 +79,22 @@ func validSessionIREvent(encoded []byte) bool {
 			if d.Type == "BLOCK_START" && d.Kind == "tool_use" && (d.ToolID == "" || d.Name == "") {
 				return false
 			}
-			return (d.Text == nil || d.Kind == "text" || d.Kind == "thinking") && (d.Arguments == nil || d.Kind == "tool_use")
+			if d.Signature != nil && d.Kind != "thinking" {
+				return false
+			}
+			if d.Redacted != nil && (d.Kind != "thinking" || d.Type != "BLOCK_START") {
+				return false
+			}
+			if d.Namespace != "" && d.Kind != "tool_use" {
+				return false
+			}
+			if d.Input != nil {
+				var input map[string]json.RawMessage
+				if d.Kind != "tool_use" || d.Type != "BLOCK_START" || !decodeIR(d.Input, &input) || input == nil {
+					return false
+				}
+			}
+			return (d.Text == nil || d.Kind == "text" || d.Kind == "thinking") && (d.Arguments == nil || (d.Kind == "tool_use" && d.Type == "BLOCK_DELTA"))
 		default:
 			return false
 		}
@@ -123,6 +142,8 @@ func validIRBlock(encoded []byte) bool {
 		ThinkingID       *string         `json:"thinking_id"`
 		EncryptedContent *string         `json:"encrypted_content"`
 		CacheControl     *string         `json:"cache_control"`
+		CacheTTL         *string         `json:"cache_ttl"`
+		MessageGroup     *int            `json:"message_group"`
 		ToolID           string          `json:"tool_id"`
 		Name             string          `json:"name"`
 		Namespace        string          `json:"namespace"`
@@ -142,7 +163,7 @@ func validIRBlock(encoded []byte) bool {
 			RevisionEpoch  string `json:"revision_epoch"`
 		} `json:"context"`
 	}
-	if !decodeIR(encoded, &b) || !irBlockKind(b.Type) {
+	if !decodeIR(encoded, &b) || !irBlockKind(b.Type) || (b.MessageGroup != nil && (*b.MessageGroup < 1 || *b.MessageGroup > 4096)) {
 		return false
 	}
 	switch b.Type {

@@ -15,6 +15,10 @@
 
 struct cJSON;
 
+/* Parse an exact native JSON frame and retain its owned byte representation. */
+int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
+                              aimee_request_t *out, char *error, size_t error_capacity);
+
 /* Parse an Anthropic Messages API request (/v1/messages) into the IR. Returns 0 on
  * success (out owned by caller -> aimee_request_free), -1 on error (err filled;
  * out zeroed). Sets out->frontend = AIMEE_WIRE_ANTHROPIC and keeps a whole-request

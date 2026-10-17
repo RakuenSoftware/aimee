@@ -145,6 +145,10 @@ typedef struct
    /* Per-block prompt-cache marker (opaque, e.g. "ephemeral"); NULL if none. The
     * cache decision is per-section, so this must survive block-preserving stages. */
    char *cache_control;
+   char *cache_ttl; /* optional cache lifetime, e.g. 5m or 1h; owned */
+   /* Positive groups retain content belonging to one authored message. Zero
+    * leaves grouping unspecified; paragraph presentation never changes text bytes. */
+   int message_group;
    /* Sidecar: the block's original wire JSON (unknown fields, exact bytes for
     * same-protocol replay). Owned. */
    struct cJSON *raw;
@@ -164,6 +168,7 @@ typedef struct
    char *description;
    struct cJSON *schema; /* input JSON schema, opaque; owned */
    char *cache_control;
+   char *cache_ttl;   /* optional cache lifetime, e.g. 5m or 1h; owned */
    struct cJSON *raw; /* sidecar */
 } aimee_tool_t;
 
@@ -183,9 +188,17 @@ typedef enum
    AIMEE_TOOL_CHOICE_TOOL, /* must call tool_choice_name */
 } aimee_tool_choice_t;
 
+typedef enum
+{
+   AIMEE_CACHE_DEFAULT =
+       0, /* retain native client policy; translate other sources deterministically */
+   AIMEE_CACHE_STABLE_PREFIX, /* explicit host normalization policy */
+} aimee_cache_policy_t;
+
 typedef struct
 {
    char *model;
+   aimee_cache_policy_t cache_policy;
    aimee_block_t *system; /* system as ORDERED BLOCKS, not a flat string */
    int n_system;
    aimee_message_t *messages;
@@ -235,6 +248,8 @@ typedef struct
     * raw-passthrough fast-path (frontend==backend, unmutated) and lossless replay.
     * Owned. */
    struct cJSON *raw;
+   char *raw_bytes; /* original native request bytes; owned, excluded from model/log JSON */
+   size_t raw_length;
 } aimee_request_t;
 
 /* Canonical stop reasons; the provider-specific string is kept alongside so nothing
@@ -289,7 +304,11 @@ typedef struct
    /* BLOCK_START of a tool_use carries the id + name (opaque, verbatim). */
    const char *tool_id;
    const char *tool_name;
-   const char *text_delta;          /* BLOCK_DELTA for text/thinking */
+   const char *text_delta;
+   const char *signature_delta;
+   const char *redacted_content;
+   const char *tool_namespace;
+   const struct cJSON *tool_input;  /* BLOCK_START initial arguments; borrowed */
    const char *tool_args_delta;     /* BLOCK_DELTA for tool_use argument JSON fragment */
    aimee_stop_reason_t stop_reason; /* TURN_STOP */
    long usage_in, usage_out;        /* TURN_STOP */

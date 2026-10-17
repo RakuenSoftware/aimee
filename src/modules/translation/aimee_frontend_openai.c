@@ -435,21 +435,20 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
    cJSON *msg = cJSON_AddObjectToObject(choice, "message");
    cJSON_AddStringToObject(msg, "role", r->role ? r->role : "assistant");
 
-   /* content = concatenation of text blocks; tool_use blocks -> tool_calls[] */
-   size_t tlen = 0;
-   for (int i = 0; i < r->n_content; i++)
-      if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-         tlen += strlen(r->content[i].text);
-   char *text = calloc(tlen + 1, 1);
+   /* Presentation follows authored-message grouping; replay retains original blocks. */
+   char *text = aimee_ir_response_text_alloc(r);
+   if (!text)
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    cJSON *tool_calls = NULL;
    if (text)
    {
       for (int i = 0; i < r->n_content; i++)
       {
          const aimee_block_t *b = &r->content[i];
-         if (b->type == AIMEE_BLK_TEXT && b->text)
-            strcat(text, b->text);
-         else if (b->type == AIMEE_BLK_TOOL_USE)
+         if (b->type == AIMEE_BLK_TOOL_USE)
          {
             if (!tool_calls)
                tool_calls = cJSON_CreateArray();

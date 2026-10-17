@@ -14,7 +14,12 @@ export default function IRTranscript({ state, onReply }: { state: SessionState; 
     {state.messages.flatMap(m => m.blocks.map((b, index) => {
       const key = `${m.id}:${index}`;
       switch (b.type) {
-        case 'text': return <Message key={key} role={m.role === 'user' ? 'user' : 'assistant'} text={b.text || ''} streaming={!m.complete} />;
+        case 'text': {
+          if (b.message_group && index > 0 && m.blocks[index - 1].type === 'text' && m.blocks[index - 1].message_group === b.message_group) return null;
+          let text = b.text || '';
+          if (b.message_group) for (let i = index + 1; i < m.blocks.length && m.blocks[i].type === 'text' && m.blocks[i].message_group === b.message_group; i++) text += m.blocks[i].text || '';
+          return <Message key={key} role={m.role === 'user' ? 'user' : 'assistant'} text={text} streaming={!m.complete} />;
+        }
         case 'thinking': return <ThinkingBlock key={key} text={b.text || ''} />;
         case 'tool_use': {
           const output = results.get(b.tool_id || '');

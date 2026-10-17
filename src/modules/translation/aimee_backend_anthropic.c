@@ -15,25 +15,18 @@ static char *dupstr(const char *s)
    return s ? strdup(s) : NULL;
 }
 
-static void add_cache_control(cJSON *el, const char *cc)
+static void add_cache_control(cJSON *el, const char *cc, const char *ttl)
 {
    if (!cc)
       return;
    cJSON *o = cJSON_AddObjectToObject(el, "cache_control");
    cJSON_AddStringToObject(o, "type", cc[0] ? cc : "ephemeral");
+   if (ttl)
+      cJSON_AddStringToObject(o, "ttl", ttl);
 }
 
-/* Uniform aimee cache policy (cross-protocol canonical egress): cache_control on the
- * Anthropic egress is decided by aimee at egress, NOT inherited from the client, so
- * the bytes are identical regardless of source protocol (Anthropic prompt-caches on
- * exact bytes; an openai-sourced request carries no markers of its own). The policy
- * marks the stable-prefix breakpoints -- the end of the system block and the end of
- * the tools block -- with an ephemeral cache_control. Deterministic: the same IR
- * content yields the same markers whether parsed from anthropic, openai, or responses
- * wire. (Message/turn-level breakpoints are a later economization refinement.) */
-/* Remove cache_control from every element of an array. The policy is the SOLE source
- * of markers, so any client marker that leaked in (e.g. via a raw-replayed UNKNOWN
- * block) must be stripped first, or the egress bytes would depend on the source. */
+/* Explicit stable-prefix policy normalizes cache markers for translated requests.
+ * Native Anthropic requests preserve client breakpoints and TTLs by default. */
 static void strip_cache_control(cJSON *arr)
 {
    if (!cJSON_IsArray(arr))
@@ -60,7 +53,7 @@ static void mark_cache_prefix(cJSON *arr)
       return;
    cJSON *last = cJSON_GetArrayItem(arr, n - 1);
    if (last && cJSON_IsObject(last))
-      add_cache_control(last, "ephemeral");
+      add_cache_control(last, "ephemeral", NULL);
 }
 
 /* Canonicalize a tool_result's content so an anthropic-sourced tool_result (verbatim
@@ -94,8 +87,22 @@ static cJSON *tool_result_content(const cJSON *tr)
 }
 
 /* one IR block -> its Anthropic wire JSON (owned). NULL if not renderable. */
-static cJSON *block_to_anthropic(const aimee_block_t *b)
+static cJSON *block_to_anthropic(const aimee_block_t *b, int preserve_cache)
 {
+   if (preserve_cache && cJSON_IsObject(b->raw))
+   {
+      aimee_block_t original = {0};
+      anthropic_ir_parse_block(b->raw, &original);
+      aimee_block_t current = *b;
+      current.context = original.context; /* Host provenance does not alter native bytes. */
+      current.message_group = original.message_group;
+      aimee_request_t left = {.system = &current, .n_system = 1};
+      aimee_request_t right = {.system = &original, .n_system = 1};
+      int unchanged = aimee_ir_request_equal(&left, &right);
+      aimee_block_free_contents(&original);
+      if (unchanged)
+         return cJSON_Duplicate(b->raw, 1);
+   }
    cJSON *el = cJSON_CreateObject();
    switch (b->type)
    {
@@ -184,18 +191,17 @@ static cJSON *block_to_anthropic(const aimee_block_t *b)
       cJSON_Delete(el);
       return b->raw ? cJSON_Duplicate(b->raw, 1) : NULL;
    }
-   /* NOTE: the client's per-block cache_control is intentionally NOT copied here --
-    * the uniform aimee cache policy (mark_cache_prefix) decides markers at egress so
-    * the bytes are source-protocol-independent. */
+   if (preserve_cache)
+      add_cache_control(el, b->cache_control, b->cache_ttl);
    return el;
 }
 
-static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n)
+static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n, int preserve_cache)
 {
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
    {
-      cJSON *el = block_to_anthropic(&blocks[i]);
+      cJSON *el = block_to_anthropic(&blocks[i], preserve_cache);
       if (!el || !cJSON_AddItemToArray(arr, el))
       {
          cJSON_Delete(el);
@@ -243,6 +249,84 @@ static void anthropic_add_tool_choice(cJSON *out, const aimee_request_t *ir)
       cJSON_AddBoolToObject(tc, "disable_parallel_tool_use", ir->parallel_tool_calls ? 0 : 1);
 }
 
+/* A native edit replaces every represented field while retaining client-owned
+ * extensions. Unchanged sections retain their original representation. */
+static cJSON *native_overlay(const cJSON *original, cJSON *generated, const char *const *fields,
+                             size_t count)
+{
+   if (!cJSON_IsObject(original))
+      return generated;
+   cJSON *out = cJSON_Duplicate(original, 1);
+   if (!out)
+   {
+      cJSON_Delete(generated);
+      return NULL;
+   }
+   for (size_t i = 0; i < count; i++)
+   {
+      cJSON *field = cJSON_DetachItemFromObjectCaseSensitive(generated, fields[i]);
+      cJSON_DeleteItemFromObjectCaseSensitive(out, fields[i]);
+      if (field && !cJSON_AddItemToObject(out, fields[i], field))
+      {
+         cJSON_Delete(field);
+         cJSON_Delete(out);
+         cJSON_Delete(generated);
+         return NULL;
+      }
+   }
+   cJSON_Delete(generated);
+   return out;
+}
+static int restore_native_section(cJSON *out, const cJSON *raw, const char *field)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(raw, field);
+   if (!value)
+      return 0;
+   cJSON *copy = cJSON_Duplicate(value, 1);
+   if (!copy)
+      return -1;
+   cJSON_DeleteItemFromObjectCaseSensitive(out, field);
+   if (!cJSON_AddItemToObject(out, field, copy))
+   {
+      cJSON_Delete(copy);
+      return -1;
+   }
+   return 0;
+}
+static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
+{
+   aimee_request_t original = {0};
+   char error[128];
+   if (anthropic_frontend_parse(ir->raw, &original, error, sizeof error) == 0)
+   {
+      aimee_request_t left = {.system = ir->system, .n_system = ir->n_system};
+      aimee_request_t right = {.system = original.system, .n_system = original.n_system};
+      int failed =
+          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "system");
+      left = (aimee_request_t){.messages = ir->messages, .n_messages = ir->n_messages};
+      right = (aimee_request_t){.messages = original.messages, .n_messages = original.n_messages};
+      failed |=
+          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "messages");
+      left = (aimee_request_t){.tools = ir->tools, .n_tools = ir->n_tools};
+      right = (aimee_request_t){.tools = original.tools, .n_tools = original.n_tools};
+      failed |=
+          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "tools");
+      aimee_request_free(&original);
+      if (failed)
+      {
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
+   else
+      aimee_request_free(&original);
+   static const char *const fields[] = {"model",       "system",        "messages",     "tools",
+                                        "tool_choice", "max_tokens",    "temperature",  "top_p",
+                                        "top_k",       "metadata",      "service_tier", "thinking",
+                                        "stream",      "stop_sequences"};
+   return native_overlay(ir->raw, out, fields, sizeof fields / sizeof fields[0]);
+}
+
 cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
@@ -251,7 +335,8 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
     * unknown native settings. Verify the typed payload against its entry
     * snapshot as well as the mutation flag: a stage forgetting to report an
     * edit must never cause stale user/tool content to be replayed. */
-   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && !ir->mutated)
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && !ir->mutated &&
+       ir->cache_policy == AIMEE_CACHE_DEFAULT)
    {
       aimee_request_t original = {0};
       char error[128];
@@ -267,6 +352,8 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       else
          aimee_request_free(&original);
    }
+   int preserve_cache =
+       ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->cache_policy == AIMEE_CACHE_DEFAULT;
    cJSON *out = cJSON_CreateObject();
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
@@ -288,14 +375,15 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       cJSON_AddBoolToObject(out, "stream", 1);
    if (ir->n_system > 0)
    {
-      cJSON *sys = blocks_to_anthropic(ir->system, ir->n_system);
+      cJSON *sys = blocks_to_anthropic(ir->system, ir->n_system, preserve_cache);
       if (!sys)
       {
          cJSON_Delete(out);
          return NULL;
       }
       cJSON_AddItemToObject(out, "system", sys);
-      mark_cache_prefix(sys); /* uniform policy: cache the stable system prefix */
+      if (!preserve_cache)
+         mark_cache_prefix(sys);
    }
    cJSON *msgs = cJSON_AddArrayToObject(out, "messages");
    for (int i = 0; i < ir->n_messages; i++)
@@ -303,16 +391,28 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       cJSON *m = cJSON_CreateObject();
       const char *role = ir->messages[i].role;
       cJSON_AddStringToObject(m, "role", role && strcmp(role, "tool") ? role : "user");
-      cJSON *content = blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks);
+      cJSON *content =
+          blocks_to_anthropic(ir->messages[i].blocks, ir->messages[i].n_blocks, preserve_cache);
       if (!content)
       {
          cJSON_Delete(m);
          cJSON_Delete(out);
          return NULL;
       }
-      strip_cache_control(content); /* uniform policy: no client markers on messages */
+      if (!preserve_cache)
+         strip_cache_control(content);
       cJSON_AddItemToObject(m, "content", content);
-      cJSON_AddItemToArray(msgs, m);
+      if (preserve_cache)
+      {
+         static const char *const fields[] = {"role", "content"};
+         m = native_overlay(ir->messages[i].raw, m, fields, 2);
+      }
+      if (!m || !cJSON_AddItemToArray(msgs, m))
+      {
+         cJSON_Delete(m);
+         cJSON_Delete(out);
+         return NULL;
+      }
    }
    if (ir->n_tools > 0)
    {
@@ -323,13 +423,27 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
          cJSON_AddStringToObject(t, "name", ir->tools[i].name ? ir->tools[i].name : "");
          if (ir->tools[i].description)
             cJSON_AddStringToObject(t, "description", ir->tools[i].description);
-         cJSON_AddItemToObject(t, "input_schema",
-                               ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
-                                                   : cJSON_CreateObject());
-         /* client tool cache_control intentionally not copied -- see mark_cache_prefix */
-         cJSON_AddItemToArray(tools, t);
+         if (ir->tools[i].schema || !preserve_cache || !ir->tools[i].raw)
+            cJSON_AddItemToObject(t, "input_schema",
+                                  ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
+                                                      : cJSON_CreateObject());
+         if (preserve_cache)
+            add_cache_control(t, ir->tools[i].cache_control, ir->tools[i].cache_ttl);
+         if (preserve_cache)
+         {
+            static const char *const fields[] = {"name", "description", "input_schema",
+                                                 "cache_control"};
+            t = native_overlay(ir->tools[i].raw, t, fields, 4);
+         }
+         if (!t || !cJSON_AddItemToArray(tools, t))
+         {
+            cJSON_Delete(t);
+            cJSON_Delete(out);
+            return NULL;
+         }
       }
-      mark_cache_prefix(tools); /* uniform policy: cache the stable tools block */
+      if (!preserve_cache)
+         mark_cache_prefix(tools);
    }
    anthropic_add_tool_choice(out, ir);
    if (ir->n_stop > 0)
@@ -339,7 +453,7 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
          cJSON_AddItemToArray(
              stop, cJSON_CreateString(ir->stop_sequences[i] ? ir->stop_sequences[i] : ""));
    }
-   return out;
+   return preserve_cache && ir->raw ? native_request_overlay(ir, out) : out;
 }
 
 /* --- parse: Anthropic response -> IR --- */

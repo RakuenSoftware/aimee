@@ -40,11 +40,56 @@ void openai_stream_state_init(openai_stream_state_t *st)
       st->tool_block[i] = -1;
 }
 
+static int optional_usage(const cJSON *usage, const char *name, long *out)
+{
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(usage, name);
+   if (!value)
+      return 0;
+   if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < 0 ||
+       value->valuedouble > 9007199254740991.0 || value->valuedouble > LONG_MAX ||
+       (double)(long)value->valuedouble != value->valuedouble)
+      return -1;
+   *out = (long)value->valuedouble;
+   return 0;
+}
+int openai_stream_finish(openai_stream_state_t *st, aimee_delta_t *out, int max)
+{
+   if (!st || !out || max < 1)
+      return -1;
+   if (st->stopped)
+      return 0;
+   if (!st->pending_stop)
+      return -1;
+   *out = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
+                          .stop_reason = st->pending_stop_reason,
+                          .usage_in = st->usage_in,
+                          .usage_out = st->usage_out,
+                          .usage_cache_read = st->usage_cache_read,
+                          .usage_cache_write = st->usage_cache_write,
+                          .usage_reasoning = st->usage_reasoning};
+   st->stopped = 1;
+   return 1;
+}
+
 int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_delta_t *out,
                            int max)
 {
-   int n = 0;
+   int n = 0, overflow = 0;
    if (!chunk || !st || !out || max <= 0)
+      return 0;
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(chunk, "usage");
+   if (cJSON_IsObject(usage))
+   {
+      if (optional_usage(usage, "prompt_tokens", &st->usage_in) ||
+          optional_usage(usage, "completion_tokens", &st->usage_out) ||
+          optional_usage(cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details"),
+                         "cached_tokens", &st->usage_cache_read) ||
+          optional_usage(cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details"),
+                         "reasoning_tokens", &st->usage_reasoning))
+         return -1;
+      st->usage_seen = 1;
+   }
+   if (st->stopped)
       return 0;
    const cJSON *choices = cJSON_GetObjectItemCaseSensitive((cJSON *)chunk, "choices");
    const cJSON *choice =
@@ -52,8 +97,12 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
    /* a final usage-only chunk may have no choices; still allow finish/usage below */
    const cJSON *delta = choice ? cJSON_GetObjectItemCaseSensitive((cJSON *)choice, "delta") : NULL;
    const char *finish = choice ? ostr(choice, "finish_reason") : NULL;
+   if (st->pending_stop && delta && cJSON_GetArraySize(delta) != 0)
+      return -1;
 
-#define SLOT() (n < max ? (memset(&out[n], 0, sizeof out[n]), &out[n++]) : NULL)
+#define SLOT()                                                                                     \
+   (n < max ? (memset(&out[n], 0, sizeof out[n]), &out[n++])                                       \
+            : (overflow = 1, (aimee_delta_t *)NULL))
 
    if (!st->started)
    {
@@ -143,9 +192,11 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       cJSON_ArrayForEach(tc, tcs)
       {
          const cJSON *jidx = cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "index");
-         int idx = (jidx && cJSON_IsNumber(jidx)) ? jidx->valueint : 0;
-         if (idx < 0 || idx >= AIMEE_STREAM_MAX_TOOLS)
-            continue;
+         if (!cJSON_IsNumber(jidx) || !isfinite(jidx->valuedouble) || jidx->valuedouble < 0 ||
+             jidx->valuedouble >= AIMEE_STREAM_MAX_TOOLS ||
+             (double)jidx->valueint != jidx->valuedouble)
+            return -1;
+         int idx = jidx->valueint;
          const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "function");
          if (st->tool_block[idx] < 0)
          {
@@ -175,7 +226,7 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       }
    }
 
-   if (finish && !st->stopped)
+   if (finish && !st->pending_stop)
    {
       if (st->reasoning_block >= 0)
       {
@@ -194,6 +245,7 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
          if (d)
          {
             d->type = AIMEE_DELTA_BLOCK_STOP;
+            d->kind = AIMEE_BLK_TEXT;
             d->block_id = st->text_block;
          }
       }
@@ -205,29 +257,21 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
          if (d)
          {
             d->type = AIMEE_DELTA_BLOCK_STOP;
+            d->kind = AIMEE_BLK_TOOL_USE;
             d->block_id = st->tool_block[i];
          }
       }
-      aimee_delta_t *d = SLOT();
-      if (d)
-      {
-         d->type = AIMEE_DELTA_TURN_STOP;
-         d->stop_reason = finish_to_stop(finish);
-         const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)chunk, "usage");
-         if (usage)
-         {
-            const cJSON *pt = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "prompt_tokens");
-            const cJSON *ct = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "completion_tokens");
-            if (pt && cJSON_IsNumber(pt))
-               d->usage_in = (long)pt->valuedouble;
-            if (ct && cJSON_IsNumber(ct))
-               d->usage_out = (long)ct->valuedouble;
-         }
-         st->stopped = 1;
-      }
+      st->pending_stop = 1;
+      st->pending_stop_reason = finish_to_stop(finish);
+   }
+   if (st->pending_stop && st->usage_seen)
+   {
+      aimee_delta_t *terminal = SLOT();
+      if (!terminal || openai_stream_finish(st, terminal, 1) != 1)
+         return -1;
    }
 #undef SLOT
-   return n;
+   return overflow ? -1 : n;
 }
 
 void converse_stream_state_init(converse_stream_state_t *st)
@@ -260,12 +304,11 @@ static int converse_usage(const cJSON *usage, const char *name, long *out)
    return 0;
 }
 
-static int converse_optional_usage(const cJSON *usage, const char *name)
+static int converse_optional_usage(const cJSON *usage, const char *name, long *out)
 {
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name))
       return 0;
-   long ignored;
-   return converse_usage(usage, name, &ignored);
+   return converse_usage(usage, name, out);
 }
 
 /* Is `ev` one of the known ConverseStream exception event-types? */
@@ -333,7 +376,8 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
       const char *tuin = tu ? ostr(tu, "input") : NULL;
       const cJSON *rc = cJSON_GetObjectItemCaseSensitive((cJSON *)delta, "reasoningContent");
       const char *rtext = rc ? ostr(rc, "text") : NULL;
-      if (!!text + !!tuin + !!rtext != 1)
+      const char *signature = rc ? ostr(rc, "signature") : NULL;
+      if (!!text + !!tuin + !!rtext + !!signature != 1)
          return -1;
       aimee_block_type_t kind;
       /* kind self-identifies from the delta's own union variant. */
@@ -372,6 +416,7 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
       out[delta_slot].type = AIMEE_DELTA_BLOCK_DELTA;
       out[delta_slot].block_id = idx;
       out[delta_slot].kind = kind;
+      out[delta_slot].signature_delta = signature;
       if (kind == AIMEE_BLK_TOOL_USE)
          out[delta_slot].tool_args_delta = tuin;
       else
@@ -414,12 +459,11 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
           payload ? cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage") : NULL;
       if (!cJSON_IsObject(usage) || converse_usage(usage, "inputTokens", &terminal.usage_in) != 0 ||
           converse_usage(usage, "outputTokens", &terminal.usage_out) != 0 ||
-          converse_optional_usage(usage, "cacheReadInputTokens") != 0 ||
-          converse_optional_usage(usage, "cacheWriteInputTokens") != 0)
+          converse_optional_usage(usage, "cacheReadInputTokens", &terminal.usage_cache_read) != 0 ||
+          converse_optional_usage(usage, "cacheWriteInputTokens", &terminal.usage_cache_write) != 0)
          return -1;
       out[0] = terminal;
       st->terminal_emitted = 1;
-      /* aimee_delta_t has no cache fields -> cache tokens dropped on the stream path. */
       return 1;
    }
 
@@ -448,9 +492,7 @@ static void anthropic_usage(const cJSON *usage, const char *name, long *out)
       *out = (long)it->valuedouble;
 }
 
-/* Anthropic content_block.type -> IR block kind. An unrecognised type maps to
- * AIMEE_BLK_UNKNOWN rather than dropping the stream, so a future block type still
- * gets well-formed START/STOP bracketing around deltas we ignore. */
+/* Native block classification; unsupported kinds fail canonical admission. */
 static aimee_block_type_t anthropic_block_kind(const char *type)
 {
    if (!type)
@@ -512,6 +554,12 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
                       &st->pending_usage_in);
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_TURN_START;
+      const cJSON *usage = cJSON_GetObjectItemCaseSensitive(msg, "usage");
+      anthropic_usage(usage, "cache_read_input_tokens", &st->pending_cache_read);
+      anthropic_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write);
+      out[0].usage_in = st->pending_usage_in;
+      out[0].usage_cache_read = st->pending_cache_read;
+      out[0].usage_cache_write = st->pending_cache_write;
       st->started = 1;
       return 1;
    }
@@ -535,6 +583,18 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       out[0].kind = kind;
       out[0].tool_id = tool_id;
       out[0].tool_name = tool_name;
+      if (kind == AIMEE_BLK_UNKNOWN)
+         return -1;
+      if (kind == AIMEE_BLK_TOOL_USE)
+         out[0].tool_input = cJSON_GetObjectItemCaseSensitive(cb, "input");
+      if (kind == AIMEE_BLK_TEXT)
+         out[0].text_delta = ostr(cb, "text");
+      if (kind == AIMEE_BLK_THINKING)
+      {
+         out[0].text_delta = ostr(cb, "thinking");
+         out[0].signature_delta = ostr(cb, "signature");
+         out[0].redacted_content = ostr(cb, "data");
+      }
       st->kind[idx] = kind;
       st->kind_set[idx] = 1;
       return 1;
@@ -552,13 +612,8 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       if (!dtype)
          return -1;
 
-      /* signature_delta: see the header's KNOWN GAPS. The IR delta model has nowhere
-       * to put a signature, so it is dropped openly rather than mangled into text. */
-      if (strcmp(dtype, "signature_delta") == 0)
-         return 0;
-
       aimee_block_type_t kind;
-      const char *text = NULL, *args = NULL;
+      const char *text = NULL, *args = NULL, *signature = NULL;
       if (strcmp(dtype, "text_delta") == 0)
       {
          kind = AIMEE_BLK_TEXT;
@@ -568,6 +623,11 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       {
          kind = AIMEE_BLK_THINKING;
          text = ostr(delta, "thinking");
+      }
+      else if (strcmp(dtype, "signature_delta") == 0)
+      {
+         kind = AIMEE_BLK_THINKING;
+         signature = ostr(delta, "signature");
       }
       else if (strcmp(dtype, "input_json_delta") == 0)
       {
@@ -579,7 +639,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       else
          return 0; /* a future delta variant -> ignore it, keep the stream */
 
-      if (!text && !args)
+      if (!text && !args && !signature)
          return -1; /* a KNOWN variant missing its own payload field */
       if (st->kind[idx] != kind)
          return -1;
@@ -588,6 +648,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       out[0].type = AIMEE_DELTA_BLOCK_DELTA;
       out[0].block_id = idx;
       out[0].kind = kind;
+      out[0].signature_delta = signature;
       if (args)
          out[0].tool_args_delta = args;
       else
@@ -620,6 +681,12 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          st->pending_stop_reason = aimee_stop_reason_parse(sr);
       anthropic_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage"), "output_tokens",
                       &st->pending_usage_out);
+      const cJSON *usage = cJSON_GetObjectItemCaseSensitive(payload, "usage");
+      anthropic_usage(usage, "input_tokens", &st->pending_usage_in);
+      anthropic_usage(usage, "cache_read_input_tokens", &st->pending_cache_read);
+      anthropic_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write);
+      anthropic_usage(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details"),
+                      "thinking_tokens", &st->pending_reasoning);
       return 0; /* message_stop emits the single terminal IR delta */
    }
 
@@ -632,6 +699,9 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       out[0].stop_reason = st->pending_stop_reason;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_out = st->pending_usage_out;
+      out[0].usage_cache_read = st->pending_cache_read;
+      out[0].usage_cache_write = st->pending_cache_write;
+      out[0].usage_reasoning = st->pending_reasoning;
       st->terminal_emitted = 1;
       return 1;
    }
@@ -691,7 +761,12 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
       if (model)
          cJSON_AddStringToObject(m, "model", model);
       cJSON *u = cJSON_AddObjectToObject(m, "usage");
-      cJSON_AddNumberToObject(u, "input_tokens", 0);
+      cJSON_AddNumberToObject(u, "input_tokens", (double)d->usage_in);
+      cJSON_AddNumberToObject(u, "output_tokens", (double)d->usage_out);
+      if (d->usage_cache_read)
+         cJSON_AddNumberToObject(u, "cache_read_input_tokens", (double)d->usage_cache_read);
+      if (d->usage_cache_write)
+         cJSON_AddNumberToObject(u, "cache_creation_input_tokens", (double)d->usage_cache_write);
       if (st)
          st->started = 1;
       ev[0] = "message_start";
@@ -709,12 +784,25 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
          cJSON_AddStringToObject(cb, "type", "tool_use");
          cJSON_AddStringToObject(cb, "id", d->tool_id ? d->tool_id : "");
          cJSON_AddStringToObject(cb, "name", d->tool_name ? d->tool_name : "");
-         cJSON_AddItemToObject(cb, "input", cJSON_CreateObject());
+         cJSON_AddItemToObject(
+             cb, "input", d->tool_input ? cJSON_Duplicate(d->tool_input, 1) : cJSON_CreateObject());
+      }
+      else if (d->kind == AIMEE_BLK_THINKING)
+      {
+         cJSON_AddStringToObject(cb, "type",
+                                 d->redacted_content ? "redacted_thinking" : "thinking");
+         if (d->redacted_content)
+            cJSON_AddStringToObject(cb, "data", d->redacted_content);
+         else
+         {
+            cJSON_AddStringToObject(cb, "thinking", d->text_delta ? d->text_delta : "");
+            cJSON_AddStringToObject(cb, "signature", d->signature_delta ? d->signature_delta : "");
+         }
       }
       else
       {
          cJSON_AddStringToObject(cb, "type", "text");
-         cJSON_AddStringToObject(cb, "text", "");
+         cJSON_AddStringToObject(cb, "text", d->text_delta ? d->text_delta : "");
       }
       ev[0] = "content_block_start";
       js[0] = o;
@@ -731,6 +819,14 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
          cJSON_AddStringToObject(dl, "type", "input_json_delta");
          cJSON_AddStringToObject(dl, "partial_json", d->tool_args_delta ? d->tool_args_delta : "");
       }
+      else if (d->kind == AIMEE_BLK_THINKING)
+      {
+         cJSON_AddStringToObject(dl, "type",
+                                 d->signature_delta ? "signature_delta" : "thinking_delta");
+         cJSON_AddStringToObject(dl, d->signature_delta ? "signature" : "thinking",
+                                 d->signature_delta ? d->signature_delta
+                                                    : (d->text_delta ? d->text_delta : ""));
+      }
       else
       {
          cJSON_AddStringToObject(dl, "type", "text_delta");
@@ -738,6 +834,21 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
       }
       ev[0] = "content_block_delta";
       js[0] = o;
+      if (d->kind == AIMEE_BLK_THINKING && d->signature_delta && d->text_delta)
+      {
+         cJSON_ReplaceItemInObjectCaseSensitive(dl, "type", cJSON_CreateString("thinking_delta"));
+         cJSON_DeleteItemFromObjectCaseSensitive(dl, "signature");
+         cJSON_AddStringToObject(dl, "thinking", d->text_delta);
+         cJSON *signature = cJSON_CreateObject();
+         cJSON_AddStringToObject(signature, "type", "content_block_delta");
+         cJSON_AddNumberToObject(signature, "index", d->block_id);
+         cJSON *sd = cJSON_AddObjectToObject(signature, "delta");
+         cJSON_AddStringToObject(sd, "type", "signature_delta");
+         cJSON_AddStringToObject(sd, "signature", d->signature_delta);
+         ev[1] = "content_block_delta";
+         js[1] = signature;
+         return 2;
+      }
       return 1;
    }
    case AIMEE_DELTA_BLOCK_STOP:
@@ -758,6 +869,16 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
       cJSON_AddNullToObject(dl, "stop_sequence");
       cJSON *u = cJSON_AddObjectToObject(o, "usage");
       cJSON_AddNumberToObject(u, "output_tokens", (double)d->usage_out);
+      cJSON_AddNumberToObject(u, "input_tokens", (double)d->usage_in);
+      if (d->usage_cache_read)
+         cJSON_AddNumberToObject(u, "cache_read_input_tokens", (double)d->usage_cache_read);
+      if (d->usage_cache_write)
+         cJSON_AddNumberToObject(u, "cache_creation_input_tokens", (double)d->usage_cache_write);
+      if (d->usage_reasoning)
+      {
+         cJSON *details = cJSON_AddObjectToObject(u, "output_tokens_details");
+         cJSON_AddNumberToObject(details, "thinking_tokens", (double)d->usage_reasoning);
+      }
       ev[0] = "message_delta";
       js[0] = o;
       cJSON *s = cJSON_CreateObject();

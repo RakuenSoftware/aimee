@@ -144,7 +144,11 @@ static int primary_session_adopt_latest_for_id(primary_session_state_t *state, c
    db1_primary_session_row_t row;
    int status = db1_primary_session_get_latest(id, &row);
    if (status != 0)
+   {
+      if (status < 0)
+         LOG_WARN("primary.session", "legacy history read unavailable");
       return status == 1 ? 0 : -1;
+   }
    cJSON *messages = primary_history_import(row.messages_json, row.provider);
    db1_primary_session_row_clear(&row);
    if (!messages)
@@ -174,7 +178,11 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
 {
    const char *principal = agent_get_request_vault_principal();
    if (state->history_failed || !principal || !principal[0])
+   {
+      LOG_WARN("primary.session", "canonical history refused: failed=%d attested=%d",
+               state->history_failed, principal && principal[0] ? 1 : 0);
       return -1;
+   }
    snprintf(state->scope_id, sizeof state->scope_id, "%s",
             alternate_id && alternate_id[0] ? alternate_id : state->id);
    db1_server_session_t owner;
@@ -185,11 +193,17 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
          return -1;
    }
    if (strcmp(owner.principal, principal))
+   {
+      LOG_WARN("primary.session", "canonical history owner mismatch");
       return -1;
+   }
    char *json = NULL;
    int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, active_turn, &json);
    if (rc < 0)
+   {
+      LOG_WARN("primary.session", "canonical history read unavailable");
       return -1;
+   }
    if (rc == 0)
    {
       cJSON *history = primary_history_import(json, state->provider);

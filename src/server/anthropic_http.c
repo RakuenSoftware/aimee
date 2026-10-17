@@ -737,11 +737,6 @@ cleanup:
 typedef struct
 {
    sse_parser_t parser;
-   anthropic_stream_xlate_t *xl; /* legacy incremental translator */
-   /* Slice 5-wire: neutral IR-delta relay (used instead of `xl` when the
-    * AIMEE_IR_STREAM_RELAY flag is on). Provider OpenAI-chat SSE chunks ->
-    * openai_chunk_to_deltas -> anthropic_delta_emit -> `emit`. */
-   int ir_relay;
    openai_stream_state_t ir_ost;
    anthropic_stream_state_t ir_ast;
    server_http_sse_event_emit emit;
@@ -749,6 +744,7 @@ typedef struct
    const char *msg_id;
    const char *model;
    long ir_usage_out; /* tapped from the TURN_STOP delta for the cost row */
+   int ir_failed;
 } prov_stream_ctx_t;
 
 typedef struct
@@ -789,13 +785,24 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
       const char *p = line + 5;
       while (*p == ' ')
          p++;
-      if (c->ir_relay)
       {
-         /* OpenAI-chat providers close the stream with a literal `data: [DONE]`
-          * sentinel that is not JSON; the finish_reason chunk already produced the
-          * IR TURN_STOP, so just skip it. */
          if (strcmp(p, "[DONE]") == 0)
+         {
+            aimee_delta_t terminal;
+            int n = openai_stream_finish(&c->ir_ost, &terminal, 1);
+            if (n < 0)
+            {
+               c->ir_failed = 1;
+               return -1;
+            }
+            if (n)
+            {
+               c->ir_usage_out = terminal.usage_out;
+               anthropic_delta_emit(&terminal, &c->ir_ast, c->msg_id, c->model, c->emit,
+                                    c->emit_ctx);
+            }
             return 0;
+         }
          cJSON *chunk = cJSON_Parse(p);
          if (chunk)
          {
@@ -806,9 +813,15 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
              * (which would hang the client's SSE reader). The +8 headroom covers a
              * reasoning block's START/DELTA/STOP on top of the text + tool worst
              * case, since one chunk may carry reasoning and content together. */
-            aimee_delta_t deltas[2 * AIMEE_STREAM_MAX_TOOLS + 8];
+            aimee_delta_t deltas[3 * AIMEE_STREAM_MAX_TOOLS + 8];
             int n = openai_chunk_to_deltas(chunk, &c->ir_ost, deltas,
                                            (int)(sizeof deltas / sizeof deltas[0]));
+            if (n < 0)
+            {
+               c->ir_failed = 1;
+               cJSON_Delete(chunk);
+               return -1;
+            }
             for (int i = 0; i < n; i++)
             {
                if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
@@ -818,9 +831,12 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             cJSON_Delete(chunk);
          }
+         else
+         {
+            c->ir_failed = 1;
+            return -1;
+         }
       }
-      else
-         anthropic_stream_feed_openai(c->xl, p); /* line is NUL-terminated by the parser */
    }
    return 0;
 }
@@ -1229,13 +1245,9 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
                                     server_http_sse_event_emit emit, void *ctx)
 {
    prov_stream_ctx_t pc;
-   /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
-    * SSE relay through the neutral IR-delta model instead of the legacy
-    * anthropic_stream_feed_openai translator -- the last live direct-translation
-    * site. */
+   /* Native chunks enter the canonical delta model before client rendering. */
    memset(&pc, 0, sizeof pc);
    sse_parser_init(&pc.parser);
-   pc.ir_relay = 1;
    openai_stream_state_init(&pc.ir_ost);
    pc.emit = emit;
    pc.emit_ctx = ctx;
@@ -1250,90 +1262,32 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
       messages_stream_pipeline_error(emit, ctx);
       return ir_status;
    }
-   /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
-    * TURN_STOP was produced), synthesize the closing sequence so the client's
-    * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
-    * still-open content blocks, then emit TURN_STOP. */
-   if (pc.ir_ast.started && !pc.ir_ost.stopped)
+   if (pc.ir_failed || !pc.ir_ost.stopped)
    {
-      aimee_delta_t bs = {0};
-      bs.type = AIMEE_DELTA_BLOCK_STOP;
-      if (pc.ir_ost.text_block >= 0)
+      aimee_delta_t terminal;
+      int n =
+          pc.ir_failed || ir_status != 200 ? -1 : openai_stream_finish(&pc.ir_ost, &terminal, 1);
+      if (n > 0)
       {
-         bs.block_id = pc.ir_ost.text_block;
-         anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+         pc.ir_usage_out = terminal.usage_out;
+         anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx);
       }
-      for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
-         if (pc.ir_ost.tool_block[i] >= 0)
-         {
-            bs.block_id = pc.ir_ost.tool_block[i];
-            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
-         }
-      aimee_delta_t ts = {0};
-      ts.type = AIMEE_DELTA_TURN_STOP;
-      ts.stop_reason = AIMEE_STOP_END_TURN;
-      ts.usage_out = pc.ir_usage_out;
-      anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
+      else if (n < 0)
+      {
+         terminal =
+             (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
+                             .error_message = "Provider stream ended before its completion event"};
+         anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx);
+         ir_status = -1;
+      }
    }
-   /* Cost row: input from the local estimate (message_start reports 0, same as
-    * the legacy translator's estimate basis), output tapped from the IR
-    * TURN_STOP delta. */
    if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est, (int)pc.ir_usage_out,
-                                0, 0, "anthropic-ingress",
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL,
+                                pc.ir_ost.usage_seen ? (int)pc.ir_ost.usage_in : input_est,
+                                (int)pc.ir_usage_out, (int)pc.ir_ost.usage_cache_read,
+                                (int)pc.ir_ost.usage_cache_write, "anthropic-ingress",
                                 ir_status == 200 ? "realized" : "partial");
    return ir_status;
-}
-
-/* OpenAI-via-translator streaming: the legacy incremental translator path.
- * Begins an Anthropic stream, feeds upstream OpenAI-chat chunks through it,
- * finishes, and records cost. Extracted from messages_stream(). */
-/* Same contract as the relay above: the upstream status comes back so the
- * gateway breaker can be tripped on a rejected payload. */
-static int messages_stream_xlate(const char *url, const char *auth, const void *prov_body,
-                                 size_t prov_body_len, const char *extra, agent_t *ag,
-                                 const char *model, const char *msg_id, int input_est,
-                                 server_http_sse_event_emit emit, void *ctx)
-{
-   anthropic_stream_xlate_t *xl;
-   prov_stream_ctx_t pc;
-   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
-   if (!xl)
-      return 0; /* never started: no upstream status, and not a rejection */
-
-   sse_parser_init(&pc.parser);
-   pc.xl = xl;
-   int xlate_status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL,
-                                             ag->provider, ag->model, WIRE_FENCE_OPENAI_CHAT);
-   sse_parser_free(&pc.parser);
-   if (xlate_status == HTTP_RETRY_ADMISSION_REFUSED)
-   {
-      messages_stream_pipeline_error(emit, ctx);
-      anthropic_stream_free(xl);
-      return xlate_status;
-   }
-
-   anthropic_stream_finish(xl);
-
-   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
-    * usage captured off the upstream OpenAI stream (prompt count preferring the
-    * upstream-reported value over the estimate, plus completion and cached
-    * tokens) and write one ingress cost row, mirroring the native relay path. A
-    * clean 200 is realized; an aborted stream with observed usage is partial. */
-   {
-      int in_tok = 0, out_tok = 0, cr_tok = 0;
-      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
-      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_ingress_record_cost(ag->name, ag->model, model, NULL, in_tok, out_tok, 0, cr_tok,
-                                   "anthropic-ingress",
-                                   xlate_status == 200 ? "realized" : "partial");
-      }
-   }
-
-   anthropic_stream_free(xl);
-   return xlate_status;
 }
 
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
@@ -1350,7 +1304,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    char extra[512];
    char msg_id[48];
    const delegate_driver_t *driver;
-   anthropic_stream_xlate_t *xl;
    int input_est;
    int responses_wire = 0;
    wire_fence_t *wire_snapshot = NULL;
@@ -1383,12 +1336,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
          cJSON_Delete(req);
          return 0;
       }
-      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
-      if (xl)
-      {
-         anthropic_stream_finish(xl);
-         anthropic_stream_free(xl);
-      }
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "Cannot initialize provider request"};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
       cJSON_Delete(req);
       return 0;
    }
@@ -1405,12 +1356,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * returns <0 today; the count is plumbed for P2b's audit.) */
    if (messages_run_request_pipeline(req, driver, ag, parity, 1 /* stream */) < 0)
    {
-      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
-      if (xl)
-      {
-         anthropic_stream_finish(xl);
-         anthropic_stream_free(xl);
-      }
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "Cannot initialize provider request"};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
       goto cleanup;
    }
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
@@ -1582,15 +1531,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    input_est = messages ? session_compact_estimate_tokens(messages) : 0;
 
-   if (aimee_ir_stream_relay_enabled())
-   {
-      stream_status = messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra,
-                                               ag, model, msg_id, input_est, emit, ctx);
-      goto cleanup;
-   }
-
-   stream_status = messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
-                                         model, msg_id, input_est, emit, ctx);
+   stream_status = messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra,
+                                            ag, model, msg_id, input_est, emit, ctx);
 cleanup:
    /* THE STREAMING HALF OF THE SAFETY NET. Bytes are already with the client, so
     * nothing can be restored or resent -- the breaker is all that is left, and

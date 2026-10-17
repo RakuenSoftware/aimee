@@ -39,16 +39,8 @@ int aimee_ir_path_enabled(void)
 
 int aimee_ir_stream_relay_enabled(void)
 {
-   /* DEFAULT-OFF, gated SEPARATELY from AIMEE_IR_PATH (roundtable Q6: gate
-    * buffered-IR / streaming-IR / passthrough independently). When on, the
-    * incremental OpenAI-chat -> Anthropic SSE relay is driven by the neutral
-    * IR-delta model (openai_chunk_to_deltas -> anthropic_delta_emit) instead of
-    * the legacy anthropic_stream_feed_openai translator -- eliminating the last
-    * live direct-translation site. Ships dark; enablement is a rollout decision
-    * gated on live cross-protocol parity, exactly like the legacy-deletion step.
-    * (The user's codex config uses the buffered-replay path, not this relay.) */
-   const char *v = getenv("AIMEE_IR_STREAM_RELAY");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
+   /* Kept for existing callers; ingress has no legacy stream execution path. */
+   return 1;
 }
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
@@ -329,16 +321,14 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
        &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
+   char *s =
+       aimee_backend_render_wire(&ir, is_responses ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_OPENAI_CHAT);
    aimee_request_free(&ir);
-   if (!prov)
+   if (!s)
    {
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_ANTHROPIC);
       return NULL;
    }
-   filter_openai_chat_tools(prov, is_responses);
-   char *s = cJSON_PrintUnformatted(prov);
-   cJSON_Delete(prov);
    if (s)
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_ANTHROPIC);
    return s;
@@ -548,20 +538,11 @@ void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *o
 
    /* content = concatenation of all TEXT blocks (parsed_response_t convention: a
     * single flat string; NULL when there is no text, e.g. a pure tool call). */
-   size_t cap = 1;
-   for (int i = 0; i < r->n_content; i++)
-      if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-         cap += strlen(r->content[i].text);
-   if (cap > 1)
+   out->content = aimee_ir_response_text_alloc(r);
+   if (out->content && !out->content[0])
    {
-      out->content = malloc(cap);
-      if (out->content)
-      {
-         out->content[0] = '\0';
-         for (int i = 0; i < r->n_content; i++)
-            if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-               strncat(out->content, r->content[i].text, cap - strlen(out->content) - 1);
-      }
+      free(out->content);
+      out->content = NULL;
    }
 
    /* tool calls: id (opaque) / name / arguments (serialized tool_input JSON). */

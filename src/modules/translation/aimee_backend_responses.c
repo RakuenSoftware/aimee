@@ -125,6 +125,8 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
       int is_assistant = im->role && strcmp(im->role, "assistant") == 0;
       /* Preserve block ordering: reasoning may precede a call, and text can
        * appear on either side. Each native item is rendered at this boundary. */
+      cJSON *last_message = NULL;
+      int last_group = 0;
       for (int j = 0; j < im->n_blocks; j++)
       {
          const aimee_block_t *b = &im->blocks[j];
@@ -237,6 +239,24 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
             cJSON_Delete(item);
             goto fail;
          }
+         int content_item = b->type == AIMEE_BLK_TEXT || b->type == AIMEE_BLK_IMAGE ||
+                            b->type == AIMEE_BLK_DOCUMENT;
+         if (content_item && last_message && b->message_group > 0 && last_group == b->message_group)
+         {
+            cJSON *parts = cJSON_GetObjectItemCaseSensitive(item, "content");
+            cJSON *part = cJSON_DetachItemFromArray(parts, 0);
+            if (!part || !cJSON_AddItemToArray(
+                             cJSON_GetObjectItemCaseSensitive(last_message, "content"), part))
+            {
+               cJSON_Delete(part);
+               cJSON_Delete(item);
+               goto fail;
+            }
+            cJSON_Delete(item);
+            continue;
+         }
+         last_message = content_item ? item : NULL;
+         last_group = content_item ? b->message_group : 0;
          if (!cJSON_AddItemToArray(input, item))
          {
             cJSON_Delete(item);
@@ -262,8 +282,14 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
           * modelled fields; everything else goes back verbatim. */
          const cJSON *raw = ir->tools[i].raw;
          const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
-         int raw_is_function = cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0;
-         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+         int raw_is_function =
+             !rtype ||
+             (cJSON_IsString(rtype) &&
+              (!strcmp(rtype->valuestring, "function") ||
+               (ir->frontend == AIMEE_WIRE_ANTHROPIC && !strcmp(rtype->valuestring, "custom"))));
+         if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !raw_is_function)
+            goto fail; /* A foreign hosted tool requires an explicit typed mapping. */
+         if (raw && !raw_is_function)
          {
             cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
             if (verbatim)
@@ -365,19 +391,8 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          }
          else if (type && strcmp(type, "message") == 0)
          {
-            /* Preserve native message separation at entry. Text fragments
-             * within one message still concatenate without invented spaces. */
-            if (saw_message)
-            {
-               aimee_block_t *separator = grow_content(out);
-               if (!separator)
-                  goto oom;
-               separator->type = AIMEE_BLK_TEXT;
-               separator->text = dupstr("\n\n");
-               if (!separator->text)
-                  goto oom;
-            }
-            saw_message = 1;
+            /* Keep authored-message grouping as metadata, never invented text. */
+            saw_message++;
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "content");
             const cJSON *part = NULL;
             if (content && cJSON_IsArray(content))
@@ -389,6 +404,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                      aimee_block_t *b = grow_content(out);
                      if (!b)
                         goto oom;
+                     b->message_group = saw_message;
                      b->type = AIMEE_BLK_TEXT;
                      b->text = dupstr(ostr(part, "text"));
                   }
@@ -397,6 +413,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                      aimee_block_t *b = grow_content(out);
                      if (!b)
                         goto oom;
+                     b->message_group = saw_message;
                      b->type = AIMEE_BLK_TEXT;
                      b->text = dupstr(ostr(part, "refusal"));
                      saw_refusal = 1;
@@ -406,6 +423,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                      aimee_block_t *b = grow_content(out);
                      if (!b)
                         goto oom;
+                     b->message_group = saw_message;
                      b->type = AIMEE_BLK_UNKNOWN;
                      b->raw = cJSON_Duplicate(part, 1);
                   }

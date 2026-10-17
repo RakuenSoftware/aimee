@@ -43,7 +43,10 @@ cJSON *aimee_ir_block_json(const aimee_block_t *block)
    if (!out)
       return NULL;
    int ok = add_string(out, "type", block_kind(block->type)) &&
-            add_string(out, "cache_control", block->cache_control);
+            add_string(out, "cache_control", block->cache_control) &&
+            add_string(out, "cache_ttl", block->cache_ttl);
+   if (block->message_group)
+      ok = ok && cJSON_AddNumberToObject(out, "message_group", block->message_group) != NULL;
    cJSON *context = cJSON_AddObjectToObject(out, "context");
    if (!context || !cJSON_AddNumberToObject(context, "origin", block->context.origin) ||
        !cJSON_AddNumberToObject(context, "authority", block->context.authority) ||
@@ -193,8 +196,17 @@ static int parse_block(const cJSON *json, aimee_block_t *out)
    if (kind == AIMEE_BLK_UNKNOWN)
       return -1;
    out->type = kind;
+   const cJSON *group = cJSON_GetObjectItemCaseSensitive(json, "message_group");
+   if (group)
+   {
+      if (!cJSON_IsNumber(group) || group->valuedouble < 1 || group->valuedouble > 4096 ||
+          group->valuedouble != group->valueint)
+         return -1;
+      out->message_group = group->valueint;
+   }
    if (read_context(cJSON_GetObjectItemCaseSensitive(json, "context"), &out->context) ||
-       read_string(json, "cache_control", &out->cache_control, 0))
+       read_string(json, "cache_control", &out->cache_control, 0) ||
+       read_string(json, "cache_ttl", &out->cache_ttl, 0))
       return -1;
    const cJSON *value;
    switch (out->type)
@@ -424,8 +436,26 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
            (delta->tool_args_delta && delta->kind != AIMEE_BLK_TOOL_USE)))
          ok = 0;
       if (delta->type == AIMEE_DELTA_BLOCK_START)
+      {
          ok = ok && add_string(out, "tool_id", delta->tool_id) &&
-              add_string(out, "name", delta->tool_name);
+              add_string(out, "name", delta->tool_name) &&
+              add_string(out, "namespace", delta->tool_namespace);
+         if (delta->tool_input)
+            ok = ok && delta->kind == AIMEE_BLK_TOOL_USE && cJSON_IsObject(delta->tool_input) &&
+                 add_copy(out, "input", delta->tool_input);
+         if (delta->redacted_content)
+            ok = ok && delta->kind == AIMEE_BLK_THINKING &&
+                 add_string(out, "redacted_content", delta->redacted_content);
+      }
+      if (delta->type == AIMEE_DELTA_BLOCK_START || delta->type == AIMEE_DELTA_BLOCK_DELTA)
+      {
+         if (delta->signature_delta)
+            ok = ok && delta->kind == AIMEE_BLK_THINKING &&
+                 add_string(out, "signature_delta", delta->signature_delta);
+         if (delta->type == AIMEE_DELTA_BLOCK_START && delta->text_delta)
+            ok = ok && (delta->kind == AIMEE_BLK_TEXT || delta->kind == AIMEE_BLK_THINKING) &&
+                 add_string(out, "text_delta", delta->text_delta);
+      }
       if (delta->type == AIMEE_DELTA_BLOCK_DELTA)
          ok = ok && add_string(out, "text_delta", delta->text_delta) &&
               add_string(out, "tool_args_delta", delta->tool_args_delta);

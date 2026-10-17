@@ -284,3 +284,28 @@ The opening attribution on #3036 remains rejected by the strengthened gate; no e
 Remaining scope includes child execution references/UI expansion, all ingress/cache and native
 replay cutovers, tmux retirement, remaining typed consumers and bypass enforcement. Live Vault-backed
 browser qualification and full-stack deployment checks remain required. The attribution gate is unchanged.
+
+### Continuation: native replay and stream fidelity (18 October)
+
+The next worktree phase preserves authored Responses message groups without inserting separator
+blocks into model history. Native Anthropic edits preserve client cache breakpoints, TTLs and unchanged
+native extensions. A strict wire codec retains the exact original frame when same-protocol semantic
+comparison succeeds, including whitespace and numeric spellings; actual ingress attachment of this
+byte sidecar remains unfinished.
+
+Canonical stream deltas now carry thinking signatures, redacted state and initial tool inputs.
+OpenAI final usage arriving after finish_reason is retained. The incremental Chat-to-Anthropic ingress
+no longer executes its legacy stream translator, and premature EOF produces an error.
+
+Fresh b6dec512c CI passed native/PG suites, Go, frontend, sanitizers and Windows. The complete script
+suite found a missing ownership entry for session_ir_history_live_test.go (corrected). Three Docker
+matrix jobs stopped in native asynchronous primary recovery. Investigation reproduced lost attested
+identity: HTTP captured it only after early streaming routes returned. Capture now precedes those
+handoffs. Generic OpenAI/Anthropic/OpenRouter and local compatible HTTP models also need native primary
+adapter registration; they previously fell into the role-confined delegate route. A disposable local
+server plus PostgreSQL and synthetic provider now completes PRIMARY_OK after these fixes. Fresh Docker
+CI must still qualify the repaired path. The attribution gate remains intentionally strict and failing.
+
+The full migration is still incomplete. Global headless execution/tmux retirement, credential custody,
+remaining raw request/governance and response consumers, MCP elicitation forms and full Vault-backed
+browser/resume acceptance remain open. Do not interpret the passing focused checks as completion.

@@ -8,6 +8,8 @@ export type Block = {
   encrypted_content?: string;
   redacted_content?: string;
   cache_control?: string;
+  cache_ttl?: string;
+  message_group?: number;
   tool_id?: string;
   name?: string;
   namespace?: string;
@@ -26,6 +28,10 @@ export type Delta = {
   tool_id?: string;
   name?: string;
   text_delta?: string;
+  signature_delta?: string;
+  redacted_content?: string;
+  namespace?: string;
+  input?: Record<string, unknown>;
   tool_args_delta?: string;
   stop_reason?: string;
   usage_in?: number;
@@ -76,12 +82,14 @@ function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 function validateBlock(block: Block): void {
+  if (block?.message_group !== undefined && (!Number.isInteger(block.message_group) || block.message_group < 1 || block.message_group > 4096))
+    throw new Error('Invalid message group');
   if (!block || !kinds.has(block.type)) throw new Error('Unsupported canonical block');
   if ((block.type === 'text' || block.type === 'thinking') && typeof block.text !== 'string')
     throw new Error('Text block requires text');
   if (block.signature !== undefined && typeof block.signature !== 'string')
     throw new Error('Invalid thinking signature');
-  for (const field of ['thinking_id', 'encrypted_content', 'redacted_content', 'cache_control'] as const) {
+  for (const field of ['thinking_id', 'encrypted_content', 'redacted_content', 'cache_control', 'cache_ttl'] as const) {
     if (block[field] !== undefined && typeof block[field] !== 'string')
       throw new Error(`Invalid block ${field}`);
   }
@@ -195,8 +203,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         throw new Error('Invalid block identity');
       if (d.type === 'BLOCK_START') {
         if (!d.kind || !['text', 'thinking', 'tool_use'].includes(d.kind) || message.blocks[blockID]) throw new Error('Invalid block start');
-        const block: Block = { type: d.kind, tool_id: d.tool_id, name: d.name,
-          ...((d.kind === 'text' || d.kind === 'thinking') ? { text: '' } : {}) };
+        if (d.signature_delta !== undefined && (d.kind !== 'thinking' || typeof d.signature_delta !== 'string')) throw new Error('Invalid thinking signature');
+        if (d.redacted_content !== undefined && (d.kind !== 'thinking' || typeof d.redacted_content !== 'string')) throw new Error('Invalid redacted content');
+        if (d.input !== undefined && (d.kind !== 'tool_use' || !d.input || typeof d.input !== 'object' || Array.isArray(d.input))) throw new Error('Invalid initial tool input');
+        const block: Block = { type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
+          ...(d.kind === 'tool_use' ? { input: d.input ?? {} } : { text: d.text_delta ?? '' }),
+          ...(d.signature_delta !== undefined ? { signature: d.signature_delta } : {}), ...(d.redacted_content !== undefined ? { redacted_content: d.redacted_content } : {}) };
         validateBlock(block);
         // Sparse block indices are not valid canonical message order.
         if (blockID !== message.blocks.length) throw new Error('Block order gap');
@@ -213,17 +225,23 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           if (block.type !== 'text' && block.type !== 'thinking') throw new Error('Text in non-text block');
           updated.text = (block.text || '') + d.text_delta;
         }
+        if (d.signature_delta !== undefined) {
+          if (typeof d.signature_delta !== 'string' || block.type !== 'thinking') throw new Error('Invalid thinking signature delta');
+          updated.signature = (block.signature || '') + d.signature_delta;
+        }
         if (d.tool_args_delta !== undefined) {
           if (typeof d.tool_args_delta !== 'string') throw new Error('Invalid argument delta');
           if (block.type !== 'tool_use') throw new Error('Arguments in non-tool block');
+          if (d.tool_args_delta && block.input && Object.keys(block.input).length > 0) throw new Error('Arguments after complete initial input');
           message.argumentFragments[blockID] = (message.argumentFragments[blockID] || '') + d.tool_args_delta;
+          if (d.tool_args_delta) delete updated.input;
         }
         message.blocks[blockID] = updated;
         return next;
       }
       if (d.type === 'BLOCK_STOP') {
         if (block.type === 'tool_use') message.blocks[blockID] = { ...block,
-          input: JSON.parse(message.argumentFragments[blockID] || '{}') as unknown };
+          input: message.argumentFragments[blockID] ? JSON.parse(message.argumentFragments[blockID]) as unknown : block.input ?? {} };
         message.stoppedBlocks.push(blockID);
         return next;
       }

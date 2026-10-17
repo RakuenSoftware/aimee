@@ -121,6 +121,19 @@ int main(void)
    assert(!aimee_ir_session_event_json(&event));
    delta.type = (aimee_delta_type_t)99;
    assert(!aimee_ir_delta_json(&delta));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                           .kind = AIMEE_BLK_THINKING,
+                           .block_id = 0,
+                           .text_delta = "initial",
+                           .signature_delta = "sig",
+                           .redacted_content = "opaque"};
+   json = aimee_ir_delta_json(&delta);
+   assert(json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "signature_delta")), "sig") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "redacted_content")), "opaque"));
+   cJSON_Delete(json);
+   delta.kind = AIMEE_BLK_TEXT;
+   assert(!aimee_ir_delta_json(&delta));
    blocks[1].tool_id = NULL;
    assert(!aimee_ir_block_json(&blocks[1]));
    blocks[1].tool_id = "opaque:42";

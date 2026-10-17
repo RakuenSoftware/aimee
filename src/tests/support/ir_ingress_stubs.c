@@ -326,3 +326,11 @@ __attribute__((weak)) int config_module_enabled(int config_tristate, int env_def
       return config_tristate;
    return env_default ? 1 : 0;
 }
+
+__attribute__((weak)) int openai_stream_finish(void *state, void *out, int max)
+{
+   (void)state;
+   (void)out;
+   (void)max;
+   return 0;
+}

@@ -37,7 +37,7 @@ coverage lives in `src/tests/test_aimee_backend.c` and `src/tests/test_aimee_bac
 
 Canonical streaming conversion lives in `src/modules/translation/aimee_ir_stream.c`, with the public
 contract at `src/modules/translation/include/aimee/translation/aimee_ir_stream.h`. Its bounded state
-machines convert OpenAI Chat chunks and decoded Bedrock ConverseStream event JSON into IR deltas, then
+machines convert Anthropic events, OpenAI Chat chunks and decoded Bedrock ConverseStream event JSON into IR deltas, then
 render IR deltas as Anthropic stream events. They do not decode Bedrock binary framing, write HTTP/SSE
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
@@ -166,3 +166,14 @@ ships and that each translation unit contains a production path. It separately r
 whose exact current-worktree callers are tests only. Removing, privatizing, or activating those intended
 egress and Bedrock-streaming contracts requires focused compatibility/readiness slices; they are not
 silently treated as live merely because their source files ship.
+
+Native request framing is owned by `wire_codec.c`. Unchanged same-protocol requests can retain
+exact original bytes; typed comparison also checks edits whose mutation flag was missed. Native
+Anthropic edits retain unchanged content forms, client cache markers and TTLs. Explicit stable-prefix
+policy normalizes translated requests. Authored Responses message groups are stored independently of
+presentation separators, so rendering a transcript does not change replay text.
+
+The live Chat-to-Anthropic incremental ingress uses canonical deltas unconditionally. Late usage,
+thinking signatures, redacted content and initial tool input survive this boundary. Missing completion
+fails with a typed error; an EOF cannot manufacture a successful end-of-turn. Other request/response
+bypasses described above still require cutover.

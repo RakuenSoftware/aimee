@@ -12,6 +12,10 @@
 #include <aimee/ir/aimee_ir.h>
 
 struct cJSON;
+
+/* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
+ * Independent semantic comparison detects edits even when their flag was missed. */
+char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
 /* Shared Anthropic block entry adapter used by request/response boundaries.
  * Unknown native types retain UNKNOWN + sidecar; canonical admission rejects
  * them until an explicit typed mapping exists. */

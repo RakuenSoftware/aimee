@@ -1288,6 +1288,21 @@ static void test_agent_adapter_registry(void)
 
    snprintf(ag.backend, sizeof(ag.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    assert(agent_adapter_agent_is_direct(&ag) == 0);
+
+   /* Configured HTTP primaries must not fall into the role-confined delegate
+    * route merely because their model name is not a built-in product name. */
+   const char *providers[] = {"openai", "anthropic", "openrouter", "ollama"};
+   for (size_t i = 0; i < sizeof providers / sizeof providers[0]; i++)
+   {
+      memset(&ag, 0, sizeof ag);
+      snprintf(ag.name, sizeof ag.name, "configured-fixture");
+      snprintf(ag.provider, sizeof ag.provider, "%s", providers[i]);
+      assert(agent_adapter_agent_is_direct(&ag));
+      assert(
+          agent_adapter_supports(agent_adapter_for_agent(&ag), AGENT_ADAPTER_CAP_PRIMARY_SESSION));
+      snprintf(ag.backend, sizeof ag.backend, "%s", AGENT_BACKEND_PROVIDER_CLI);
+      assert(!agent_adapter_agent_is_direct(&ag));
+   }
 }
 
 /* Regression guard for the codex-tmux misregistration that hid the local synth

@@ -4,6 +4,7 @@
 #include "server_session_control.h"
 #include "server/server_error_kind.h"
 #include "server_http_authz.h"
+#include "server_write_tier_db1.h"
 #include "server_http_internal.h"
 #include "server_http_identity.h"
 #include "runtime_secret.h"
@@ -243,6 +244,92 @@ static _Thread_local char g_disp_method[96];
 static _Thread_local char g_disp_body[24576];
 static char g_agg_body[24576];
 static atomic_int g_op_context_clean;
+/* The socket handoff fixture exercises HTTP parsing and identity, without a
+ * provider, egress broker or context-assembly service. */
+int server_conn_io_read(int fd, void *buf, int n)
+{
+   return (int)read(fd, buf, (size_t)n);
+}
+int server_write_tier_verify_for_request(const char *token, size_t len, int64_t now,
+                                         server_write_tier_outcome_t *outcome,
+                                         server_identity_token_claims_t *claims)
+{
+   (void)token;
+   (void)len;
+   (void)now;
+   (void)claims;
+   *outcome = SERVER_WRITE_TIER_ABSENT;
+   return SERVER_REMOTE_WRITES_OFF;
+}
+int server_write_tier_consume_for_request(const server_identity_token_claims_t *claims, int64_t now,
+                                          server_write_tier_outcome_t *outcome)
+{
+   (void)claims;
+   (void)now;
+   *outcome = SERVER_WRITE_TIER_INVALID;
+   return SERVER_REMOTE_WRITES_OFF;
+}
+const char *server_write_tier_outcome_str(server_write_tier_outcome_t outcome)
+{
+   (void)outcome;
+   return "fixture_refused";
+}
+int server_tls_mtls_mode(void)
+{
+   return 0;
+}
+int delegate_egress_adapter_serve(int fd, int uds, const char *head, size_t len, const char *tag)
+{
+   (void)fd;
+   (void)uds;
+   (void)head;
+   (void)len;
+   (void)tag;
+   assert(0);
+   return -1;
+}
+void ingress_preinject_finish_sources(void)
+{
+}
+void ingress_preinject_set_request_disabled(int disabled)
+{
+   (void)disabled;
+}
+void ingress_preinject_set_turn_id(const char *id)
+{
+   (void)id;
+}
+int ingress_preinject_mint_turn_id(char *out, size_t len)
+{
+   if (len)
+      out[0] = '\0';
+   return 0;
+}
+void anthropic_http_capture_request_headers(const char *headers)
+{
+   (void)headers;
+}
+int agent_http_post(const char *url, const char *auth, const char *body, char **response,
+                    int timeout, const char *extra)
+{
+   (void)url;
+   (void)auth;
+   (void)body;
+   (void)timeout;
+   (void)extra;
+   *response = NULL;
+   return -1;
+}
+static char g_stream_principal[128];
+int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
+{
+   (void)ctx;
+   (void)request;
+   snprintf(g_stream_principal, sizeof g_stream_principal, "%s", conn->vault_principal);
+   assert(conn->attested_transport == ATTEST_UDS_PEERCRED);
+   return 0;
+}
+
 static server_ctx_t g_test_server_ctx;
 static int g_test_server_ctx_available = 1;
 
@@ -534,6 +621,23 @@ static int recall_fault_status(const char *kind, uint32_t *status)
    return 0;
 }
 
+static void test_stream_handoff_retains_attested_owner(void)
+{
+   int pair[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+   const char *wire = "POST /v1/chat/stream HTTP/1.1\r\nHost: localhost\r\nContent-Type: "
+                      "application/json\r\nContent-Length: 2\r\n\r\n{}";
+   assert(write(pair[1], wire, strlen(wire)) == (ssize_t)strlen(wire));
+   g_stream_principal[0] = '\0';
+   handle_conn_inline(pair[0], 0);
+   char expected[64];
+   snprintf(expected, sizeof expected, "uid:%lu", (unsigned long)getuid());
+   assert(!strcmp(g_stream_principal, expected));
+   assert(!server_http_identity_principal()[0]);
+   close(pair[0]);
+   close(pair[1]);
+}
+
 static void test_operator_control_reply_route(void)
 {
    server_control_scope_t *scope =
@@ -572,6 +676,7 @@ static void test_operator_control_reply_route(void)
 
 int main(void)
 {
+   test_stream_handoff_retains_attested_owner();
    test_operator_control_reply_route();
    extern int server_http_declared_status(const char *json);
    assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"not_found\"}") == 502);

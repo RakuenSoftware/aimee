@@ -158,3 +158,20 @@ it('advances past host history checkpoints without duplicating the observation t
     scope: '', phase: 'commit', count: 0,
   } }))).toThrow('Invalid history');
 });
+
+
+it('preserves initial content, opaque thinking state and complete tool inputs during stream replay', () => {
+  const d = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'm', role: 'assistant', payload });
+  const events = [d(1, { type: 'TURN_START' }),
+    d(2, { type: 'BLOCK_START', block_id: 0, kind: 'thinking', text_delta: 'initial', signature_delta: 'sig', redacted_content: 'opaque' }),
+    d(3, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', text_delta: ' thought', signature_delta: 'nature' }),
+    d(4, { type: 'BLOCK_STOP', block_id: 0 }),
+    d(5, { type: 'BLOCK_START', block_id: 1, kind: 'tool_use', tool_id: 'call', name: 'read', namespace: 'files', input: { path: 'a' } }),
+    d(6, { type: 'BLOCK_STOP', block_id: 1 }), d(7, { type: 'TURN_STOP' })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages[0].blocks[0]).toMatchObject({ text: 'initial thought', signature: 'signature', redacted_content: 'opaque' });
+  expect(state.messages[0].blocks[1]).toMatchObject({ namespace: 'files', input: { path: 'a' } });
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  const partial = events.slice(0, 5).reduce(reduceSession, emptySession('s'));
+  expect(() => reduceSession(partial, d(6, { type: 'BLOCK_DELTA', block_id: 1, tool_args_delta: '{}' }))).toThrow('complete initial input');
+});
