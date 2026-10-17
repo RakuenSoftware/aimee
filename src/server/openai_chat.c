@@ -162,6 +162,28 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
                                   int preserve_messages, const cJSON *template_kwargs);
 static int openai_governance_enabled(void);
 
+/* Whether a parsed reply was cut off at the token cap. Decided by the canonical
+ * value the IR parse carried, not the raw string: that string is the provider's own
+ * word ("length", "max_tokens", "incomplete") or a policy stage's, so comparing it
+ * against one wire's spelling misses every other wire's truncation. The raw string
+ * is consulted only when no IR parse set a value. */
+static int parsed_truncated(const parsed_response_t *p)
+{
+   if (p->stop == AIMEE_STOP_MAX_TOKENS)
+      return 1;
+   return p->stop == AIMEE_STOP_UNKNOWN && strcmp(p->stop_reason, "length") == 0;
+}
+
+/* Chat Completions finish_reason for a text reply. */
+static const char *openai_text_finish(const parsed_response_t *p)
+{
+   if (parsed_truncated(p))
+      return "length";
+   if (p->stop == AIMEE_STOP_CONTENT_FILTER)
+      return "content_filter";
+   return "stop";
+}
+
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
 /* A connector that packs/counts chat messages must keep that exact role shape.
@@ -333,9 +355,9 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
             tlen =
                 openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
          else
-            tlen = openai_format_chat_completion(tid, model, parsed.content ? parsed.content : "",
-                                                 tcreated, parsed.prompt_tokens,
-                                                 parsed.completion_tokens, resp, cap);
+            tlen = openai_format_chat_completion_reason(
+                tid, model, parsed.content ? parsed.content : "", tcreated, parsed.prompt_tokens,
+                parsed.completion_tokens, openai_text_finish(&parsed), resp, cap);
          agent_free_parsed_response(&parsed);
          cJSON_Delete(messages);
          cJSON_Delete(tools);
@@ -920,9 +942,10 @@ static int responses_handler(const char *body, char *resp, int cap)
       cJSON_Delete(response);
    }
    else
-      len = openai_format_response(id, model, result.content ? result.content : "", created,
-                                   result.prompt_tokens, result.completion_tokens,
-                                   result.cache_read_tokens, resp, cap);
+      len = openai_format_response_status(
+          id, model, result.content ? result.content : "", created, result.prompt_tokens,
+          result.completion_tokens, result.cache_read_tokens,
+          parsed_truncated(&result) ? "max_output_tokens" : NULL, resp, cap);
    agent_free_parsed_response(&result);
    if (len < 0)
    {
@@ -1059,7 +1082,10 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          {
             /* Policing may have dropped every call; fall back to a text turn. */
             emit_chunk(emit, ctx, id, model, created, 0, parsed.content ? parsed.content : "", 0);
-            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+            char fin[512];
+            if (openai_format_chat_chunk_finish(id, model, created, openai_text_finish(&parsed),
+                                                fin, sizeof(fin)) > 0)
+               emit(ctx, fin);
          }
          agent_free_parsed_response(&parsed);
          cJSON_Delete(messages);
@@ -1750,11 +1776,10 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          free(itf);
       }
 
-      /* OpenAI finish_reason "length" (carried into stop_reason) means the model
-       * was truncated at the token cap. The backend reports that as a terminal
-       * response.incomplete{reason:max_output_tokens}, not response.completed;
-       * mirror it so Codex applies its truncation handling. */
-      int truncated = (parsed.stop_reason[0] && strcmp(parsed.stop_reason, "length") == 0);
+      /* A reply truncated at the token cap, on any upstream wire. The backend reports that as a
+       * terminal response.incomplete{reason:max_output_tokens}, not response.completed; mirror it
+       * so Codex applies its truncation handling. */
+      int truncated = parsed_truncated(&parsed);
       size_t ccap = n * 6 + 1024;
       char *cf = malloc(ccap);
       if (cf)

@@ -162,6 +162,7 @@ int main(void)
       assert(gw_response_run_governance(&pr, 1, 1) == 1);
       assert(pr.call_count == 0);
       assert(strcmp(pr.stop_reason, "end_turn") == 0);
+      assert(pr.stop == AIMEE_STOP_END_TURN);
    }
 
    gw_response_governance_register_provider(NULL);
