@@ -11,6 +11,8 @@
 #include <unistd.h>
 
 #include "cli_codex.h"
+#include "server_session_control.h"
+#include <aimee/ir/session_event.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Minimal harnesses have no bound server turn to cancel. */
@@ -645,6 +647,83 @@ static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
    rmdir(root);
 }
 
+static int operator_requests, operator_responses;
+static int codex_operator_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind == AIMEE_SESSION_CONTROL_REQUEST)
+   {
+      server_control_scope_t *scope = server_control_scope_current();
+      assert(server_control_register(scope, event->request_id, event->control_kind,
+                                     event->control) == 0);
+      cJSON *reply =
+          cJSON_Parse(!strcmp(event->control_kind, "question")
+                          ? "{\"decision\":\"allow\",\"answers\":{\"direction\":[\"North\"]}}"
+                          : "{\"decision\":\"deny\"}");
+      char id[256];
+      snprintf(id, sizeof id, "operator-turn:%s", event->request_id);
+      assert(server_control_reply("operator-session", id, "alice", reply) == 0);
+      cJSON_Delete(reply);
+      operator_requests++;
+   }
+   else if (event->kind == AIMEE_SESSION_CONTROL_RESPONSE)
+      operator_responses++;
+   return 0;
+}
+static void test_operator_replies_reach_native_child(void)
+{
+   char root[256], script[512];
+   snprintf(root, sizeof root, "%s/aimee-codex-operator-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(root));
+   snprintf(script, sizeof script, "%s/codex", root);
+   FILE *fp = fopen(script, "w");
+   assert(fp);
+   fputs("#!/usr/bin/env python3\nimport json, sys\ndef send(value):\n print(json.dumps(value), "
+         "flush=True)\nfor i in range(3):\n frame=json.loads(sys.stdin.readline())\n if "
+         "frame.get('method') == 'initialized':\n  frame=json.loads(sys.stdin.readline())\n "
+         "result={'thread': {'id':'t1'}} if frame['method'].startswith('thread/') else {}\n "
+         "send({'jsonrpc':'2.0','id':frame['id'],'result':result})\nfor method, ident, params, "
+         "expected in [\n ('item/commandExecution/requestApproval', 71, {'command':'printf "
+         "hello'}, {'decision':'decline'}),\n ('item/tool/requestUserInput', 72, "
+         "{'questions':[{'id':'direction','question':'Which "
+         "direction?','options':[{'label':'North'}]}]}, "
+         "{'answers':{'direction':{'answers':['North']}}})\n]:\n "
+         "send({'jsonrpc':'2.0','id':ident,'method':method,'params':params})\n "
+         "frame=json.loads(sys.stdin.readline())\n assert frame['id']==ident and "
+         "frame['result']==expected, "
+         "frame\nsend({'method':'item/"
+         "completed','params':{'item':{'type':'agentMessage','id':'m1','text':'Operator replies "
+         "received'}}})\nsend({'method':'turn/"
+         "completed','params':{'turn':{'status':'completed'}}})\n",
+         fp);
+   assert(fclose(fp) == 0 && chmod(script, 0700) == 0);
+   char *old_path = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+   char path[16384];
+   snprintf(path, sizeof path, "%s:%s", root, old_path ? old_path : "");
+   assert(setenv("PATH", path, 1) == 0);
+   server_control_scope_t *scope =
+       server_control_scope_open("operator-session", "operator-turn", "alice");
+   assert(scope);
+   server_control_scope_t *previous = server_control_scope_bind(scope);
+   aimee_ir_session_set_sink(codex_operator_capture, NULL);
+   cli_codex_chat_request_t req = {.cwd = root, .user_prompt = "hello", .timeout_ms = 5000};
+   cli_codex_chat_result_t out;
+   codex_stream_capture_t cap = {0};
+   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
+   assert(strstr(cap.buf, "Operator replies received"));
+   assert(operator_requests == 2 && operator_responses == 2);
+   aimee_ir_session_set_sink(NULL, NULL);
+   server_control_scope_bind(previous);
+   server_control_scope_close(scope);
+   if (old_path)
+      assert(setenv("PATH", old_path, 1) == 0);
+   else
+      unsetenv("PATH");
+   free(old_path);
+   unlink(script);
+   rmdir(root);
+}
+
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
@@ -781,6 +860,7 @@ int main(void)
    test_chat_stream_replaces_invalid_utf8_prompt_bytes();
    printf("OK\n");
 
+   test_operator_replies_reach_native_child();
    printf("All cli_codex parse tests passed.\n");
    return 0;
 }

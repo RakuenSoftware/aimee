@@ -27986,6 +27986,111 @@
         "fields": [],
         "max_bytes": 65536
       }
+    },
+    {
+      "family": "sessions",
+      "id": 32,
+      "name": "session_ir_history_save",
+      "c_name": "db1_session_ir_history_save",
+      "c_params": [
+        "session_id",
+        "checkpoint",
+        "scope",
+        "actor",
+        "messages_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "checkpoint",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "messages_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 16777216
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 33,
+      "name": "session_ir_history_load",
+      "c_name": "db1_session_ir_history_load",
+      "c_params": [
+        "session_id",
+        "scope",
+        "actor"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "messages_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 16777216
+      }
     }
   ]
 }

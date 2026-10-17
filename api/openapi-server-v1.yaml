@@ -5219,6 +5219,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/control-reply:
+    post:
+      summary: Reply to a pending harness permission or question
+      description: >
+        Queues a decision for the exact server-owned session and execution request.
+        Requires the root-UDS-attested browser user and matching session principal.
+        Model ingress and MCP credentials cannot approve requests. The owning
+        execution persists the correlated canonical response before writing to
+        its native control channel. Stale or already answered requests return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, request_id, reply]
+              properties:
+                session_id: { type: string }
+                request_id: { type: string }
+                reply:
+                  type: object
+                  required: [decision]
+                  properties:
+                    decision: { type: string, enum: [allow, deny, cancel] }
+                    answers:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items: { type: string }
+      responses:
+        "200":
+          description: Decision queued for the owning execution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  queued: { type: boolean }
+        "400": { description: Invalid request }
+        "403": { description: Browser identity or ownership refused }
+        "409": { description: Pending request is stale or already answered }
   /chat/live:
     post:
       summary: Poll the live (in-flight) turn for a session

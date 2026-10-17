@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define CLAUDE_ARG_MAX 48
+#define CLAUDE_ARG_MAX 64
 
 /* Build `claude -p` argv into tokens[]. The leading *split_count tokens (the
  * parsed cli_cmd, default "claude") are heap-allocated; the rest are borrowed.
@@ -73,6 +73,14 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
    CLAUDE_ADD_ARG("stream-json");
    CLAUDE_ADD_ARG("--verbose");
    CLAUDE_ADD_ARG("--include-partial-messages");
+   if (cfg && cfg->control_channel)
+   {
+      CLAUDE_ADD_ARG("--input-format");
+      CLAUDE_ADD_ARG("stream-json");
+      CLAUDE_ADD_ARG("--permission-prompt-tool");
+      CLAUDE_ADD_ARG("stdio");
+   }
+
    /* Hand the delegate aimee. `aimee mcp serve` is the stdio MCP proxy that
     * forwards tool calls to this server over /v1, so a spawned CLI delegate reaches
     * the same tools a native agent does — git_commit / git_push / git_pr, memory,
@@ -96,8 +104,9 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
     * let the primary keep spawning its own subagents despite the gateway request
     * strip, which only removes Task from the API request, not from the CLI's own
     * built-in tool registry. Mirrors guardrails' Task->Subagent canonicalization. */
-   CLAUDE_ADD_ARG("AskUserQuestion,Task,Agent,RemoteTrigger");
-   if (cfg && cfg->primary && !strstr(cmd, "--permission-mode") &&
+   CLAUDE_ADD_ARG(cfg && cfg->control_channel ? "Task,Agent,RemoteTrigger"
+                                              : "AskUserQuestion,Task,Agent,RemoteTrigger");
+   if (cfg && cfg->primary && !cfg->control_channel && !strstr(cmd, "--permission-mode") &&
        !strstr(cmd, "--dangerously-skip-permissions"))
    {
       CLAUDE_ADD_ARG("--permission-mode");

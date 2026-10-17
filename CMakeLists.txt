@@ -714,6 +714,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_codex.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
     ${AIMEE_SRC_DIR}/server/claude_headless.c
+    ${AIMEE_SRC_DIR}/server/server_session_control.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c

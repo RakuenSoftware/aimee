@@ -331,7 +331,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
 
    /* output items: message (output_text parts) / function_call / reasoning */
    const cJSON *output = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "output");
-   int saw_tool = 0, saw_refusal = 0;
+   int saw_tool = 0, saw_refusal = 0, saw_message = 0;
    if (output && cJSON_IsArray(output))
    {
       const cJSON *item = NULL;
@@ -365,6 +365,19 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          }
          else if (type && strcmp(type, "message") == 0)
          {
+            /* Preserve native message separation at entry. Text fragments
+             * within one message still concatenate without invented spaces. */
+            if (saw_message)
+            {
+               aimee_block_t *separator = grow_content(out);
+               if (!separator)
+                  goto oom;
+               separator->type = AIMEE_BLK_TEXT;
+               separator->text = dupstr("\n\n");
+               if (!separator->text)
+                  goto oom;
+            }
+            saw_message = 1;
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "content");
             const cJSON *part = NULL;
             if (content && cJSON_IsArray(content))

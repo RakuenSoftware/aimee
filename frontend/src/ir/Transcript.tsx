@@ -1,12 +1,13 @@
 import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives';
 import { toolResults } from './session';
 import type { SessionState } from './session';
+import ControlCard, { type ReplyControl } from './ControlCard';
 const pretty = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? '';
 function mediaURL(ref: string | undefined): string | undefined {
   if (ref && (/^https?:\/\//i.test(ref) || /^data:image\/(png|jpeg|webp|gif);base64,/i.test(ref) || ref.startsWith('/api/artifacts/'))) return ref;
   return undefined;
 }
-export default function IRTranscript({ state }: { state: SessionState }) {
+export default function IRTranscript({ state, onReply }: { state: SessionState; onReply?: ReplyControl }) {
   const results = toolResults(state);
   const uses = new Set(state.messages.flatMap(m => m.blocks.filter(b => b.type === 'tool_use').map(b => b.tool_id)));
   return <>
@@ -34,10 +35,7 @@ export default function IRTranscript({ state }: { state: SessionState }) {
         }
       }
     }))}
-    {Object.entries(state.controls).map(([id, c]) => <details key={id}>
-      <summary>{c.kind}: {c.response ? 'Resolved' : c.closed ? 'Closed' : 'Awaiting operator'}</summary>
-      <pre>{pretty(c.request)}</pre>{c.response && <pre>{pretty(c.response)}</pre>}
-    </details>)}
+    {Object.entries(state.controls).map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} />)}
     {state.errors.map((error, i) => <div role="alert" key={`error:${i}`}>{error}</div>)}
   </>;
 }

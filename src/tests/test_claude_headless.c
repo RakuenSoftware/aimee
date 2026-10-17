@@ -1,5 +1,7 @@
 #include "claude_headless.h"
+#include "agent_exec.h"
 #include "platform_test_util.h"
+#include "server_session_control.h"
 #include <aimee/ir/session_event.h>
 #include "cJSON.h"
 #include <assert.h>
@@ -33,6 +35,18 @@ static int capture(const aimee_session_event_t *event, void *context)
    assert(typed);
    cJSON_Delete(typed);
    events++;
+   server_control_scope_t *scope = server_control_scope_current();
+   if (scope && event->kind == AIMEE_SESSION_CONTROL_REQUEST)
+   {
+      assert(server_control_register(scope, event->request_id, event->control_kind,
+                                     event->control) == 0);
+      cJSON *reply = cJSON_Parse("{\"decision\":\"allow\"}");
+      char id[256];
+      snprintf(id, sizeof id, "test-turn:%s", event->request_id);
+      assert(server_control_reply("aimee-one", id, "alice", reply) == 0);
+      cJSON_Delete(reply);
+   }
+
    return reject_after && events >= reject_after ? -1 : 0;
 }
 static int bind_session(const char *id, void *context)
@@ -98,6 +112,42 @@ static void script(const char *path, const char *body)
    assert(!fclose(f));
    assert(!chmod(path, 0700));
 }
+static void interactive_script(const char *path)
+{
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs("#!/usr/bin/python3\nimport sys,json\n"
+         "init=json.loads(sys.stdin.readline())\n"
+         "assert init['request']['subtype']=='initialize'\n"
+         "print(json.dumps({'type':'control_response','response':{'subtype':'success','request_id':"
+         "init['request_id'],'response':{}}}),flush=True)\n"
+         "user=json.loads(sys.stdin.readline())\n"
+         "assert user['type']=='user' and user['message']['content']=='hello'\n"
+         "print(json.dumps({'type':'control_request','request_id':'permission','request':{'subtype'"
+         ":'can_use_tool','tool_name':'Read','input':{'path':'source.c'}}}),flush=True)\n"
+         "reply=json.loads(sys.stdin.readline())['response']\n"
+         "assert reply['request_id']=='permission' and reply['response']['behavior']=='allow'\n"
+         "assert reply['response']['updatedInput']=={'path':'source.c'}\n",
+         f);
+   const char *line = strchr(success_frames, '{');
+   while (line && line[0] == '{')
+   {
+      const char *end = strchr(line, '\n');
+      assert(end);
+      char *raw = strndup(line, (size_t)(end - line));
+      assert(raw);
+      cJSON *value = cJSON_CreateString(raw);
+      char *literal = cJSON_PrintUnformatted(value);
+      assert(literal);
+      fprintf(f, "print(%s,flush=True)\n", literal);
+      free(raw);
+      free(literal);
+      cJSON_Delete(value);
+      line = end + 1;
+   }
+   fputs("sys.stdin.read()\n", f);
+   assert(!fclose(f) && !chmod(path, 0700));
+}
 int main(void)
 {
    char path[4096];
@@ -147,6 +197,28 @@ int main(void)
    assert(now_ms() - start < 4000);
    cancel_at = 0;
    assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
+   aimee_ir_session_set_sink(capture, NULL);
+   events = 0;
+   binds = 0;
+   server_control_scope_t *scope = server_control_scope_open("aimee-one", "test-turn", "alice");
+   assert(scope);
+   server_control_scope_bind(scope);
+   cfg.control_channel = 1;
+   interactive_script(path);
+   assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
+   assert(events == 8 && binds == 1 && out.response && !strcmp(out.response, "reply"));
+   free(out.response);
+   server_control_scope_close(scope);
+   scope = server_control_scope_open("aimee-one", "test-turn", "alice");
+   assert(scope);
+   server_control_scope_bind(scope);
+   aimee_ir_session_set_sink(capture, NULL);
+   events = 0;
+   reject_after = 1;
+   assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(!out.success && events == 1 && !strcmp(out.stop_reason, "capture_failed"));
+   reject_after = 0;
+   server_control_scope_close(scope);
    aimee_ir_session_set_sink(NULL, NULL);
    unlink(path);
    puts("Claude headless lifecycle tests passed");

@@ -855,6 +855,7 @@ static int chat_claude_print(compute_ctx_t *c, const agent_t *agent, const char 
                              .system_prompt = system,
                              .user_prompt = prompt,
                              .primary = 1,
+                             .control_channel = 1,
                              .resume_id = resume,
                              .home = home,
                              .session_id = c->ir_session};

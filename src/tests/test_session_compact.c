@@ -935,9 +935,37 @@ static void test_canonical_compaction_preserves_instructions_and_pairs(void)
    PASS("canonical compaction retains instructions, signed reasoning and complete tool cycles");
 }
 
+static void test_canonical_tool_evidence_in_fallback(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   cJSON_AddItemToArray(messages, make_canonical_text("user", "task"));
+   cJSON_AddItemToArray(
+       messages,
+       cJSON_Parse("{\"role\":\"assistant\",\"blocks\":["
+                   "{\"type\":\"tool_use\",\"tool_id\":\"a\",\"name\":\"read\",\"input\":{}},"
+                   "{\"type\":\"tool_use\",\"tool_id\":\"b\",\"name\":\"read\",\"input\":{}}]}"));
+   cJSON_AddItemToArray(
+       messages,
+       cJSON_Parse(
+           "{\"role\":\"tool\",\"blocks\":[{\"type\":\"text\",\"text\":\"first\"},"
+           "{\"type\":\"tool_result\",\"tool_id\":\"a\",\"content\":\"error in src/second.c\"},"
+           "{\"type\":\"tool_result\",\"tool_id\":\"b\",\"content\":\"changed src/third.c\"}]}"));
+   for (int i = 0; i < 12; i++)
+      cJSON_AddItemToArray(messages, make_canonical_text("assistant", "progress"));
+   session_compact_config_t cfg = {.retain_tail = 3};
+   session_compact_result_t result;
+   assert(session_compact(messages, &cfg, &result) == 0 && result.compacted);
+   const char *summary = result.summary;
+   assert(strstr(summary, "src/second.c") && strstr(summary, "src/third.c"));
+   assert(strstr(summary, "error in src/second.c"));
+   cJSON_Delete(messages);
+   PASS("canonical fallback keeps all tool evidence");
+}
+
 int main(void)
 {
    printf("session_compact:\n");
+   test_canonical_tool_evidence_in_fallback();
    test_canonical_compaction_preserves_instructions_and_pairs();
 
    test_pressure_unknown_window();

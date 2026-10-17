@@ -35,6 +35,8 @@ cJSON *aimee_frontend_history_import(const cJSON *messages, aimee_wire_t legacy_
             goto fail;
          cJSON *copy = aimee_ir_message_json(&message);
          aimee_message_free(&message);
+         if (copy && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "_compaction_boundary")))
+            cJSON_AddBoolToObject(copy, "_compaction_boundary", 1);
          if (!copy || !cJSON_AddItemToArray(out, copy))
          {
             cJSON_Delete(copy);

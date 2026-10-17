@@ -2319,7 +2319,39 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
           list_path ? cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status)
                     : NULL;
       if (list_status >= 200 && list_status < 300)
-         cli_index_apply_worktree_project(req, worktree_root, projects);
+      {
+         int registered = cli_index_apply_worktree_project(req, worktree_root, projects);
+#if defined(AIMEE_POSIX)
+         /* Bootstrap direct CLI discovery through the existing bounded scan,
+          * then resolve its registered name. Never treat a list outage as absence. */
+         if (!registered && remote &&
+             cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(projects, "projects")) &&
+             !cJSON_GetObjectItemCaseSensitive(req, "project"))
+         {
+            cJSON_Delete(projects);
+            projects = NULL;
+            if (cli_ws_ingest_tree(remote, bearer, worktree_root) == 0)
+            {
+               projects =
+                   cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status);
+               if (list_status >= 200 && list_status < 300)
+                  cli_index_apply_worktree_project(req, worktree_root, projects);
+            }
+            if (!cJSON_GetObjectItemCaseSensitive(req, "project"))
+            {
+               fprintf(stderr,
+                       "aimee: could not register the active repository for index discovery: %s\n",
+                       worktree_root);
+               cJSON_Delete(projects);
+               free(worktree_root);
+               cJSON_Delete(req);
+               free(bearer);
+               free(remote);
+               return 1;
+            }
+         }
+#endif
+      }
       cJSON_Delete(projects);
       free(worktree_root);
    }

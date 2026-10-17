@@ -10,6 +10,64 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int chat_ir_write_envelope(compute_ctx_t *c, const char *json)
+{
+   pthread_mutex_lock(c->write_mutex);
+   if (c->conn_alive &&
+       (write_all(c->conn_fd, json, strlen(json)) != 0 || write_all(c->conn_fd, "\n", 1) != 0))
+      c->conn_alive = 0;
+   pthread_mutex_unlock(c->write_mutex);
+   return 0;
+}
+
+/* Other server owners can commit checkpoints between adapter emissions. Fill
+ * that gap from the same durable log so a live subscriber sees exactly the
+ * sequence it will see on reload. A disconnected subscriber needs no delivery. */
+static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *sequence)
+{
+   unsigned long long target = strtoull(sequence, NULL, 10);
+   if (c->conn_alive && c->ir_sequence[0] && target > strtoull(c->ir_sequence, NULL, 10) + 1)
+   {
+      while (strtoull(c->ir_sequence, NULL, 10) < target)
+      {
+         char *page = db1_session_ir_page(c->ir_session, c->ir_sequence, 128, c->vault_principal);
+         cJSON *events = page ? cJSON_Parse(page) : NULL;
+         free(page);
+         if (!cJSON_IsArray(events) || !cJSON_GetArraySize(events))
+         {
+            cJSON_Delete(events);
+            return -1;
+         }
+         const cJSON *event;
+         cJSON_ArrayForEach(event, events)
+         {
+            const char *next =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "sequence"));
+            if (!next || strtoull(next, NULL, 10) != strtoull(c->ir_sequence, NULL, 10) + 1 ||
+                strlen(next) >= sizeof c->ir_sequence)
+            {
+               cJSON_Delete(events);
+               return -1;
+            }
+            char *wire = cJSON_PrintUnformatted(event);
+            if (!wire)
+            {
+               cJSON_Delete(events);
+               return -1;
+            }
+            chat_ir_write_envelope(c, wire);
+            free(wire);
+            snprintf(c->ir_sequence, sizeof c->ir_sequence, "%s", next);
+         }
+         cJSON_Delete(events);
+      }
+      return 0;
+   }
+   chat_ir_write_envelope(c, json);
+   snprintf(c->ir_sequence, sizeof c->ir_sequence, "%s", sequence);
+   return 0;
+}
+
 /* The session log is committed before any delivery. A dead browser socket is
  * only a lost subscriber; storage failure stops capture and the host turn. */
 static int chat_ir_sink(const aimee_session_event_t *event, void *context)
@@ -21,6 +79,13 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
        event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
    if (role && !strcmp(role, "assistant"))
       c->ir_model_events++;
+   if (event->kind == AIMEE_SESSION_CONTROL_REQUEST &&
+       server_control_register(c->ir_controls, event->request_id, event->control_kind,
+                               event->control) != 0)
+   {
+      c->ir_failed = 1;
+      return -1;
+   }
    cJSON *payload = aimee_ir_session_event_json(event);
    if (!payload)
    {
@@ -123,13 +188,11 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
       c->ir_failed = 1;
       return -1;
    }
-   pthread_mutex_lock(c->write_mutex);
-   if (c->conn_alive &&
-       (write_all(c->conn_fd, json, strlen(json)) != 0 || write_all(c->conn_fd, "\n", 1) != 0))
-      c->conn_alive = 0;
-   pthread_mutex_unlock(c->write_mutex);
+   int rc = chat_ir_deliver(c, json, sequence);
    free(json);
-   return 0;
+   if (rc != 0)
+      c->ir_failed = 1;
+   return rc;
 }
 
 int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)
@@ -152,6 +215,10 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
       return -1;
    for (int i = 0; i < 16; i++)
       snprintf(c->ir_turn + 2 * i, 3, "%02x", random[i]);
+   c->ir_controls = server_control_scope_open(c->ir_session, c->ir_turn, c->vault_principal);
+   if (!c->ir_controls)
+      return -1;
+   c->ir_previous_controls = server_control_scope_bind(c->ir_controls);
    c->ir_previous_sink = aimee_ir_session_get_sink(&c->ir_previous_context);
    c->ir_enabled = 1;
    aimee_ir_session_set_sink(chat_ir_sink, c);

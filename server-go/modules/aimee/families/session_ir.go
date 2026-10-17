@@ -26,6 +26,8 @@ func validSessionIREvent(encoded []byte) bool {
 		return false
 	}
 	switch e.Kind {
+	case "history":
+		return validIRHistoryEvent(e.Payload)
 	case "message":
 		var m struct {
 			Role   string            `json:"role"`

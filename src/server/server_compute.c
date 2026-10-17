@@ -362,6 +362,8 @@ void compute_ctx_free(compute_ctx_t *cctx)
    {
       if (!cctx->ir_completed)
          server_chat_ir_finish(cctx, "execution ended without completion");
+      server_control_scope_bind(cctx->ir_previous_controls);
+      server_control_scope_close(cctx->ir_controls);
       aimee_ir_session_set_sink(cctx->ir_previous_sink, cctx->ir_previous_context);
    }
    if (cctx->background_job_id > 0)

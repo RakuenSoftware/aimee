@@ -229,4 +229,33 @@ Sanitizer experiments needed `--gc-sections`, `-fsanitize=address,undefined`, `-
 
 ## Overnight success criteria
 
-Continue implementing the user's canonical-IR design in #3036. Start with canonical primary load/switch and the log/history source-of-truth seam, then native controls and ingress/cache-preserving cutover. Keep a precise checklist of what is truly removed versus still transitional. Run meaningful tests and the repository's required gates, fix CI defects, and push to the same branch. Do not report the entire task complete while interactive controls, ingress bypasses, native history ownership or other agreed consumers remain unfinished.
+Continue implementing the user's canonical-IR design in #3036. Start with canonical primary load/switch and the log/history source-of-truth seam, then native controls and ingress/cache-preserving cutover. Keep a precise checklist of what is removed versus still transitional. Run meaningful tests and the repository's required gates, fix CI defects, and push to the same branch. Do not report the entire task complete while interactive controls, ingress bypasses, native history ownership or other agreed consumers remain unfinished.
+
+## Local continuation progress (18 October 2026)
+
+Implementation continues in #3036 on `fix/browser-ir-runtime`. The migration remains unfinished.
+
+- Primary model switching/reload now consumes canonical history. Completed primary histories are
+  owner-checked atomic checkpoints in the ordered durable session log. Legacy provider rows are
+  import-only. Related transcript reads use bounded dynamic transport frames instead of the old
+  1 MiB empty-on-oversize behavior.
+- Compaction fallback reads typed tool results as evidence. Same-protocol untouched Anthropic
+  replay retains client cache markers and TTLs; unreported typed mutations prevent stale replay.
+- Browser permission/question replies use a server pending registry bound to principal/session/turn.
+  Only authenticated browser transport can enqueue decisions. Claude uses bidirectional stream-json
+  stdin; Codex consumes correlated operator replies. Both persist control responses before delivery.
+- Main-checkout CLI index discovery now bootstraps missing registry scope using the existing bounded
+  ingest path and resolves the canonical registered project; linked-worktree scope is retained.
+- Local frontend: 264 tests and TypeScript passed. Native server builds. Focused address/undefined
+  sanitizer fixtures, including replay and the real Codex child control exchange, passed with
+  leak detection enabled. Full native agent tests pass under `/var/tmp`; this host has `/tmp/.git`,
+  so the isolation test correctly treats `/tmp` scratch directories as repository descendants.
+- Local PostgreSQL live race fixtures cover checkpoint atomicity, ownership, replay and child-scope
+  privacy. Web backend race tests cover authenticated reply forwarding and cross-origin refusal.
+- CMake configuration still fails on existing deleted source references (starting with `_learn.c`).
+  Make is the working native build. Do not describe CMake or deployment qualification as passed.
+
+Still required: log-only capture owners for every nonbrowser primary/delegate worker, governance
+and observation pairing, remaining ingress/cache and native replay cutovers, tmux retirement,
+remaining typed IR consumers, bypass enforcement, and full integration/deployment qualification.
+The opening attribution on #3036 remains rejected by the strengthened gate; no exemption was added.

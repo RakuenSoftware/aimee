@@ -1,6 +1,6 @@
 /* db1/primary_sessions.h: durable primary-agent conversation transcripts.
  *
- * Direct primary adapters keep provider-formatted message history client-side
+ * Direct primary adapters retain canonical message history server-side
  * because some providers are called with store=false. This DB1 table gives
  * those sessions restart-safe continuity without exposing sqlite outside DB1.
  */
@@ -37,13 +37,22 @@ extern "C"
    char *db1_session_ir_page(const char *session_id, const char *after, int limit,
                              const char *principal);
 
+   /* Owner-checked host history projections in the ordered session log.
+    * Save appends an atomic checkpoint; load replays the latest checkpoint and
+    * subsequent completed harness observations. scope keeps child prompts private.
+    * Load returns 0 found, 1 missing, -1 failure; caller frees *out. */
+   int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
+                                   const char *scope, const char *actor, const char *messages_json);
+   int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
+                                   char **out);
+
    /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
    int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,
                                size_t capacity, const char *principal);
    int db1_session_harness_bind(const char *session_id, const char *harness, const char *native_id,
                                 const char *principal);
 
-   /* Upsert the provider-formatted message array JSON for one primary
+   /* Upsert the canonical message array JSON for one primary
     * conversation session. Returns 0 on success. */
    int db1_primary_session_save(const char *session_id, const char *agent_name,
                                 const char *provider, const char *messages_json);
@@ -63,7 +72,8 @@ extern "C"
    int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_t **out,
                                         int max);
 
-   /* Load the newest transcript row for one session_id. Returns 0 on hit. */
+   /* Load the newest transcript row for one session_id. Returns 0 on hit, 1 on miss, -1 on failure.
+    */
    int db1_primary_session_get_latest(const char *session_id, db1_primary_session_row_t *out);
 
    void db1_primary_session_row_clear(db1_primary_session_row_t *row);

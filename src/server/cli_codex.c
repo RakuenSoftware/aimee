@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "provider_cli_adapter.h"
+#include "server_session_control.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -595,7 +596,7 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
    long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
-      if (agent_request_cancelled())
+      if (agent_request_cancelled() || aimee_ir_session_capture_failed())
       {
          if (status)
             *status = CLI_CODEX_READ_READ_ERR;
@@ -1244,6 +1245,45 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
    }
 
    const char *m = method->valuestring;
+   server_control_scope_t *scope = server_control_scope_current();
+   int supported = strstr(m, "requestApproval") || !strcmp(m, "item/tool/requestUserInput") ||
+                   !strcmp(m, "mcpServer/elicitation/request") ||
+                   !strcmp(m, "execCommandApproval") || !strcmp(m, "applyPatchApproval");
+   if (scope && supported)
+   {
+      char *key = cJSON_PrintUnformatted(id), *native_id = NULL, *kind = NULL;
+      cJSON *request = NULL, *reply = NULL;
+      int taken = 0;
+      while (key && !agent_request_cancelled() && !aimee_ir_session_capture_failed())
+      {
+         taken = server_control_take(scope, key, &native_id, &kind, &request, &reply);
+         if (taken != 0)
+            break;
+         struct timespec pause = {0, 100000000L};
+         nanosleep(&pause, NULL);
+      }
+      if (taken == 1)
+      {
+         cJSON *result =
+             aimee_codex_control_reply(m, cJSON_GetObjectItemCaseSensitive(obj, "params"), reply);
+         int rc = result
+                      ? cli_codex_send_jsonrpc_result(c, id, result)
+                      : cli_codex_send_jsonrpc_error(
+                            c, id, -32602, "Operator reply could not satisfy this control request");
+         if (rc != 0)
+            aimee_ir_session_fail_capture();
+      }
+      else if (!agent_request_cancelled())
+         aimee_ir_session_fail_capture();
+      free(key);
+      free(native_id);
+      free(kind);
+      cJSON_Delete(request);
+      cJSON_Delete(reply);
+      cJSON_Delete(obj);
+      return 1;
+   }
+
    if (strcmp(m, "item/commandExecution/requestApproval") == 0 ||
        strcmp(m, "item/fileChange/requestApproval") == 0 || strcmp(m, "execCommandApproval") == 0 ||
        strcmp(m, "applyPatchApproval") == 0)

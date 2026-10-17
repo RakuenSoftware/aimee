@@ -77,6 +77,7 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include "modules/git/git_org_repos.h" /* git_org_repos_list for /v1/workspace/org-repos */
 #include "webuser_editor.h"            /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "server_session_control.h"
 #include "webchat_live.h" /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"        /* index_scan_project after a webuser clone (WP-D) */
 #include "kb_client.h"    /* kb_client_index_scan — push webuser clones into aimee-kb */
@@ -1527,6 +1528,32 @@ int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
  * pegged a core). Returns the row ONLY when its monotonic rev advanced past
  * since_rev, so an unchanged turn returns changed:false and the browser does no
  * work. CAP_SESSION_READ (a session read, like /events). */
+/* Only the root-UDS-attested web backend may deliver an operator decision.
+ * An agent's own MCP/ingress bearer cannot approve its pending tool request. */
+static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
+{
+   server_conn_t identity = {0};
+   server_http_identity_apply(&identity);
+   if (identity.attested_transport != ATTEST_WEBCHAT_TRUSTED || !identity.vault_principal[0])
+      return err_json(resp, cap, 403, "control replies require an authenticated browser user");
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
+   const char *request = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "request_id"));
+   const cJSON *reply = cJSON_GetObjectItemCaseSensitive(body, "reply");
+   if (!session || !request || !cJSON_IsObject(reply))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "session_id, request_id and reply are required");
+   }
+   int rc = server_control_reply(session, request, identity.vault_principal, reply);
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, rc == 1 ? 409 : 403,
+                      "control request is stale, invalid or belongs to another user");
+   snprintf(resp, cap, "{\"status\":\"ok\",\"queued\":true}");
+   return 200;
+}
+
 static int rh_chat_live(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
@@ -2116,6 +2143,7 @@ const http_route_t g_v1_routes[] = {
     /* Steering: stop the in-flight turn + queue a follow-up the server
      * auto-continues (streamed to the session's /events). */
     {"POST", "/v1/chat/interrupt", NULL, RM_EXACT, "chat.interrupt", 0, rh_dispatch_op},
+    {"POST", "/v1/chat/control-reply", NULL, RM_EXACT, NULL, CAP_CHAT, rh_chat_control_reply},
     /* The browser's fixed-timer poll for the live turn (db1 webchat_live mirror),
      * replacing client-side SSE reconciliation. */
     {"POST", "/v1/chat/live", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_chat_live},

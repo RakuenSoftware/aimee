@@ -503,14 +503,51 @@ aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
   ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
 if(NOT WIN32)
-  aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c
+  aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c ../server/server_session_control.c
     ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
     ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
 endif()
 
 if(NOT WIN32)
-  aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c
+  aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
   target_link_libraries(test_server_chat_ir PRIVATE OpenSSL::Crypto)
+endif()
+
+# Owner-checked canonical primary-history fixtures.
+if(NOT WIN32)
+  add_executable(test_primary_session_adapter
+    test_primary_session_adapter.c ../server/primary_session_adapter.c
+    ../server/agent_adapter.c support/provider_cli_adapter_stub.c support/log_stub.c
+    ../modules/translation/history_ir.c
+    ../modules/translation/aimee_frontend_anthropic.c
+    ../modules/translation/aimee_frontend_openai.c
+    ../modules/translation/aimee_frontend_responses.c
+    ../modules/translation/aimee_backend_responses.c
+    ../modules/ir/aimee_ir.c ../modules/ir/session_event.c
+    ../modules/ir/aimee_ir_metrics.c ../text.c ../util.c ../vendor/cJSON.c)
+  add_executable(test_primary_history_client test_primary_history_client.c
+    ../db1_client/sessions.c ../primary_session_release.c ../module_json_call.c ../log.c)
+  foreach(history_test test_primary_session_adapter test_primary_history_client)
+    target_include_directories(${history_test} PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+      ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+      ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+    target_compile_options(${history_test} PRIVATE -ffunction-sections -fdata-sections)
+    if(APPLE)
+      target_link_options(${history_test} PRIVATE -Wl,-dead_strip)
+    else()
+      target_link_options(${history_test} PRIVATE -Wl,--gc-sections)
+    endif()
+    target_link_libraries(${history_test} PRIVATE Threads::Threads OpenSSL::Crypto m)
+    aimee_enable_test_asserts(${history_test})
+    add_test(NAME ${history_test} COMMAND ${history_test})
+    set_tests_properties(${history_test} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  endforeach()
+endif()
+
+if(NOT WIN32)
+  aimee_add_test(test_server_session_control test_server_session_control.c
+    ../server/server_session_control.c ../vendor/cJSON.c)
+  target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
 endif()

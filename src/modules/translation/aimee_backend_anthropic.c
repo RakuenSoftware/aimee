@@ -2,6 +2,7 @@
  * The IR is Anthropic-shaped by design, so this is the most direct mapping; the
  * OpenAI/Responses backends convert the same IR to their wire. See aimee_backend.h. */
 #include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 
@@ -246,14 +247,26 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
       return NULL;
-   /* The raw-sidecar fast-path was RETIRED here (cross-protocol canonical egress): the
-    * Anthropic egress is now a pure, deterministic function of the typed IR for EVERY
-    * source. Shipping the client's raw bytes only for an Anthropic source made
-    * openai->IR->anthropic and anthropic->IR->anthropic diverge (client key-order +
-    * client cache markers), but Anthropic prompt-caches on exact bytes, so the same
-    * logical content must serialize identically regardless of source. All top-level
-    * fields the sidecar preserved are now modeled (slice 1) and cache_control is
-    * applied uniformly (slice 2), so nothing is lost by rebuilding. */
+   /* Native replay retains client cache breakpoints, TTLs, field ordering and
+    * unknown native settings. Verify the typed payload against its entry
+    * snapshot as well as the mutation flag: a stage forgetting to report an
+    * edit must never cause stale user/tool content to be replayed. */
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && !ir->mutated)
+   {
+      aimee_request_t original = {0};
+      char error[128];
+      if (anthropic_frontend_parse(ir->raw, &original, error, sizeof error) == 0)
+      {
+         int same_model = (!ir->model && !original.model) ||
+                          (ir->model && original.model && !strcmp(ir->model, original.model));
+         int unchanged = same_model && aimee_ir_request_equal(ir, &original);
+         aimee_request_free(&original);
+         if (unchanged)
+            return cJSON_Duplicate(ir->raw, 1);
+      }
+      else
+         aimee_request_free(&original);
+   }
    cJSON *out = cJSON_CreateObject();
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);

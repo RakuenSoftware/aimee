@@ -65,15 +65,6 @@ struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJS
                                        const struct cJSON *tools, const char *system,
                                        const char *driver_name, int max_tokens, double temperature);
 
-/* Convert a stored conversation history (the message array a primary session
- * persists) from the wire its provider speaks to the wire another provider speaks,
- * through the IR: Anthropic messages for "anthropic", Responses input items for
- * "chatgpt", Chat Completions messages for every other provider. System messages are
- * dropped (the system prompt is supplied per turn). Returns a new cJSON array the
- * caller owns, or NULL when the history does not parse or cannot be built. */
-struct cJSON *aimee_ir_convert_history(const char *messages_json, const char *from_provider,
-                                       const char *to_provider);
-
 /* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
  * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */
 int aimee_ir_resp_path_enabled(void);

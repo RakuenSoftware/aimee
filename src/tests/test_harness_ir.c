@@ -206,8 +206,56 @@ static void acp(void)
    assert(cJSON_GetArraySize(events) > before);
    aimee_harness_ir_free(&s);
 }
+static void control_outputs(void)
+{
+   cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
+   cJSON *decision = cJSON_Parse("{\"decision\":\"allow\"}");
+   cJSON *frame = aimee_claude_control_reply("native-permission", request, decision);
+   assert(frame);
+   cJSON *response = cJSON_GetObjectItem(cJSON_GetObjectItem(frame, "response"), "response");
+   assert(!strcmp(string(response, "behavior"), "allow"));
+   assert(cJSON_Compare(cJSON_GetObjectItem(response, "updatedInput"),
+                        cJSON_GetObjectItem(request, "input"), 1));
+   cJSON_Delete(frame);
+   cJSON_Delete(request);
+   cJSON_Delete(decision);
+   request = cJSON_Parse("{\"tool_name\":\"AskUserQuestion\",\"input\":{\"questions\":[{"
+                         "\"question\":\"Pick a model\"}]}}");
+   decision = cJSON_Parse("{\"decision\":\"allow\",\"answers\":{\"Pick a model\":[\"model-b\"]}}");
+   frame = aimee_claude_control_reply("question", request, decision);
+   assert(frame);
+   response = cJSON_GetObjectItem(cJSON_GetObjectItem(frame, "response"), "response");
+   assert(
+       !strcmp(string(cJSON_GetObjectItem(cJSON_GetObjectItem(response, "updatedInput"), "answers"),
+                      "Pick a model"),
+               "model-b"));
+   cJSON_Delete(frame);
+   cJSON_Delete(request);
+   cJSON_Delete(decision);
+   request = cJSON_Parse("{\"questions\":[{\"id\":\"q1\",\"question\":\"Pick a model\"}]}");
+   decision = cJSON_Parse("{\"decision\":\"allow\",\"answers\":{\"q1\":[\"model-b\"]}}");
+   response = aimee_codex_control_reply("item/tool/requestUserInput", request, decision);
+   assert(response);
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetArrayItem(
+           cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(response, "answers"), "q1"),
+                               "answers"),
+           0)),
+       "model-b"));
+   cJSON_Delete(response);
+   cJSON_Delete(decision);
+   decision = cJSON_Parse("{\"decision\":\"deny\"}");
+   response = aimee_codex_control_reply("item/commandExecution/requestApproval", request, decision);
+   assert(response);
+   assert(!strcmp(string(response, "decision"), "decline"));
+   cJSON_Delete(response);
+   cJSON_Delete(decision);
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
+   control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
    claude();

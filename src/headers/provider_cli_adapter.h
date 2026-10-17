@@ -57,6 +57,7 @@ extern "C"
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
+      int control_channel;    /* bidirectional structured input for browser-owned controls */
       int primary;            /* server-owned primary uses its authorized autonomous mode */
       const char *resume_id;  /* structured primary conversation, optional */
       const char *home;       /* parent-materialized runtime credential HOME */

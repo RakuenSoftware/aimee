@@ -437,7 +437,7 @@ static void test_agent_config_recommended_sampling_roundtrip(void)
    printf("agent_config_recommended_sampling_roundtrip OK\n");
 }
 
-static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
+static void test_parse_response_openai_rejects_invalid_tool_arguments(void)
 {
    const char *json = "{"
                       "  \"choices\": [{"
@@ -461,23 +461,13 @@ static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
    assert(root != NULL);
 
    parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
-
-   assert(out.is_tool_call == 1);
-   assert(out.call_count == 1);
-   assert(strcmp(out.calls[0].name, "bash") == 0);
-   assert(strcmp(out.calls[0].arguments, "{}") == 0);
-
-   cJSON *tool_calls = cJSON_GetObjectItem(out.assistant_message, "tool_calls");
-   cJSON *tc = cJSON_GetArrayItem(tool_calls, 0);
-   cJSON *fn = cJSON_GetObjectItem(tc, "function");
-   cJSON *args = cJSON_GetObjectItem(fn, "arguments");
-   assert(cJSON_IsString(args));
-   assert(strcmp(args->valuestring, "{}") == 0);
+   assert(agent_ir_parse_json_response(root, 0, -1, NULL, &out) != 0);
+   assert(out.is_tool_call == 0 && out.call_count == 0);
+   assert(out.assistant_message == NULL);
 
    agent_free_parsed_response(&out);
    cJSON_Delete(root);
-   printf("parse_response_openai_sanitizes_invalid_tool_arguments OK\n");
+   printf("parse_response_openai_rejects_invalid_tool_arguments OK\n");
 }
 
 static void test_parse_response_captures_provider_model(void)
@@ -952,7 +942,7 @@ int main(void)
    test_openai_provider_fixed_temperature_fallback();
    test_openai_required_temperature_overrides_caller();
    test_agent_config_recommended_sampling_roundtrip();
-   test_parse_response_openai_sanitizes_invalid_tool_arguments();
+   test_parse_response_openai_rejects_invalid_tool_arguments();
    test_parse_response_captures_provider_model();
    test_parse_response_keeps_text_with_tool_use();
    test_parse_response_openai_mistral_content_array();

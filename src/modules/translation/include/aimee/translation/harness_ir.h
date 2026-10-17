@@ -24,5 +24,12 @@ int aimee_claude_frame_ir(const struct cJSON *frame, aimee_harness_ir_t *state);
 int aimee_codex_frame_ir(const struct cJSON *frame, aimee_harness_ir_t *state);
 int aimee_codex_reply_ir(const struct cJSON *frame, aimee_harness_ir_t *state);
 int aimee_acp_frame_ir(const struct cJSON *frame, aimee_harness_ir_t *state);
+/* Canonical operator decision -> documented native control output boundary.
+ * Answers are {question-id:[selected/free-form strings]}; original tool input
+ * is retained unless that tool explicitly asks the operator for answers. */
+struct cJSON *aimee_claude_control_reply(const char *native_id, const struct cJSON *request,
+                                         const struct cJSON *decision);
+struct cJSON *aimee_codex_control_reply(const char *method, const struct cJSON *params,
+                                        const struct cJSON *decision);
 void aimee_harness_ir_free(aimee_harness_ir_t *state);
 #endif

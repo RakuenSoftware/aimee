@@ -36,6 +36,7 @@ export type Delta = {
   error_message?: string;
 };
 export type SessionEvent =
+  | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
   | { kind: 'message'; message_id: string; payload: Message }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
   | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string } }
@@ -106,6 +107,21 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'history': {
+      const history = event.payload;
+      if (!nonempty(history.scope) || (history.phase !== 'message' && history.phase !== 'commit'))
+        throw new Error('Invalid history checkpoint');
+      if (history.phase === 'message') {
+        if (!Number.isSafeInteger(history.index ?? 0) || (history.index ?? 0) < 0 || !history.message ||
+            !nonempty(history.message.role) || !Array.isArray(history.message.blocks))
+          throw new Error('Invalid history checkpoint message');
+        history.message.blocks.forEach(validateBlock);
+      } else if (!Number.isSafeInteger(history.count ?? 0) || (history.count ?? 0) < 0)
+        throw new Error('Invalid history checkpoint count');
+      // Host prompt checkpoints advance the same cursor, without duplicating
+      // the immutable observation timeline or exposing child prompts there.
+      return next;
+    }
     case 'message': {
       if (!nonempty(event.message_id) || !nonempty(event.payload.role) || !Array.isArray(event.payload.blocks) || event.payload.blocks.length > 4096)
         throw new Error('Invalid canonical message');

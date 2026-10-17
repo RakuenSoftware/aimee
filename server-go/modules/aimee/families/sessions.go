@@ -48,6 +48,8 @@ const (
 	opSessionIRPage               uint32 = 29
 	opSessionHarnessGet           uint32 = 30
 	opSessionHarnessBind          uint32 = 31
+	opSessionIRHistorySave        uint32 = 32
+	opSessionIRHistoryLoad        uint32 = 33
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -963,6 +965,8 @@ var Sessions = store.Family{
 		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
+		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
+		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 3, Run: sessionIRHistoryLoad},
 		opSessionHarnessGet:           {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
 		opSessionHarnessBind:          {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
 	},

@@ -47,6 +47,29 @@ int db1_session_ir_append(const char *sid, const char *eid, const char *turn, co
    snprintf(sequence, 32, "%d", cJSON_GetArraySize(log_entries));
    return 0;
 }
+char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *principal)
+{
+   assert(!strcmp(sid, "session-one") && !strcmp(principal, owner) && limit == 128);
+   cJSON *events = cJSON_CreateArray();
+   for (int i = atoi(after); i < cJSON_GetArraySize(log_entries); i++)
+   {
+      cJSON *envelope = cJSON_CreateObject();
+      char sequence[32];
+      snprintf(sequence, sizeof sequence, "%d", i + 1);
+      cJSON_AddNumberToObject(envelope, "version", 1);
+      cJSON_AddStringToObject(envelope, "session_id", sid);
+      cJSON_AddStringToObject(envelope, "sequence", sequence);
+      cJSON_AddStringToObject(envelope, "event_id", sequence);
+      cJSON_AddStringToObject(envelope, "turn_id", "checkpoint");
+      cJSON_AddStringToObject(envelope, "actor", owner);
+      cJSON_AddItemToObject(envelope, "event",
+                            cJSON_Duplicate(cJSON_GetArrayItem(log_entries, i), 1));
+      cJSON_AddItemToArray(events, envelope);
+   }
+   char *json = cJSON_PrintUnformatted(events);
+   cJSON_Delete(events);
+   return json;
+}
 int write_all(int fd, const char *text, size_t length)
 {
    (void)fd;
@@ -58,11 +81,11 @@ int write_all(int fd, const char *text, size_t length)
    assert(envelope);
    int committed = cJSON_GetArraySize(log_entries);
    assert(committed > 0);
-   char sequence[32];
-   snprintf(sequence, sizeof(sequence), "%d", committed);
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(envelope, "sequence")), sequence));
+   const char *sequence = cJSON_GetStringValue(cJSON_GetObjectItem(envelope, "sequence"));
+   int delivered = sequence ? atoi(sequence) : 0;
+   assert(delivered > 0 && delivered <= committed);
    assert(cJSON_Compare(cJSON_GetObjectItem(envelope, "event"),
-                        cJSON_GetArrayItem(log_entries, committed - 1), 1));
+                        cJSON_GetArrayItem(log_entries, delivered - 1), 1));
    cJSON_Delete(envelope);
    writes++;
    return 0;
@@ -79,6 +102,8 @@ static compute_ctx_t context(void)
 }
 static void cleanup(compute_ctx_t *c)
 {
+   server_control_scope_bind(c->ir_previous_controls);
+   server_control_scope_close(c->ir_controls);
    aimee_ir_session_set_sink(c->ir_previous_sink, c->ir_previous_context);
    cJSON_Delete(c->ir_tool_ids);
    cJSON_Delete(log_entries);
@@ -108,6 +133,14 @@ static void response(void)
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   compute_ctx_t checkpoint_context = context();
+   assert(!server_chat_ir_begin(&checkpoint_context, "session-one", "hello"));
+   cJSON_AddItemToArray(log_entries, cJSON_Parse("{\"kind\":\"history\",\"payload\":{\"scope\":"
+                                                 "\"primary\",\"phase\":\"commit\",\"count\":0}}"));
+   assert(!server_chat_ir_finish(&checkpoint_context, NULL));
+   assert(writes == 4 && !checkpoint_context.ir_failed);
+   cleanup(&checkpoint_context);
+
    compute_ctx_t c = context();
    assert(!server_chat_ir_begin(&c, "session-one", "hello"));
    assert(writes == 2);

@@ -51,6 +51,7 @@
     "server-go/modules/aimee/families/runtime_state.go",
     "server-go/modules/aimee/families/schema.go",
     "server-go/modules/aimee/families/session_ir.go",
+    "server-go/modules/aimee/families/session_ir_history.go",
     "server-go/modules/aimee/families/sessions.go",
     "server-go/modules/aimee/families/telemetry.go",
     "server-go/modules/aimee/families/telemetry_diagnose.go",

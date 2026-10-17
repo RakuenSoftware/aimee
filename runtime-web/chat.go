@@ -481,3 +481,44 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"username": currentUser(r)})
 }
+
+// A browser decision is forwarded with the verified webuser identity. Runtime
+// owns pending IDs and checks the session/turn owner again before enqueueing it.
+func (s *server) handleChatControlReply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "cross-origin control reply refused", http.StatusForbidden)
+		return
+	}
+	if currentUser(r) == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		SessionID string          `json:"session_id"`
+		RequestID string          `json:"request_id"`
+		Reply     json.RawMessage `json:"reply"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || req.SessionID == "" || req.RequestID == "" || len(req.Reply) == 0 {
+		http.Error(w, "session_id, request_id and reply required", http.StatusBadRequest)
+		return
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		http.Error(w, "invalid control reply", http.StatusBadRequest)
+		return
+	}
+	status, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/chat/control-reply", body)
+	if err != nil {
+		http.Error(w, "control reply service unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(data)
+}

@@ -285,6 +285,31 @@ static void flashback_extract_from_text(cJSON *files, cJSON *errors, cJSON *deci
    }
 }
 
+/* Visit every visible evidence block. Tool results carry content, and a
+ * multi-block message must not lose later paths/errors to the first TEXT. */
+static void flashback_extract_content(cJSON *files, cJSON *errors, cJSON *decisions,
+                                      const cJSON *content)
+{
+   if (cJSON_IsString(content))
+      flashback_extract_from_text(files, errors, decisions, content->valuestring);
+   else if (cJSON_IsArray(content))
+   {
+      const cJSON *block;
+      cJSON_ArrayForEach(block, content)
+      {
+         const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "type"));
+         if (!type)
+            continue;
+         if (!strcmp(type, "text") || !strcmp(type, "input_text") || !strcmp(type, "output_text"))
+            flashback_extract_content(files, errors, decisions,
+                                      cJSON_GetObjectItemCaseSensitive(block, "text"));
+         else if (!strcmp(type, "tool_result"))
+            flashback_extract_content(files, errors, decisions,
+                                      cJSON_GetObjectItemCaseSensitive(block, "content"));
+      }
+   }
+}
+
 static cJSON *flashback_build(const cJSON *messages, int start_idx, int end_idx)
 {
    cJSON *root = NULL;
@@ -307,9 +332,14 @@ static cJSON *flashback_build(const cJSON *messages, int start_idx, int end_idx)
    for (int i = start_idx; i < end_idx; i++)
    {
       cJSON *msg = cJSON_GetArrayItem((cJSON *)messages, i);
-      flashback_extract_from_text(cJSON_GetObjectItem(root, "files_modified"),
-                                  cJSON_GetObjectItem(root, "errors_encountered"),
-                                  cJSON_GetObjectItem(root, "decisions_made"), msg_text(msg));
+      const cJSON *content = cJSON_GetObjectItemCaseSensitive(msg, "blocks");
+      if (!content)
+         content = cJSON_GetObjectItemCaseSensitive(msg, "content");
+      if (!content)
+         content = cJSON_GetObjectItemCaseSensitive(msg, "output");
+      flashback_extract_content(cJSON_GetObjectItem(root, "files_modified"),
+                                cJSON_GetObjectItem(root, "errors_encountered"),
+                                cJSON_GetObjectItem(root, "decisions_made"), content);
    }
 
    return root;

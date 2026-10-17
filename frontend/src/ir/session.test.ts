@@ -140,3 +140,21 @@ it('rejects cross-turn control replies and content arriving after cancellation',
   state = reduceSession(state, envelope(3, { kind: 'execution', payload: { status: 'cancelled' } }));
   expect(() => reduceSession(state, envelope(4, message('late', 'assistant', [{ type: 'text', text: 'late' }])))).toThrow('execution completion');
 });
+
+it('advances past host history checkpoints without duplicating the observation timeline', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, {
+    kind: 'message', message_id: 'visible', payload: { role: 'assistant', blocks: [{ type: 'text', text: 'visible' }] },
+  }));
+  state = reduceSession(state, envelope(2, { kind: 'history', payload: {
+    scope: 'delegate:child', phase: 'message', index: 0,
+    message: { role: 'user', blocks: [{ type: 'text', text: 'private child prompt' }] },
+  } }));
+  state = reduceSession(state, envelope(3, { kind: 'history', payload: {
+    scope: 'delegate:child', phase: 'commit', count: 1,
+  } }));
+  expect(state.sequence).toBe('3');
+  expect(state.messages.map(message => message.blocks[0].text)).toEqual(['visible']);
+  expect(() => reduceSession(state, envelope(4, { kind: 'history', payload: {
+    scope: '', phase: 'commit', count: 0,
+  } }))).toThrow('Invalid history');
+});

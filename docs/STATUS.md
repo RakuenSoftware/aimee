@@ -21,8 +21,9 @@ workspace registration alone does not start a client runner.
 
 The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
 Claude uses structured print mode; Codex app-server and ACP convert native frames at entry.
-Per-harness resume handles and runtime credentials stay server-side. Interactive approval replies,
-the global legacy-loop removal and live subscription qualification remain separate gates.
+Per-harness resume handles and runtime credentials stay server-side. Permission and question
+replies use authenticated browser transport and correlated native control channels. Global legacy-loop
+removal and live subscription qualification remain separate gates.
 See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
 
 ## Runtime
@@ -100,6 +101,7 @@ See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md)
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Canonical IR migration | In progress | Direct primary load, switching and compaction use canonical log checkpoints; native observations remain immutable. Browser control replies and remaining legacy ingress/execution consumers are unfinished. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

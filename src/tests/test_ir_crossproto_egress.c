@@ -1,10 +1,5 @@
-/* test_ir_crossproto_egress.c -- the IR-funnel HARD requirement: outbound requests
- * to the Anthropic Messages API must be BYTE-IDENTICAL for the same logical
- * conversation regardless of the client's source protocol, because Anthropic
- * prompt-caches on exact bytes. So anthropic->IR->anthropic and openai->IR->anthropic
- * must serialize identically. This is achieved by making the Anthropic egress a pure,
- * deterministic function of the typed IR (no raw sidecar) with a uniform aimee
- * cache_control policy applied at egress (client markers normalized away). */
+/* Canonical transformed requests use deterministic cross-protocol egress.
+ * Untouched native requests separately retain their original cache policy. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +21,7 @@ static char *egress(const char *body, int frontend /* 0=anthropic,1=openai */)
    int rc = (frontend == 0) ? anthropic_frontend_parse(req, &ir, err, sizeof err)
                             : openai_frontend_parse(req, &ir, err, sizeof err);
    assert(rc == 0);
+   ir.mutated = 1; /* exercise canonical rebuild, not native replay */
    cJSON *out = anthropic_backend_build(&ir);
    assert(out);
    char *s = cJSON_PrintUnformatted(out);
@@ -81,7 +77,11 @@ static void test_canonical_replay_egress(void)
    cJSON *wire = responses_backend_build(&request);
    assert(wire);
    cJSON *items = cJSON_GetObjectItem(wire, "input");
-   assert(cJSON_GetArraySize(items) == 4);
+   assert(cJSON_GetArraySize(items) == 5);
+   cJSON *separator = cJSON_GetArrayItem(items, 3);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetArrayItem(cJSON_GetObjectItem(separator, "content"), 0), "text")),
+                  "\n\n"));
    cJSON *reasoning = cJSON_GetArrayItem(items, 0);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reasoning, "id")), "rs_opaque"));
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(reasoning, "encrypted_content")),
@@ -206,11 +206,47 @@ static void test_history_entry_migration(void)
    printf("  native-history-entry-retains-reasoning-and-tool-pairs OK\n");
 }
 
+static void test_native_cache_replay_and_unreported_mutation(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"model\":\"native\",\"max_tokens\":64,\"native_setting\":{\"keep\":true},"
+                   "\"system\":[{\"type\":\"text\",\"text\":\"system\","
+                   "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],"
+                   "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\","
+                   "\"text\":\"hello\",\"cache_control\":{\"type\":\"ephemeral\"}}]}]}");
+   aimee_request_t ir = {0};
+   char error[128];
+   assert(anthropic_frontend_parse(request, &ir, error, sizeof error) == 0);
+   cJSON *output = anthropic_backend_build(&ir);
+   assert(output && cJSON_Compare(request, output, 1));
+   char *before = cJSON_PrintUnformatted(request), *after = cJSON_PrintUnformatted(output);
+   assert(before && after && !strcmp(before, after));
+   free(before);
+   free(after);
+   cJSON_Delete(output);
+   free(ir.messages[0].blocks[0].text);
+   ir.messages[0].blocks[0].text = strdup("changed without a mutation flag");
+   output = anthropic_backend_build(&ir);
+   char *wire = cJSON_PrintUnformatted(output);
+   assert(wire && strstr(wire, "changed without a mutation flag"));
+   free(wire);
+   cJSON_Delete(output);
+   free(ir.model);
+   ir.model = strdup("switched-model");
+   output = anthropic_backend_build(&ir);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "model")), "switched-model"));
+   cJSON_Delete(output);
+   aimee_request_free(&ir);
+   cJSON_Delete(request);
+   puts("  native cache replay and unreported mutation detection OK");
+}
+
 int main(void)
 {
    test_history_entry_migration();
    printf("cross-protocol anthropic egress byte-identity:\n");
    test_canonical_replay_egress();
+   test_native_cache_replay_and_unreported_mutation();
 
    /* Text-only turn: same served model, system, and user content in each wire.
     * The anthropic client sends its own cache_control; the openai client sends none.

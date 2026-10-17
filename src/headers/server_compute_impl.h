@@ -8,6 +8,7 @@
 #include "server.h"
 #include "cJSON.h"
 #include <aimee/ir/session_event.h>
+#include "server_session_control.h"
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
@@ -45,6 +46,8 @@ typedef struct
    unsigned long long ir_model_events;
    cJSON *ir_tool_ids;
    char ir_session[128], ir_turn[128];
+   char ir_sequence[32];
+   server_control_scope_t *ir_controls, *ir_previous_controls;
    char ir_harness[32];
    aimee_ir_session_sink_fn ir_previous_sink;
    void *ir_previous_context;

@@ -7,6 +7,7 @@ import { useSessions } from '../SessionContext';
 import IRTranscript from '../ir/Transcript';
 import { emptySession, reduceSession } from '../ir/session';
 import type { Envelope, SessionState } from '../ir/session';
+import type { ControlReply } from '../ir/ControlCard';
 import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
@@ -1615,6 +1616,15 @@ export default function Chat() {
     return () => { es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
   }, [activeAimeeSid]);
   const canonicalState = irSessions.current[activeAimeeSid];
+  const replyControl = useCallback(async (requestId: string, reply: ControlReply) => {
+    const response = await fetch('/api/chat/control-reply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: activeAimeeSid, request_id: requestId, reply }),
+    });
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+  }, [activeAimeeSid]);
+
   const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
   const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
   useEffect(() => {
@@ -2748,7 +2758,7 @@ export default function Chat() {
           {windowedMsgs.length > 0 && <details><summary>Earlier text-only history</summary>
             <Transcript messages={windowedMsgs} working={false} activeSid={activeAimeeSid} />
           </details>}
-          <IRTranscript state={canonicalState} /></> :
+          <IRTranscript state={canonicalState} onReply={replyControl} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
         {irTransportErrors[activeAimeeSid] && <div role="alert">{irTransportErrors[activeAimeeSid]}</div>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}

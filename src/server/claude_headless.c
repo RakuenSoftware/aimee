@@ -2,6 +2,8 @@
  * callers own Vault materialization, resume metadata and durable IR delivery. */
 #include "claude_headless.h"
 #include "agent_config.h"
+#include "agent_exec.h"
+#include "server_session_control.h"
 #include <aimee/translation/harness_ir.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
@@ -22,6 +24,48 @@ static uint64_t mono_ms(void)
    clock_gettime(CLOCK_MONOTONIC, &ts);
    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 }
+static char *claude_input_line(cJSON *frame)
+{
+   char *json = frame ? cJSON_PrintUnformatted(frame) : NULL;
+   cJSON_Delete(frame);
+   if (!json)
+      return NULL;
+   size_t n = strlen(json);
+   char *line = realloc(json, n + 2);
+   if (!line)
+   {
+      free(json);
+      return NULL;
+   }
+   line[n] = '\n';
+   line[n + 1] = 0;
+   return line;
+}
+static char *claude_initialize_line(void)
+{
+   cJSON *frame = cJSON_CreateObject();
+   if (!frame)
+      return NULL;
+   cJSON_AddStringToObject(frame, "type", "control_request");
+   cJSON_AddStringToObject(frame, "request_id", "aimee:init");
+   cJSON *request = cJSON_AddObjectToObject(frame, "request");
+   cJSON_AddStringToObject(request, "subtype", "initialize");
+   cJSON_AddObjectToObject(request, "hooks");
+   return claude_input_line(frame);
+}
+static char *claude_user_line(const char *prompt, const char *resume)
+{
+   cJSON *frame = cJSON_CreateObject();
+   if (!frame)
+      return NULL;
+   cJSON_AddStringToObject(frame, "type", "user");
+   cJSON_AddStringToObject(frame, "session_id", resume ? resume : "");
+   cJSON_AddNullToObject(frame, "parent_tool_use_id");
+   cJSON *message = cJSON_AddObjectToObject(frame, "message");
+   cJSON_AddStringToObject(message, "role", "user");
+   cJSON_AddStringToObject(message, "content", prompt);
+   return claude_input_line(frame);
+}
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind_session,
                         void *context, agent_result_t *out)
 {
@@ -35,6 +79,14 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
        capture_failed = 0;
    pid_t pid = -1;
    aimee_harness_ir_t ir = {0};
+   char *input_line = NULL;
+   int initialized = !cfg->control_channel, prompt_sent = !cfg->control_channel;
+   server_control_scope_t *controls = server_control_scope_current();
+   if (cfg->control_channel && !controls)
+   {
+      snprintf(out->error, sizeof out->error, "browser control owner is unavailable");
+      goto finish;
+   }
    if (claude_provider_cli_adapter.spawn(cfg, prompt, &in, &output, &pid) != 0)
    {
       snprintf(out->error, sizeof(out->error), "could not start claude -p");
@@ -42,11 +94,14 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    }
    fcntl(in, F_SETFL, fcntl(in, F_GETFL, 0) | O_NONBLOCK);
    fcntl(output, F_SETFL, fcntl(output, F_GETFL, 0) | O_NONBLOCK);
-   size_t sent = 0, length = strlen(prompt), used = 0;
+   input_line = cfg->control_channel ? claude_initialize_line() : strdup(prompt);
+   if (!input_line)
+      goto stop;
+   size_t sent = 0, length = strlen(input_line), used = 0;
    char *buffer = malloc(4 * 1024 * 1024 + 1);
    if (!buffer)
       goto stop;
-   uint64_t last = mono_ms();
+   uint64_t last = mono_ms(), started = last;
    while (!eof)
    {
       if (agent_request_cancelled())
@@ -54,13 +109,69 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          interrupted = 1;
          break;
       }
+      if (cfg->control_channel && !initialized && mono_ms() - started > 60000)
+      {
+         snprintf(out->error, sizeof out->error, "Claude control initialization timed out");
+         break;
+      }
+      if (cfg->control_channel && initialized && !input_line && in >= 0)
+      {
+         if (!prompt_sent)
+         {
+            input_line = claude_user_line(prompt, cfg->resume_id);
+            prompt_sent = 1;
+            if (!input_line)
+               goto capture_stop;
+         }
+         else
+         {
+            char *id = NULL, *kind = NULL;
+            cJSON *request = NULL, *reply = NULL;
+            int taken = server_control_take(controls, NULL, &id, &kind, &request, &reply);
+            if (taken < 0)
+               goto capture_stop;
+            if (taken == 1)
+            {
+               cJSON *frame = aimee_claude_control_reply(id, request, reply);
+               if (!frame)
+               {
+                  frame = cJSON_CreateObject();
+                  cJSON_AddStringToObject(frame, "type", "control_response");
+                  cJSON *error = cJSON_AddObjectToObject(frame, "response");
+                  cJSON_AddStringToObject(error, "subtype", "error");
+                  cJSON_AddStringToObject(error, "request_id", id);
+                  cJSON_AddStringToObject(error, "error",
+                                          "Operator reply did not satisfy this request");
+               }
+               int published = frame ? aimee_claude_frame_ir(frame, &ir) : -1;
+               free(id);
+               free(kind);
+               cJSON_Delete(request);
+               cJSON_Delete(reply);
+               if (published != 0)
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
+               input_line = claude_input_line(frame);
+               if (!input_line)
+                  goto capture_stop;
+            }
+         }
+         if (input_line)
+         {
+            sent = 0;
+            length = strlen(input_line);
+         }
+      }
       int idle = agent->cli_idle_timeout_ms > 0 ? agent->cli_idle_timeout_ms : 30 * 60 * 1000;
       if (mono_ms() - last > (uint64_t)idle)
       {
          snprintf(out->error, sizeof(out->error), "Claude structured stream became idle");
          break;
       }
-      struct pollfd fds[2] = {{.fd = output, .events = POLLIN}, {.fd = in, .events = POLLOUT}};
+      struct pollfd fds[2] = {{.fd = output, .events = POLLIN},
+                              {.fd = in, .events = input_line ? POLLOUT : 0}};
       if (poll(fds, 2, 100) < 0)
       {
          if (errno == EINTR)
@@ -71,15 +182,20 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          break;
       if (in >= 0 && (fds[1].revents & POLLOUT))
       {
-         ssize_t n = write(in, prompt + sent, length - sent);
+         ssize_t n = write(in, input_line + sent, length - sent);
          if (n > 0)
             sent += (size_t)n;
          else if (n < 0 && errno != EAGAIN && errno != EINTR)
             break;
          if (sent == length)
          {
-            close(in);
-            in = -1;
+            free(input_line);
+            input_line = NULL;
+            if (!cfg->control_channel)
+            {
+               close(in);
+               in = -1;
+            }
          }
       }
       if (fds[0].revents & (POLLIN | POLLHUP))
@@ -112,6 +228,23 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
             cJSON *frame = cJSON_Parse(line);
             if (cJSON_IsObject(frame))
             {
+               const cJSON *frame_type = cJSON_GetObjectItemCaseSensitive(frame, "type");
+               const cJSON *control = cJSON_GetObjectItemCaseSensitive(frame, "response");
+               const char *control_id =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(control, "request_id"));
+               if (cfg->control_channel && cJSON_IsString(frame_type) &&
+                   !strcmp(frame_type->valuestring, "control_response") && control_id &&
+                   !strcmp(control_id, "aimee:init"))
+               {
+                  const char *subtype =
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(control, "subtype"));
+                  if (initialized || !subtype || strcmp(subtype, "success"))
+                  {
+                     cJSON_Delete(frame);
+                     goto capture_stop;
+                  }
+                  initialized = 1;
+               }
                if (aimee_claude_frame_ir(frame, &ir) != 0)
                {
                   cJSON_Delete(frame);
@@ -132,6 +265,11 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                {
                   saw_result =
                       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(frame, "is_error")) ? -1 : 1;
+                  if (cfg->control_channel && in >= 0)
+                  {
+                     close(in);
+                     in = -1;
+                  }
                }
             }
             cJSON_Delete(frame);
@@ -150,9 +288,12 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    goto capture_done;
 capture_stop:
    capture_failed = 1;
+   aimee_ir_session_fail_capture();
 capture_done:
    free(buffer);
 stop:
+   free(input_line);
+   input_line = NULL;
    if (in >= 0)
    {
       close(in);
@@ -183,8 +324,8 @@ stop:
          }
       }
    }
-   if (eof && !capture_failed && !interrupted && saw_result == 1 && WIFEXITED(status) &&
-       WEXITSTATUS(status) == 0)
+   if (eof && initialized && prompt_sent && !capture_failed && !interrupted && saw_result == 1 &&
+       WIFEXITED(status) && WEXITSTATUS(status) == 0)
    {
       /* Compatibility result is rendered from IR; the browser consumes the sink. */
       if (ir.claude_message)
@@ -214,6 +355,11 @@ stop:
       snprintf(out->error, sizeof(out->error), "%s",
                interrupted ? "Claude turn interrupted" : "Claude structured turn failed");
 finish:
+   if (capture_failed)
+   {
+      rc = AGENT_RC_CAPTURE_FAILED;
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+   }
    if (in >= 0)
       close(in);
    if (output >= 0)
