@@ -97,7 +97,7 @@ func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, e
 			return "", "", err
 		}
 	}
-	if token == "" || account == "" {
+	if token == "" {
 		document, err := m.resources.Credential(ctx, "get", name, "oauth", "")
 		if err != nil {
 			return "", "", err
