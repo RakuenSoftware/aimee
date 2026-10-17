@@ -317,13 +317,19 @@ static cJSON *system_to_converse(const aimee_block_t *blocks, int n, int *failed
    return arr;
 }
 
-/* Translate the opaque Anthropic-style ir->tool_choice ({type:auto|any|tool,name})
- * into Converse's object-wrapped toolChoice ({auto:{}}|{any:{}}|{tool:{name:X}}).
- * Returns NULL (=> OMIT toolChoice) for an absent/unrecognized shape -- never a bare
- * string, never a malformed object. */
-static cJSON *converse_tool_choice(const cJSON *tc, int *failed)
+/* Translate the typed IR tool choice into Converse's object-wrapped toolChoice
+ * ({auto:{}}|{any:{}}|{tool:{name:X}}). Returns NULL (=> OMIT toolChoice) when unset
+ * or NONE: Converse has no "none" choice, and omitting it is the provider default
+ * rather than a different forced tool. Never a bare string, never a malformed object. */
+static cJSON *converse_tool_choice(const aimee_request_t *ir, int *failed)
 {
-   const char *type = ostr(tc, "type");
+   const char *type = NULL;
+   if (ir->tool_choice == AIMEE_TOOL_CHOICE_AUTO)
+      type = "auto";
+   else if (ir->tool_choice == AIMEE_TOOL_CHOICE_ANY)
+      type = "any";
+   else if (ir->tool_choice == AIMEE_TOOL_CHOICE_TOOL)
+      type = "tool";
    if (!type)
       return NULL;
    if (strcmp(type, "auto") == 0)
@@ -348,8 +354,8 @@ static cJSON *converse_tool_choice(const cJSON *tc, int *failed)
    }
    if (strcmp(type, "tool") == 0)
    {
-      const char *name = ostr(tc, "name");
-      if (!name)
+      const char *name = ir->tool_choice_name;
+      if (!name || !name[0])
          return NULL;
       cJSON *o = json_new_object(failed);
       cJSON *t = o ? json_add_object(o, "tool", failed) : NULL;
@@ -448,7 +454,7 @@ cJSON *bedrock_converse_build(const aimee_request_t *ir)
    }
 
    /* toolConfig -- omit entirely if n_tools==0 AND no toolChoice is produced. */
-   choice = converse_tool_choice(ir->tool_choice, &failed);
+   choice = converse_tool_choice(ir, &failed);
    if (failed)
       goto fail;
    if (ir->n_tools > 0 || choice)

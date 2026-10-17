@@ -162,6 +162,22 @@ typedef struct
    struct cJSON *raw; /* sidecar */
 } aimee_tool_t;
 
+/* Which tools the model may or must call. TYPED, not wire-shaped: every wire spells
+ * this differently (Anthropic {type:auto|any|tool|none}; OpenAI chat
+ * "auto"|"none"|"required"|{type:function,function:{name}}; Responses
+ * "auto"|"none"|"required"|{type:function,name}), so an opaque copy is only valid on
+ * the wire it was parsed from. A choice no wire-neutral value can express (e.g. a
+ * Responses hosted-tool or allowed_tools choice) is a frontend parse error, not a
+ * silent downgrade. */
+typedef enum
+{
+   AIMEE_TOOL_CHOICE_UNSET = 0, /* the client sent none: provider default */
+   AIMEE_TOOL_CHOICE_AUTO,
+   AIMEE_TOOL_CHOICE_NONE,
+   AIMEE_TOOL_CHOICE_ANY,  /* must call some tool (Anthropic any / OpenAI required) */
+   AIMEE_TOOL_CHOICE_TOOL, /* must call tool_choice_name */
+} aimee_tool_choice_t;
+
 typedef struct
 {
    char *model;
@@ -171,7 +187,13 @@ typedef struct
    int n_messages;
    aimee_tool_t *tools;
    int n_tools;
-   struct cJSON *tool_choice; /* opaque; owned */
+   aimee_tool_choice_t tool_choice;
+   char *tool_choice_name; /* AIMEE_TOOL_CHOICE_TOOL only; opaque tool name; owned */
+   /* Whether the model may emit several tool calls in one turn. OpenAI and Responses
+    * spell it parallel_tool_calls; Anthropic spells the negation,
+    * tool_choice.disable_parallel_tool_use. has_* == 0 when the client sent neither. */
+   int parallel_tool_calls;
+   int has_parallel_tool_calls;
    int max_tokens;
    int has_max_tokens;
    double temperature;

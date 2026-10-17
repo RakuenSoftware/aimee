@@ -40,6 +40,39 @@ static char *blocks_text(const aimee_block_t *blocks, int n)
    return s;
 }
 
+void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int responses_shape)
+{
+   switch (ir->tool_choice)
+   {
+   case AIMEE_TOOL_CHOICE_AUTO:
+      cJSON_AddStringToObject(out, "tool_choice", "auto");
+      break;
+   case AIMEE_TOOL_CHOICE_NONE:
+      cJSON_AddStringToObject(out, "tool_choice", "none");
+      break;
+   case AIMEE_TOOL_CHOICE_ANY:
+      cJSON_AddStringToObject(out, "tool_choice", "required");
+      break;
+   case AIMEE_TOOL_CHOICE_TOOL:
+   {
+      cJSON *tc = cJSON_AddObjectToObject(out, "tool_choice");
+      if (!tc)
+         break;
+      cJSON_AddStringToObject(tc, "type", "function");
+      const char *name = ir->tool_choice_name ? ir->tool_choice_name : "";
+      if (responses_shape)
+         cJSON_AddStringToObject(tc, "name", name);
+      else
+         cJSON_AddStringToObject(cJSON_AddObjectToObject(tc, "function"), "name", name);
+      break;
+   }
+   case AIMEE_TOOL_CHOICE_UNSET:
+      break;
+   }
+   if (ir->has_parallel_tool_calls)
+      cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
+}
+
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
@@ -190,8 +223,7 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          cJSON_AddItemToArray(tools, t);
       }
    }
-   if (ir->tool_choice)
-      cJSON_AddItemToObject(out, "tool_choice", cJSON_Duplicate(ir->tool_choice, 1));
+   openai_family_add_tool_choice(out, ir, 0);
    if (ir->n_stop == 1)
       cJSON_AddStringToObject(out, "stop", ir->stop_sequences[0] ? ir->stop_sequences[0] : "");
    else if (ir->n_stop > 1)

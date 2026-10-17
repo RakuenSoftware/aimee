@@ -165,6 +165,43 @@ static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n)
    return arr;
 }
 
+/* Render the typed IR tool choice in Anthropic's spelling. Parallel tool use rides
+ * inside the choice object as its negation, so a client that only set
+ * parallel_tool_calls:false still needs a choice object to carry it. */
+static void anthropic_add_tool_choice(cJSON *out, const aimee_request_t *ir)
+{
+   const char *type = NULL;
+   switch (ir->tool_choice)
+   {
+   case AIMEE_TOOL_CHOICE_AUTO:
+      type = "auto";
+      break;
+   case AIMEE_TOOL_CHOICE_NONE:
+      type = "none";
+      break;
+   case AIMEE_TOOL_CHOICE_ANY:
+      type = "any";
+      break;
+   case AIMEE_TOOL_CHOICE_TOOL:
+      type = "tool";
+      break;
+   case AIMEE_TOOL_CHOICE_UNSET:
+      if (ir->has_parallel_tool_calls && !ir->parallel_tool_calls)
+         type = "auto";
+      break;
+   }
+   if (!type)
+      return;
+   cJSON *tc = cJSON_AddObjectToObject(out, "tool_choice");
+   if (!tc)
+      return;
+   cJSON_AddStringToObject(tc, "type", type);
+   if (ir->tool_choice == AIMEE_TOOL_CHOICE_TOOL)
+      cJSON_AddStringToObject(tc, "name", ir->tool_choice_name ? ir->tool_choice_name : "");
+   if (ir->has_parallel_tool_calls && ir->tool_choice != AIMEE_TOOL_CHOICE_NONE)
+      cJSON_AddBoolToObject(tc, "disable_parallel_tool_use", ir->parallel_tool_calls ? 0 : 1);
+}
+
 cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
@@ -229,8 +266,7 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       }
       mark_cache_prefix(tools); /* uniform policy: cache the stable tools block */
    }
-   if (ir->tool_choice)
-      cJSON_AddItemToObject(out, "tool_choice", cJSON_Duplicate(ir->tool_choice, 1));
+   anthropic_add_tool_choice(out, ir);
    if (ir->n_stop > 0)
    {
       cJSON *stop = cJSON_AddArrayToObject(out, "stop_sequences");
