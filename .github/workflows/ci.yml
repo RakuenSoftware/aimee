@@ -1,8 +1,12 @@
 name: CI
 
 on:
-  # Re-run the gate on each integration tip; PR checks alone only cover the
-  # merge preview that existed when the PR ran.
+  # Test GitHub's queued integration commit without updating the PR branch.
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
+  # Push checks validate the integrated branch. merge_group checks validate
+  # the candidate that the queue will merge, using the same complete suite.
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
@@ -27,7 +31,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
