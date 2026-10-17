@@ -1,0 +1,223 @@
+/* Claude print-mode process lifecycle. Native frames terminate in translation;
+ * callers own Vault materialization, resume metadata and durable IR delivery. */
+#include "claude_headless.h"
+#include "agent_config.h"
+#include <aimee/translation/harness_ir.h>
+#include <aimee/translation/aimee_backend.h>
+#include "cJSON.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+static uint64_t mono_ms(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind_session,
+                        void *context, agent_result_t *out)
+{
+   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0] || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   const agent_t *agent = cfg->agent;
+   const char *prompt = cfg->user_prompt;
+   char bound[1025] = "";
+   int in = -1, output = -1, status = 0, rc = -1, saw_result = 0, interrupted = 0, eof = 0,
+       capture_failed = 0;
+   pid_t pid = -1;
+   aimee_harness_ir_t ir = {0};
+   if (claude_provider_cli_adapter.spawn(cfg, prompt, &in, &output, &pid) != 0)
+   {
+      snprintf(out->error, sizeof(out->error), "could not start claude -p");
+      goto finish;
+   }
+   fcntl(in, F_SETFL, fcntl(in, F_GETFL, 0) | O_NONBLOCK);
+   fcntl(output, F_SETFL, fcntl(output, F_GETFL, 0) | O_NONBLOCK);
+   size_t sent = 0, length = strlen(prompt), used = 0;
+   char *buffer = malloc(4 * 1024 * 1024 + 1);
+   if (!buffer)
+      goto stop;
+   uint64_t last = mono_ms();
+   while (!eof)
+   {
+      if (agent_request_cancelled())
+      {
+         interrupted = 1;
+         break;
+      }
+      int idle = agent->cli_idle_timeout_ms > 0 ? agent->cli_idle_timeout_ms : 30 * 60 * 1000;
+      if (mono_ms() - last > (uint64_t)idle)
+      {
+         snprintf(out->error, sizeof(out->error), "Claude structured stream became idle");
+         break;
+      }
+      struct pollfd fds[2] = {{.fd = output, .events = POLLIN}, {.fd = in, .events = POLLOUT}};
+      if (poll(fds, 2, 100) < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         break;
+      }
+      if (in >= 0 && (fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)))
+         break;
+      if (in >= 0 && (fds[1].revents & POLLOUT))
+      {
+         ssize_t n = write(in, prompt + sent, length - sent);
+         if (n > 0)
+            sent += (size_t)n;
+         else if (n < 0 && errno != EAGAIN && errno != EINTR)
+            break;
+         if (sent == length)
+         {
+            close(in);
+            in = -1;
+         }
+      }
+      if (fds[0].revents & (POLLIN | POLLHUP))
+      {
+         if (used == 4 * 1024 * 1024)
+         {
+            snprintf(out->error, sizeof(out->error), "Claude frame exceeds capture limit");
+            break;
+         }
+         ssize_t n = read(output, buffer + used, 4 * 1024 * 1024 - used);
+         if (n == 0)
+            eof = 1;
+         else if (n < 0)
+         {
+            if (errno == EAGAIN || errno == EINTR)
+               continue;
+            break;
+         }
+         else
+         {
+            used += (size_t)n;
+            last = mono_ms();
+         }
+         buffer[used] = '\0';
+         char *line = buffer, *end = NULL;
+         while ((end = strchr(line, '\n')) || (eof && *line))
+         {
+            if (end)
+               *end = '\0';
+            cJSON *frame = cJSON_Parse(line);
+            if (cJSON_IsObject(frame))
+            {
+               if (aimee_claude_frame_ir(frame, &ir) != 0)
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
+               const cJSON *sid = cJSON_GetObjectItemCaseSensitive(frame, "session_id");
+               if (cJSON_IsString(sid) && sid->valuestring[0] && strcmp(bound, sid->valuestring) &&
+                   (strlen(sid->valuestring) > 1024 ||
+                    (bind_session && bind_session(sid->valuestring, context) != 0)))
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
+               if (cJSON_IsString(sid) && strlen(sid->valuestring) <= 1024)
+                  snprintf(bound, sizeof(bound), "%s", sid->valuestring);
+               const cJSON *type = cJSON_GetObjectItemCaseSensitive(frame, "type");
+               if (cJSON_IsString(type) && !strcmp(type->valuestring, "result"))
+               {
+                  saw_result =
+                      cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(frame, "is_error")) ? -1 : 1;
+               }
+            }
+            cJSON_Delete(frame);
+            if (!end)
+            {
+               line += strlen(line);
+               break;
+            }
+            line = end + 1;
+         }
+         size_t remaining = used - (size_t)(line - buffer);
+         memmove(buffer, line, remaining);
+         used = remaining;
+      }
+   }
+   goto capture_done;
+capture_stop:
+   capture_failed = 1;
+capture_done:
+   free(buffer);
+stop:
+   if (in >= 0)
+   {
+      close(in);
+      in = -1;
+   }
+   /* SIGINT records an interrupted turn; SIGKILL is the bounded shutdown fallback. */
+   if (pid > 0)
+   {
+      if (!eof || interrupted)
+         kill(-pid, SIGINT);
+      int reaped = 0;
+      for (int i = 0; i < 30; i++)
+      {
+         pid_t w = waitpid(pid, &status, WNOHANG);
+         if (w == pid || (w < 0 && errno == ECHILD))
+         {
+            reaped = 1;
+            break;
+         }
+         struct timespec pause = {0, 100000000L};
+         nanosleep(&pause, NULL);
+      }
+      if (!reaped)
+      {
+         kill(-pid, SIGKILL);
+         while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+         {
+         }
+      }
+   }
+   if (eof && !capture_failed && !interrupted && saw_result == 1 && WIFEXITED(status) &&
+       WEXITSTATUS(status) == 0)
+   {
+      /* Compatibility result is rendered from IR; the browser consumes the sink. */
+      if (ir.claude_message)
+      {
+         aimee_response_t response = {0};
+         char error[128];
+         if (anthropic_backend_parse(ir.claude_message, &response, error, sizeof(error)) == 0)
+         {
+            size_t n = 1;
+            for (int i = 0; i < response.n_content; i++)
+               if (response.content[i].type == AIMEE_BLK_TEXT && response.content[i].text)
+                  n += strlen(response.content[i].text) + 1;
+            out->response = malloc(n);
+            if (out->response)
+               aimee_ir_response_text(&response, out->response, n);
+            out->prompt_tokens = (int)response.usage_in;
+            out->completion_tokens = (int)response.usage_out;
+            out->cache_read_tokens = (int)response.usage_cache_read;
+            out->cache_write_tokens = (int)response.usage_cache_write;
+            aimee_response_free(&response);
+         }
+      }
+      out->success = 1;
+      rc = 0;
+   }
+   else if (!out->error[0])
+      snprintf(out->error, sizeof(out->error), "%s",
+               interrupted ? "Claude turn interrupted" : "Claude structured turn failed");
+finish:
+   if (in >= 0)
+      close(in);
+   if (output >= 0)
+      close(output);
+   aimee_harness_ir_free(&ir);
+   return rc;
+}

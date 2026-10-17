@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Unified-presence integration for webchat. A browser tab attaches a "webchat"
@@ -37,7 +39,7 @@ func (s *server) handleChatAttach(w http.ResponseWriter, r *http.Request) {
 	// subscribe_mask 1 == PRESENCE_EV_TURN: the live turn stream. Not persistent
 	// — a browser tab is a live surface, not a durable delivery target.
 	body, _ := json.Marshal(map[string]any{"surface": "webchat", "subscribe_mask": 1})
-	st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/sessions/"+req.Sid+"/attach", body)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/sessions/"+url.PathEscape(req.Sid)+"/attach", body)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "aimee-server unavailable")
 		return
@@ -68,7 +70,7 @@ func (s *server) handleChatDetach(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"attach_id": req.AttachID})
-	st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/sessions/"+req.Sid+"/detach", body)
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/sessions/"+url.PathEscape(req.Sid)+"/detach", body)
 	if err != nil || st != http.StatusOK {
 		// Best-effort: a failed detach is non-fatal (the presence is torn down
 		// when the session closes anyway).
@@ -101,10 +103,17 @@ func (s *server) handleChatSessionEvents(w http.ResponseWriter, r *http.Request)
 	// Forward a resume cursor so the browser resumes after a reconnect/remount
 	// instead of replaying the whole ring from 0. Validated as a uint to keep it
 	// out of the upstream URL if malformed.
-	upstream := "http://aimee/v1/sessions/" + sid + "/events"
+	upstream := "http://aimee/v1/sessions/" + url.PathEscape(sid) + "/events"
 	if cur := r.URL.Query().Get("cursor"); cur != "" {
 		if _, perr := strconv.ParseUint(cur, 10, 64); perr == nil {
 			upstream += "?cursor=" + cur
+		}
+	}
+	if r.URL.Query().Get("format") == "ir" {
+		if strings.Contains(upstream, "?") {
+			upstream += "&format=ir"
+		} else {
+			upstream += "?format=ir"
 		}
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)
@@ -112,6 +121,7 @@ func (s *server) handleChatSessionEvents(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusInternalServerError, "request build failed")
 		return
 	}
+	req.Header.Set("X-Aimee-Webuser", currentUser(r))
 	// Forward the EventSource auto-reconnect cursor so the upstream resumes from
 	// the last delivered event instead of replaying the ring from 0.
 	if leid := r.Header.Get("Last-Event-ID"); leid != "" {

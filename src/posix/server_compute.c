@@ -1,5 +1,6 @@
 /* server_compute.c: POSIX chat.send_stream worker for primary-agent streaming. */
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_adapter.h"
 #include "ingress_preinject.h"    /* S2 binding: publish primary session id per turn */
 #include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
@@ -8,6 +9,11 @@
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — stream tool events */
 #include "router_advise.h"           /* S1 advisory request->workflow router hook */
 #include "cli_codex.h"
+#include "claude_headless.h"
+#include "provider_cli_adapter.h"
+#include "platform_path.h"
+#include <aimee/translation/harness_ir.h>
+#include <poll.h>
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1_client/db1.h"
@@ -213,6 +219,13 @@ static void live_mirror_locked(compute_ctx_t *cctx, const char *event, const cha
  * connection is alive, -1 once it has dropped (callers that care; most ignore). */
 static int stream_event(compute_ctx_t *cctx, const char *event, const char *key, const char *value)
 {
+   if (cctx->ir_enabled)
+   {
+      if (event && !strcmp(event, "session") && value && value[0] && cctx->ir_harness[0])
+         return db1_session_harness_bind(cctx->ir_session, cctx->ir_harness, value,
+                                         cctx->vault_principal);
+      return cctx->ir_failed ? -1 : 0;
+   }
    pthread_mutex_lock(cctx->write_mutex);
 
    /* 0) Live-turn db1 mirror — the browser's polling source of truth. */
@@ -472,6 +485,9 @@ static int chat_codex_effort_allowed(const char *effort)
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
 }
 
+static int chat_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
+                             size_t capacity, cli_session_t *cleanup);
+
 static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
                                      const char *thread_id, const char *cwd, const char *model,
                                      const char *effort)
@@ -520,8 +536,27 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
     * chat worker against its own nested tool call. */
    compute_ctx_release_budget(cctx);
 
+   char home[4096] = "", resume[1025] = "";
+   cli_session_t cleanup = {0};
+   if (cctx->ir_enabled)
+   {
+      snprintf(cctx->ir_harness, sizeof(cctx->ir_harness), "codex");
+      if (db1_session_harness_get(cctx->ir_session, "codex", resume, sizeof(resume),
+                                  cctx->vault_principal) < 0 ||
+          chat_harness_home("codex", cwd, cctx->ir_session, home, sizeof(home), &cleanup) != 0)
+      {
+         free(system_prompt);
+         compute_error(cctx, "could not prepare Vault-backed Codex runtime");
+         compute_ctx_free(cctx);
+         return;
+      }
+      creq.thread_id = resume[0] ? resume : NULL;
+      creq.home = home;
+      creq.session_id = cctx->ir_session;
+   }
    cli_codex_chat_result_t result;
    int rc = cli_codex_chat_stream(&creq, codex_stream_event_cb, cctx, &result);
+   cli_session_destroy(&cleanup);
    free(system_prompt);
 
    if (rc != 0)
@@ -762,6 +797,73 @@ static int chat_cli_cancel_check(void *ud)
    return agent_request_cancelled();
 }
 
+/* Credential homes are ephemeral; only native conversation files persist.
+ * These are harness runtime state, never the browser's transcript. */
+static int chat_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
+                             size_t capacity, cli_session_t *cleanup)
+{
+   for (const char *p = sid; *p; p++)
+      if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
+         return -1;
+   int claude = !strcmp(vendor, "claude");
+   if ((claude ? cli_session_isolated_claude_home(cwd, home, capacity)
+               : cli_session_isolated_codex_home(home, capacity)) != 0)
+      return -1;
+   cli_session_set_isolated_home(cleanup, home);
+   char history[4096], link[4096];
+   const char *directory = claude ? "projects" : "sessions";
+   if (snprintf(history, sizeof(history), "%s/browser-%s/%s/%s", aimee_home(), vendor, sid,
+                directory) >= (int)sizeof(history) ||
+       platform_mkdir_p(history, 0700) != 0 ||
+       snprintf(link, sizeof(link), "%s/.%s/%s", home, vendor, directory) >= (int)sizeof(link) ||
+       symlink(history, link) != 0)
+   {
+      cli_session_destroy(cleanup);
+      home[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
+static int chat_claude_bind_session(const char *native_id, void *context)
+{
+   compute_ctx_t *c = context;
+   return db1_session_harness_bind(c->ir_session, "claude", native_id, c->vault_principal);
+}
+
+/* A headless Claude process is the harness. Only its native structured frames
+ * enter translation; stdout diagnostics and terminal screens are never content. */
+static int chat_claude_print(compute_ctx_t *c, const agent_t *agent, const char *cwd,
+                             const char *system, const char *prompt, agent_result_t *out)
+{
+   char home[4096] = "", resume[1025] = "";
+   int rc = -1;
+   cli_session_t cleanup = {0};
+   if (chat_harness_home("claude", cwd, c->ir_session, home, sizeof(home), &cleanup) != 0)
+   {
+      snprintf(out->error, sizeof(out->error), "could not prepare Vault-backed Claude runtime");
+      return -1;
+   }
+   if (db1_session_harness_get(c->ir_session, "claude", resume, sizeof(resume),
+                               c->vault_principal) < 0)
+   {
+      snprintf(out->error, sizeof(out->error), "could not load Claude resume state");
+      goto finish;
+   }
+   provider_cli_cfg_t cfg = {.agent = agent,
+                             .cwd = cwd,
+                             .system_prompt = system,
+                             .user_prompt = prompt,
+                             .primary = 1,
+                             .resume_id = resume,
+                             .home = home,
+                             .session_id = c->ir_session};
+   rc = claude_headless_run(&cfg, chat_claude_bind_session, c, out);
+finish:
+   cli_session_destroy(&cleanup);
+   return rc;
+}
+
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
                                      const char *model_override)
@@ -894,8 +996,17 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * delegation target (see agent_routing_set_primary_turn). Thread-local, so
     * any delegation the turn spawns (other worker threads) stays policed. */
    agent_routing_set_primary_turn(1);
-   int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
-                                 AGENT_DEFAULT_MAX_TOKENS, &result);
+   agent_t *selected_agent = agent_find(&acfg, selected);
+   int structured_claude =
+       cctx->ir_enabled && selected_agent &&
+       (!strcmp(selected_agent->cli_kind, "claude") ||
+        !strcmp(selected_agent->cli_kind, "claude-code") || !strcmp(provider, "claude") ||
+        !strcmp(provider, "claude-oauth") || !strcmp(provider, "claude-code"));
+   int rc = structured_claude
+                ? chat_claude_print(cctx, selected_agent, use_cwd,
+                                    system_prompt ? system_prompt : "", message, &result)
+                : agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
+                                       AGENT_DEFAULT_MAX_TOKENS, &result);
    agent_routing_set_primary_turn(0);
 
    cli_session_set_error_grace_ms(prev_error_grace);
@@ -942,7 +1053,8 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    /* Log this turn to the durable DB1 transcript. The agent (tmux CLI) worker is
     * the one chat path that otherwise persists nothing, so a session started here
     * (e.g. over inbound ACP/MCP) was previously unrecoverable after a crash. */
-   chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
+   if (!cctx->ir_enabled)
+      chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
    if (!sctx.emitted && result.response && result.response[0])
@@ -1089,11 +1201,8 @@ static int chat_provider_uses_codex_cli(const char *provider)
 {
    if (!provider)
       return 0;
-   /* codex-oauth runs the codex CLI as a persistent TUI over tmux (1:1 per aimee
-    * session) via the agent worker — NOT the one-shot app-server stream — so it
-    * must NOT be claimed here. */
    if (strcmp(provider, "codex-oauth") == 0)
-      return 0;
+      return 1;
    if (strcmp(provider, "codex-cli") == 0)
       return 1;
    if (strcmp(provider, "codex") != 0)
@@ -1271,6 +1380,19 @@ void chat_stream_worker(void *arg)
       return;
    }
 
+   cJSON *ir_version = cJSON_GetObjectItemCaseSensitive(req, "ir_version");
+   if (cJSON_IsNumber(ir_version) && ir_version->valueint == 1)
+   {
+      if (server_chat_ir_begin(cctx, aimee_sid, message) != 0)
+      {
+         compute_error(cctx, "cannot initialize canonical session");
+         compute_ctx_free(cctx);
+         return;
+      }
+      /* Native handles are resolved by the selected harness, never the client. */
+      provider_sid = "";
+   }
+
    /* Register the session in DB1 up front so it is locatable in `server_sessions`
     * regardless of which provider path serves the turn below (codex / primary-
     * session / agent). Idempotent and best-effort. */
@@ -1315,12 +1437,8 @@ void chat_stream_worker(void *arg)
                                   effort_override);
       return;
    }
-   /* Everything else — claude-oauth / codex-oauth / claude / claude-code (the
-    * persistent CLI TUIs, driven over tmux 1:1 per aimee session through the
-    * agent worker -> agent_execute_cli_session) and the in-process HTTP API
-    * providers (primary-session adapters). NEVER `claude -p`: a one-shot print
-    * process cannot multiplex concurrent sessions into isolated persistent
-    * panes, which is the whole point of a per-session tmux CLI session. */
+   /* Native API primaries retain their session adapter. Canonical Claude
+    * browser turns use structured print mode in the agent worker below. */
    compute_ctx_release_budget(cctx);
    if (chat_provider_uses_primary_session(provider))
    {

@@ -2731,10 +2731,10 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "3a349db886e702c63101c1e2fc399092074b5ceeb927ed397df6a0345a38e3c5",
+      "sha256": "ba182c3f515c01a3790c32dca08a259442ea198a6f07ace69b85107bcdc5189c",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "1a0e64c669a408e287d82d7da4d791d176fd07e5c18e7341d1abb0bb3148ad5f"
+        "api/openapi-server-v1.yaml": "c682e3854f5070b51d44c2a642a70ef9b3b459a4dfaa9d5e553a100d3f2edf38"
       }
     }
   },

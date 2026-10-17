@@ -5132,13 +5132,19 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /chat/stream:
     post:
-      summary: Native streaming chat (aimee event stream)
+      summary: Stream a native chat turn
       description: >
-        Stream a chat turn as newline-delimited aimee events
-        (turn_start / text / thinking / turn_end / session / retry_attempt / usage / done /
-        error), the same event shape the NDJSON socket emits. Used by the
-        first-party webchat UI; distinct from the OpenAI-shaped
-        /chat/completions. Requires CAP_CHAT (UDS, or an unscoped TCP bearer).
+        With ir_version=1, emits canonical session envelopes as NDJSON, committed
+        to the session log before delivery. Each envelope contains version (1),
+        session_id, decimal-string sequence, event_id, turn_id, actor, and event.
+        The event is a typed message, IR delta, harness control request/response,
+        or host execution lifecycle. Delta payload types are TURN_START,
+        BLOCK_START, BLOCK_DELTA, BLOCK_STOP, TURN_STOP, and ERROR. Whole messages
+        retain role and typed text/thinking/tool_use/tool_result/image/document
+        blocks. Tool results pair by opaque tool_id. The authenticated owner is
+        required; provider resume IDs are resolved server-side. Browser
+        disconnect does not cancel execution. Legacy callers without ir_version
+        retain the prior aimee event format. Requires CAP_CHAT.
       requestBody:
         required: true
         content:
@@ -5147,8 +5153,12 @@ paths:
               type: object
               required: [message]
               properties:
+                ir_version: { type: integer, enum: [1], description: Select the canonical durable session stream }
+                attach_id: { type: string, description: Server-minted presence attachment }
+                queue: { type: boolean, description: Wait for the session turn lock }
+                queue_wait_ms: { type: integer, minimum: 0, maximum: 120000 }
                 message: { type: string }
-                aimee_session_id: { type: string }
+                aimee_session_id: { type: string, description: Required stable session identity for ir_version=1 }
                 claude_session_id: { type: string }
                 cwd: { type: string }
                 clean_retry:
@@ -5165,7 +5175,7 @@ paths:
                     replace_constraints: { type: boolean }
       responses:
         "200":
-          description: Newline-delimited aimee chat events (read until close)
+          description: NDJSON canonical session envelopes with ir_version=1; otherwise legacy chat events
           content:
             application/x-ndjson:
               schema: { type: string }
@@ -5831,19 +5841,39 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /sessions/{id}/events:
     get:
-      summary: Stream presence events as Server-Sent Events
+      summary: Replay and tail canonical session events, or legacy presence
       description: >
         text/event-stream of presence events
         (turn_started / turn_delta / turn_done / busy and routed async events
-        such as delegate/cron/reflection completions).
+        such as delegate/cron/reflection completions) by default. With format=ir,
+        replays the durable canonical session log after cursor, then tails newly
+        committed events. Each SSE frame has event=ir, id=decimal sequence, and
+        data equal to the canonical envelope emitted by /chat/stream. Both roles
+        and tool results are retained. Last-Event-ID takes precedence over cursor
+        on reconnect; a fresh browser starts at zero. Access requires the attested
+        session owner. Keep-alive comments contain no conversation content.
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string }
+        - name: format
+          in: query
+          schema: { type: string, enum: [ir] }
+          description: Select canonical durable replay instead of legacy presence
+        - name: cursor
+          in: query
+          schema: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+          description: Exclusive decimal event sequence; default zero
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+          description: Reconnect cursor; takes precedence over the query cursor
       responses:
         "200":
-          description: text/event-stream of presence events
+          description: SSE canonical envelopes with format=ir; otherwise presence events
+        "403":
+          description: Missing session actor or session ownership mismatch
         "404":
           description: No such session
           content:

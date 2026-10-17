@@ -13,6 +13,12 @@
 #include "cli_codex.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
+/* Minimal harnesses have no bound server turn to cancel. */
+int agent_request_cancelled(void)
+{
+   return 0;
+}
+
 static void test_parse_agent_message_extracts_text(void)
 {
    const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"

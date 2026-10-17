@@ -17,6 +17,14 @@ MR-07 remains observe-only, selection and utility-horizon policies remain disabl
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
 
+## Browser chat integration (2026-10-17)
+
+The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
+Claude uses structured print mode; Codex app-server and ACP convert native frames at entry.
+Per-harness resume handles and runtime credentials stay server-side. Interactive approval replies,
+the global legacy-loop removal and live subscription qualification remain separate gates.
+See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
+
 ## Runtime
 
 | Feature | State | Boundary |

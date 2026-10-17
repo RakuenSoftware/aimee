@@ -578,162 +578,107 @@ func TestChatStreamHTTPReadsNDJSONEvents(t *testing.T) {
 	}
 }
 
-func TestHandleChatSendPersistsStableUserSession(t *testing.T) {
+func TestHandleChatSendPersistsOnlyStableSessionMetadata(t *testing.T) {
 	workspace := t.TempDir()
-	var forwardedProviderID string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"root":%q}`, workspace)
-	})
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, `{"root":%q}`, workspace) })
+	raw := `{"version":1,"session_id":"stable-web-id","sequence":"1","event_id":"e1","turn_id":"t1","actor":"alice","event":{"kind":"message","message_id":"m1","payload":{"role":"assistant","blocks":[{"type":"text","text":"hello again"}]}}}`
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
 		if actor := r.Header.Get("X-Aimee-Webuser"); actor != "alice" {
-			t.Errorf("chat actor = %q, want alice", actor)
+			t.Errorf("chat actor = %q", actor)
 		}
-		var body map[string]string
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode stream request: %v", err)
+			t.Errorf("decode request: %v", err)
+			return
 		}
-		forwardedProviderID = body["claude_session_id"]
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		fmt.Fprintln(w, `{"event":"turn_start"}`)
-		fmt.Fprintln(w, `{"event":"session","id":"provider-thread"}`)
-		fmt.Fprintln(w, `{"event":"text","content":"hello "}`)
-		fmt.Fprintln(w, `{"event":"text","content":"again"}`)
-		fmt.Fprintln(w, `{"event":"done"}`)
-		fmt.Fprintln(w, `{"status":"ok"}`)
+		if body["ir_version"] != float64(1) || body["aimee_session_id"] != "stable-web-id" || body["queue"] != true {
+			t.Errorf("request = %+v", body)
+		}
+		if _, present := body["claude_session_id"]; present {
+			t.Error("browser backend must leave provider resume state with Aimee")
+		}
+		fmt.Fprintln(w, raw)
 	})
-	cfg := startFakeV1(t, mux)
 	s := newSessionTestServer(t)
-	s.cfg = cfg
-
-	runtimeAtSessionEvent := ""
-	rr := &observingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr.onWrite = func(p []byte) {
-		if strings.Contains(string(p), "event: session") {
-			runtimeAtSessionEvent, _ = s.chatSessionProviderID("alice", "stable-web-id")
-		}
-	}
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
-		`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"question"}`)), "alice")
+	s.cfg = startFakeV1(t, mux)
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"question"}`)), "alice")
 	s.handleChatSend(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK || rr.Body.String() != "event: ir\ndata: "+raw+"\n\n" {
+		t.Fatalf("response = %d %s", rr.Code, rr.Body.String())
 	}
-
 	cs, err := s.getChatSession("alice", "stable-web-id")
 	if err != nil || cs == nil {
-		t.Fatalf("stable session missing: %v %+v", err, cs)
+		t.Fatalf("missing metadata: %v", err)
 	}
-	if cs.ProviderSessionID != "provider-thread" {
-		t.Fatalf("provider session = %q", cs.ProviderSessionID)
-	}
-	if forwardedProviderID != "" {
-		t.Fatalf("new session trusted client provider id %q", forwardedProviderID)
-	}
-	if runtimeAtSessionEvent != "provider-thread" {
-		t.Fatalf("runtime at browser session event = %q", runtimeAtSessionEvent)
-	}
-	if len(cs.Messages) != 2 || cs.Messages[0].Text != "question" || cs.Messages[1].Text != "hello again" {
-		t.Fatalf("messages = %+v", cs.Messages)
-	}
-	if wrong, _ := s.getChatSession("alice", "provider-thread"); wrong != nil {
-		t.Fatalf("provider id incorrectly became the stable key: %+v", wrong)
+	if len(cs.Messages) != 0 || cs.ProviderSessionID != "" {
+		t.Fatalf("second transcript/resume state created: %+v", cs)
 	}
 }
 
-func TestHandleChatSendUsesOnlyServerBoundProviderSession(t *testing.T) {
+func TestHandleChatSendDoesNotForwardLegacyProviderBinding(t *testing.T) {
 	workspace := t.TempDir()
-	var forwardedProviderID string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"root":%q}`, workspace)
-	})
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, `{"root":%q}`, workspace) })
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode stream request: %v", err)
+			t.Errorf("decode: %v", err)
+			return
 		}
-		forwardedProviderID = body["claude_session_id"]
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		fmt.Fprintln(w, `{"event":"done"}`)
-		fmt.Fprintln(w, `{"status":"ok"}`)
+		if _, present := body["claude_session_id"]; present {
+			t.Error("legacy provider binding leaked into request")
+		}
+		fmt.Fprintln(w, `{"version":1}`)
 	})
-	cfg := startFakeV1(t, mux)
 	s := newSessionTestServer(t)
-	s.cfg = cfg
+	s.cfg = startFakeV1(t, mux)
 	if err := s.touchChatSession("alice", "stable-web-id", workspace, "first turn"); err != nil {
-		t.Fatalf("touch: %v", err)
+		t.Fatal(err)
 	}
 	if err := s.setChatSessionRuntime("alice", "stable-web-id", "trusted-provider-thread"); err != nil {
-		t.Fatalf("runtime: %v", err)
+		t.Fatal(err)
 	}
-
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
-		`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"continue"}`)), "alice")
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"stable-web-id","claude_session_id":"attacker-thread","message":"continue"}`)), "alice")
 	s.handleChatSend(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
-	}
-	if forwardedProviderID != "trusted-provider-thread" {
-		t.Fatalf("forwarded provider id = %q, want server-bound id", forwardedProviderID)
-	}
-	cs, err := s.getChatSession("alice", "stable-web-id")
-	if err != nil || cs == nil || cs.ProviderSessionID != "trusted-provider-thread" {
-		t.Fatalf("server runtime binding changed: err=%v session=%+v", err, cs)
+		t.Fatalf("status = %d", rr.Code)
 	}
 }
 
-func TestHandleChatSendForwardsToolLifecycle(t *testing.T) {
+func TestHandleChatSendForwardsCanonicalBytesUntouched(t *testing.T) {
 	workspace := t.TempDir()
+	// Whitespace, unknown extension fields and large integer strings must survive
+	// the web backend. Canonical validation belongs to the owner and reducer.
+	frames := []string{
+		` {"version":1, "sequence":"9007199254740993", "extension":{"future":true}}`,
+		`{"event":{"kind":"message","payload":{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"opaque:42","name":"delegate","input":{"task":"inspect"}}]}}}`,
+		`{"event":{"kind":"message","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"opaque:42","content":{"files":3}}]}}}`,
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"root":%q}`, workspace)
-	})
+	mux.HandleFunc("/v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, `{"root":%q}`, workspace) })
 	mux.HandleFunc("/v1/chat/stream", func(w http.ResponseWriter, r *http.Request) {
-		if actor := r.Header.Get("X-Aimee-Webuser"); actor != "alice" {
-			t.Errorf("chat actor = %q, want alice", actor)
+		if r.Header.Get("X-Aimee-Webuser") != "alice" {
+			t.Error("untrusted actor forwarded")
 		}
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		for _, event := range []string{
-			`{"event":"turn_start"}`,
-			`{"event":"tool_call.started","name":"delegate"}`,
-			`{"event":"tool_call.completed","name":"delegate"}`,
-			`{"event":"tool_start","name":"bash","args":"pwd"}`,
-			`{"event":"tool_result","name":"bash","result":"/workspace"}`,
-			`{"event":"text","content":"Finished"}`,
-			`{"event":"done"}`,
-			`{"status":"ok"}`,
-		} {
-			fmt.Fprintln(w, event)
+		for _, frame := range frames {
+			fmt.Fprintln(w, frame)
 		}
 	})
 	s := newSessionTestServer(t)
 	s.cfg = startFakeV1(t, mux)
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(
-		`{"aimee_session_id":"tool-session","message":"do work"}`)), "alice")
-	// An untrusted browser header must never override the authenticated actor.
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/send", strings.NewReader(`{"aimee_session_id":"tool-session","message":"do work"}`)), "alice")
 	req.Header.Set("X-Aimee-Webuser", "mallory")
 	s.handleChatSend(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
+	expected := ""
+	for _, frame := range frames {
+		expected += "event: ir\ndata: " + frame + "\n\n"
 	}
-	remaining := rr.Body.String()
-	for _, frame := range []string{
-		"event: turn_start\n",
-		"event: tool_call.started\ndata: {\"name\":\"delegate\"}\n",
-		"event: tool_call.completed\ndata: {\"name\":\"delegate\"}\n",
-		"event: tool_start\ndata: {\"args\":\"pwd\",\"name\":\"bash\"}\n",
-		"event: tool_result\ndata: {\"name\":\"bash\",\"result\":\"/workspace\"}\n",
-		"event: text\ndata: {\"content\":\"Finished\"}\n",
-		"event: done\n",
-	} {
-		index := strings.Index(remaining, frame)
-		if index < 0 {
-			t.Fatalf("missing or out-of-order frame %q in %q", frame, remaining)
-		}
-		remaining = remaining[index+len(frame):]
+	if rr.Code != http.StatusOK || rr.Body.String() != expected {
+		t.Fatalf("changed IR bytes: status=%d body=%q", rr.Code, rr.Body.String())
 	}
 }
 

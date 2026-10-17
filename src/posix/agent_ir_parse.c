@@ -10,6 +10,7 @@
 #include "agent_protocol.h"
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/ir/session_event.h>
 #include <aimee/ir/aimee_ir_metrics.h>
 #include <aimee/delegates/aimee_ir_rescue.h>
 #include "tool_call_args.h"
@@ -112,6 +113,11 @@ int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, in
       *n_rescued = rescued;
 
    /* model, stop reason, usage, TEXT content, and TOOL_USE calls (shared bridge). */
+   if (aimee_ir_session_emit_response(&ir, NULL) != 0)
+   {
+      aimee_response_free(&ir);
+      return -1;
+   }
    ir_bridge_common(&ir, out);
 
    /* assistant_message for multi-turn replay. When a rescue fired the raw response
@@ -266,6 +272,12 @@ int agent_ir_parse_responses(const char *body, int rescue_mode, int *n_rescued,
    if (n_rescued)
       *n_rescued = rescued;
 
+   if (aimee_ir_session_emit_response(&ir, NULL) != 0)
+   {
+      aimee_response_free(&ir);
+      cJSON_Delete(robj);
+      return -1;
+   }
    ir_bridge_common(&ir, out);
 
    /* assistant_message for multi-turn replay is the output-item array itself: the

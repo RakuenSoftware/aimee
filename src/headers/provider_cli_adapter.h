@@ -57,6 +57,10 @@ extern "C"
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
+      int primary;            /* server-owned primary uses its authorized autonomous mode */
+      const char *resume_id;  /* structured primary conversation, optional */
+      const char *home;       /* parent-materialized runtime credential HOME */
+      const char *session_id; /* host-owned Aimee identity for MCP/hooks */
    } provider_cli_cfg_t;
 
    typedef struct provider_cli_adapter

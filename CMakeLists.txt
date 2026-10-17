@@ -713,6 +713,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
+    ${AIMEE_SRC_DIR}/server/claude_headless.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c
@@ -893,6 +894,7 @@ set(CLI_SRCS
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/session_event.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
@@ -957,6 +959,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_chat_ir.c
     ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c

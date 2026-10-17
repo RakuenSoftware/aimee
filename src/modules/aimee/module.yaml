@@ -181,6 +181,7 @@
     "server-go/modules/aimee/families/schema_subject_erasure_receipts.sql",
     "server-go/modules/aimee/families/schema_task_projection.sql",
     "server-go/modules/aimee/families/schema_telemetry.sql",
-    "server-go/modules/aimee/families/schema_workflow.sql"
+    "server-go/modules/aimee/families/schema_workflow.sql",
+    "server-go/modules/aimee/families/schema_session_harness.sql"
   ]
 }

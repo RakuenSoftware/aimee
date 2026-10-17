@@ -905,23 +905,45 @@ int db1_session_ir_append(const char *session_id, const char *event_id, const ch
        call_stage(AIMEE_DB1_OP_SESSION_IR_APPEND, fields, 5, values, caps, 1, NULL));
 }
 
-char *db1_session_ir_page(const char *session_id, const char *after, int limit)
+char *db1_session_ir_page(const char *session_id, const char *after, int limit,
+                          const char *principal)
 {
    if (!session_id || !after || limit < 1 || limit > 128)
       return NULL;
    char bound[32];
    snprintf(bound, sizeof(bound), "%d", limit);
-   const char *fields[] = {session_id, after, bound};
+   const char *fields[] = {session_id, after, bound, principal};
    char *json = malloc(4u * 1024u * 1024u);
    if (!json)
       return NULL;
    char *const values[] = {json};
    const size_t caps[] = {4u * 1024u * 1024u};
-   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 3, values, caps, 1, NULL) !=
+   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 4, values, caps, 1, NULL) !=
        AIMEE_DB1_STATUS_OK)
    {
       free(json);
       return NULL;
    }
    return json;
+}
+
+int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,
+                            size_t capacity, const char *principal)
+{
+   if (!session_id || !harness || !out_native_id || !capacity)
+      return -1;
+   const char *fields[] = {session_id, harness, principal};
+   char *values[] = {out_native_id};
+   const size_t caps[] = {capacity};
+   int status = call_stage(AIMEE_DB1_OP_SESSION_HARNESS_GET, fields, 3, values, caps, 1, NULL);
+   return status == AIMEE_DB1_STATUS_OK ? 0 : status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+}
+int db1_session_harness_bind(const char *session_id, const char *harness, const char *native_id,
+                             const char *principal)
+{
+   if (!session_id || !harness || !native_id)
+      return -1;
+   const char *fields[] = {session_id, harness, native_id, principal};
+   return write_result(
+       call_stage(AIMEE_DB1_OP_SESSION_HARNESS_BIND, fields, 4, NULL, NULL, 0, NULL));
 }
