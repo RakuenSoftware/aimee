@@ -2635,7 +2635,13 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "cafc2cfa29d2c966c00f9eb00dc12e271f57b092873aa1919b92aa1f94c68a1f"
+      "sha256": "79bb15f142b1db23c19eab4e034936beaa1e3747d86b72e70da914a76f6666fc",
+      "reason": "Reviewed 2026-10-17: add a canonical Codex credential getter through the existing attested Vault pipe. AIMEE_MEMORY_BACKEND_TOKEN custody and Go memory ownership are unchanged; no memory policy or fallback is added.",
+      "evidence": [
+        "src/tests/test_agent.c",
+        "server-go/modules/providers/inspect_test.go",
+        "docs/validation/deployment-repair-1.0.2-2026-10-17.md"
+      ]
     },
     "src/server/server_state_vectors.c": {
       "disposition": "host-transport",
