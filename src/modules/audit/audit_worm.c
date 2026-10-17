@@ -708,8 +708,15 @@ int audit_worm_verify_restored_history(char *err, size_t errlen, long *head, lon
       *head = 0;
    if (checkpoint)
       *checkpoint = 0;
+   const char *epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   if (!epoch || !epoch[0] || strlen(epoch) > 64 || strspn(epoch, "0123456789-") != strlen(epoch))
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "no valid recovery epoch for restored history");
+      return AUDIT_WORM_VERIFY_RED;
+   }
    char path[1024], sidecar[1040], key_path[1024];
-   snprintf(path, sizeof path, "%s/audit/worm-restored.db", aimee_home());
+   snprintf(path, sizeof path, "%s/audit/worm-restored-%s.db", aimee_home(), epoch);
    struct stat before, after, key_before, key_after;
    sqlite3 *db = NULL;
    int status = AUDIT_WORM_VERIFY_RED;

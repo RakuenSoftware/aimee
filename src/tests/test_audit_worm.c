@@ -739,9 +739,13 @@ static void archive_rollback_journal(const char *path)
 static void test_restored_history_verification(void)
 {
    char dir[512], path[600], err[256];
+   const char *previous_epoch = getenv("AIMEE_AUDIT_RECOVERY_EPOCH");
+   char *saved_epoch = previous_epoch ? strdup(previous_epoch) : NULL;
+   assert(!previous_epoch || saved_epoch);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261014", 1) == 0);
    snprintf(dir, sizeof dir, "%s/audit", g_dir);
    (void)mkdir(dir, 0700);
-   snprintf(path, sizeof path, "%s/worm-restored.db", dir);
+   snprintf(path, sizeof path, "%s/worm-restored-20261014.db", dir);
    assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
    assert(audit_worm_init_at(path) == 0);
    audit_worm_close();
@@ -760,6 +764,11 @@ static void test_restored_history_verification(void)
    assert(audit_worm_verify_restored_history(err, sizeof err, &head, &checkpoint) ==
           AUDIT_WORM_VERIFY_GREEN);
    assert(head == 2 && checkpoint == 2);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261015", 1) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "../20261014", 1) == 0);
+   assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
+   assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", "20261014", 1) == 0);
    assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) ==
           AUDIT_WORM_VERIFY_GREEN);
    char key_path[512];
@@ -800,6 +809,13 @@ static void test_restored_history_verification(void)
    assert(chmod(path, 0444) == 0);
    assert(audit_worm_verify_restored_history(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_RED);
    assert(unlink(path) == 0);
+   if (saved_epoch)
+   {
+      assert(setenv("AIMEE_AUDIT_RECOVERY_EPOCH", saved_epoch, 1) == 0);
+      free(saved_epoch);
+   }
+   else
+      assert(unsetenv("AIMEE_AUDIT_RECOVERY_EPOCH") == 0);
 }
 
 int main(int argc, char **argv)

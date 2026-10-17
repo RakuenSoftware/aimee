@@ -31,12 +31,13 @@ recovered historical head; it does not change existing evidence. The archive is
 then switched to rollback-journal mode and made read-only. The active 20261014
 recovery epoch remains separate and continues accumulating current events.
 
-The verification API now checks audit/worm-restored.db instead of permanently
+The verification API now checks audit/worm-restored-<epoch>.db instead of permanently
 reporting red whenever a recovery epoch exists. Missing, mutable, empty,
 unattested or damaged archives fail closed. Verified but uncheckpointed tails
 remain amber. Successful verification is cached only for unchanged archive and
 checkpoint-key file identities; changes and unresolved SQLite sidecars invalidate
-it. Original loss manifests remain historical evidence, supplemented by restoration
+it. The archive filename binds verification to the active recovery epoch, and a
+later or malformed epoch cannot inherit a previous archive result. Original loss manifests remain historical evidence, supplemented by restoration
 receipts rather than rewritten.
 
 ## Repository indexing

@@ -99,7 +99,7 @@ extern "C"
     * 0 if intact, -1 on the first break (reason in err). */
    int audit_worm_verify_file(const char *db_path, char *err, size_t errlen);
 
-   /* Verify the operator-installed read-only audit/worm-restored.db archive.
+   /* Verify the operator-installed read-only audit/worm-restored-<epoch>.db archive.
     * Missing, mutable, empty, malformed and tampered history stays RED. The
     * active recovery epoch and original damaged evidence are never changed. */
    int audit_worm_verify_restored_history(char *err, size_t errlen, long *head, long *checkpoint);
