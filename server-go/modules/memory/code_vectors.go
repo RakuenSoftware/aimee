@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 )
 
 func (p *personalVectors) codeQueryVector(ctx context.Context, query string) (string, string, error) {
@@ -52,11 +53,13 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 	if err := p.reuseCodeVectors(ctx, generation); err != nil {
 		return err
 	}
-	rows, err := p.db.Query(ctx, `SELECT f.project,f.path,left(f.content,8192),f.fingerprint,`+codeEmbeddingInputHashSQL+`
+	rows, err := p.db.Query(ctx, `SELECT project,path,content,fingerprint,input_hash FROM (
+ SELECT f.project,f.path,left(f.content,8192) AS content,f.fingerprint,`+codeEmbeddingInputHashSQL+` AS input_hash,
+ row_number() OVER (PARTITION BY f.project ORDER BY f.path) AS project_turn
  FROM user_code_files f LEFT JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=$1
  LEFT JOIN user_code_embedding_jobs j ON j.project=f.project AND j.path=f.path AND j.generation=$1 AND j.input_hash=`+codeEmbeddingInputHashSQL+`
  WHERE (v.path IS NULL OR v.content_fingerprint<>f.fingerprint OR v.input_hash<>`+codeEmbeddingInputHashSQL+` OR vector_dims(v.embedding)<>(SELECT dimension FROM user_code_embedding_generations g WHERE g.project=f.project AND g.generation=v.generation) OR vector_norm(v.embedding)=0)
- AND (j.path IS NULL OR (j.attempts<8 AND j.next_attempt_at<=clock_timestamp())) ORDER BY f.project,f.path LIMIT 16`, generation)
+ AND (j.path IS NULL OR (j.attempts<8 AND j.next_attempt_at<=clock_timestamp())) ) pending ORDER BY project_turn,project,path LIMIT 16`, generation)
 	if err != nil {
 		return err
 	}
@@ -76,38 +79,59 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 		return err
 	}
 	var workErr error
-	for _, item := range items {
-		success, err := func() (bool, error) {
-			content := strings.ToValidUTF8(item.path+"\n"+item.content, "")
-			result := Embed(ctx, 0, p.executor, EmbedRequest{BaseURL: endpoint, Text: content, InputType: "document", MaxDim: 4000})
-			if result.Error != "" || result.Unavailable || result.Unauthorized || result.Truncated {
-				return false, errors.New("code embedding unavailable")
-			}
-			vector, err := vectorLiteral(result.Vector)
-			if err != nil {
-				return false, err
-			}
-			after, err := p.serving(ctx, endpoint, len(result.Vector))
-			if err != nil || after != serving {
-				return false, errors.New("code embedding identity changed")
-			}
-			tag, err := p.db.Exec(ctx, `UPDATE user_code_embedding_generations SET dimension=$3 WHERE project=$1 AND generation=$2 AND dimension IN (0,$3)`, item.project, generation, len(result.Vector))
-			if err != nil {
-				return false, err
-			}
-			if tag.RowsAffected() != 1 {
-				return false, errors.New("code dimensions changed within generation")
-			}
-			tag, err = p.db.Exec(ctx, `INSERT INTO user_code_embedding_versions(project,path,generation,content_fingerprint,input_hash,embedding)
+	// Two simultaneous document calls let the shipped embedder coalesce work,
+	// while bounding model memory and leaving interactive retrieval headroom.
+	// Publish each pair before proceeding so a cancelled later pair cannot lose
+	// successfully embedded earlier files. Database access stays serial.
+	for offset := 0; offset < len(items); offset += 2 {
+		pair := items[offset:min(offset+2, len(items))]
+		results := make([]EmbedResponse, len(pair))
+		var workers sync.WaitGroup
+		for i, item := range pair {
+			workers.Add(1)
+			go func(i int, item pending) {
+				defer workers.Done()
+				content := strings.ToValidUTF8(item.path+"\n"+item.content, "")
+				results[i] = Embed(ctx, 0, p.executor, EmbedRequest{BaseURL: endpoint, Text: content, InputType: "document", MaxDim: 4000})
+			}(i, item)
+		}
+		workers.Wait()
+		for i, item := range pair {
+			success, err := func() (bool, error) {
+				result := results[i]
+				if result.Error != "" || result.Unavailable || result.Unauthorized || result.Truncated {
+					return false, errors.New("code embedding unavailable")
+				}
+				vector, err := vectorLiteral(result.Vector)
+				if err != nil {
+					return false, err
+				}
+				after, err := p.serving(ctx, endpoint, len(result.Vector))
+				if err != nil || after != serving {
+					return false, errors.New("code embedding identity changed")
+				}
+				tag, err := p.db.Exec(ctx, `UPDATE user_code_embedding_generations SET dimension=$3 WHERE project=$1 AND generation=$2 AND dimension IN (0,$3)`, item.project, generation, len(result.Vector))
+				if err != nil {
+					return false, err
+				}
+				if tag.RowsAffected() != 1 {
+					return false, errors.New("code dimensions changed within generation")
+				}
+				tag, err = p.db.Exec(ctx, `INSERT INTO user_code_embedding_versions(project,path,generation,content_fingerprint,input_hash,embedding)
  SELECT f.project,f.path,$3,f.fingerprint,$4,$5::vector FROM user_code_files f WHERE f.project=$1 AND f.path=$2 AND `+codeEmbeddingInputHashSQL+`=$4 AND f.fingerprint=$6
  ON CONFLICT(project,path,generation) DO UPDATE SET content_fingerprint=EXCLUDED.content_fingerprint,input_hash=EXCLUDED.input_hash,embedding=EXCLUDED.embedding`, item.project, item.path, generation, item.hash, vector, item.fingerprint)
-			return err == nil && tag.RowsAffected() == 1, err
-		}()
-		workErr = errors.Join(workErr, err, p.recordCodeIndexAttempt(ctx, item.project, item.path, generation, item.hash, success))
+				return err == nil && tag.RowsAffected() == 1, err
+			}()
+			workErr = errors.Join(workErr, err, p.recordCodeIndexAttempt(ctx, item.project, item.path, generation, item.hash, success))
+		}
 	}
 	projects, err := p.db.Query(ctx, `SELECT g.project FROM user_code_embedding_generations g JOIN user_code_projects p ON p.name=g.project
  LEFT JOIN user_code_embedding_active a ON a.project=g.project
- WHERE g.generation=$1 AND (a.generation IS DISTINCT FROM g.generation OR g.validated_watermark<>p.generation) ORDER BY g.created_at,g.project LIMIT 16`, generation)
+ WHERE g.generation=$1 AND (a.generation IS DISTINCT FROM g.generation OR g.validated_watermark<>p.generation)
+ AND NOT EXISTS (
+ SELECT 1 FROM user_code_files f LEFT JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=g.generation
+ WHERE f.project=g.project AND (v.path IS NULL OR v.content_fingerprint<>f.fingerprint OR v.input_hash<>`+codeEmbeddingInputHashSQL+` OR vector_dims(v.embedding)<>g.dimension OR vector_norm(v.embedding)=0))
+ ORDER BY g.created_at,g.project LIMIT 16`, generation)
 	if err != nil {
 		return errors.Join(workErr, err)
 	}

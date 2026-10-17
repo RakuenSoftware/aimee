@@ -2278,8 +2278,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "3a31a0b7ec12b2d80586314f70faa699289f281dc4953c88c5758bd155b393a9",
-      "review": "2026-10-14: Adds explicit historical/live audit verification reporting; memory request handlers, actor checks, and Go ownership are unchanged."
+      "sha256": "336b9019e24b6a720efed098fd40f9c28c99083ab1826c6621d3675857eba91d",
+      "review": "2026-10-17: Verifies a separate restored historical audit archive instead of hardcoding RED for every recovery epoch. Memory request handlers, actor checks, custody symbols and Go ownership are unchanged. Evidence: C audit recovery/cache regressions and docs/validation/deployment-audit-index-recovery-2026-10-17.md."
     },
     "src/tasks.c": {
       "disposition": "host-context",

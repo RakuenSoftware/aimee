@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ func (d vectorEvalStore) Migrate(ctx context.Context, m store.MigrationRequest) 
 }
 
 type vectorTestEgress struct {
+	mu          sync.Mutex
 	fail        bool
 	stall       bool
 	serving     string
@@ -49,6 +51,8 @@ type vectorTestEgress struct {
 }
 
 func (e *vectorTestEgress) Do(ctx context.Context, _ uint64, r egress.HTTPRequest) (egress.HTTPResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.targets = append(e.targets, r.TargetURL)
 	if e.stall {
 		<-ctx.Done()

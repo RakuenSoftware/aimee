@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -652,5 +654,102 @@ func TestCodeRebuildReusesOnlyIdenticalVerifiedInputs(t *testing.T) {
 	}
 	if len(executor.seen)-before != 1 {
 		t.Fatal("changed input borrowed a stale vector")
+	}
+}
+
+// Hold the first two requests until both are in flight. A serial worker times
+// out; an unbounded worker exceeds the measured concurrency limit.
+type codePairEgress struct {
+	base    vectorTestEgress
+	entered chan struct{}
+	release chan struct{}
+	active  atomic.Int32
+	peak    atomic.Int32
+	calls   atomic.Int32
+}
+
+func (e *codePairEgress) Do(ctx context.Context, trace uint64, r egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if r.Purpose != "embedding-health" {
+		n := e.active.Add(1)
+		defer e.active.Add(-1)
+		for old := e.peak.Load(); n > old; old = e.peak.Load() {
+			if e.peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		if e.calls.Add(1) <= 2 {
+			e.entered <- struct{}{}
+			select {
+			case <-e.release:
+			case <-ctx.Done():
+				return egress.HTTPResponse{}, ctx.Err()
+			}
+		}
+	}
+	return e.base.Do(ctx, trace, r)
+}
+func TestCodeIndexBoundsParallelEmbeddingAndPublishesAllFiles(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	files := make([]CodeFile, 5)
+	for i := range files {
+		files[i] = CodeFile{Path: fmt.Sprintf("file%d.c", i), Content: fmt.Sprintf("unique content %d", i)}
+	}
+	if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "parallel", Root: "/fixture/parallel", Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	e := &codePairEgress{base: vectorTestEgress{serving: "pair-model"}, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: e, db: db, code: s}
+	done := make(chan error, 1)
+	go func() { done <- p.indexCodeBatch(ctx) }()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-e.entered:
+		case <-ctx.Done():
+			close(e.release)
+			<-done
+			t.Fatal("document requests did not overlap")
+		}
+	}
+	close(e.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if e.peak.Load() != 2 || e.calls.Load() != 5 {
+		t.Fatalf("peak=%d calls=%d", e.peak.Load(), e.calls.Load())
+	}
+	var count int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_embedding_versions`).Scan(&count); err != nil || count != 5 {
+		t.Fatalf("published=%d error=%v", count, err)
+	}
+}
+func TestCodeIndexSharesWorkAndDoesNotStarveReadyProjects(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("busy-%02d", i)
+		files := make([]CodeFile, 20)
+		for j := range files {
+			files[j] = CodeFile{Path: fmt.Sprintf("file-%02d.c", j), Content: fmt.Sprintf("unique %s %d", name, j)}
+		}
+		if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: name, Root: "/fixture/" + name, Files: files}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A complete empty repository sorts behind more than sixteen unfinished ones.
+	if _, err := db.Exec(ctx, `INSERT INTO user_code_projects(name,root) VALUES('zz-ready','/fixture/ready')`); err != nil {
+		t.Fatal(err)
+	}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: &vectorTestEgress{serving: "fair-model"}, db: db, code: s}
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var projects int
+	if err := db.QueryRow(ctx, `SELECT count(DISTINCT project) FROM user_code_embedding_versions`).Scan(&projects); err != nil || projects != 16 {
+		t.Fatalf("projects advanced=%d error=%v", projects, err)
+	}
+	var ready bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_code_embedding_active WHERE project='zz-ready')`).Scan(&ready); err != nil || !ready {
+		t.Fatalf("completed project starved: ready=%v error=%v", ready, err)
 	}
 }
