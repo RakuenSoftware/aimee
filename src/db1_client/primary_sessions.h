@@ -27,6 +27,14 @@ extern "C"
       char *messages_json;
    } db1_primary_session_row_t;
 
+   /* Canonical ordered session log. Append returns an exact decimal sequence
+    * into out_sequence[32]; retrying an event ID is idempotent only when every
+    * immutable field matches. Page returns owned canonical envelope-array JSON. */
+   int db1_session_ir_append(const char *session_id, const char *event_id,
+                              const char *turn_id, const char *actor,
+                              const char *payload, char out_sequence[32]);
+   char *db1_session_ir_page(const char *session_id, const char *after, int limit);
+
    /* Upsert the provider-formatted message array JSON for one primary
     * conversation session. Returns 0 on success. */
    int db1_primary_session_save(const char *session_id, const char *agent_name,

@@ -1,5 +1,11 @@
 # What's new
 
+## Canonical IR session migration (in progress)
+
+Adds typed session-event serialization, an ordered Server-owned event log, and a shared frontend
+projection for live/replayed messages, tools, thinking, attachments, and harness controls. These are
+migration foundations; the live browser/runtime paths have not yet switched to the new contract.
+
 ## Browser chat repairs
 
 Browser chat now forwards the authenticated actor to Runtime and displays tool lifecycle events.
