@@ -550,4 +550,7 @@ if(NOT WIN32)
   aimee_add_test(test_server_session_control test_server_session_control.c
     ../server/server_session_control.c ../vendor/cJSON.c)
   target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
+  aimee_add_test(test_server_session_log test_server_session_log.c
+    ../server/server_session_log.c ../server/server_session_control.c)
+  target_link_libraries(test_server_session_log PRIVATE Threads::Threads OpenSSL::Crypto)
 endif()

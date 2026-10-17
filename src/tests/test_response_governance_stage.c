@@ -11,6 +11,8 @@
 #include "agent_protocol.h"
 #include "gw_stage_governance.h"
 #include "cJSON.h"
+#include "agent_response_projection.h"
+#include <aimee/ir/session_event.h>
 
 static int g_provider_calls;
 static int g_policy_active;
@@ -71,6 +73,21 @@ static void seed_call(parsed_response_t *parsed, int index, const char *name)
 {
    snprintf(parsed->calls[index].name, sizeof(parsed->calls[index].name), "%s", name);
    parsed->calls[index].arguments = copy_string("{}");
+}
+
+static int denied_events, reject_event;
+static unsigned denied_ids;
+static int capture_denial(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   assert(event->kind == AIMEE_SESSION_MESSAGE && event->message->n_blocks == 1);
+   const aimee_block_t *block = &event->message->blocks[0];
+   assert(block->type == AIMEE_BLK_TOOL_RESULT && block->tool_is_error);
+   int index = -1;
+   assert(sscanf(block->tool_id, "opaque-%d", &index) == 1 && index >= 0 && index <= 16);
+   denied_ids |= 1u << (unsigned)index;
+   denied_events++;
+   return reject_event ? -1 : 0;
 }
 
 int main(void)
@@ -247,13 +264,32 @@ int main(void)
       }
       response.stop_reason = AIMEE_STOP_MAX_TOKENS;
       g_provider_calls = g_provider_mode = 0;
-      assert(gw_ir_response_run_governance(&response, 1, 1) == 9);
+      aimee_ir_session_set_sink(capture_denial, NULL);
+      char first_denied[64] = "";
+      assert(agent_response_govern(&response, 1, 1, first_denied, sizeof first_denied) == 9);
+      assert(denied_events == 9 && denied_ids == 0x15555 && !strcmp(first_denied, "Agent"));
+      aimee_ir_session_set_sink(NULL, NULL);
       assert(g_provider_calls == 2 && aimee_ir_response_tool_count(&response) == 8);
       assert(response.stop_reason == AIMEE_STOP_MAX_TOKENS);
       assert(!strcmp(response.content[0].thinking_signature, "sig"));
       aimee_response_free(&response);
    }
 
+   {
+      aimee_response_t response = {0};
+      response.content = calloc(1, sizeof *response.content);
+      assert(response.content);
+      response.n_content = 1;
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_id = copy_string("opaque-0"),
+                                            .tool_name = copy_string("Agent")};
+      reject_event = 1;
+      aimee_ir_session_set_sink(capture_denial, NULL);
+      assert(agent_response_govern(&response, 1, 1, NULL, 0) < 0);
+      assert(aimee_ir_session_capture_failed());
+      aimee_ir_session_set_sink(NULL, NULL);
+      aimee_response_free(&response);
+   }
    /* NULL-safe. */
    assert(gw_response_run_governance(NULL, 1, 1) == 0);
 

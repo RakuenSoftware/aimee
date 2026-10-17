@@ -22,6 +22,7 @@
 #include "kb_client.h"
 #include "agent.h"
 #include "agent_protocol.h"
+#include "server_session_log.h"
 #include <aimee/ir/session_event.h>
 #include "agent_request_shaping.h"
 #include "agent_request_build.h" /* agent_build_request + provider predicates */
@@ -318,11 +319,22 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    int durable_job_id = agent_get_durable_job_id();
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
-   int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
-                                                          max_tokens, temperature, out)
-                      : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
+   server_session_log_t *log_scope = NULL;
+   int capture = server_session_log_begin(role, user_prompt, &log_scope);
+   int rc;
+   if (capture < 0)
+   {
+      rc = AGENT_RC_CAPTURE_FAILED;
+      snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
+   }
+   else
+      rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
+                                                         max_tokens, temperature, out)
+                     : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (server_session_log_finish(log_scope, rc == 0 && out->success, out->error))
+      rc = AGENT_RC_CAPTURE_FAILED;
    agent_admission_release(admit_slot);
-   if (aimee_ir_session_capture_failed())
+   if (rc == AGENT_RC_CAPTURE_FAILED || aimee_ir_session_capture_failed())
    {
       rc = AGENT_RC_CAPTURE_FAILED;
       out->success = 0;

@@ -44,7 +44,7 @@ extern "C"
    int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
-                                   char **out);
+                                   const char *active_turn, char **out);
 
    /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
    int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,

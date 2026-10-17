@@ -1521,13 +1521,6 @@ int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
  * rh_dispatch_op. The {id} segment is the workspace's absolute path, carried
  * percent-encoded so its '/'s survive as one path segment. */
 
-/* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
- * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
- * db1 webchat_live row as the answer streams; the browser tails it on a fixed
- * ~500ms timer instead of reconciling the per-token SSE stream client-side (which
- * pegged a core). Returns the row ONLY when its monotonic rev advanced past
- * since_rev, so an unchanged turn returns changed:false and the browser does no
- * work. CAP_SESSION_READ (a session read, like /events). */
 /* Only the root-UDS-attested web backend may deliver an operator decision.
  * An agent's own MCP/ingress bearer cannot approve its pending tool request. */
 static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
@@ -1554,6 +1547,13 @@ static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
    return 200;
 }
 
+/* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
+ * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
+ * db1 webchat_live row as the answer streams; the browser tails it on a fixed
+ * ~500ms timer instead of reconciling the per-token SSE stream client-side (which
+ * pegged a core). Returns the row ONLY when its monotonic rev advanced past
+ * since_rev, so an unchanged turn returns changed:false and the browser does no
+ * work. CAP_SESSION_READ (a session read, like /events). */
 static int rh_chat_live(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;

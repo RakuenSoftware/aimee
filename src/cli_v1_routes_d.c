@@ -2307,8 +2307,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
-   /* Run after either native or server-advertised argspec marshalling, so both
-    * paths carry the same inferred scope. Keep cwd intact for file requests. */
+   /* Infer scope after marshalling; retain cwd for file requests. */
    char *worktree_root = cli_index_worktree_root(disp_method, req);
    if (worktree_root)
    {
@@ -2321,6 +2320,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       if (list_status >= 200 && list_status < 300)
       {
          int registered = cli_index_apply_worktree_project(req, worktree_root, projects);
+         (void)registered; /* Bootstrap is POSIX-only; scope forwarding is portable. */
 #if defined(AIMEE_POSIX)
          /* Bootstrap direct CLI discovery through the existing bounded scan,
           * then resolve its registered name. Never treat a list outage as absence. */

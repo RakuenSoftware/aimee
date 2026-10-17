@@ -296,3 +296,7 @@ c1d01de0c8bdbff766340182686314fd51969f97:docs/validation/native-memory-fixes-202
 
 # Reviewed SHA-256 of the public browser IR OpenAPI schema, not a credential.
 d9f9605298a6adc74c951aa552dd9ced7d15e0b3:tests/baselines/modules/memory-ownership.json:generic-api-key:2737
+
+# SHA-256 of the reviewed OpenAPI protocol catalog input, not an API credential.
+# tests/baselines/modules/memory-ownership.json: api/openapi-server-v1.yaml
+a08f764739750bcd4094b4c409aa0c4ea99ab75e:tests/baselines/modules/memory-ownership.json:generic-api-key:2737

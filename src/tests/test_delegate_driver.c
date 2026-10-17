@@ -1,3 +1,5 @@
+#include "agent_response_projection.h"
+#include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -293,6 +295,18 @@ static void test_delegate_respond_xml_rescue_then_strip_pure(void)
    agent_free_parsed_response(&pr);
 }
 
+static int final_results;
+static int capture_final(const aimee_session_event_t *event, void *context)
+{
+   int mixed = *(int *)context;
+   const aimee_block_t *block = &event->message->blocks[0];
+   assert(event->kind == AIMEE_SESSION_MESSAGE && block->type == AIMEE_BLK_TOOL_RESULT);
+   assert(!strcmp(block->tool_id, "respond-id") && block->tool_is_error == mixed);
+   if (!mixed)
+      assert(!strcmp(cJSON_GetStringValue(block->tool_result), "answer"));
+   final_results++;
+   return 0;
+}
 static void test_typed_delegate_respond(void)
 {
    for (int mixed = 0; mixed <= 1; mixed++)
@@ -317,7 +331,10 @@ static void test_typed_delegate_respond(void)
                                                .tool_name = strdup("read_file"),
                                                .tool_input = cJSON_Parse("{\"path\":\"a\"}")};
       response.stop_reason = AIMEE_STOP_TOOL_USE;
-      assert(agent_ir_strip_delegate_respond(&response) == (mixed ? 2 : 1));
+      aimee_ir_session_set_sink(capture_final, &mixed);
+      assert(agent_response_consume_final(&response) == (mixed ? 2 : 1));
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(final_results == mixed + 1);
       assert(!strcmp(response.content[0].thinking_signature, "sig"));
       assert(response.content[mixed ? 2 : 2].type == AIMEE_BLK_IMAGE);
       if (mixed)

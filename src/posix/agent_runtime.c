@@ -14,6 +14,8 @@
 #include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include "server_session_log.h"
+#include "agent_response_projection.h"
 #include "agent_runtime_messages.h"
 #include "ingress_preinject.h"
 #include "request_context.h"
@@ -470,8 +472,30 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
                                       const char *user_prompt, int max_tokens, double temperature,
                                       agent_result_t *out)
 {
-   return agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
-                                            max_tokens, temperature, NULL, NULL, out);
+   if (!server_session_log_active())
+      return agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
+                                               max_tokens, temperature, NULL, NULL, out);
+   cJSON *history = NULL, *updated = NULL;
+   if (server_session_log_history_load(&history) < 0)
+   {
+      memset(out, 0, sizeof *out);
+      snprintf(out->error, sizeof out->error, "canonical execution history is unavailable");
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   int rc = agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
+                                              max_tokens, temperature, history, &updated, out);
+   cJSON_Delete(history);
+   if (rc == 0 && server_session_log_history_save(updated))
+   {
+      rc = AGENT_RC_CAPTURE_FAILED;
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "canonical execution checkpoint failed");
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+   }
+   cJSON_Delete(updated);
+   return rc;
 }
 
 int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t *network,
@@ -1379,32 +1403,17 @@ native_provider_http:
       char denied_tool[64] = "";
       if (role != NULL)
       {
-         int original_call_count =
-             call_count > AGENT_MAX_TOOL_CALLS ? AGENT_MAX_TOOL_CALLS : call_count;
-         /* Only the denial diagnostic is bounded; every typed call is governed. */
-         char *original_tool_names[AGENT_MAX_TOOL_CALLS] = {0};
-         int names_ok = 1;
-         for (int i = 0; i < original_call_count; i++)
-         {
-            original_tool_names[i] = safe_strdup(aimee_ir_response_tool(&response, i)->tool_name);
-            if (!original_tool_names[i])
-               names_ok = 0;
-         }
          int governance_tri = config_present() ? config_module_governance() : -1;
-         denied_calls = gw_ir_response_run_governance(
+         denied_calls = agent_response_govern(
              &response, config_module_enabled(governance_tri, gw_response_governance_enabled()),
-             gateway_prevent_subagents_enabled());
+             gateway_prevent_subagents_enabled(), denied_tool, sizeof denied_tool);
          call_count = aimee_ir_response_tool_count(&response);
-         int kept_index = 0;
-         for (int i = 0; i < original_call_count; i++)
+         if (denied_calls < 0)
          {
-            if (names_ok && kept_index < call_count &&
-                strcmp(original_tool_names[i],
-                       aimee_ir_response_tool(&response, kept_index)->tool_name) == 0)
-               kept_index++;
-            else if (!denied_tool[0] && original_tool_names[i])
-               snprintf(denied_tool, sizeof denied_tool, "%s", original_tool_names[i]);
-            free(original_tool_names[i]);
+            delegate_response_release(&response, NULL, NULL, 0);
+            delegate_capture_stop(out, &capture_failed);
+            snprintf(out->error, sizeof out->error, "cannot persist host governance decision");
+            break;
          }
       }
       response_text = aimee_ir_response_text_alloc(&response);
@@ -1481,7 +1490,7 @@ native_provider_http:
                                     : "XML tool_call block");
             /* If the smuggled call was actually the respond tool, it IS a final
              * answer -- strip it and finish successfully. */
-            int stripped = inject_respond_tool ? agent_ir_strip_delegate_respond(&response) : 0;
+            int stripped = inject_respond_tool ? agent_response_consume_final(&response) : 0;
             if (stripped < 0)
             {
                delegate_response_release(&response, response_text, tool_arguments, call_count);
@@ -1528,7 +1537,7 @@ native_provider_http:
          if (n_rescued > 0)
             out->rescue_recoveries++;
       }
-      int respond_strip = inject_respond_tool ? agent_ir_strip_delegate_respond(&response) : 0;
+      int respond_strip = inject_respond_tool ? agent_response_consume_final(&response) : 0;
       if (respond_strip < 0)
       {
          delegate_response_release(&response, response_text, tool_arguments, call_count);

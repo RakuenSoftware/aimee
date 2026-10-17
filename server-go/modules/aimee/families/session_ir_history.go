@@ -114,6 +114,7 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 	pending := map[string][]json.RawMessage{}
 	positions := map[string]map[string]int{}
 	found := false
+	open := map[string]bool{}
 	for rows.Next() {
 		var turn, payload string
 		if err = rows.Scan(&turn, &payload); err != nil {
@@ -179,7 +180,11 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 			if err = json.Unmarshal(event.Payload, &execution); err != nil {
 				return 0, nil, err
 			}
+			if execution.Status == "running" {
+				open[turn] = true
+			}
 			if execution.Status == "completed" || execution.Status == "failed" || execution.Status == "cancelled" {
+				delete(open, turn)
 				if len(pending[turn]) > 0 {
 					history = append(history, pending[turn]...)
 					found = true
@@ -191,6 +196,11 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 	}
 	if err = rows.Err(); err != nil {
 		return 0, nil, err
+	}
+	for turn := range open {
+		if turn != f[3] {
+			return 0, nil, fmt.Errorf("unfinished canonical execution requires reconciliation")
+		}
 	}
 	if !found {
 		return store.StatusMissing, nil, nil

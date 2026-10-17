@@ -966,7 +966,7 @@ var Sessions = store.Family{
 		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
 		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
-		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 3, Run: sessionIRHistoryLoad},
+		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
 		opSessionHarnessGet:           {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
 		opSessionHarnessBind:          {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
 	},

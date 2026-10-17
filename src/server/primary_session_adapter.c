@@ -170,7 +170,7 @@ static int primary_session_store_history(primary_session_state_t *state, const c
 }
 
 static int primary_session_load_messages_locked(primary_session_state_t *state,
-                                                const char *alternate_id)
+                                                const char *alternate_id, const char *active_turn)
 {
    const char *principal = agent_get_request_vault_principal();
    if (state->history_failed || !principal || !principal[0])
@@ -187,7 +187,7 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    if (strcmp(owner.principal, principal))
       return -1;
    char *json = NULL;
-   int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, &json);
+   int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, active_turn, &json);
    if (rc < 0)
       return -1;
    if (rc == 0)
@@ -302,7 +302,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
                state->id);
       return -1;
    }
-   if (primary_session_load_messages_locked(state, req->aimee_session_id) != 0)
+   if (primary_session_load_messages_locked(state, req->aimee_session_id, req->active_turn_id) != 0)
    {
       pthread_mutex_unlock(&g_primary_sessions_lock);
       snprintf(out->error, sizeof(out->error), "failed to import primary session history");
@@ -516,7 +516,7 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
                   state->id);
       return -1;
    }
-   if (primary_session_load_messages_locked(state, req->aimee_session_id) != 0)
+   if (primary_session_load_messages_locked(state, req->aimee_session_id, req->active_turn_id) != 0)
    {
       pthread_mutex_unlock(&g_primary_sessions_lock);
       if (error_out && error_len > 0)

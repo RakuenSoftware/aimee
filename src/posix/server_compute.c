@@ -1161,6 +1161,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.network = &acfg.network;
    preq.provider_session_id = provider_sid;
    preq.aimee_session_id = aimee_sid;
+   preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
    preq.cwd = use_cwd;
    preq.system_prompt = system_prompt ? system_prompt : "";
    preq.user_prompt = message;
@@ -1314,6 +1315,7 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
    preq.agent = ag;
    preq.provider_session_id = provider_sid;
    preq.aimee_session_id = aimee_sid;
+   preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
 
    char session_id[128];
    char err[256];

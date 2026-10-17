@@ -1,6 +1,7 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_session_control.h"
 #include "server/server_error_kind.h"
 #include "server_http_authz.h"
 #include "server_http_internal.h"
@@ -533,8 +534,45 @@ static int recall_fault_status(const char *kind, uint32_t *status)
    return 0;
 }
 
+static void test_operator_control_reply_route(void)
+{
+   server_control_scope_t *scope =
+       server_control_scope_open("control-session", "control-turn", "webuser:alice");
+   assert(scope);
+   cJSON *request = cJSON_Parse("{\"title\":\"Run a command?\"}");
+   assert(server_control_register(scope, "71", "permission", request) == 0);
+   cJSON_Delete(request);
+   const char *body = "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+                      "\"reply\":{\"decision\":\"deny\"}}";
+   char response[1024];
+   server_http_identity_clear();
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   // A model's bearer and a forged browser assertion cannot approve via TCP.
+   server_http_identity_capture(-1, 1,
+                                "POST /v1/chat/control-reply HTTP/1.1\r\nAuthorization: Bearer "
+                                "model-token\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   int pair[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+   server_http_identity_capture(
+       pair[0], 0, "POST /v1/chat/control-reply HTTP/1.1\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   int expected = getuid() == 0 ? 200 : 403;
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == expected);
+   if (expected == 200)
+      assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                               sizeof response) == 409);
+   server_http_identity_clear();
+   close(pair[0]);
+   close(pair[1]);
+   server_control_scope_close(scope);
+}
+
 int main(void)
 {
+   test_operator_control_reply_route();
    extern int server_http_declared_status(const char *json);
    assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"not_found\"}") == 502);
    assert(server_http_declared_status("{\"status\":\"error\",\"http_status\":404}") == 404);

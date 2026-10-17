@@ -259,3 +259,28 @@ Still required: log-only capture owners for every nonbrowser primary/delegate wo
 and observation pairing, remaining ingress/cache and native replay cutovers, tmux retirement,
 remaining typed IR consumers, bypass enforcement, and full integration/deployment qualification.
 The opening attribution on #3036 remains rejected by the strengthened gate; no exemption was added.
+
+### Additional local execution/history validation
+
+- `agent_dispatch_one` now installs a log-only owner for attested native primaries without an
+  existing capture and gives delegates private durable child sessions. Workers use copied typed
+  attestation; no HTTP context is shared. Durable job IDs select stable child history across attempts.
+- The tool loop loads/checkpoints that same durable canonical history. A prior unfinished host
+  execution requires reconciliation; only the caller's server-owned active turn may be excluded
+  from its own history load. This prevents restart from silently replaying an uncertain execution.
+- Governance emits an explicit error TOOL_RESULT for each removed opaque call ID, including calls
+  beyond the old mask width. Host-consumed synthetic final-answer calls also receive paired results.
+- Configured integration passed 153/153 checks with 25 full-stack-service skips. Deployment compose
+  environment tests passed, including the real emitter. HTTP reply tests reject model bearer/TCP
+  spoofing; native pending ownership, consume-once and child subprocess fixtures cover correlation.
+- New log owner and governance fixtures passed address/undefined sanitizers with leak detection.
+  The all-family Go race suite passes against a fresh isolated PostgreSQL database; sharing it with
+  the integration schema invalidates older tests' global table-count assumptions.
+- Fresh CI on `a08f76473` passed lint and exposed link dependency omissions for native HTTP/control
+  and a newly activated cold CLI fixture, plus a Windows unused-variable warning. Those are fixed
+  locally and need fresh CI. Secret scanning reported the OpenAPI input SHA-256 as an API key;
+  `.gitleaksignore` records that single commit/file/rule/line finding and its digest-only rationale.
+
+Remaining scope includes child execution references/UI expansion, all ingress/cache and native
+replay cutovers, tmux retirement, remaining typed consumers and bypass enforcement. Live Vault-backed
+browser qualification and full-stack deployment checks remain required. The attribution gate is unchanged.

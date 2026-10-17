@@ -591,17 +591,17 @@ static void primary_cells_free(char **cells, uint32_t count)
 }
 
 int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
-                                char **out)
+                                const char *active_turn, char **out)
 {
    if (!out)
       return -1;
    *out = NULL;
    if (!session_id || !scope || !actor)
       return -1;
-   const char *fields[] = {session_id, scope, actor};
+   const char *fields[] = {session_id, scope, actor, active_turn ? active_turn : ""};
    char **cells = NULL;
    uint32_t count = 0;
-   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD, fields, 3, &cells, &count);
+   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD, fields, 4, &cells, &count);
    int rc = status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
    if (status == AIMEE_DB1_STATUS_OK && count == 1)
    {

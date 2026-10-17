@@ -190,7 +190,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
 $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/module_stage_adapters.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
@@ -981,6 +981,17 @@ $(TESTPREFIX)/unit-test-process-module-handlers: \
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,
 # L_CLIENT, L_SERVER, or L_KB; the order-only edge guarantees the archive exists
 # before any selected test link starts.
+# Register before both the archive dependency and shard snapshot.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-index-worktree
+TEST_TARGETS += $(TESTPREFIX)/unit-test-workspace-add-noscan
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-control
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-log
+
+ifdef AIMEE_TREESITTER
+TEST_TARGETS += $(TESTPREFIX)/unit-test-code-treesitter
+endif
+
+
 $(TEST_TARGETS): | $(CORE_CONNECTION_LIB)
 
 .PHONY: unit-test-communication
@@ -996,14 +1007,6 @@ $(TESTPREFIX)/unit-test-communication: $(OBJDIR)/tests/test_communication.o \
 # Round-robin selection keeps adjacent families from piling into one shard and
 # preserves process isolation -- every selected target is still the same binary
 # used by the full suite.
-# Register these before the shard snapshot; late appends never ran in unit-tests.
-TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-index-worktree
-TEST_TARGETS += $(TESTPREFIX)/unit-test-workspace-add-noscan
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-control
-
-ifdef AIMEE_TREESITTER
-TEST_TARGETS += $(TESTPREFIX)/unit-test-code-treesitter
-endif
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -1983,7 +1986,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
  $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
  $(OBJDIR)/server/server_config.o \
  $(OBJDIR)/tests/support/skill_jobs_stub.o \
- $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_surfaces.o $(OBJDIR)/command_registry.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_routes_workspace.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/appliance_admin.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
+ $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_surfaces.o $(OBJDIR)/command_registry.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_http_routes_workspace.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/appliance_admin.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/modules/vault/vault_principal.o \
  $(OBJDIR)/tests/support/workflow_api_stub.o \
  $(OBJDIR)/tests/support/vault_handlers_stub.o \
  $(OBJDIR)/modules/vault/runtime_secret.o \
@@ -4199,7 +4202,7 @@ $(TESTPREFIX)/unit-test-gw-response-registry: $(OBJDIR)/tests/test_gw_response_r
 
 
 # Response governance stage (Slice 2): toggle proven via a counting police stub.
-$(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/tests/test_response_governance_stage.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-response-governance-stage: $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/tests/test_response_governance_stage.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # Orchestration-hook seam + runner (Slice 3 of the response/orchestration seam), self-contained.
@@ -5574,7 +5577,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                      $(OBJDIR)/modules/delegates/delegate_launch_args.o \
                      $(OBJDIR)/tests/delegate_permissions_stub.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_surfaces.o $(OBJDIR)/command_registry.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_routes_workspace.o $(OBJDIR)/server/workspace_register_args.o $(OBJDIR)/server/workflow_control_bus.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_surfaces.o $(OBJDIR)/command_registry.o $(OBJDIR)/server/server_bearer_auth.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_http_routes_workspace.o $(OBJDIR)/server/workspace_register_args.o $(OBJDIR)/server/workflow_control_bus.o \
                      $(OBJDIR)/server/server_runtime_identity.o \
                      $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/appliance_admin.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/cli_command_defs.o $(OBJDIR)/server/cli_dispatch_defs.o $(OBJDIR)/server/cli_marshal_defs.o $(OBJDIR)/server/cli_argspec_defs.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/server_http_authz.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/shared/auth_token_verify.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
@@ -7940,3 +7943,9 @@ $(TESTPREFIX)/unit-test-primary-history-client: $(OBJDIR)/tests/test_primary_his
 $(TESTPREFIX)/unit-test-server-session-control: $(OBJDIR)/tests/test_server_session_control.o \
     $(OBJDIR)/server/server_session_control.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_log.o \
+    $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_session_control.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

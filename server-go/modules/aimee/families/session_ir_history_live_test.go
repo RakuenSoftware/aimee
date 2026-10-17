@@ -70,7 +70,7 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 			t.Fatal(err)
 		}
 		defer tx.Rollback(ctx)
-		status, cells, err := sessionIRHistoryLoad(ctx, sessionIRLiveTx{tx}, []string{"s", scope, actor})
+		status, cells, err := sessionIRHistoryLoad(ctx, sessionIRLiveTx{tx}, []string{"s", scope, actor, "turn"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,6 +139,18 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 	appendEvent("current-user", "turn", `{"kind":"message","message_id":"user","payload":{"role":"user","blocks":[{"type":"text","text":"CURRENT_PROMPT"}]}}`)
 	if _, got := load("primary", "alice"); strings.Contains(got, "CURRENT_PROMPT") {
 		t.Fatal("active browser prompt would be duplicated")
+	}
+	// A fresh process/turn cannot silently replay an unfinished execution.
+	{
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = sessionIRHistoryLoad(ctx, sessionIRLiveTx{tx}, []string{"s", "primary", "alice", "new-turn"})
+		_ = tx.Rollback(ctx)
+		if err == nil {
+			t.Fatal("unfinished execution was silently replayed")
+		}
 	}
 	appendEvent("final", "turn", `{"kind":"execution","payload":{"status":"completed"}}`)
 	if _, got := load("primary", "alice"); !strings.Contains(got, "CURRENT_PROMPT") {

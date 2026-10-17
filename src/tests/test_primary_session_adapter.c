@@ -32,7 +32,8 @@ int db1_server_session_create(const char *id, const char *client, const char *pr
    assert(0);
    return -1;
 }
-int db1_session_ir_history_load(const char *id, const char *scope, const char *actor, char **out)
+int db1_session_ir_history_load(const char *id, const char *scope, const char *actor,
+                                const char *active_turn, char **out)
 {
    assert(!strcmp(id, "stable") && !strcmp(scope, "primary") && !strcmp(actor, "alice"));
    *out = canonical_stored ? strdup(canonical_stored) : NULL;

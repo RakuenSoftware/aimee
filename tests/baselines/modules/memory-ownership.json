@@ -2114,7 +2114,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "4a42168d94364e533f6ba8d4cb9238e4633f5186802c870b8e275d16310d3e72"
+      "sha256": "e076b6594be231c9d1c16b1ecfdf322ddc28b888dbbe7564d9eceda2ec364b44"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2201,7 +2201,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "6f95c1e90cee1ec8dab44462a476573f08ebde7ec8018eb309663768e8df4397",
+      "sha256": "7546890821f531a3645ba8aa9372db63db67db037e4254bfcf30491b6678e951",
       "review": "2026-10-18: adds browser-attested chat control replies; pending session/turn/principal ownership is checked before queuing. Existing memory_stats routing and memory owner calls are unchanged."
     },
     "src/server/server_mcp.c": {

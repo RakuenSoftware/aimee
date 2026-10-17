@@ -28051,7 +28051,8 @@
       "c_params": [
         "session_id",
         "scope",
-        "actor"
+        "actor",
+        "active_turn"
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
@@ -28079,6 +28080,11 @@
             "name": "actor",
             "type": "text",
             "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": false
           }
         ]
       },
