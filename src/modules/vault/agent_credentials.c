@@ -22,6 +22,12 @@
 #include <strings.h> /* strcasecmp: vault names carry operator casing */
 
 #include "runtime_secret.h"
+#include "config.h"
+#include "platform_path.h"
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "vault_principal.h"
 #include "vault_store.h" /* vault_store_entry_t */
 
@@ -488,7 +494,7 @@ static int codex_parse_oauth_pair(const char *data, char *access, size_t an, cha
  * against OpenAI's token endpoint whenever it is within the skew of expiry —
  * without reading or rewriting a persistent auth.json. Returns 0 + a bearer in
  * |buf|; -1 when Vault has no usable OAuth document. */
-static int codex_oauth_vault_token(char *buf, size_t len)
+static int codex_oauth_current_token_locked(char *buf, size_t len)
 {
    for (int tries = 0; tries < 2; tries++)
    {
@@ -526,6 +532,36 @@ static int codex_oauth_vault_token(char *buf, size_t len)
    return -1;
 }
 
+/* Serving threads and attested resource helpers share a rotating refresh token.
+ * Serialize the whole read/refresh/store across processes, not just each Vault
+ * write, so two near-expiry requests cannot consume the same refresh token. */
+int agent_codex_oauth_current_token(char *buf, size_t len)
+{
+   if (!buf || !len)
+      return -1;
+   buf[0] = '\0';
+   char dir[1024], path[1280];
+   const char *home = config_default_dir();
+   if (!home || !home[0] || (size_t)snprintf(dir, sizeof(dir), "%s/.vault", home) >= sizeof(dir) ||
+       platform_mkdir_p(dir, 0700) != 0 ||
+       (size_t)snprintf(path, sizeof(path), "%s/.codex-oauth.lock", dir) >= sizeof(path))
+      return -1;
+   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+   struct stat st;
+   if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+       (st.st_mode & 0077) != 0 || st.st_nlink != 1 || flock(fd, LOCK_EX) != 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   int rc = codex_oauth_current_token_locked(buf, len);
+   close(fd);
+   if (rc != 0)
+      OPENSSL_cleanse(buf, len);
+   return rc;
+}
+
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
 {
    buf[0] = '\0';
@@ -557,7 +593,7 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       }
       /* Vault-backed, auto-refreshing token bootstrapped from the opaque codex
        * OAuth document already ingested by login or boot migration. */
-      if (codex_oauth_vault_token(token, sizeof(token)) == 0)
+      if (agent_codex_oauth_current_token(token, sizeof(token)) == 0)
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;

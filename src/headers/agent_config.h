@@ -112,7 +112,7 @@ typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
 /* Rank a qualified pool using request-size pricing; negative return fails closed. */
 typedef int (*agent_route_cost_fn)(const agent_config_t *cfg, const char *role,
-                                  agent_t *const candidates[], int count, int min_context);
+                                   agent_t *const candidates[], int count, int min_context);
 void agent_set_route_cost_provider(agent_route_cost_fn provider);
 int agent_role_competence(const agent_t *agent, const char *role);
 int agent_role_meets_competence(const agent_t *agent, const char *role);
@@ -309,6 +309,11 @@ int agent_has_resolvable_credentials(const agent_t *agent);
  * Returns 1 when a credential exists, 0 otherwise and on any vault error, so a
  * failure to read reads as "not configured" rather than a false positive. */
 int vault_provider_has_credential(const char *provider_name);
+
+/* Server Codex connection only: resolve the canonical Vault token, refreshing
+ * through the same store as serving. Never reads client files or another named
+ * connection. The caller must keep the returned credential off the module bus. */
+int agent_codex_oauth_current_token(char *buf, size_t len);
 
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 

@@ -252,3 +252,40 @@ func TestProbeFailureRetainsNativeClientFields(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestCodexProbeUsesCurrentVaultTokenInsteadOfStaleDocument(t *testing.T) {
+	m, _, vault := manager(t)
+	vault.values["codex:codex_oauth_current"] = "refreshed-access"
+	vault.values["codex:oauth"] = `{"tokens":{"access_token":"expired-access","account_id":"account-a"}}`
+	token, account, err := m.resolveCodex(context.Background(), object{"name": "codex"})
+	if err != nil || token != "refreshed-access" || account != "account-a" {
+		t.Fatal("canonical refreshed credential was not selected")
+	}
+	// Explicit selected-connection overrides retain serving's precedence.
+	vault.values["codex:codex_oauth_token"] = "explicit-access"
+	token, _, err = m.resolveCodex(context.Background(), object{"name": "codex"})
+	if err != nil || token != "explicit-access" {
+		t.Fatal("explicit credential precedence changed")
+	}
+	if _, _, err := m.resolveCodex(context.Background(), object{"name": "personal"}); err == nil {
+		t.Fatal("a named connection borrowed the canonical server token")
+	}
+}
+
+type failedCanonicalVault struct{ Resources }
+
+func (v failedCanonicalVault) Credential(ctx context.Context, op, agent, cred, secret string) (string, error) {
+	if agent == "codex" && cred == "codex_oauth_current" {
+		return "", errors.New("refresh unavailable")
+	}
+	return v.Resources.Credential(ctx, op, agent, cred, secret)
+}
+
+func TestCodexRefreshFailureDoesNotReuseStaleDocument(t *testing.T) {
+	m, _, vault := manager(t)
+	vault.values["codex:oauth"] = `{"access_token":"expired-access"}`
+	m.resources = failedCanonicalVault{vault}
+	if _, _, err := m.resolveCodex(context.Background(), object{"name": "codex"}); err == nil {
+		t.Fatal("refresh failure fell back to stale credentials")
+	}
+}

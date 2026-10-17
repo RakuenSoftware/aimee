@@ -573,3 +573,84 @@ func TestPrivateCodePublishedSpanBoundsAndDrift(t *testing.T) {
 		t.Fatalf("new generation not visible: %s (%v)", raw, err)
 	}
 }
+
+func TestCodeQueryWaitsForBusyEmbedderWithinCallerBudget(t *testing.T) {
+	t.Setenv("AIMEE_GRAPH_FUSION", "off")
+	ctx, s, db := codeFixture(t)
+	_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "alpha", Root: "/fixture/alpha", Files: []CodeFile{{Path: "worker.c", Content: "void worker() {}"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &vectorTestEgress{serving: "model-a"}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A document ahead of this query takes longer than the previous 1.5s cap.
+	executor.delay = 2 * time.Second
+	raw, err := s.searchCode(ctx, "alpha", "semantic question", 10)
+	var diagnostic struct {
+		DenseState string `json:"dense_state"`
+	}
+	if err != nil || json.Unmarshal(raw, &diagnostic) != nil || diagnostic.DenseState != "query_executed" {
+		t.Fatalf("busy healthy embedder lost semantic retrieval: %s (%v)", raw, err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	raw, err = s.searchCode(bounded, "alpha", "worker", 10)
+	if err != nil || json.Unmarshal(raw, &diagnostic) != nil || diagnostic.DenseState != "unavailable" || time.Since(started) >= 500*time.Millisecond {
+		t.Fatalf("short caller budget was not preserved for lexical SQL: %s (%v)", raw, err)
+	}
+}
+
+func TestCodeRebuildReusesOnlyIdenticalVerifiedInputs(t *testing.T) {
+	ctx, s, db := codeFixture(t)
+	publish := func(project, path, content string) {
+		t.Helper()
+		if _, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: project, Root: "/fixture/" + project, Files: []CodeFile{{Path: path, Content: content}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("alpha", "worker.c", "void worker() {}")
+	identity := fixtureEmbeddingIdentity()
+	identity.Dimensions = 3
+	executor := &vectorTestEgress{identity: &identity}
+	p := &personalVectors{endpoint: "https://fixture-embedder", executor: executor, db: db, code: s}
+	s.personal = p
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := len(executor.seen)
+	publish("beta", "worker.c", "void worker() {}")
+	publish("gamma", "different.c", "void worker() {}")
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 1 {
+		t.Fatalf("identical input was recomputed or a different path reused it: %v", executor.seen[before:])
+	}
+	var active int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM user_code_embedding_active WHERE project IN ('alpha','beta','gamma')`).Scan(&active); err != nil || active != 3 {
+		t.Fatal(active, err)
+	}
+	// Model identity changes invalidate every old cached vector.
+	identity.ArtifactRevision = strings.Repeat("c", 40)
+	before = len(executor.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 3 {
+		t.Fatal("a different generation borrowed cached vectors")
+	}
+	// A real content change also requires a fresh embedding.
+	publish("beta", "worker.c", "void changed() {}")
+	before = len(executor.seen)
+	if err := p.indexCodeBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(executor.seen)-before != 1 {
+		t.Fatal("changed input borrowed a stale vector")
+	}
+}

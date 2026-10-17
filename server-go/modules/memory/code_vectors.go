@@ -49,6 +49,9 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := p.reuseCodeVectors(ctx, generation); err != nil {
+		return err
+	}
 	rows, err := p.db.Query(ctx, `SELECT f.project,f.path,left(f.content,8192),f.fingerprint,`+codeEmbeddingInputHashSQL+`
  FROM user_code_files f LEFT JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=$1
  LEFT JOIN user_code_embedding_jobs j ON j.project=f.project AND j.path=f.path AND j.generation=$1 AND j.input_hash=`+codeEmbeddingInputHashSQL+`
@@ -126,4 +129,34 @@ func (p *personalVectors) indexCodeBatch(ctx context.Context) error {
 		workErr = errors.Join(workErr, p.cutoverCodeGeneration(ctx, project, generation))
 	}
 	return workErr
+}
+
+// Repository snapshots often contain exactly the same embedding input. Reuse
+// only verified vectors for the identical input hash, serving identity and
+// preprocessing policy (all bound into generation). Publication and retrieval
+// still validate each target file's own fingerprint and project watermark.
+func (p *personalVectors) reuseCodeVectors(ctx context.Context, generation string) error {
+	_, err := p.db.Exec(ctx, `WITH cached AS MATERIALIZED (
+ SELECT DISTINCT ON (v.input_hash) v.input_hash,v.embedding,vector_dims(v.embedding) AS dim
+ FROM user_code_embedding_versions v JOIN user_code_embedding_generations g USING(project,generation)
+ WHERE v.generation=$1 AND g.identity_state='verified' AND vector_dims(v.embedding)=g.dimension AND vector_norm(v.embedding)>0
+ ORDER BY v.input_hash,v.project,v.path
+), pending AS MATERIALIZED (
+ SELECT f.project,f.path,f.fingerprint,c.input_hash,c.embedding,c.dim
+ FROM user_code_files f JOIN user_code_embedding_generations g ON g.project=f.project AND g.generation=$1
+ JOIN cached c ON c.input_hash=`+codeEmbeddingInputHashSQL+`
+ LEFT JOIN user_code_embedding_versions v ON v.project=f.project AND v.path=f.path AND v.generation=$1
+ WHERE g.identity_state='verified' AND g.dimension IN (0,c.dim)
+ AND (v.path IS NULL OR v.content_fingerprint<>f.fingerprint OR v.input_hash<>c.input_hash OR vector_dims(v.embedding)<>c.dim OR vector_norm(v.embedding)=0)
+ ORDER BY f.project,f.path LIMIT 4096
+), dimensions AS (
+ UPDATE user_code_embedding_generations g SET dimension=p.dim
+ FROM (SELECT DISTINCT project,dim FROM pending) p
+ WHERE g.project=p.project AND g.generation=$1 AND g.dimension IN (0,p.dim)
+ RETURNING g.project
+)
+INSERT INTO user_code_embedding_versions(project,path,generation,content_fingerprint,input_hash,embedding)
+ SELECT p.project,p.path,$1,p.fingerprint,p.input_hash,p.embedding FROM pending p JOIN dimensions d USING(project)
+ ON CONFLICT(project,path,generation) DO UPDATE SET content_fingerprint=EXCLUDED.content_fingerprint,input_hash=EXCLUDED.input_hash,embedding=EXCLUDED.embedding`, generation)
+	return err
 }

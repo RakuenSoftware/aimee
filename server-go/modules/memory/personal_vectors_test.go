@@ -44,6 +44,8 @@ type vectorTestEgress struct {
 	seen        []string
 	targets     []string
 	beforeEmbed func()
+	delay       time.Duration
+	identity    *EmbeddingIdentity
 }
 
 func (e *vectorTestEgress) Do(ctx context.Context, _ uint64, r egress.HTTPRequest) (egress.HTTPResponse, error) {
@@ -56,7 +58,22 @@ func (e *vectorTestEgress) Do(ctx context.Context, _ uint64, r egress.HTTPReques
 		return egress.HTTPResponse{}, errors.New("offline")
 	}
 	if r.Purpose == "embedding-health" {
+		if e.identity != nil {
+			digest, err := e.identity.Digest()
+			if err != nil {
+				return egress.HTTPResponse{}, err
+			}
+			body, _ := json.Marshal(map[string]any{"embedding_identity": e.identity, "embedding_identity_digest": digest})
+			return egress.HTTPResponse{Status: 200, Body: body}, nil
+		}
 		return egress.HTTPResponse{Status: 200, Body: []byte(`{"serving_id":"` + e.serving + `"}`)}, nil
+	}
+	if e.delay > 0 {
+		select {
+		case <-time.After(e.delay):
+		case <-ctx.Done():
+			return egress.HTTPResponse{}, ctx.Err()
+		}
 	}
 	e.seen = append(e.seen, string(r.Body))
 	if e.beforeEmbed != nil {
