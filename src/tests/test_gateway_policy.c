@@ -485,6 +485,7 @@ static void test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_r
     * max_tokens — the client now sees end_turn, not max_tokens, because
     * the wire is a different shape. */
    assert(strcmp(p.stop_reason, "end_turn") == 0);
+   assert(p.stop == AIMEE_STOP_END_TURN); /* the canonical value emitters render */
    PASS("police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason");
 }
 

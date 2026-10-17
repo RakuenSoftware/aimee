@@ -291,5 +291,6 @@ int gw_response_run_completion(parsed_response_t *parsed, const cJSON *messages,
    parsed->call_count = 1;
    snprintf(parsed->stop_reason, sizeof(parsed->stop_reason), "%s",
             tool_stop_reason && tool_stop_reason[0] ? tool_stop_reason : "tool_calls");
+   parsed->stop = AIMEE_STOP_TOOL_USE;
    return 1;
 }

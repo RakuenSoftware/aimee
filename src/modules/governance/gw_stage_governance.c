@@ -58,7 +58,16 @@ static int apply_decision(parsed_response_t *parsed, const aimee_governance_deci
       write_index++;
    }
    parsed->call_count = write_index;
+   /* The module answers in one vocabulary whatever wire the response came from, so
+    * the string is for the audit; the canonical value is what emitters render. It
+    * only changes the reason when every call was dropped (the turn now ends) or the
+    * upstream gave none (surviving calls make it a tool turn). */
+   int had_reason = parsed->stop_reason[0] != '\0';
    snprintf(parsed->stop_reason, sizeof(parsed->stop_reason), "%s", decision->stop_reason);
+   if (write_index == 0)
+      parsed->stop = AIMEE_STOP_END_TURN;
+   else if (!had_reason)
+      parsed->stop = AIMEE_STOP_TOOL_USE;
    return original_count - write_index;
 }
 
