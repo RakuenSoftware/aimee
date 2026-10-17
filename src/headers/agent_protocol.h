@@ -3,6 +3,7 @@
 #define DEC_AGENT_PROTOCOL_H 1
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h> /* aimee_stop_reason_t */
 
 struct cJSON;
 
@@ -48,8 +49,14 @@ typedef struct parsed_response
     * the requested/served alias, e.g. a dated version). Empty when absent. */
    char model[MAX_MODEL_LEN];
    /* Provider stop/finish reason (Anthropic stop_reason / OpenAI finish_reason),
-    * captured for the audit. Empty when absent. */
+    * captured for the audit. Empty when absent. Its vocabulary is whatever the
+    * provider (or a policy stage) wrote, so never compare it against one wire's
+    * words to decide behaviour -- use `stop`. */
    char stop_reason[32];
+   /* The canonical stop reason, carried from the IR parse. AIMEE_STOP_UNKNOWN (the
+    * zero value) when no IR parse produced this response. Emitters render it in
+    * their own client's vocabulary. */
+   aimee_stop_reason_t stop;
 } parsed_response_t;
 
 /* --- Request builders --- */

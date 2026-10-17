@@ -544,6 +544,7 @@ void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *o
       snprintf(out->model, sizeof(out->model), "%s", r->model);
    if (r->raw_stop_reason)
       snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", r->raw_stop_reason);
+   out->stop = r->stop_reason;
 
    /* content = concatenation of all TEXT blocks (parsed_response_t convention: a
     * single flat string; NULL when there is no text, e.g. a pure tool call). */

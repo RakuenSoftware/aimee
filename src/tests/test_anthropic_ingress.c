@@ -251,6 +251,34 @@ static void test_response_text(void)
    PASS("response_text");
 }
 
+/* The canonical stop decides the Anthropic stop_reason on the buffered reply. The
+ * buffered renderer used to derive it from the call count alone, so a truncated reply
+ * from an OpenAI-family primary reached Claude Code as end_turn. */
+static void test_response_truncation_from_canonical(void)
+{
+   parsed_response_t p;
+   memset(&p, 0, sizeof(p));
+   p.content = (char *)"partial";
+   p.stop = AIMEE_STOP_MAX_TOKENS;
+   snprintf(p.stop_reason, sizeof(p.stop_reason), "%s", "length");
+   cJSON *r = anthropic_response_from_parsed("msg_t", "m", &p);
+   assert(strcmp(ostr(r, "stop_reason"), "max_tokens") == 0);
+   cJSON_Delete(r);
+
+   /* A policy stage's word in the raw string does not override the canonical value. */
+   snprintf(p.stop_reason, sizeof(p.stop_reason), "%s", "end_turn");
+   r = anthropic_response_from_parsed("msg_t", "m", &p);
+   assert(strcmp(ostr(r, "stop_reason"), "max_tokens") == 0);
+   cJSON_Delete(r);
+
+   p.stop = AIMEE_STOP_STOP_SEQUENCE;
+   p.stop_reason[0] = '\0';
+   r = anthropic_response_from_parsed("msg_t", "m", &p);
+   assert(strcmp(ostr(r, "stop_reason"), "stop_sequence") == 0);
+   cJSON_Delete(r);
+   PASS("response_truncation_from_canonical");
+}
+
 static void test_response_tool_use(void)
 {
    parsed_response_t p;
@@ -786,6 +814,7 @@ int main(void)
    test_tools_empty();
    test_tools_responses_mapping();
    test_response_text();
+   test_response_truncation_from_canonical();
    test_response_tool_use();
    test_response_empty_gets_text_block();
    test_stream_text();
