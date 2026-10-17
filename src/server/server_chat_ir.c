@@ -1,6 +1,7 @@
 /* Durable session capture owned by the server compute task. */
 #include "server_compute_impl.h"
 #include "agent_config.h"
+#include "presence.h"
 #include "db1_client/server_sessions.h"
 #include "db1_client/primary_sessions.h"
 #include "cJSON.h"
@@ -135,6 +136,8 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
 {
    if (!c->presence_locked || !session || !session[0] || strlen(session) >= sizeof(c->ir_session) ||
        !c->vault_principal[0])
+      return -1;
+   if (!presence_turn_host_own(c->presence_session, c->presence_turn_id))
       return -1;
    db1_server_session_t row;
    int found = db1_server_session_get(session, &row);

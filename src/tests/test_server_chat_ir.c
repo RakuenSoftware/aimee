@@ -9,6 +9,12 @@
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled;
 static char owner[64] = "alice";
+int presence_turn_host_own(const char *sid, const char *turn)
+{
+   (void)sid;
+   (void)turn;
+   return 1;
+}
 int agent_request_cancelled(void)
 {
    return cancelled;

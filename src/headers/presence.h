@@ -214,6 +214,9 @@ extern "C"
     * the head of the queue (if any), waking its waiter. Also releases any
     * workspace leases the turn's holder acquired. No-op if turn_id is not the
     * live turn. Returns 1 on release, 0 otherwise. */
+   /* Retain turn arbitration and workspace leases when a browser detaches. */
+   int presence_turn_host_own(const char *session_id, const char *turn_id);
+
    int presence_turn_release(const char *session_id, const char *turn_id);
 
    /* True (1) if turn_id is the live in-flight turn for session_id. Lets a

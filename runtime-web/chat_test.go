@@ -818,6 +818,9 @@ func TestHandleChatAttachProxiesV1(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sessions/web1/attach", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aimee-Webuser") != "alice" {
+			t.Error("authenticated actor not forwarded")
+		}
 		gotMethod, gotPath = r.Method, r.URL.Path
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
@@ -826,7 +829,7 @@ func TestHandleChatAttachProxiesV1(t *testing.T) {
 	s := &server{cfg: startFakeV1(t, mux)}
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/attach", strings.NewReader(`{"sid":"web1"}`))
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/attach", strings.NewReader(`{"sid":"web1"}`)), "alice")
 	s.handleChatAttach(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"att-7"`) {
 		t.Fatalf("attach: code=%d body=%q", rr.Code, rr.Body.String())
@@ -855,6 +858,9 @@ func TestHandleChatDetachProxiesV1(t *testing.T) {
 	var gotPath, gotBody string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sessions/web1/detach", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aimee-Webuser") != "alice" {
+			t.Error("authenticated actor not forwarded")
+		}
 		gotPath = r.URL.Path
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
@@ -863,7 +869,7 @@ func TestHandleChatDetachProxiesV1(t *testing.T) {
 	s := &server{cfg: startFakeV1(t, mux)}
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/detach", strings.NewReader(`{"sid":"web1","attach_id":"att-7"}`))
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/detach", strings.NewReader(`{"sid":"web1","attach_id":"att-7"}`)), "alice")
 	s.handleChatDetach(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"detached":true`) {
 		t.Fatalf("detach: code=%d body=%q", rr.Code, rr.Body.String())

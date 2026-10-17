@@ -1,4 +1,5 @@
 #include "claude_headless.h"
+#include "platform_test_util.h"
 #include <aimee/ir/session_event.h>
 #include "cJSON.h"
 #include <assert.h>
@@ -99,7 +100,8 @@ static void script(const char *path, const char *body)
 }
 int main(void)
 {
-   char path[] = "/tmp/aimee-headless-XXXXXX";
+   char path[4096];
+   snprintf(path, sizeof(path), "%s/aimee-headless-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);

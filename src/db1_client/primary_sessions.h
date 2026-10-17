@@ -7,6 +7,8 @@
 #ifndef DEC_DB1_PRIMARY_SESSIONS_H
 #define DEC_DB1_PRIMARY_SESSIONS_H 1
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C"
 {
