@@ -1,5 +1,11 @@
 # What's new
 
+## Browser chat repairs
+
+Browser chat now forwards the authenticated actor to Runtime and displays tool lifecycle events.
+Direct primary model sessions emit the same activity as the existing agent path. Credentials remain
+in the environment Vault; tool lifecycle events carry tool names rather than credential material.
+
 ## 1.0.1 release in preparation
 
 The next application release is **1.0.1**, following published
