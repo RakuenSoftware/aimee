@@ -720,6 +720,165 @@ static void test_sigs_zero_when_nothing_compacted(void)
    PASS("no compaction -> no signatures");
 }
 
+/* ------------------------------------------------------------------ tool pairing */
+
+/* Every tool result left in the compacted array must follow a call it answers. */
+static int every_result_has_its_call(const cJSON *arr)
+{
+   char seen[32][32];
+   int n_seen = 0;
+   const cJSON *msg = NULL;
+   cJSON_ArrayForEach(msg, arr)
+   {
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
+      const char *call = NULL, *result = NULL;
+      if (type && strcmp(type, "function_call") == 0)
+         call = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
+      else if (type && strcmp(type, "function_call_output") == 0)
+         result = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
+      else if (role && strcmp(role, "tool") == 0)
+         result = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
+      else if (role && strcmp(role, "assistant") == 0)
+      {
+         const cJSON *tc = cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "tool_calls"), 0);
+         call = tc ? cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id")) : NULL;
+      }
+      if (call && n_seen < 32)
+         snprintf(seen[n_seen++], sizeof(seen[0]), "%s", call);
+      if (result)
+      {
+         int found = 0;
+         for (int i = 0; i < n_seen; i++)
+            found |= strcmp(seen[i], result) == 0;
+         if (!found)
+            return 0;
+      }
+   }
+   return 1;
+}
+
+static cJSON *make_openai_call(const char *id)
+{
+   cJSON *msg = make_tool_call_msg("read_file", "{\"path\":\"a.c\"}");
+   cJSON *call = cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "tool_calls"), 0);
+   cJSON_ReplaceItemInObject(call, "id", cJSON_CreateString(id));
+   return msg;
+}
+
+static cJSON *make_openai_result(const char *id)
+{
+   cJSON *msg = make_msg("tool", "file contents");
+   cJSON_AddStringToObject(msg, "tool_call_id", id);
+   return msg;
+}
+
+/* The cut is a message count; with retain_tail=1 it lands on the tool result, so the
+ * call it answers was summarised away and the result went to the provider alone. */
+static void test_cut_keeps_openai_call_with_its_result(void)
+{
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.retain_tail = 1;
+   cJSON *arr = make_long_conversation(6);
+   cJSON_AddItemToArray(arr, make_openai_call("call_tail"));
+   cJSON_AddItemToArray(arr, make_openai_result("call_tail"));
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+   assert(every_result_has_its_call(arr));
+   char *s = cJSON_PrintUnformatted(arr);
+   assert(strstr(s, "\"tool_call_id\":\"call_tail\"") && strstr(s, "\"id\":\"call_tail\""));
+   free(s);
+   cJSON_Delete(arr);
+   PASS("cut_keeps_openai_call_with_its_result");
+}
+
+static cJSON *make_responses_item(const char *type, const char *call_id)
+{
+   cJSON *it = cJSON_CreateObject();
+   cJSON_AddStringToObject(it, "type", type);
+   cJSON_AddStringToObject(it, "call_id", call_id);
+   if (strcmp(type, "function_call") == 0)
+   {
+      cJSON_AddStringToObject(it, "name", "read_file");
+      cJSON_AddStringToObject(it, "arguments", "{}");
+   }
+   else
+      cJSON_AddStringToObject(it, "output", "file contents");
+   return it;
+}
+
+static cJSON *make_responses_message(const char *role, const char *part_type, const char *text)
+{
+   cJSON *it = cJSON_CreateObject();
+   cJSON_AddStringToObject(it, "type", "message");
+   cJSON_AddStringToObject(it, "role", role);
+   cJSON *content = cJSON_AddArrayToObject(it, "content");
+   cJSON *part = cJSON_CreateObject();
+   cJSON_AddStringToObject(part, "type", part_type);
+   cJSON_AddStringToObject(part, "text", text);
+   cJSON_AddItemToArray(content, part);
+   return it;
+}
+
+/* Responses history keeps calls and outputs as role-less items, and a parallel turn
+ * puts both calls before both outputs: the cut must move past the whole group. */
+static void test_cut_keeps_responses_parallel_calls(void)
+{
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.retain_tail = 2;
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "anchor"));
+   for (int i = 0; i < 6; i++)
+   {
+      cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "filler question"));
+      cJSON_AddItemToArray(arr,
+                           make_responses_message("assistant", "output_text", "filler answer"));
+   }
+   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_1"));
+   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_2"));
+   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_1"));
+   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_2"));
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+   assert(every_result_has_its_call(arr));
+   cJSON_Delete(arr);
+   PASS("cut_keeps_responses_parallel_calls");
+}
+
+/* Responses text parts and role-less calls reach the summary: the task came from an
+ * input_text part, and the summarised function_call is counted rather than skipped. */
+static void test_summary_reads_responses_items(void)
+{
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.retain_tail = 2;
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "anchor"));
+   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "Port the parser to IR"));
+   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_9"));
+   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_9"));
+   cJSON_AddItemToArray(arr, make_responses_message("assistant", "output_text", "Done reading"));
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "next"));
+      cJSON_AddItemToArray(arr, make_responses_message("assistant", "output_text", "ok"));
+   }
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+   assert(strstr(result.summary, "Port the parser to IR"));
+   assert(strstr(result.summary, "1 tool call"));
+   cJSON_Delete(arr);
+   PASS("summary_reads_responses_items");
+}
+
 int main(void)
 {
    printf("session_compact:\n");
@@ -750,6 +909,9 @@ int main(void)
    test_record_keeps_section_contract();
    test_compact_idempotent_on_small();
    test_compact_result_counts();
+   test_cut_keeps_openai_call_with_its_result();
+   test_cut_keeps_responses_parallel_calls();
+   test_summary_reads_responses_items();
 
    test_sigs_capture_readonly_calls();
    test_sigs_exclude_mutating_and_verifying_tools();
