@@ -28,7 +28,7 @@ class MergeQueueTests(unittest.TestCase):
                              ['docs_only=false', 'docs_changed=true'])
 
     def test_queue_workflows_preserve_integration_checkout(self):
-        for name in ('ci', 'release-policy', 'core-c', 'c-repositories'):
+        for name in ('ci', 'release-policy', 'core-c', 'c-repositories', 'audit-storage'):
             with self.subTest(workflow=name):
                 workflow = yaml.load((ROOT / f'.github/workflows/{name}.yml').read_text(),
                                      Loader=yaml.BaseLoader)
