@@ -30,9 +30,70 @@ int ir_seam_test_plan_calls(const char *phase);
 const char *ir_seam_test_query(void);
 int ir_seam_test_guidance_provided(void);
 
+/* A history stored by one primary converts into another primary's wire through the
+ * IR, tool call/result pairing included, so switching the session's agent keeps the
+ * conversation instead of starting empty. */
+static void test_convert_history(void)
+{
+   static const char *ANTH =
+       "[{\"role\":\"user\",\"content\":\"read a.c\"},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"reading\"},"
+       "{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Read\",\"input\":{\"path\":\"a.c\"}}]}"
+       ","
+       "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\","
+       "\"content\":\"int main;\"}]},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}]";
+
+   /* Anthropic -> Responses: the call and its output keep one call_id. */
+   cJSON *items = aimee_ir_convert_history(ANTH, "anthropic", "chatgpt");
+   assert(cJSON_IsArray(items));
+   const cJSON *call = NULL, *output = NULL;
+   const cJSON *it = NULL;
+   cJSON_ArrayForEach(it, items)
+   {
+      const cJSON *type = cJSON_GetObjectItem(it, "type");
+      if (cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
+         call = it;
+      if (cJSON_IsString(type) && strcmp(type->valuestring, "function_call_output") == 0)
+         output = it;
+   }
+   assert(call && output);
+   assert(strcmp(cJSON_GetObjectItem(call, "name")->valuestring, "Read") == 0);
+   assert(strcmp(cJSON_GetObjectItem(call, "call_id")->valuestring,
+                 cJSON_GetObjectItem(output, "call_id")->valuestring) == 0);
+   char *text = cJSON_PrintUnformatted(items);
+   assert(strstr(text, "read a.c") && strstr(text, "done"));
+   free(text);
+
+   /* ...and back to Chat Completions for an OpenAI-family primary. */
+   char *items_json = cJSON_PrintUnformatted(items);
+   cJSON_Delete(items);
+   cJSON *chat = aimee_ir_convert_history(items_json, "chatgpt", "openai");
+   free(items_json);
+   assert(cJSON_IsArray(chat));
+   int saw_calls = 0, saw_tool = 0;
+   cJSON_ArrayForEach(it, chat)
+   {
+      const cJSON *role = cJSON_GetObjectItem(it, "role");
+      assert(cJSON_IsString(role) && strcmp(role->valuestring, "system") != 0);
+      saw_calls |= cJSON_IsArray(cJSON_GetObjectItem(it, "tool_calls"));
+      saw_tool |= strcmp(role->valuestring, "tool") == 0;
+   }
+   assert(saw_calls && saw_tool);
+   cJSON_Delete(chat);
+
+   /* Same wire is returned as stored; an unparseable history converts to nothing. */
+   cJSON *same = aimee_ir_convert_history(ANTH, "anthropic", "anthropic");
+   assert(cJSON_IsArray(same) && cJSON_GetArraySize(same) == 4);
+   cJSON_Delete(same);
+   assert(aimee_ir_convert_history("not json", "openai", "anthropic") == NULL);
+   assert(aimee_ir_convert_history("{\"a\":1}", "openai", "anthropic") == NULL);
+}
+
 int main(void)
 {
    printf("ir-serve: ");
+   test_convert_history();
    cJSON *req = cJSON_Parse(REQ);
    assert(req);
 

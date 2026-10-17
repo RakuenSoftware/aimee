@@ -10,6 +10,8 @@
 #include "log.h"
 #include "model_registry.h"
 #include "provider_cli_adapter.h"
+#include "aimee_ir_serve.h" /* aimee_ir_convert_history */
+#include "db1_client/primary_sessions.h"
 #include "session_compact.h"
 #include "util.h"
 #include "cJSON.h"
@@ -135,6 +137,39 @@ static int primary_session_load_messages_for_id(primary_session_state_t *state, 
    return 1;
 }
 
+/* A session's history is stored per (agent, provider) in that provider's wire shape,
+ * so switching the session's primary used to start the new agent with no history.
+ * Adopt the session's newest history from whichever agent served it last, converted
+ * through the IR into this agent's wire. The converted copy is saved under this agent
+ * after the turn, like any other history. */
+static int primary_session_adopt_latest_for_id(primary_session_state_t *state, const char *id)
+{
+   if (!state || !id || !id[0])
+      return 0;
+   db1_primary_session_row_t row;
+   if (db1_primary_session_get_latest(id, &row) != 0)
+      return 0;
+   cJSON *messages = NULL;
+   if (row.messages_json && row.messages_json[0] &&
+       !(strcmp(row.agent_name, state->agent_name) == 0 &&
+         strcmp(row.provider, state->provider) == 0))
+      messages = aimee_ir_convert_history(row.messages_json, row.provider, state->provider);
+   if (messages)
+   {
+      LOG_INFO("primary.session", "adopted %d message(s) of session %s from %s/%s into %s/%s",
+               cJSON_GetArraySize(messages), id, row.agent_name, row.provider, state->agent_name,
+               state->provider);
+      cJSON_Delete(state->messages);
+      state->messages = messages;
+   }
+   else if (row.messages_json && row.messages_json[0])
+      LOG_WARN("primary.session",
+               "session %s history from %s/%s could not be converted for %s/%s; starting empty", id,
+               row.agent_name, row.provider, state->agent_name, state->provider);
+   db1_primary_session_row_clear(&row);
+   return messages != NULL;
+}
+
 static void primary_session_load_messages_locked(primary_session_state_t *state,
                                                  const char *alternate_id)
 {
@@ -142,8 +177,13 @@ static void primary_session_load_messages_locked(primary_session_state_t *state,
       return;
    if (primary_session_load_messages_for_id(state, state->id))
       return;
-   if (alternate_id && alternate_id[0] && strcmp(alternate_id, state->id) != 0)
-      (void)primary_session_load_messages_for_id(state, alternate_id);
+   int has_alternate = alternate_id && alternate_id[0] && strcmp(alternate_id, state->id) != 0;
+   if (has_alternate && primary_session_load_messages_for_id(state, alternate_id))
+      return;
+   if (primary_session_adopt_latest_for_id(state, state->id))
+      return;
+   if (has_alternate)
+      (void)primary_session_adopt_latest_for_id(state, alternate_id);
 }
 
 int primary_session_adapter_can_handle(const agent_t *agent)
