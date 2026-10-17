@@ -83,3 +83,43 @@ it('rejects deltas after message completion and premature message stops', () => 
   state = reduceSession(state, d(4, { type: 'TURN_STOP' }));
   expect(() => reduceSession(state, d(5, { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: 'late' }))).toThrow('completion');
 });
+
+
+it('closes partial messages and unresolved controls when execution is cancelled', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: { status: 'running' } }));
+  state = reduceSession(state, envelope(2, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_START' } }));
+  state = reduceSession(state, envelope(3, { kind: 'control_request', request_id: 'p', control_kind: 'permission', payload: {} }));
+  state = reduceSession(state, envelope(4, { kind: 'execution', payload: { status: 'cancelled' } }));
+  expect(state.messages[0]).toMatchObject({ complete: true, cancelled: true });
+  expect(state.controls.p.closed).toBe(true);
+  expect(state.activeTurns).toEqual([]);
+  expect(() => reduceSession(state, envelope(5, { kind: 'control_response', request_id: 'p', control_kind: 'permission', payload: { decision: 'allow' } }))).toThrow('pending request');
+});
+
+it('retains a failed model response while its host handles the failure', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: { status: 'running' } }));
+  state = reduceSession(state, envelope(2, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_START' } }));
+  state = reduceSession(state, envelope(3, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'ERROR', error_message: 'Provider failed' } }));
+  expect(state.messages[0]).toMatchObject({ complete: true, error: 'Provider failed' });
+  expect(state.activeTurns).toEqual(['t']);
+  state = reduceSession(state, envelope(4, { kind: 'execution', payload: { status: 'failed', error: 'Retry budget exhausted' } }));
+  expect(state.activeTurns).toEqual([]);
+  expect(state.errors).toEqual(['Provider failed', 'Retry budget exhausted']);
+});
+
+
+it('preserves usage when a final typed snapshot replaces streamed content', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_START' } }));
+  state = reduceSession(state, envelope(2, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_STOP', stop_reason: 'end_turn', usage_in: 123, usage_out: 45 } }));
+  state = reduceSession(state, envelope(3, message('m', 'assistant', [{ type: 'thinking', text: 'Reason', signature: 'opaque' }])));
+  expect(state.messages[0].usage).toEqual({ input: 123, output: 45 });
+  expect(state.messages[0].stopReason).toBe('end_turn');
+});
+
+it('rejects cross-turn control replies and content arriving after cancellation', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: { status: 'running' } }));
+  state = reduceSession(state, envelope(2, { kind: 'control_request', request_id: 'p', control_kind: 'permission', payload: {} }));
+  expect(() => reduceSession(state, { ...envelope(3, { kind: 'control_response', request_id: 'p', control_kind: 'permission', payload: {} }), turn_id: 'other' })).toThrow('pending request');
+  state = reduceSession(state, envelope(3, { kind: 'execution', payload: { status: 'cancelled' } }));
+  expect(() => reduceSession(state, envelope(4, message('late', 'assistant', [{ type: 'text', text: 'late' }])))).toThrow('execution completion');
+});

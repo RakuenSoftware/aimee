@@ -42,10 +42,14 @@ export type ProjectedMessage = Message & {
   id: string; turn: string; complete: boolean;
   argumentFragments: Record<number, string>;
   stoppedBlocks: number[];
+  error?: string;
+  cancelled?: boolean;
+  stopReason?: string;
+  usage?: { input: number; output: number };
 };
 export type Control = {
   kind: string; request: Record<string, unknown>; response?: Record<string, unknown>;
-  requestedBy: string; resolvedBy?: string;
+  requestedBy: string; resolvedBy?: string; turn: string; closed?: boolean;
 };
 export type SessionState = {
   session: string; sequence: string; messages: ProjectedMessage[];
@@ -86,6 +90,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
   if (nextSequence !== previousSequence + 1n) throw new Error('Session replay gap');
   const event = envelope.event;
   const next: SessionState = { ...state, sequence: envelope.sequence };
+  const execution = state.executions[envelope.turn_id];
+  if (execution && execution !== 'running' &&
+      (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
+    throw new Error('Content follows execution completion');
   switch (event.kind) {
     case 'message': {
       if (!nonempty(event.message_id) || !nonempty(event.payload.role) || !Array.isArray(event.payload.blocks) || event.payload.blocks.length > 4096)
@@ -97,6 +105,11 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (index >= 0) {
         if (state.messages[index].role !== message.role || state.messages[index].turn !== message.turn)
           throw new Error('Message identity changed');
+        const previous = state.messages[index];
+        message.usage = previous.usage;
+        message.stopReason = previous.stopReason;
+        message.error = previous.error;
+        message.cancelled = previous.cancelled;
         next.messages = state.messages.map((m, i) => i === index ? message : m);
       } else next.messages = [...state.messages, message];
       return next;
@@ -106,7 +119,14 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const d = event.payload;
       const index = state.messages.findIndex(m => m.id === event.message_id);
       if (d.type === 'ERROR') {
-        next.errors = [...state.errors, d.error_message || 'Runtime error'];
+        const error = d.error_message || 'Runtime error';
+        next.errors = [...state.errors, error];
+        if (index >= 0) {
+          const message = state.messages[index];
+          if (message.role !== event.role || message.turn !== envelope.turn_id)
+            throw new Error('Delta changed message identity');
+          next.messages = state.messages.map((m, i) => i === index ? { ...m, complete: true, error } : m);
+        }
         return next;
       }
       if (d.type === 'TURN_START') {
@@ -127,6 +147,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (d.type === 'TURN_STOP') {
         if (message.stoppedBlocks.length !== message.blocks.length)
           throw new Error('Message has open blocks');
+        for (const value of [d.usage_in, d.usage_out]) {
+          if (value !== undefined && (!Number.isSafeInteger(value) || value < 0))
+            throw new Error('Invalid model usage');
+        }
+        message.usage = { input: d.usage_in || 0, output: d.usage_out || 0 };
+        message.stopReason = d.stop_reason;
         message.complete = true;
         return next;
       }
@@ -181,18 +207,27 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       next.activeTurns = status === 'running' ? [...state.activeTurns, envelope.turn_id] :
         state.activeTurns.filter(turn => turn !== envelope.turn_id);
       if (event.payload.error) next.errors = [...state.errors, event.payload.error];
+      if (status !== 'running') {
+        const open = state.messages.filter(m => m.turn === envelope.turn_id && !m.complete);
+        if (status === 'completed' && open.length) throw new Error('Execution completed with open messages');
+        next.messages = state.messages.map(m => m.turn === envelope.turn_id && !m.complete ?
+          { ...m, complete: true, cancelled: status === 'cancelled',
+            error: status === 'failed' ? (event.payload.error || 'Execution failed') : undefined } : m);
+        next.controls = Object.fromEntries(Object.entries(state.controls).map(([id, control]) =>
+          [id, control.turn === envelope.turn_id && !control.response ? { ...control, closed: true } : control]));
+      }
       return next;
     }
     case 'control_request': {
       if (!event.request_id || !event.control_kind || state.controls[event.request_id])
         throw new Error('Invalid or duplicate control request');
       next.controls = { ...state.controls, [event.request_id]: {
-        kind: event.control_kind, request: event.payload, requestedBy: envelope.actor } };
+        kind: event.control_kind, request: event.payload, requestedBy: envelope.actor, turn: envelope.turn_id } };
       return next;
     }
     case 'control_response': {
       const request = state.controls[event.request_id];
-      if (!request || request.response || request.kind !== event.control_kind)
+      if (!request || request.response || request.closed || request.turn !== envelope.turn_id || request.kind !== event.control_kind)
         throw new Error('Control response has no matching pending request');
       next.controls = { ...state.controls, [event.request_id]: { ...request,
         response: event.payload, resolvedBy: envelope.actor } };
