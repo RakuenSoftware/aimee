@@ -422,7 +422,7 @@ func certificateCoversCurrentSANs(certPEM []byte) bool {
 	if err != nil || time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
 		return false
 	}
-	dnsNames, ipAddrs := certSANs()
+	dnsNames, ipAddrs := requiredCertSANs()
 	for _, name := range dnsNames {
 		if cert.VerifyHostname(name) != nil {
 			return false
@@ -466,12 +466,21 @@ func parseTLSPrivateKey(keyPEM []byte) (crypto.Signer, error) {
 // only DNS:localhost cannot validate for https://<LAN-IP>:8443, which (besides
 // the usual warning) makes browsers refuse to register VSCode's service worker
 // ("An SSL certificate error occurred when fetching the script") so the editor's
-// webviews break. Explicit AIMEE_TLS_EXTRA_SAN or AIMEE_WEBCHAT_TLS_SANS
-// entries define stable deployment identities alongside localhost. Without
-// explicit entries, discover the hostname and non-loopback interface IPs.
+// webviews break. Newly issued certificates retain automatic hostname and
+// interface coverage alongside the declared deployment SANs. Certificate reuse
+// requires only stable declared identities when configured, so a changing
+// container address cannot invalidate an already trusted certificate.
 // AIMEE_TLS_EXTRA_SAN is the public deployment setting and
 // accepts the same comma/space-separated DNS:/IP: syntax as the native server.
 func certSANs() (dnsNames []string, ipAddrs []net.IP) {
+	return certSANsWithDiscovery(true)
+}
+
+func requiredCertSANs() (dnsNames []string, ipAddrs []net.IP) {
+	return certSANsWithDiscovery(false)
+}
+
+func certSANsWithDiscovery(includeDiscovered bool) (dnsNames []string, ipAddrs []net.IP) {
 	dnsSeen := map[string]bool{}
 	ipSeen := map[string]bool{}
 	addDNS := func(n string) {
@@ -516,10 +525,9 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 			}
 		}
 	}
-	// Declared deployment identities are authoritative. Container hostnames
-	// and bridge IPs can change on replacement or cold boot; adding them would
-	// needlessly replace a public certificate already trusted by its users.
-	if !configured {
+	// Preserve automatic coverage when minting a cert. During reuse, declared
+	// stable identities suffice; without declarations retain legacy discovery.
+	if includeDiscovered || !configured {
 		if h, err := os.Hostname(); err == nil {
 			addDNS(h)
 		}
