@@ -265,15 +265,25 @@ jobs:
 
   no-coauthor-trailers:
     # Standing directive: commits/PRs must never carry AI co-authorship trailers.
+    # Also rejects AI app attribution on the opening PR entry.
     # Scans only the PR's NEW commits (base..head), so existing history is
     # grandfathered while any newly introduced trailer fails the PR.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Reject AI author and committer identities in new commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/check-commit-identities.py "$BASE_SHA" "$HEAD_SHA"
       - name: Reject AI co-authorship trailers in new commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -302,7 +312,7 @@ jobs:
           # trailer alternative is line-anchored so prose naming the trailer (a
           # commit that FIXES this check, for instance) does not trip it.
           ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*[_*]*generated (with|by) \[(claude|codex|chatgpt|copilot|github copilot)'
           ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
           ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
           export ATTRIBUTION_RE
@@ -344,25 +354,16 @@ jobs:
             exit 1
           fi
           echo "no co-authorship trailers in $range — ok"
-      - name: Reject AI attribution in the PR title/body
+      - name: Reject AI attribution in live PR metadata and text
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Same set as the commit scan above; kept in step with it deliberately,
-          # because a body-only session link is the easy way for one to land.
-          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
-          hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-                 | grep -inE "$ATTRIBUTION_RE" || true)
-          if [ -n "$hits" ]; then
-            echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
-            echo "$hits"
-            exit 1
-          fi
-          echo "no AI attribution in PR title/body — ok"
+          # The opening entry's "with <app>" badge is structured issue metadata,
+          # not body text. Fetch live state so editing a footer cannot hide it.
+          # An API or schema failure fails this step; there is no empty fallback.
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}" > "$RUNNER_TEMP/pr-attribution.json"
+          python3 scripts/check-pr-attribution.py "$RUNNER_TEMP/pr-attribution.json"
 
   lint:
     needs: change-scope

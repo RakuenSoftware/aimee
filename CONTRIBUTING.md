@@ -20,6 +20,14 @@ database connections. Native KB algorithms use its session transport and hold no
 The `aimee` and `aimee-kb` binaries link no SQLite:
 `make -C src check-linking` asserts each binary's boundary and prints what it found.
 
+## Commit and PR identity
+
+Use the operator's Git identity for both author and committer. The `no-coauthor-trailers`
+CI gate rejects assistant identities, attribution trailers and generated-by footers, and AI app
+attribution recorded by GitHub on the opening PR entry (`performed_via_github_app`). Removing
+body text does not remove that metadata. The gate fetches the live issue representation and
+fails if attribution cannot be verified. Ordinary documentation references to a tool are allowed.
+
 ## Build and test
 
 From `src/`:

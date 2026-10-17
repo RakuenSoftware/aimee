@@ -662,6 +662,12 @@
       "test": "src/tests/test_aimee_ir_stream.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_tool_choice.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "translation",

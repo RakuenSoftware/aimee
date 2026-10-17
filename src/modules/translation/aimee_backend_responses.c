@@ -211,8 +211,7 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
          cJSON_AddItemToArray(tools, t);
       }
    }
-   if (ir->tool_choice)
-      cJSON_AddItemToObject(out, "tool_choice", cJSON_Duplicate(ir->tool_choice, 1));
+   openai_family_add_tool_choice(out, ir, 1);
    return out;
 }
 

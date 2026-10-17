@@ -10,7 +10,7 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 ## Public contracts
 
 `src/modules/translation/module.yaml` is the complete module-local ownership inventory: nine shipping
-translation units, four canonical public headers, six direct tests, and this module document.
+translation units, four canonical public headers, seven direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
 canonical document. Canonical public-header placement remains enforced by the descriptor-derived
 header-layout gate. This physical ownership claim does not imply that every exported adapter helper is

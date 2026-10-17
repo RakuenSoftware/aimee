@@ -230,8 +230,38 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       }
    }
 
+   /* tool_choice: {type:auto|any|tool|none, name?, disable_parallel_tool_use?} */
    const cJSON *tc = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tool_choice");
-   out->tool_choice = tc ? cJSON_Duplicate(tc, 1) : NULL;
+   if (tc && !cJSON_IsNull(tc))
+   {
+      const char *type = cJSON_IsObject(tc) ? ostr(tc, "type") : NULL;
+      if (type && strcmp(type, "auto") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      else if (type && strcmp(type, "any") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_ANY;
+      else if (type && strcmp(type, "none") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      else if (type && strcmp(type, "tool") == 0 && ostr(tc, "name") && ostr(tc, "name")[0])
+      {
+         out->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+         out->tool_choice_name = dupstr(ostr(tc, "name"));
+         if (!out->tool_choice_name)
+            goto oom;
+      }
+      else
+      {
+         if (err && errn)
+            snprintf(err, errn, "anthropic_frontend_parse: unsupported tool_choice");
+         aimee_request_free(out);
+         return -1;
+      }
+      const cJSON *dp = cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "disable_parallel_tool_use");
+      if (cJSON_IsBool(dp))
+      {
+         out->has_parallel_tool_calls = 1;
+         out->parallel_tool_calls = !cJSON_IsTrue(dp);
+      }
+   }
 
    /* stop_sequences */
    const cJSON *stop = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stop_sequences");

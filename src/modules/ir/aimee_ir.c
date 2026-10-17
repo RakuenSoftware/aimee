@@ -161,7 +161,7 @@ void aimee_request_free(aimee_request_t *r)
       }
       free(r->tools);
    }
-   cJSON_Delete(r->tool_choice);
+   free_str(r->tool_choice_name);
    cJSON_Delete(r->metadata);
    free_str(r->service_tier);
    cJSON_Delete(r->thinking);
@@ -365,7 +365,11 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
           !json_eq(a->tools[i].schema, b->tools[i].schema))
          return 0;
    }
-   if (!json_eq(a->tool_choice, b->tool_choice))
+   if (a->tool_choice != b->tool_choice || (a->tool_choice == AIMEE_TOOL_CHOICE_TOOL &&
+                                            !str_eq(a->tool_choice_name, b->tool_choice_name)))
+      return 0;
+   if (a->has_parallel_tool_calls != b->has_parallel_tool_calls ||
+       (a->has_parallel_tool_calls && !a->parallel_tool_calls != !b->parallel_tool_calls))
       return 0;
    /* sampling params (content, not provenance) */
    if (a->has_max_tokens != b->has_max_tokens ||
