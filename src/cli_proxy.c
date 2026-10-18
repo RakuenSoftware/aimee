@@ -381,23 +381,53 @@ cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, cons
    snprintf(proxy->session_id, sizeof(proxy->session_id), "%s", session_id ? session_id : "");
    atomic_init(&proxy->stopping, 0);
    mutex_init(&proxy->mutex);
+#ifndef AIMEE_WINDOWS
+   pthread_attr_t scoped_attributes;
+   pthread_attr_t *worker_attributes = NULL;
+   if (route)
+   {
+      /* Scoped server callbacks run the same deep RPC handlers as the server
+       * listener, whose explicit stack is 32 MiB. The thin proxy stays default. */
+      if (pthread_attr_init(&scoped_attributes))
+      {
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      if (pthread_attr_setstacksize(&scoped_attributes, (size_t)32 * 1024 * 1024))
+      {
+         pthread_attr_destroy(&scoped_attributes);
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      worker_attributes = &scoped_attributes;
+   }
+#endif
    for (int i = 0; i < PROXY_WORKERS; i++)
    {
       proxy_worker_t *worker = &proxy->workers[i];
       worker->proxy = proxy;
       worker->downstream = worker->upstream = -1;
 #ifdef AIMEE_WINDOWS
-      worker->thread = (HANDLE)_beginthreadex(NULL, 0, proxy_worker, worker, 0, NULL);
+      worker->thread = (HANDLE)_beginthreadex(NULL, route ? 32u * 1024u * 1024u : 0, proxy_worker,
+                                              worker, 0, NULL);
       if (!worker->thread)
 #else
-      if (pthread_create(&worker->thread, NULL, proxy_worker, worker) != 0)
+      if (pthread_create(&worker->thread, worker_attributes, proxy_worker, worker) != 0)
 #endif
       {
+#ifndef AIMEE_WINDOWS
+         if (worker_attributes)
+            pthread_attr_destroy(worker_attributes);
+#endif
          cli_proxy_stop(proxy);
          return NULL;
       }
       proxy->started++;
    }
+#ifndef AIMEE_WINDOWS
+   if (worker_attributes)
+      pthread_attr_destroy(worker_attributes);
+#endif
 #ifdef AIMEE_WINDOWS
    proxy->monitor = (HANDLE)_beginthreadex(NULL, 0, proxy_monitor, proxy, 0, NULL);
    if (!proxy->monitor)

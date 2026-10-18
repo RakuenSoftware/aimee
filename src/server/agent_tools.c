@@ -38,9 +38,9 @@
  * The agent runtime calls agent_tools_begin_turn() at the start of each
  * tool-call round so that all write_file / edit_file calls within that round
  * share a single fsnap snapshot (visible in `aimee rewind list`). */
-_Thread_local static int g_aturn_turn = -1;      /* current turn (-1 = unknown) */
-_Thread_local static int64_t g_aturn_snapid = 0; /* cached snap id for this turn */
-_Thread_local static char g_aturn_sid[64] = {0}; /* session_id copy */
+_Thread_local static int g_aturn_turn = -1;       /* current turn (-1 = unknown) */
+_Thread_local static int64_t g_aturn_snapid = 0;  /* cached snap id for this turn */
+_Thread_local static char g_aturn_sid[128] = {0}; /* session_id copy */
 
 void agent_tools_begin_turn(int turn)
 {
@@ -87,6 +87,7 @@ _Thread_local static int g_write_capable = 1;
  * code that resolves against it belong together. The env var is still honoured (it
  * is how the single-process CLI passes --toolset); this takes precedence. */
 _Thread_local static char g_active_toolset[128];
+_Thread_local static int g_scope_isolated;
 
 void agent_tools_set_active_toolset(const char *toolset)
 {
@@ -580,6 +581,86 @@ int agent_tools_knowledge_write_allowed(void)
    return g_knowledge_write;
 }
 
+/* The state owner captures permissions once; a native callback cannot borrow
+ * another worker's deny-list storage or process-global toolset fallback. */
+void agent_tools_scope_bookmark(agent_tools_scope_snapshot_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   const char *role = agent_tools_dispatch_role();
+   snprintf(out->role, sizeof out->role, "%s", role ? role : "");
+   memcpy(out->toolset, g_active_toolset, sizeof out->toolset);
+   memcpy(out->session, g_aturn_sid, sizeof out->session);
+   memcpy(out->read_only_root, g_parent_ro_root, sizeof out->read_only_root);
+   memcpy(out->write_root, g_parent_write_root, sizeof out->write_root);
+   out->turn = g_aturn_turn;
+   out->snapshot_id = g_aturn_snapid;
+   out->write_capable = g_write_capable;
+   out->knowledge_write = g_knowledge_write;
+   out->shell = g_shell;
+   out->isolated = g_scope_isolated;
+   out->denied = g_denied;
+   out->denied_count = g_denied ? g_denied_count : 0;
+}
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope)
+{
+   if (!scope)
+      return;
+   if (scope->owned_denied)
+   {
+      for (int i = 0; i < scope->denied_count; i++)
+         free(scope->owned_denied[i]);
+      free(scope->owned_denied);
+   }
+   memset(scope, 0, sizeof *scope);
+}
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out)
+{
+   if (!out)
+      return -1;
+   agent_tools_scope_bookmark(out);
+   out->isolated = 1;
+   if (out->denied_count > 0)
+   {
+      if ((size_t)out->denied_count > SIZE_MAX / sizeof *out->owned_denied)
+         goto failed;
+      out->owned_denied = calloc((size_t)out->denied_count, sizeof *out->owned_denied);
+      if (!out->owned_denied)
+         goto failed;
+      for (int i = 0; i < out->denied_count; i++)
+         if (out->denied[i] && !(out->owned_denied[i] = strdup(out->denied[i])))
+            goto failed;
+      out->denied = (const char *const *)out->owned_denied;
+   }
+   return 0;
+failed:
+   agent_tools_scope_destroy_owned(out);
+   return -1;
+}
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope)
+{
+   if (!scope)
+      return;
+   agent_tools_set_dispatch_role(scope->role);
+   memcpy(g_active_toolset, scope->toolset, sizeof g_active_toolset);
+   memcpy(g_aturn_sid, scope->session, sizeof g_aturn_sid);
+   memcpy(g_parent_ro_root, scope->read_only_root, sizeof g_parent_ro_root);
+   memcpy(g_parent_write_root, scope->write_root, sizeof g_parent_write_root);
+   g_aturn_turn = scope->turn;
+   g_aturn_snapid = scope->snapshot_id;
+   g_write_capable = scope->write_capable;
+   g_knowledge_write = scope->knowledge_write;
+   g_shell = scope->shell;
+   g_scope_isolated = scope->isolated;
+   g_denied = scope->denied;
+   g_denied_count = scope->denied_count;
+}
+int agent_tools_scope_isolated(void)
+{
+   return g_scope_isolated;
+}
+
 /* Which toolset a delegate runs with.
  *
  * Three sources, in order:
@@ -656,7 +737,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
     * concurrent delegate's value would otherwise decide what THIS one may call. The
     * env var stays as the single-process CLI's --toolset channel. */
    const char *toolset_name = agent_tools_active_toolset();
-   if (!toolset_name || !toolset_name[0])
+   if ((!toolset_name || !toolset_name[0]) && !g_scope_isolated)
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
       toolset_name = delegate_toolset_for_role(role);
@@ -755,7 +836,7 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
     * so what we advertise and what we enforce never disagree (e.g. a panel sets its
     * toolset thread-locally, not via the env). */
    const char *toolset_name = agent_tools_active_toolset();
-   if (!toolset_name || !toolset_name[0])
+   if ((!toolset_name || !toolset_name[0]) && !g_scope_isolated)
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;

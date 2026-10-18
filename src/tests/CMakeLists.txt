@@ -461,6 +461,7 @@ if(NOT WIN32)
   aimee_enable_test_asserts(test_server_native_replay)
   add_test(NAME test_server_native_replay COMMAND test_server_native_replay)
   add_executable(test_server_native_runtime test_server_native_runtime.c
+    ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../cli_proxy.c ../server/request_context.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
   target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}

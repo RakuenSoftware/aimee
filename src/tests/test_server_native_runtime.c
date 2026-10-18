@@ -1,4 +1,11 @@
 #include "server_native_runtime.h"
+#include <aimee/tools/agent_tools.h>
+#include "agent_source_authority.h"
+#include "agent_tasks.h"
+#include "server_delegate_scope.h"
+#include "server_session_control.h"
+#include "modules/workspace/workspace_provider.h"
+#include "util.h"
 #include "server_native_replay.h"
 #include <aimee/translation/aimee_frontend.h>
 #include "server_http.h"
@@ -13,6 +20,121 @@
 #include <string.h>
 #include <unistd.h>
 
+static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];
+static _Thread_local int job_id, effect_authorized, scope_admitted;
+static void restored_probe(void);
+static _Thread_local server_delegate_scope_t delegate_scope;
+static _Thread_local const workspace_provider_t *workspace;
+static _Thread_local server_control_scope_t *controls;
+static workspace_provider_t alice_workspace = {.kind = WS_PROVIDER_SHARED};
+static workspace_provider_t bob_workspace = {.kind = WS_PROVIDER_SHARED};
+const char *agent_tools_dispatch_role(void)
+{
+   return tool_role[0] ? tool_role : NULL;
+}
+void agent_tools_set_dispatch_role(const char *role)
+{
+   snprintf(tool_role, sizeof tool_role, "%s", role ? role : "");
+}
+void agent_tools_set_effect_authorized(int authorized)
+{
+   effect_authorized = authorized;
+}
+const char *run_cmd_get_cwd(void)
+{
+   return tool_cwd[0] ? tool_cwd : NULL;
+}
+void run_cmd_set_cwd(const char *cwd)
+{
+   snprintf(tool_cwd, sizeof tool_cwd, "%s", cwd ? cwd : "");
+}
+const char *session_id(void)
+{
+   return tool_session;
+}
+int session_id_override_active(void)
+{
+   return tool_session[0] != 0;
+}
+void session_id_set_override(const char *sid)
+{
+   snprintf(tool_session, sizeof tool_session, "%s", sid ? sid : "");
+}
+void agent_set_durable_job(int id)
+{
+   job_id = id;
+}
+int agent_get_durable_job_id(void)
+{
+   return job_id;
+}
+const workspace_provider_t *workspace_provider_active(void)
+{
+   return workspace;
+}
+void workspace_provider_set_active(const workspace_provider_t *provider)
+{
+   workspace = provider;
+}
+void server_delegate_scope_capture(server_delegate_scope_t *out)
+{
+   *out = delegate_scope;
+}
+void server_delegate_scope_restore(const server_delegate_scope_t *scope)
+{
+   delegate_scope = *scope;
+}
+server_control_scope_t *server_control_scope_bind(server_control_scope_t *scope)
+{
+   server_control_scope_t *old = controls;
+   controls = scope;
+   if (scope_admitted)
+   {
+      restored_probe();
+      scope_admitted = 0;
+   }
+   return old;
+}
+char *normalize_path(const char *path, const char *cwd, char *out, size_t capacity)
+{
+   (void)cwd;
+   snprintf(out, capacity, "%s", path);
+   return out;
+}
+
+static void owner_tools(int alice)
+{
+   static _Thread_local char deny[64];
+   static _Thread_local const char *denied[1];
+   strcpy(deny, alice ? "git_push" : "write_file");
+   denied[0] = deny;
+   agent_tools_set_dispatch_role(alice ? "reviewer" : "");
+   agent_tools_set_active_toolset(alice ? "review_indexed" : NULL);
+   agent_tools_write_capable_set(!alice);
+   agent_tools_shell_set(!alice);
+   agent_tools_knowledge_write_set(!alice);
+   agent_tools_denied_set(denied, 1);
+   agent_tools_parent_write_guard_set(alice ? "/parent/alice" : "/parent/bob",
+                                      alice ? "/work/alice" : "/work/bob");
+   session_id_set_override(alice ? "session-a" : "session-b");
+   agent_tools_begin_turn(alice ? 7 : 9);
+   agent_tools_set_snap_id(alice ? 71 : 91);
+   run_cmd_set_cwd(alice ? "/work/alice" : "/work/bob");
+   workspace = alice ? &alice_workspace : &bob_workspace;
+   job_id = alice ? 11 : 22;
+   delegate_scope = (server_delegate_scope_t){.depth = alice ? 2 : 0};
+   if (alice)
+      strcpy(delegate_scope.parent, "parent-alice");
+   delegate_scope.mailbox = alice ? &alice_workspace : NULL;
+   if (alice)
+      agent_source_authority_tls_set(1, "/source/alice", "src/alice.c\n");
+   else
+   {
+      agent_source_authority_snapshot_t absent = {0};
+      agent_source_authority_tls_restore(&absent);
+   }
+}
+
 static _Thread_local agent_request_creds_t current_credentials;
 static _Thread_local const agent_t *current_model;
 static _Thread_local atomic_int *current_cancel;
@@ -24,6 +146,25 @@ static int seen_count;
 static void probe_replay_scope(const char *path);
 static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_removed,
     malformed_source;
+
+static void restored_probe(void)
+{
+   assert(!current_model && !request_context_get());
+   assert(!agent_tools_scope_isolated() && !agent_tools_dispatch_role());
+   assert(!agent_tools_active_toolset());
+   assert(!agent_tools_tool_denied("git_push") && !agent_tools_tool_denied("write_file"));
+   assert(!agent_tools_parent_write_guard_root() && !agent_tools_parent_write_guard_write_root());
+   assert(!agent_tools_readonly_delegate_blocks());
+   assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
+   assert(agent_tools_get_turn() == -1 && !agent_tools_get_snap_id());
+   assert(!run_cmd_get_cwd() && !session_id_override_active());
+   assert(!job_id && !workspace && !controls && !effect_authorized);
+   assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
+   agent_source_authority_snapshot_t previous = {0};
+   assert(!agent_source_authority_tls_capture_checked(&previous));
+   assert(!previous.active && !previous.authority && !previous.root[0] && !previous.paths);
+   agent_source_authority_snapshot_destroy(&previous);
+}
 
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
@@ -52,6 +193,8 @@ const agent_t *agent_registry_bind_ingress_model(const agent_t *selected)
 {
    const agent_t *previous = current_model;
    current_model = selected;
+   if (selected)
+      scope_admitted = 1;
    return previous;
 }
 int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out)
@@ -121,12 +264,53 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    (void)method;
    probe_replay_scope(path);
    assert(protocol_captured);
-   assert(length == 2 && !strcmp(body, "{}"));
+   assert(length == (int)strlen(body));
+   if (strncmp(path, "/v1/mcp/", 8))
+      assert(length == 2 && !strcmp(body, "{}"));
    const request_context_t *owner = request_context_get();
    assert(owner && owner->vault_transport == ATTEST_WEBCHAT_TRUSTED);
    assert(!strcmp(identity, owner->vault_principal));
    assert(!strcmp(owner->method, method) && !strcmp(owner->path, path));
    assert(owner->model_execution);
+   int alice = !strcmp(owner->vault_principal, "webuser:alice");
+   assert(agent_tools_scope_isolated());
+   assert(!strcmp(tool_role, alice ? "reviewer" : ""));
+   const char *toolset = agent_tools_active_toolset();
+   assert(alice ? toolset && !strcmp(toolset, "review_indexed") : !toolset);
+   assert(agent_tools_readonly_delegate_blocks() == alice);
+   assert(agent_tools_shell_allowed() == !alice && agent_tools_knowledge_write_allowed() == !alice);
+   assert(agent_tools_tool_denied(alice ? "git_push" : "write_file"));
+   assert(!strcmp(agent_tools_parent_write_guard_root(), alice ? "/parent/alice" : "/parent/bob"));
+   assert(
+       !strcmp(agent_tools_parent_write_guard_write_root(), alice ? "/work/alice" : "/work/bob"));
+   assert(agent_tools_get_turn() == (alice ? 7 : 9));
+   assert(agent_tools_get_snap_id() == (alice ? 71 : 91));
+   assert(!strcmp(run_cmd_get_cwd(), alice ? "/work/alice" : "/work/bob"));
+   assert(!strcmp(session_id(), owner->session_key));
+   assert(job_id == (alice ? 11 : 22));
+   assert(workspace == (alice ? &alice_workspace : &bob_workspace));
+   assert(delegate_scope.depth == (alice ? 2 : 0));
+   assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
+   assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));
+   assert(!controls && !effect_authorized);
+   agent_source_authority_snapshot_t observed = {0};
+   assert(!agent_source_authority_tls_capture_checked(&observed));
+   assert(observed.active && observed.authority == alice);
+   assert(!strcmp(observed.root, alice ? "/source/alice" : ""));
+   assert(alice ? observed.paths && !strcmp(observed.paths, "src/alice.c\n") : !observed.paths);
+   agent_source_authority_snapshot_destroy(&observed);
+   if (!strncmp(path, "/v1/mcp/", 8))
+   {
+      cJSON *request = cJSON_Parse(body);
+      assert(request &&
+             !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "session_id")),
+                     owner->session_key));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "cwd")),
+                     "/work/alice"));
+      assert(strstr(body, "9007199254740993"));
+      cJSON_Delete(request);
+   }
+
    assert(!owner->idempotency_key[0]);
    assert(strlen(owner->request_id) == 32);
    pthread_mutex_lock(&ids_mutex);
@@ -240,13 +424,17 @@ static int send_request(const server_native_runtime_t *runtime, const char *path
    int fd = aimee_core_socket_connect("127.0.0.1", port, 2000);
    assert(fd >= 0);
    assert(!aimee_core_socket_set_timeouts(fd, 5000, 2000));
-   char request[1024];
+   char request[2048];
+   const char *body =
+       strncmp(path, "/v1/mcp/", 8)
+           ? "{}"
+           : "{\"session_id\":\"forged-session\",\"arguments\":{\"large\":9007199254740993}}";
    int n = snprintf(request, sizeof request,
                     "POST %s HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nAuthorization: Bearer %s\r\n"
                     "X-Aimee-Webuser: mallory\r\naimee-session-id: forged\r\n"
                     "Anthropic-Version: 2023-06-01\r\nAnthropic-Beta: fixture-beta\r\n"
-                    "Content-Length: 2\r\n\r\n{}",
-                    path, port, token);
+                    "Content-Length: %zu\r\n\r\n%s",
+                    path, port, token, strlen(body), body);
    assert(!aimee_core_socket_write_all(fd, request, (size_t)n));
    return fd;
 }
@@ -284,12 +472,23 @@ int main(void)
    b.capabilities = CAP_CHAT;
    assert(!server_native_runtime_open(&selected, NULL, "session-a"));
    assert(!server_native_runtime_open(&selected, &b, "session-a"));
+   owner_tools(1);
    atomic_store(&malformed_source, 1);
    assert(!server_native_runtime_open(&selected, &a, "session-a"));
    atomic_store(&malformed_source, 0);
    server_native_runtime_t *alice = server_native_runtime_open(&selected, &a, "session-a");
+   owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
+   /* Destroy/change every original borrowed host value after the owner copy.
+    * Callback workers must retain each captured policy and source independently. */
+   owner_tools(1);
+   agent_tools_set_dispatch_role("changed-after-open");
+   agent_tools_set_active_toolset("coding");
+   agent_source_authority_tls_set(1, "/foreign", "foreign.c");
+   setenv("AIMEE_ACTIVE_TOOLSET", "foreign-toolset", 1);
+   setenv("AIMEE_DELEGATE_SOURCE_PATHS", "foreign-process-path", 1);
+
    assert(strcmp(server_native_runtime_binding(alice), server_native_runtime_binding(bob)));
    assert(strlen(server_native_runtime_token(alice)) == 64);
    char response[1024];
@@ -336,6 +535,12 @@ int main(void)
    assert(atomic_load(&cancelled));
    server_native_runtime_close(alice);
    server_native_runtime_close(bob);
-   puts("native runtime: owned actor/session/model, capability, lineage and cancellation passed");
+   unsetenv("AIMEE_ACTIVE_TOOLSET");
+   unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");
+   agent_source_authority_snapshot_t absent = {0};
+   agent_source_authority_tls_restore(&absent);
+   agent_tools_denied_set(NULL, 0);
+   puts("native runtime: owned actor/model/permissions/source, resource leases and cancellation "
+        "passed");
    return 0;
 }

@@ -10,7 +10,9 @@ typedef struct server_native_runtime server_native_runtime_t;
  * to the attested request owner. No operator/global CLI credential is borrowed.
  * Model forwarding requires stable Vault source lineage (currently Codex);
  * other native credential owners still require their custody cutover.
- * Close only after the native child exits; it joins all admitted callbacks. */
+ * Caller retains its active workspace/delegate resource leases until close.
+ * Close only after the native child exits; it joins all admitted callbacks.
+ * Callback workers inherit model permissions and never operator controls. */
 server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id);

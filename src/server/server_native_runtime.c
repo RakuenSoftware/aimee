@@ -1,6 +1,13 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include <aimee/tools/agent_tools.h>
+#include "agent_source_authority.h"
+#include "agent_tasks.h"
+#include "server_delegate_scope.h"
+#include "server_session_control.h"
+#include "modules/workspace/workspace_provider.h"
+#include "util.h"
 #include "server_native_replay.h"
 #include <aimee/translation/aimee_frontend.h>
 #include "cli_proxy.h"
@@ -25,6 +32,12 @@ struct server_native_runtime
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
+   agent_tools_scope_snapshot_t tools;
+   agent_source_authority_snapshot_t source;
+   server_delegate_scope_t delegate;
+   const workspace_provider_t *workspace;
+   char cwd[MAX_PATH_LEN];
+   int job_id;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
@@ -104,6 +117,69 @@ static int native_forward(const char *method, const char *path, const char *head
    if (length)
       memcpy(input, body, (size_t)length);
    input[length] = 0;
+   if (!model_request && !strcmp(method, "POST"))
+   {
+      /* Session metadata is host identity, even inside the MCP body. Tool
+       * arguments remain intact; exact numeric argument spelling is retained. */
+      cJSON *request = aimee_ir_json_parse_frame(input, (size_t)length);
+      if (!cJSON_IsObject(request))
+      {
+         cJSON_Delete(request);
+         free(input);
+         return -1;
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "session_id");
+      if (!cJSON_AddStringToObject(request, "session_id", runtime->session) ||
+          (runtime->cwd[0] && !cJSON_GetObjectItemCaseSensitive(request, "cwd") &&
+           !cJSON_AddStringToObject(request, "cwd", runtime->cwd)))
+      {
+         cJSON_Delete(request);
+         free(input);
+         return -1;
+      }
+      free(input);
+      input = cJSON_PrintUnformatted(request);
+      cJSON_Delete(request);
+      if (!input)
+         return -1;
+      length = (unsigned long)strlen(input);
+      if (length > 4u * 1024u * 1024u)
+      {
+         free(input);
+         return -1;
+      }
+   }
+   /* These host leases outlive the child and this listener. Workers receive
+    * owned permission/source copies and borrowed stable resource providers. */
+   agent_source_authority_snapshot_t previous_source = {0}, bound_source = {0};
+   if (agent_source_authority_tls_capture_checked(&previous_source) ||
+       agent_source_authority_snapshot_clone(&runtime->source, &bound_source))
+   {
+      agent_source_authority_snapshot_destroy(&previous_source);
+      agent_source_authority_snapshot_destroy(&bound_source);
+      free(input);
+      return -1;
+   }
+   agent_tools_scope_snapshot_t previous_tools;
+   agent_tools_scope_bookmark(&previous_tools);
+   server_delegate_scope_t previous_delegate;
+   server_delegate_scope_capture(&previous_delegate);
+   const workspace_provider_t *previous_workspace = workspace_provider_active();
+   int previous_job = agent_get_durable_job_id();
+   char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
+   const char *cwd = run_cmd_get_cwd();
+   snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
+   if (session_id_override_active())
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   server_control_scope_t *previous_controls = server_control_scope_bind(NULL);
+   agent_tools_scope_restore(&runtime->tools);
+   agent_tools_set_effect_authorized(0);
+   agent_source_authority_tls_restore(&bound_source);
+   server_delegate_scope_restore(&runtime->delegate);
+   workspace_provider_set_active(runtime->workspace);
+   agent_set_durable_job(runtime->job_id);
+   run_cmd_set_cwd(runtime->cwd);
+   session_id_set_override(runtime->session);
    request_context_snapshot_t previous_request;
    request_context_snapshot(&previous_request);
    agent_request_creds_t previous_credentials;
@@ -171,6 +247,15 @@ restore:
    request_context_restore(&previous_request);
    server_http_identity_bind_request_owner(request_context_get());
    request_context_snapshot_clear(&previous_request);
+   agent_tools_set_effect_authorized(0);
+   agent_tools_scope_restore(&previous_tools);
+   agent_source_authority_tls_restore(&previous_source);
+   server_delegate_scope_restore(&previous_delegate);
+   workspace_provider_set_active(previous_workspace);
+   agent_set_durable_job(previous_job);
+   run_cmd_set_cwd(previous_cwd);
+   session_id_set_override(previous_session);
+   server_control_scope_bind(previous_controls);
    free(input);
    return rc;
 }
@@ -207,6 +292,21 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    snprintf(runtime->credentials.vault_principal, sizeof runtime->credentials.vault_principal, "%s",
             owner->vault_principal);
    agent_codex_credentials_t credentials = {0};
+   if (agent_tools_scope_capture_owned(&runtime->tools) ||
+       agent_source_authority_tls_capture_checked(&runtime->source))
+      goto failed;
+   /* An ordinary primary has no delegate source overlay. Make that absence
+    * explicit rather than falling back to a concurrent delegate's global env. */
+   if (!runtime->source.active)
+   {
+      agent_source_authority_snapshot_destroy(&runtime->source);
+      runtime->source.active = 1;
+   }
+   runtime->workspace = workspace_provider_active();
+   runtime->job_id = agent_get_durable_job_id();
+   server_delegate_scope_capture(&runtime->delegate);
+   const char *cwd = run_cmd_get_cwd();
+   snprintf(runtime->cwd, sizeof runtime->cwd, "%s", cwd ? cwd : "");
    if (!strcmp(selected->auth_type, "codex-oauth"))
    {
       const char *registration =
@@ -285,6 +385,8 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
       return;
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
+   agent_tools_scope_destroy_owned(&runtime->tools);
+   agent_source_authority_snapshot_destroy(&runtime->source);
    OPENSSL_cleanse(runtime, sizeof *runtime);
    free(runtime);
 }

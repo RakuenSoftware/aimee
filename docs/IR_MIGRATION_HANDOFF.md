@@ -9,7 +9,7 @@ learning work. The follow-up is [#3047](https://github.com/RakuenSoftware/aimee/
 branch `fix/browser-ir-continuation`, based on merged #3038 (`344139139`). Its scoped native
 runtime prerequisites and exact validation limits are recorded at the end of this handoff.
 The scoped runtime now captures and restores replay evidence, with SDK activation still pending.
-The SDK cutover, account-bound cache/history adoption and standalone learning repair remain unfinished. Do not treat the new foundation as overall completion.
+The SDK cutover, account-bound cache/history adoption and autonomous learning remain unfinished. Explicit receipt-bound feedback now persists without a KB; this does not establish independent grading or synthesis. Do not treat these prerequisites as overall completion.
 
 Automatic reviews and strict attribution remain enabled. Production `.100` must remain KB-free.
 Do not reopen #3036 or add WOL work. Earlier instructions to continue the now-merged #3038
@@ -1129,3 +1129,34 @@ PostgreSQL retries cover maximum admitted action/gap arrays exceeding 64 KiB,
 without the old 4096-byte DTO. The script suite's observed shared-checkout race
 was repaired and independently stress-run; its complete rerun/fresh CI remain
 the final validation for this checkpoint.
+
+
+## Native execution context handoff
+
+The scoped listener now owns captured tool permissions and source-authority paths,
+including role, toolset, deny list, write/shell/knowledge limits and turn snapshot.
+Callbacks bind the captured workspace, cwd, job, session and delegate context and
+restore the worker context on success or refusal. Empty native scopes cannot fall
+back to another delegate's process environment. Model callbacks clear effect grants
+and operator controls; the SDK reader retains human control ownership. The caller
+must retain workspace/delegate leases until the child exits and listener joins.
+
+MCP bodies receive the host session identity, preserving tool argument numeric
+spelling. Session overrides retain the full 127-character canonical identifier.
+Scoped HTTP workers use the server's 32 MiB stack size for deep model/tool handlers.
+The production server, full agent fixture, native runtime fixture, ASan/UBSan,
+ThreadSanitizer and CMake assertions pass. All 76 lint checks pass; exact CI
+Cppcheck 2.13.0 reports no diagnostics for the six affected production files.
+
+This supplies context handoff, not complete SDK activation or MCP admission.
+The served MCP boundary still needs shared role/permission/effect enforcement;
+carrying a permission snapshot alone does not establish that enforcement. Native
+history/cache prefix proof, streaming and credential custody remain prerequisites.
+
+The full local script rerun passes all 69 tests (one proxy fixture runs separately).
+The feedback route fixture now links the real request-context owner and covers
+local/remote selection plus model-feedback refusal. Its DB1 reply is initialized;
+the exact CI Cppcheck ratchet returns to 46 pre-existing telemetry diagnostics.
+Published checkpoint `4be93529f` has 54 passing checks, two platform skips and
+one Docker tier pending at this observation; no failures. Later commits require
+their own fresh qualification. No production promotion has occurred.

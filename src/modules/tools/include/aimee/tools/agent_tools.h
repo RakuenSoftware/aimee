@@ -268,6 +268,27 @@ int agent_tools_get_turn(void);
 int64_t agent_tools_get_snap_id(void);
 void agent_tools_set_snap_id(int64_t id);
 
+/* Host execution handoff. A bookmark borrows the current deny list and stays
+ * on its originating call stack. An owned snapshot deep-copies it and may be
+ * shared read-only by joined native callback workers. No callbacks, credentials
+ * or per-call effect authorization are carried. Restore before destroying an
+ * owned snapshot; all bound workers must have joined first. */
+typedef struct
+{
+   char role[64], toolset[128], session[128];
+   char read_only_root[MAX_PATH_LEN], write_root[MAX_PATH_LEN];
+   int turn, write_capable, knowledge_write, shell, isolated;
+   int64_t snapshot_id;
+   const char *const *denied;
+   int denied_count;
+   char **owned_denied;
+} agent_tools_scope_snapshot_t;
+void agent_tools_scope_bookmark(agent_tools_scope_snapshot_t *out);
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out);
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope);
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope);
+int agent_tools_scope_isolated(void);
+
 /* Delegate parent-worktree write guard.
  * read_only_root remains readable but must not be writable through local tools.
  * write_root is an optional exception, normally the delegate's isolated worktree. */
