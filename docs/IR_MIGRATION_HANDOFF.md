@@ -1160,3 +1160,26 @@ the exact CI Cppcheck ratchet returns to 46 pre-existing telemetry diagnostics.
 Published checkpoint `4be93529f` has 54 passing checks, two platform skips and
 one Docker tier pending at this observation; no failures. Later commits require
 their own fresh qualification. No production promotion has occurred.
+
+
+## Real SDK tool history qualification
+
+The actual SDK fixture now runs a local stdio MCP server, executes a failed
+read-only tool, resumes after process restart, then adopts the captured canonical
+messages into a separate native thread. Both Codex 0.153.4 (CI pin) and 0.160.1
+pass. The provider receives the same full call/result ID, actual arguments and
+callable namespace on fresh canonical adoption. Structured failure content survives.
+No vendor credential, external model or production service participates.
+
+This found and repaired SDK tool ingress semantics: MCP/dynamic arguments are no
+longer wrapped in an extra host `arguments` object, MCP callable namespaces retain
+the SDK's namespace identity, and dynamic results retain `contentItems`. Failed
+commands with completed status and nonzero exit code, dynamic `success=false`,
+MCP error payloads and SDK failed/declined status all set canonical error intent.
+The narrow C fixtures and ASan/UBSan pass, as do both real SDK qualifications.
+The CMake harness/headless targets now link their required SHA-256 owner and
+OpenSSL dependency; both pass with assertions enabled. All 76 lint gates and
+exact CI Cppcheck pass for this change.
+Old durable records are not heuristically rewritten; earlier wrapped records do
+not establish byte-equivalent native replay. Full account-bound prefix admission,
+compaction qualification and command-item adoption still need completion.

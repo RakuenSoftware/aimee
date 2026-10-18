@@ -921,7 +921,13 @@ static void test_canonical_history_adoption(void)
 
 /* Used by the opt-in real SDK integration fixture. All model traffic is sent
  * to its loopback provider; no server/Vault credential is needed or read. */
-static int native_history_probe(const char *resume)
+static int native_probe_capture(const aimee_session_event_t *event, void *context)
+{
+   cJSON *json = aimee_ir_session_event_json(event);
+   return json && cJSON_AddItemToArray(context, json) ? 0 : -1;
+}
+
+static int native_history_probe(const char *resume, const char *history_file)
 {
    cJSON *arguments = cJSON_Parse("{\"path\":\"fixture.txt\"}");
    cJSON *result = cJSON_CreateString("prior tool result");
@@ -938,16 +944,41 @@ static int native_history_probe(const char *resume)
                                  {.role = "user", .blocks = blocks + 2, .n_blocks = 1},
                                  {.role = "assistant", .blocks = blocks + 3, .n_blocks = 1}};
    aimee_request_t history = {.messages = messages, .n_messages = 4};
+   aimee_request_t adopted = {0};
+   if (history_file)
+   {
+      FILE *file = fopen(history_file, "rb");
+      assert(file);
+      char input[65536];
+      size_t size = fread(input, 1, sizeof input - 1, file);
+      assert(feof(file) && !ferror(file));
+      fclose(file);
+      cJSON *json = aimee_ir_json_parse_frame(input, size);
+      assert(cJSON_IsArray(json));
+      adopted.n_messages = cJSON_GetArraySize(json);
+      assert(adopted.n_messages > 0 && adopted.n_messages <= 128);
+      adopted.messages = calloc((size_t)adopted.n_messages, sizeof *adopted.messages);
+      assert(adopted.messages);
+      for (int i = 0; i < adopted.n_messages; i++)
+         assert(aimee_ir_message_parse(cJSON_GetArrayItem(json, i), adopted.messages + i) == 0);
+      cJSON_Delete(json);
+   }
    cli_codex_chat_request_t req = {.thread_id = resume,
-                                   .history = resume ? NULL : &history,
+                                   .history = history_file ? &adopted
+                                              : resume     ? NULL
+                                                           : &history,
                                    .user_prompt = resume ? "after restart" : "current user",
                                    .model = "fixture-model",
                                    .system_prompt = "Local native protocol fixture.",
                                    .timeout_ms = 15000};
    cli_codex_chat_result_t out;
    codex_stream_capture_t captured = {0};
+   cJSON *events = cJSON_CreateArray();
+   aimee_ir_session_set_sink(native_probe_capture, events);
    int rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
+   aimee_ir_session_set_sink(NULL, NULL);
    cJSON *report = cJSON_CreateObject();
+   cJSON_AddItemToObject(report, "events", events);
    cJSON_AddStringToObject(report, "thread_id", out.thread_id);
    cJSON_AddStringToObject(report, "text", captured.buf);
    cJSON_AddStringToObject(report, "error", out.error);
@@ -958,6 +989,7 @@ static int native_history_probe(const char *resume)
    cJSON_Delete(report);
    cJSON_Delete(arguments);
    cJSON_Delete(result);
+   aimee_request_free(&adopted);
    return rc ? 1 : 0;
 }
 
@@ -965,7 +997,8 @@ int main(int argc, char **argv)
 {
    signal(SIGPIPE, SIG_IGN);
    if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
-      return native_history_probe(argc == 3 ? argv[2] : NULL);
+      return native_history_probe(argc == 3 ? argv[2] : NULL,
+                                  argc == 4 && !strcmp(argv[2], "--import") ? argv[3] : NULL);
    test_canonical_history_adoption();
    puts("canonical history: typed adoption, resume protocol and refusal before model turn "
         "passed");

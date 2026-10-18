@@ -477,12 +477,14 @@ endif()
 aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
   ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
-  ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+  ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+target_link_libraries(test_harness_ir PRIVATE OpenSSL::Crypto)
 if(NOT WIN32)
   aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c ../server/server_session_control.c
     ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
     ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
-    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_claude_headless PRIVATE OpenSSL::Crypto)
 endif()
 
 if(NOT WIN32)
