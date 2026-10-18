@@ -2,20 +2,23 @@ package delegates
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/ir"
 )
 
 const (
 	StageRescue uint32 = 6
 	EventRescue uint32 = 6662
 
-	rescueRequestMagic  uint32 = 0x51535244 /* "DRSQ" */
-	rescueResponseMagic uint32 = 0x52535244 /* "DRSR" */
-	rescueReqHeaderLen         = 16
-	rescueRespHeaderLen        = 16
-	rescueTextMax              = 1 << 20
-	rescueKnownMax             = 4096
+	rescueRequestMagic uint32 = 0x51535244 /* "DRSQ" */
+	rescueWireVersion  byte   = 2
+	rescueReqHeaderLen        = 16
+	rescueTextMax             = 1 << 20
+	rescueKnownMax            = 4096
 
 	// Detection runs on every model response, so it is its own mode rather
 	// than a full parse whose result is thrown away.
@@ -34,7 +37,7 @@ func decodeRescueRequest(request []byte) (rescueRequest, bool) {
 	var out rescueRequest
 	if len(request) < rescueReqHeaderLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != rescueRequestMagic ||
-		request[4] != wireVersion || request[5] > 1 || request[6] > rescueModeDetect {
+		request[4] != rescueWireVersion || request[5] > 1 || request[6] > rescueModeDetect || request[7] != 0 {
 		return out, false
 	}
 	out.allowJSON = request[5] == 1
@@ -47,6 +50,9 @@ func decodeRescueRequest(request []byte) (rescueRequest, bool) {
 		return out, false
 	}
 	out.text = string(request[rescueReqHeaderLen : rescueReqHeaderLen+textLen])
+	if !utf8.ValidString(out.text) || strings.ContainsRune(out.text, 0) {
+		return out, false
+	}
 
 	out.known = make([]string, 0, knownCount)
 	at := rescueReqHeaderLen + textLen
@@ -59,7 +65,11 @@ func decodeRescueRequest(request []byte) (rescueRequest, bool) {
 		if at+n > len(request) {
 			return out, false
 		}
-		out.known = append(out.known, string(request[at:at+n]))
+		name := string(request[at : at+n])
+		if !utf8.ValidString(name) || strings.ContainsRune(name, 0) {
+			return out, false
+		}
+		out.known = append(out.known, name)
 		at += n
 	}
 	if at != len(request) {
@@ -83,32 +93,47 @@ func handleRescue(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 		return nil, bus.ModuleStatusCancelled
 	}
 
-	response := make([]byte, rescueRespHeaderLen)
-	binary.LittleEndian.PutUint32(response[0:4], rescueResponseMagic)
-
+	response := rescueResponse{Version: 1}
 	if req.mode == rescueModeDetect {
-		if RescueHasToolCalls(req.text, req.known, req.allowJSON) {
-			binary.LittleEndian.PutUint32(response[4:8], 1)
+		response.Matched = RescueHasToolCalls(req.text, req.known, req.allowJSON)
+	} else {
+		result, found := RescueParseToolCalls(req.text, req.known, req.allowJSON)
+		if found < 0 || found != len(result.Calls) {
+			return nil, bus.ModuleStatusInvalidRequest
 		}
-		return response, bus.ModuleStatusOK
+		if found > 0 {
+			message := ir.Message{Role: "assistant", Blocks: make([]ir.Block, 0, len(result.Calls)+1)}
+			if result.Content != "" {
+				text := result.Content
+				message.Blocks = append(message.Blocks, ir.Block{Type: "text", Text: &text})
+			}
+			for _, call := range result.Calls {
+				var input json.RawMessage
+				if !strings.HasPrefix(strings.TrimSpace(call.Arguments), "{") || !ir.Decode([]byte(call.Arguments), &input) {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+				message.Blocks = append(message.Blocks, ir.Block{Type: "tool_use", ToolID: call.ID, Name: call.Name, Input: input})
+			}
+			encoded, err := json.Marshal([]ir.Message{message})
+			if err != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			if _, err := ir.DecodeMessages(encoded); err != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			response.Matched = true
+			response.Message = &message
+		}
 	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return encoded, bus.ModuleStatusOK
+}
 
-	result, found := RescueParseToolCalls(req.text, req.known, req.allowJSON)
-	if result.IsToolCall {
-		binary.LittleEndian.PutUint32(response[4:8], 1)
-	}
-	binary.LittleEndian.PutUint32(response[8:12], uint32(found))
-	binary.LittleEndian.PutUint32(response[12:16], uint32(len(result.Content)))
-	response = append(response, result.Content...)
-	for _, call := range result.Calls {
-		var hdr [8]byte
-		binary.LittleEndian.PutUint16(hdr[0:2], uint16(len(call.ID)))
-		binary.LittleEndian.PutUint16(hdr[2:4], uint16(len(call.Name)))
-		binary.LittleEndian.PutUint32(hdr[4:8], uint32(len(call.Arguments)))
-		response = append(response, hdr[:]...)
-		response = append(response, call.ID...)
-		response = append(response, call.Name...)
-		response = append(response, call.Arguments...)
-	}
-	return response, bus.ModuleStatusOK
+type rescueResponse struct {
+	Version int         `json:"version"`
+	Matched bool        `json:"matched"`
+	Message *ir.Message `json:"message,omitempty"`
 }

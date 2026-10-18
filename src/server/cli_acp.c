@@ -1,3 +1,4 @@
+#include <aimee/translation/harness_ir.h>
 /* cli_acp.c: outbound ACP delegate transport.
  *
  * Implements provider_cli_adapter_t for ACP-capable external agents
@@ -19,6 +20,7 @@
  */
 
 #include "provider_cli_adapter.h"
+#include "agent_config.h"
 #include "util.h"
 
 #include "cJSON.h"
@@ -149,6 +151,8 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
 {
    for (;;)
    {
+      if (agent_request_cancelled())
+         return NULL;
       /* Check buffer for complete line */
       char *nl = memchr(p->buf, '\n', p->buf_len);
       if (nl)
@@ -184,6 +188,8 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
          return NULL;
 
       long long remain_ms = deadline_ms - now;
+      if (remain_ms > 100 && aimee_ir_session_get_sink(NULL))
+         remain_ms = 100;
       struct timeval tv = {
           .tv_sec = (time_t)(remain_ms / 1000),
           .tv_usec = (suseconds_t)((remain_ms % 1000) * 1000),
@@ -193,6 +199,8 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
       FD_ZERO(&rfds);
       FD_SET(p->out_fd, &rfds);
       int sel = select(p->out_fd + 1, &rfds, NULL, NULL, &tv);
+      if (sel == 0 && aimee_ir_session_get_sink(NULL))
+         continue;
       if (sel <= 0)
          return NULL; /* timeout or error */
 
@@ -729,11 +737,22 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
    /* 4. read events until turn complete (parsing is in pure acp_turn_consume).
     * The turn ends with the response to the session/prompt request (id 3). */
    acp_turn_state_t st = {.prompt_id = 3};
+   aimee_harness_ir_t ir = {0};
+   int capture_failed = 0;
    while (!st.done && util_now_ms() < deadline_ms)
    {
       char *line = acp_read_line(&p, deadline_ms);
       if (!line)
          break;
+      cJSON *native = cJSON_Parse(line);
+      int capture = cJSON_IsObject(native) ? aimee_acp_frame_ir(native, &ir) : 0;
+      cJSON_Delete(native);
+      if (capture != 0)
+      {
+         capture_failed = 1;
+         free(line);
+         break;
+      }
       /* Agent-issued client requests (fs read/write, permission) act on aimee's
        * worktree and must be answered before the turn can complete. */
       char *client_resp = NULL;
@@ -741,6 +760,16 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
       {
          if (client_resp)
          {
+            cJSON *reply = cJSON_Parse(client_resp);
+            int capture = aimee_codex_reply_ir(reply, &ir);
+            cJSON_Delete(reply);
+            if (capture != 0)
+            {
+               capture_failed = 1;
+               free(client_resp);
+               free(line);
+               break;
+            }
             acp_write_line(&p, client_resp);
             free(client_resp);
          }
@@ -754,17 +783,26 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
          snprintf(out->error, sizeof(out->error), "%s", st.error);
          acp_proc_close(&p);
          free(st.text);
+         aimee_harness_ir_free(&ir);
          return -1;
       }
    }
 
+   aimee_harness_ir_free(&ir);
+   if (capture_failed)
+   {
+      acp_proc_close(&p);
+      free(st.text);
+      snprintf(out->error, sizeof(out->error), "ACP canonical capture failed");
+      return -1;
+   }
    acp_proc_close(&p);
 
    out->latency_ms = (int)(util_now_ms() - start_ms);
    out->turns = 1;
    out->tool_calls += st.tool_calls;
 
-   if (!st.done && !st.text)
+   if (!st.done)
    {
       snprintf(out->error, sizeof(out->error), "acp adapter: no response (timeout or EOF)");
       free(st.text);

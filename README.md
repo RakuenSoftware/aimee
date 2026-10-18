@@ -63,7 +63,8 @@ can use MCP tools over stdio; an agent UI can use the ACP bridge; a model-facing
 connect through OpenAI Chat Completions or Responses, or Anthropic Messages ingress. A custom
 application can call the named HTTP API or use a generated SDK. Browser chat carries the signed-in
 actor to Runtime and displays tool start/completion activity; provider credentials stay in Vault.
-The browser is another client of that same runtime.
+The browser is another client of that same runtime. Direct primary model changes retain
+canonical conversation history through the owner-checked session log.
 
 This is the basis of compatibility with any harness or UI that implements one of those contracts.
 It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,

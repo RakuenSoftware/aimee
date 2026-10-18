@@ -41,6 +41,29 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
                                    temperature, out);
 }
 
+int agent_request_with_tools_supported(const aimee_request_t *request)
+{
+   (void)request;
+   return 0; /* The thin Windows client does not host tool execution. */
+}
+int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
+                                     const char *role, const aimee_request_t *request,
+                                     aimee_response_t *response, agent_result_t *out)
+{
+   (void)agent;
+   (void)network;
+   (void)role;
+   (void)request;
+   if (response)
+      memset(response, 0, sizeof *response);
+   if (out)
+   {
+      memset(out, 0, sizeof *out);
+      snprintf(out->error, sizeof out->error, "tool execution not supported on Windows");
+   }
+   return -1;
+}
+
 /* ================================================================
  * From: agent_context.c
  * ================================================================ */

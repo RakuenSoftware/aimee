@@ -701,7 +701,7 @@ int vault_env_module_resource(void)
    int reader = strcmp(executable, "/usr/local/libexec/aimee-modules/aimee-module-egress") == 0;
    if ((!writer && !reader) || prctl(PR_SET_DUMPABLE, 0) != 0)
       return -1;
-   char wire[8193] = {0}, value[4096] = {0};
+   char wire[8193] = {0}, value[8192] = {0};
    size_t len = fread(wire, 1, sizeof(wire) - 1, stdin);
    if (!feof(stdin) || len == 0)
    {
@@ -717,11 +717,27 @@ int vault_env_module_resource(void)
    const char *cred = cJSON_GetStringValue(cJSON_GetObjectItem(req, "credential"));
    char *secret = (char *)cJSON_GetStringValue(cJSON_GetObjectItem(req, "secret"));
    vault_status_t st = VAULT_ERR_BADARG;
-   /* A read-only computed credential, not an additional stored token. The
-    * canonical server connection is the only namespace this resolver owns. */
-   if (op && strcmp(op, "get") == 0 && agent && strcmp(agent, "codex") == 0 && cred &&
-       strcmp(cred, "codex_oauth_current") == 0)
-      st = agent_codex_oauth_current_token(value, sizeof(value)) == 0 ? VAULT_OK : VAULT_ERR_BADARG;
+   /* Serving and diagnostics share one selected connection snapshot. This
+    * computed credential travels only on the attested private helper pipes. */
+   if (op && !strcmp(op, "get") && agent && agent[0] && strlen(agent) < 64 && cred &&
+       !strcmp(cred, "codex_oauth_credentials"))
+   {
+      agent_codex_credentials_t pair;
+      if (!agent_codex_connection_credentials(agent, &pair))
+      {
+         cJSON *json = cJSON_CreateObject();
+         if (json && cJSON_AddStringToObject(json, "token", pair.token) &&
+             cJSON_AddStringToObject(json, "account_id", pair.account_id) &&
+             cJSON_AddStringToObject(json, "source_digest", pair.source_digest) &&
+             cJSON_PrintPreallocated(json, value, sizeof value, 0))
+            st = VAULT_OK;
+         for (cJSON *field = json ? json->child : NULL; field; field = field->next)
+            if (field->valuestring)
+               OPENSSL_cleanse(field->valuestring, strlen(field->valuestring));
+         cJSON_Delete(json);
+      }
+      OPENSSL_cleanse(&pair, sizeof pair);
+   }
    else if (op && agent && agent[0] && strlen(agent) < 64 && cred &&
             (strcmp(cred, "api_key") == 0 || strcmp(cred, "codex_oauth_token") == 0 ||
              strcmp(cred, "codex_account_id") == 0 || strcmp(cred, "oauth") == 0 ||

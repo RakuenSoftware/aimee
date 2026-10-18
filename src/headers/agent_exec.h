@@ -2,6 +2,7 @@
 #define DEC_AGENT_EXEC_H 1
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
@@ -20,6 +21,17 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
                                      int max_tokens, double temperature,
                                      struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out);
+
+/* Complete canonical conversation for the server-owned tool loop. No user
+ * message is reconstructed from a text projection. The final response remains
+ * typed and owned by the caller; ordinary result text is compatibility only. */
+int agent_request_with_tools_supported(const aimee_request_t *request);
+int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
+                                     const char *role, const aimee_request_t *request,
+                                     aimee_response_t *response, agent_result_t *out);
+int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected,
+                                 const aimee_request_t *request, aimee_response_t *response,
+                                 agent_result_t *out);
 
 int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
                   int max_tokens, double temperature, agent_result_t *out);
@@ -123,6 +135,14 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
 /* Context assembly refused before the next provider request. Terminal for
  * routing/fallback and not a provider-health failure. */
 #define AGENT_RC_CONTEXT_REFUSED (-3)
+
+/* Durable capture failed. Execution may already have run tools, so retrying on
+ * another provider or credential is forbidden and must not affect health. */
+#define AGENT_RC_CAPTURE_FAILED (-4)
+static inline int agent_rc_is_local_refusal(int rc)
+{
+   return rc == AGENT_RC_CONTEXT_REFUSED || rc == AGENT_RC_CAPTURE_FAILED;
+}
 
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.
@@ -265,7 +285,7 @@ int policy_recheck_action_tool(const char *tool, const char *effect, const char 
                                char *reason, size_t reason_len);
 int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
                         int authorized);
-char *policy_action_finish(const char *verdict, char *result);
+char *policy_action_finish(const char *verdict, char *result, int *is_error);
 struct cJSON;
 int policy_prepare_exploration(const struct cJSON *offer, const char *session,
                                const char *workspace, const char *project);

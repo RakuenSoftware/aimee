@@ -2,7 +2,7 @@
  * observe/act on a turn. Slice 3 of the response/orchestration-stages proposal.
  *
  * DISTINCT from the request/response stage registries. A request/response STAGE transforms
- * a payload (mutates raw cJSON / parsed_response and returns an intervention count). An
+ * a payload (mutates canonical request/response IR and returns an intervention count). An
  * orchestration HOOK acts on the TURN: it may spawn a delegate, advance a workflow,
  * short-circuit the turn, or suspend it for later re-entry. Conflating the two interfaces
  * was explicitly ruled against by the roundtable, so this seam has its own types.
@@ -22,18 +22,17 @@
 
 #include <stddef.h>
 
-struct cJSON;
-struct parsed_response;
+#include <aimee/ir/aimee_ir.h>
 
 /* Immutable view of the turn handed to every hook. All pointers are BORROWED and read-only
  * for the hook's lifetime; a hook that needs to mutate does so through the capability
  * handles, never through this snapshot. Grows by adding fields, never a bare pointer. */
 typedef struct
 {
-   const char *turn_id;                    /* correlation id for this turn (never NULL) */
-   const char *session_id;                 /* originating session id, or NULL if none */
-   const struct cJSON *request;            /* inbound request payload, read-only */
-   const struct parsed_response *response; /* reply so far, or NULL before the response exists */
+   const char *turn_id;              /* correlation id for this turn (never NULL) */
+   const char *session_id;           /* originating session id, or NULL if none */
+   const aimee_request_t *request;   /* inbound request payload, read-only */
+   const aimee_response_t *response; /* reply so far, or NULL before the response exists */
 } gw_turn_snapshot_t;
 
 /* Narrow capability handles: the ONLY way a hook effects change. Each returns 0 when the

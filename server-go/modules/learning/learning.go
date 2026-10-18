@@ -25,6 +25,12 @@ const (
 
 // Handle classifies one learning signal into its downstream sink mask.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if invocation.StageID == StageExecution {
+		if invocation.Cancelled() {
+			return nil, bus.ModuleStatusCancelled
+		}
+		return handleExecution(invocation, request)
+	}
 	if invocation.StageID == StageExperience {
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled

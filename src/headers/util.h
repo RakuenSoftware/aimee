@@ -8,6 +8,11 @@
 #include <string.h>
 #include <time.h>
 
+/* Read one complete bounded binary stream, including embedded NUL bytes.
+ * Returns owned NUL-terminated storage plus its actual byte length; over-limit
+ * or read failure returns NULL and clears length instead of returning a prefix. */
+char *read_stream_limited(FILE *stream, size_t maximum, size_t *length);
+
 /* Free the `count` strings in a shlex_split() token array (not the array). */
 static inline void util_free_tokens(char **tokens, int count)
 {

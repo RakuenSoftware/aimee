@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "agent_protocol.h"
 #include "model_registry.h"
 
 void test_agent_route_with_caps_honors_tools_enabled(void)
@@ -632,31 +633,17 @@ void test_primary_turn_reaches_default_above_min_tier(void)
    strcpy(cfg.agents[0].roles[0], "explain");
    assert(agent_route(&cfg, "review") == NULL);
 
-   /* Session affinity outranks the default: a tmux agent holds a STATEFUL
-    * session, so a primary turn must not be yanked to an HTTP default and
-    * abandon it. Only cost_tier is bypassed, never the tmux preference.
-    *
-    * A tmux agent is only ROUTABLE when tmux is actually installed
-    * (agent_routing_block_reason returns MISSING_COMMAND otherwise), so this
-    * assertion is environment-dependent and is skipped rather than weakened
-    * into something that passes for the wrong reason. */
-   if (access("/usr/bin/tmux", X_OK) == 0 || access("/bin/tmux", X_OK) == 0)
-   {
-      strcpy(cfg.agents[0].roles[0], "review");
-      strcpy(cfg.agents[1].roles[0], "review");
-      strcpy(cfg.agents[1].backend, AGENT_BACKEND_TMUX_CLI);
-      strcpy(cfg.agents[1].cli_cmd, "sh"); /* on PATH so only tmux gates it */
-      assert(agent_route(&cfg, "review") == &cfg.agents[1]);
-
-      /* With no tmux peer the default wins again. */
-      cfg.agents[1].backend[0] = '\0';
-      cfg.agents[1].cli_cmd[0] = '\0';
-      assert(agent_route(&cfg, "review") == &cfg.agents[0]);
-   }
-   else
-   {
-      printf("  SKIP: tmux session-affinity assertion (tmux not installed)\n");
-   }
+   /* Canonical history owns continuity, so a historical backend spelling
+    * cannot override the selected primary. This holds without tmux installed. */
+   strcpy(cfg.agents[0].roles[0], "review");
+   strcpy(cfg.agents[1].roles[0], "review");
+   strcpy(cfg.agents[1].backend, AGENT_BACKEND_TMUX_CLI);
+   strcpy(cfg.agents[1].cli_kind, "codex");
+   strcpy(cfg.agents[1].cli_cmd, "sh");
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   cfg.agents[1].backend[0] = '\0';
+   cfg.agents[1].cli_cmd[0] = '\0';
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
 
    agent_routing_set_primary_turn(0);
    printf("  PASS: test_primary_turn_reaches_default_above_min_tier\n");

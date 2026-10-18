@@ -21,6 +21,7 @@ int request_context_refuse_assembly(const char *kind)
 static cJSON *stored_intent;
 static int calls, dispatched, outcomes, guard_held, guard_released;
 static int fail_resource, fail_verify, fail_store, memory_required, stale;
+static const char *replay_state;
 static const char *text(const cJSON *j, const char *key)
 {
    const char *s = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, key));
@@ -143,8 +144,17 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
          assert(guard_held && !guard_released);
       if (!strcmp(op, "dispatch"))
       {
-         dispatched++;
-         cJSON_AddBoolToObject(r, "dispatch_allowed", 1);
+         if (replay_state)
+         {
+            cJSON *receipt = cJSON_AddObjectToObject(r, "receipt");
+            cJSON_AddStringToObject(receipt, "state", replay_state);
+            cJSON_AddBoolToObject(r, "dispatch_allowed", 0);
+         }
+         else
+         {
+            dispatched++;
+            cJSON_AddBoolToObject(r, "dispatch_allowed", 1);
+         }
       }
    }
    if (!strcmp(op, "outcome") || !strcmp(op, "reconcile"))
@@ -175,6 +185,10 @@ int main(void)
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 0) == -1 && calls == 0);
    fail_resource = 1;
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1 && calls == 0);
+   int refused = 0;
+   char *refusal = policy_action_finish("refused", strdup("error: not executed"), &refused);
+   assert(refused && strstr(refusal, "exact_resource_adapter_unavailable"));
+   free(refusal);
    fail_resource = 0;
    context.memory_receipt_required = 1;
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1 && calls == 0);
@@ -187,7 +201,9 @@ int main(void)
    guard_released = 0;
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == 0);
    assert(dispatched == 1 && guard_released == 1 && !guard_held);
-   char *result = policy_action_finish("ok", strdup("saved"));
+   int is_error = 1;
+   char *result = policy_action_finish("ok", strdup("saved"), &is_error);
+   assert(!is_error);
    cJSON *envelope = cJSON_Parse(result);
    assert(!strcmp(text(envelope, "completion_claim"), "effect_confirmed"));
    assert(outcomes == 1);
@@ -197,7 +213,8 @@ int main(void)
    guard_released = 0;
    fail_verify = 1;
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == 0);
-   result = policy_action_finish("ok", strdup("saved"));
+   result = policy_action_finish("ok", strdup("saved"), &is_error);
+   assert(is_error);
    envelope = cJSON_Parse(result);
    assert(!strcmp(text(envelope, "completion_claim"), "outcome_unknown"));
    free(result);
@@ -216,6 +233,18 @@ int main(void)
           !strcmp(text(reconciled, "completion_claim"), "effect_confirmed"));
    cJSON_Delete(req);
    cJSON_Delete(reconciled);
+   for (int unknown = 0; unknown < 2; unknown++)
+   {
+      policy_action_attempt("attempt");
+      guard_released = 0;
+      replay_state = unknown ? "outcome_unknown" : "acknowledged";
+      assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1);
+      int failed = !unknown;
+      char *prior = policy_action_finish("refused", strdup("not repeated"), &failed);
+      assert(failed == unknown && prior && strstr(prior, replay_state));
+      free(prior);
+   }
+   replay_state = NULL;
    cJSON_Delete(args);
    cJSON_Delete(stored_intent);
    puts("governed action host transport: ok");

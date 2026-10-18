@@ -272,4 +272,8 @@ int rh_git_sshkey(const route_req_t *rq, char *resp, int cap);
 int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
                             const char *out[], int out_cap);
 
+/* Offload a long-lived stream while retaining its attested owner identity. */
+int server_http_sse_offload(int fd, void (*fn)(int, const char *, const char *), const char *id,
+                            const char *request_id);
+
 #endif /* SERVER_HTTP_INTERNAL_H */

@@ -59,12 +59,6 @@
 #include "cJSON.h"
 #include "dstr.h"
 
-/* Defined in agent_runtime_tmux.c (no shared header). Drives the standard CLI
- * agent over a tmux session, which runs on the client over the reverse channel
- * when the active workspace is detached. */
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
 #include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
@@ -254,6 +248,33 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
 /* Write response and free context */
 void compute_respond(compute_ctx_t *cctx, cJSON *resp)
 {
+   if (cctx->ir_enabled)
+   {
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      int failed =
+          cctx->ir_failed || (cJSON_IsString(status) && !strcmp(status->valuestring, "error"));
+      if (server_chat_ir_finish(cctx, failed
+                                          ? (cJSON_IsString(message) ? message->valuestring
+                                                                     : "canonical capture failed")
+                                          : NULL) == 0)
+      {
+         if (cctx->ir_delivery)
+         {
+            cJSON_Delete(resp);
+            return;
+         }
+      }
+      else
+      {
+         /* No successful completion after a storage failure. The transport error
+          * is deliberately outside the persisted content protocol. */
+         cJSON_Delete(resp);
+         resp = cJSON_CreateObject();
+         cJSON_AddStringToObject(resp, "status", "error");
+         cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
+      }
+   }
    compute_update_background_job(cctx, resp);
    compute_update_coord_task(cctx, resp);
 
@@ -337,6 +358,14 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
 
 void compute_ctx_free(compute_ctx_t *cctx)
 {
+   if (cctx->ir_enabled)
+   {
+      if (!cctx->ir_completed)
+         server_chat_ir_finish(cctx, "execution ended without completion");
+      server_control_scope_bind(cctx->ir_previous_controls);
+      server_control_scope_close(cctx->ir_controls);
+      aimee_ir_session_set_sink(cctx->ir_previous_sink, cctx->ir_previous_context);
+   }
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)
@@ -356,6 +385,7 @@ void compute_ctx_free(compute_ctx_t *cctx)
    if (cctx->conn_fd >= 0)
       close(cctx->conn_fd);
 #endif
+   request_context_snapshot_clear(&cctx->request_context);
    free(cctx);
 }
 
@@ -667,8 +697,9 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
    return 0;
 }
 
-void delegate_worker(void *arg)
+static void delegate_worker_run(void *arg)
 {
+   aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    compute_ctx_begin_budget(cctx);
    if (cctx->background_job_id > 0)
@@ -950,79 +981,8 @@ void delegate_worker(void *arg)
       via_name = inline_acp_name;
    }
 
-   /* Claude over the standard `claude` CLI/tmux on a DETACHED (thin-client)
-    * workspace: claude runs its own interactive session on the CLIENT (the tmux
-    * driver marshals its commands over the reverse channel) against the client's
-    * tree, doing its own edits — so it bypasses the server-side worktree
-    * isolation / write-guard machinery below (which assumes a local fs), exactly
-    * as the primary chat path does. Gated by the agent's `primary_only` flag. */
-   if (via_name && via_name[0])
-   {
-      agent_t *cag = agent_find(&acfg, via_name);
-      if (cag && agent_is_claude_cli(cag))
-      {
-         int detached_bound = workspace_turn_bind_active(cwd);
-         const workspace_provider_t *wsp = workspace_provider_active();
-         if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
-         {
-            if (cag->primary_only)
-            {
-               workspace_turn_unbind_active();
-               char m[320];
-               snprintf(m, sizeof(m),
-                        "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
-                        "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
-                        "(see DELEGATES.md for the Anthropic account-risk warning)",
-                        cag->name);
-               delegation_compute_error(cctx, m);
-               compute_ctx_free(cctx);
-               return;
-            }
-            if (cwd[0] == '/' && !strstr(cwd, "/.."))
-               run_cmd_set_cwd(cwd);
-            char *tmpl = NULL;
-            const char *sysp = delegate_assemble_system_prompt(system_prompt, role, prompt, cwd,
-                                                               persona_override, cwd, &tmpl);
-            agent_result_t result;
-            memset(&result, 0, sizeof(result));
-            int cli_max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-            int cli_cost_failed = 0;
-            if (max_cost_usd != 0.0)
-            {
-               size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
-               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
-               char cost_err[256] = "";
-               if (max_cost_usd < 0.0 ||
-                   delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
-                                             cost_err, sizeof(cost_err)) != 0)
-               {
-                  snprintf(result.error, sizeof(result.error), "%s",
-                           max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
-                  cli_cost_failed = 1;
-               }
-            }
-            if (!cli_cost_failed && wire_fence_external_backend() != 0)
-            {
-               snprintf(result.error, sizeof(result.error), "%s", wire_fence_last_error());
-               cli_cost_failed = 1;
-            }
-            int rc = cli_cost_failed
-                         ? -1
-                         : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
-                                                     cli_max_tokens, 0.3, &result);
-            run_cmd_set_cwd(NULL);
-            workspace_turn_unbind_active();
-            free(tmpl);
-            cJSON *resp = delegate_build_result_response(deleg_id, rc, &result, &acfg, role, cag,
-                                                         -1, 0, NULL, NULL);
-            free(result.response);
-            compute_respond(cctx, resp);
-            compute_ctx_free(cctx);
-            return;
-         }
-         workspace_turn_unbind_active();
-      }
-   }
+   /* Native CLI delegates follow the same scoped admission, durable capture
+    * and workspace policy as every other delegate. */
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
    /* A delegate packet is bounded unless its caller explicitly says it owns the
@@ -1915,6 +1875,13 @@ void delegate_worker(void *arg)
    delegate_checkout_add_result_ex(resp, launch_worktree_path, launch_head, parent_worktree_path,
                                    parent_worktree_head, parent_worktree_fingerprint);
 
+   /* Persist observed learning before clients can observe terminal completion.
+    * Capture failure is explicit and does not rewrite the task's execution result. */
+   if (delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
+                                     learning_goal, deleg_id) != 0)
+      LOG_WARN("delegate", "delegate %s: terminal execution has incomplete learning capture",
+               deleg_id);
+
    free(result.response);
    free(handoff_prompt);
    free(resolved_prompt);
@@ -1934,10 +1901,6 @@ void delegate_worker(void *arg)
                role && role[0] ? role : "task", result.turns, result.tool_calls);
       (void)presence_route_event(effective_sid, PRESENCE_EV_DELEGATE, "delegate_done", summary);
    }
-
-   /* Classify and record a learning from this delegate exit. */
-   delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
-                                 learning_goal, deleg_id);
 
    /* Close the delegate_routing bandit decision (if one was sampled) with the run
     * outcome. By default success (rc == 0) -> 1.0, otherwise 0.0. When the
@@ -1985,7 +1948,7 @@ void delegate_worker(void *arg)
    if (target_agent && leased_cred_name[0])
    {
       failover_reason_t reason = FAILOVER_NONE;
-      if (rc != AGENT_RC_CONTEXT_REFUSED && !result.success)
+      if (!agent_rc_is_local_refusal(rc) && !result.success)
          reason = delegate_credentials_classify_failure(target_agent->provider, result.error);
       if (reason != FAILOVER_NONE)
          delegate_credentials_report_failure(leased_principal, target_agent->name, leased_cred_name,
@@ -2017,6 +1980,13 @@ delegate_fail:
    if (delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
    compute_ctx_free(cctx);
+}
+
+void delegate_worker(void *arg)
+{
+   compute_ctx_bind_request_context(arg);
+   delegate_worker_run(arg);
+   compute_ctx_clear_request_context();
 }
 
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -2077,19 +2047,7 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
 #endif
       cctx->conn_alive = 1;
    }
-   /* Capture the peer's caps for the foreign-cwd trust check (AC #6). A UDS peer
-    * is CAPS_ALL (same filesystem); a remote/TCP peer is less, and its cwd must
-    * not be opened on the server's own fs. A NULL conn is an in-process caller. */
-   cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
-
-   /* WP-C vault identity: the conn's attested principal (hop 3) wins; else fall back
-    * to the chat turn's per-turn thread-local — the chat-spawned delegate's loopback
-    * conn carries no restored identity, and the TL is cleared per turn (no leak). */
-   if (conn)
-      cctx->attested_transport = conn->attested_transport;
-   snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",
-            (conn && conn->vault_principal[0]) ? conn->vault_principal
-                                               : agent_get_request_vault_principal());
+   compute_ctx_capture_request_context(cctx, conn);
 
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);

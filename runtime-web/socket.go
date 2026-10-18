@@ -196,3 +196,42 @@ func chatStreamHTTP(ctx context.Context, socketPath, username, message, aimeeSes
 	}
 	return nil
 }
+
+// The browser transport does not interpret conversation events. Native adapters
+// have already produced and persisted canonical IR before these bytes arrive.
+func chatIRHTTP(ctx context.Context, socketPath, username, message, sid, cwd, attachID string, cb func([]byte) error) error {
+	payload, err := json.Marshal(map[string]any{"message": message, "aimee_session_id": sid, "cwd": cwd, "attach_id": attachID, "ir_version": 1,"queue":true,"queue_wait_ms":30000})
+	if err != nil {
+		return err
+	}
+	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}
+	defer transport.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://aimee/v1/chat/stream", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Aimee-Webuser", username)
+	response, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("chat stream HTTP %d", response.StatusCode)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 65536), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) != 0 {
+			if err = cb(line); err != nil {
+				return err
+			}
+		}
+	}
+	return scanner.Err()
+}

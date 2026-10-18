@@ -8,12 +8,18 @@
 #include <string.h>
 
 static int g_dispatch_calls = 0;
+static int g_dispatch_error;
 
-char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error)
 {
    /* Keep this unit fast and focused on RPC framing. Full dispatch-path coverage lives in
     * unit-test-agent, which links the real agent_tools_dispatch implementation. */
    g_dispatch_calls++;
+   *is_error = g_dispatch_error;
+   if (g_dispatch_error)
+      return safe_strdup(
+          "{\"status\":\"refused\",\"reason\":\"fixture\",\"dispatch_allowed\":false}");
    char buf[2048];
    snprintf(buf, sizeof(buf), "{\"tool\":\"%s\",\"args\":%s}", name ? name : "",
             arguments_json ? arguments_json : "{}");
@@ -105,6 +111,28 @@ static void test_python_rpc_allowed_tool(void)
    const char *stdout_text = cJSON_GetObjectItem(json, "stdout")->valuestring;
    assert(strstr(stdout_text, "\"ok\": true") != NULL);
    assert(strstr(stdout_text, "\"tool\": \"read_file\"") != NULL);
+   cJSON_Delete(json);
+   free(result);
+}
+
+static void test_python_rpc_structured_refusal(void)
+{
+   g_dispatch_calls = 0;
+   g_dispatch_error = 1;
+   char *result =
+       tool_execute_script("python",
+                           "import aimee_tools\n"
+                           "r = aimee_tools.call('read_file', {'path': '/tmp/example.txt'})\n"
+                           "assert r['ok'] is False\n"
+                           "assert r['result']['status'] == 'refused'\n"
+                           "assert 'fixture' in r['error']\n"
+                           "print('refusal retained')\n",
+                           5, NULL, NULL);
+   g_dispatch_error = 0;
+   assert(result);
+   cJSON *json = parse_json_or_die(result);
+   assert(cJSON_GetObjectItem(json, "exit_code")->valueint == 0 && g_dispatch_calls == 1);
+   assert(strstr(cJSON_GetObjectItem(json, "stdout")->valuestring, "refusal retained"));
    cJSON_Delete(json);
    free(result);
 }
@@ -236,6 +264,7 @@ int main(void)
 {
    test_script_env_scrub();
    test_python_rpc_allowed_tool();
+   test_python_rpc_structured_refusal();
    test_bash_rpc_shim();
    test_rpc_policy_denial();
    test_rpc_descriptor_is_the_only_capability();

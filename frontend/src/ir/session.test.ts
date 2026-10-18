@@ -1,5 +1,6 @@
+import { parseJSON, stringifyJSON } from './json';
 import { describe, expect, it } from 'vitest';
-import { emptySession, reduceSession, toolResults } from './session';
+import { emptySession, reduceSession, toolResults, toolBlockKey } from './session';
 import type { Block, Envelope, SessionEvent } from './session';
 const envelope = (n: number, event: SessionEvent): Envelope => ({ version: 1, session_id: 's', sequence: String(n), event_id: `e${n}`, turn_id: 't', actor: 'operator', event });
 const message = (id: string, role: string, blocks: Block[]): SessionEvent => ({ kind: 'message', message_id: id, payload: { role, blocks } });
@@ -9,7 +10,7 @@ describe('canonical session projection', () => {
     const events = [
       envelope(1, message('u', 'user', [{ type: 'text', text: 'Investigate' }])),
       envelope(2, message('a', 'assistant', [
-        { type: 'thinking', text: 'Reason', signature: 'opaque' },
+        { type: 'thinking', text: 'Reason', signature: 'opaque', thinking_id: 'rs_1', encrypted_content: 'cipher', redacted_content: 'redacted', cache_control: 'ephemeral' },
         { type: 'tool_use', tool_id: 'b', name: 'read_file', input: { path: 'b' } },
         { type: 'tool_use', tool_id: 'a', name: 'read_file', input: { path: 'a' } },
       ])),
@@ -22,10 +23,28 @@ describe('canonical session projection', () => {
     ];
     const live = events.reduce(reduceSession, emptySession('s'));
     expect((JSON.parse(JSON.stringify(events)) as Envelope[]).reduce(reduceSession, emptySession('s'))).toEqual(live);
-    expect(toolResults(live).get('a')?.[0].content).toBe('A');
-    expect(toolResults(live).get('b')?.[0].content).toBe('B');
+    expect(toolResults(live).byCall.get(toolBlockKey(live.messages[1], 2))?.[0].content).toBe('A');
+    expect(toolResults(live).byCall.get(toolBlockKey(live.messages[1], 1))?.[0].content).toBe('B');
     expect(live.messages[1].blocks[0].signature).toBe('opaque');
+    expect(live.messages[1].blocks[0].encrypted_content).toBe('cipher');
+    expect(live.messages[1].blocks[0].redacted_content).toBe('redacted');
+    expect(live.messages[1].blocks[0].cache_control).toBe('ephemeral');
     expect(reduceSession(live, events[4])).toBe(live);
+  });
+  it('retains stop reason and cache usage for buffered typed responses', () => {
+    const events = [
+      envelope(1, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: { type: 'TURN_START' } }),
+      envelope(2, message('buffered', 'assistant', [{ type: 'text', text: 'partial answer' }])),
+      envelope(3, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: {
+        type: 'TURN_STOP', stop_reason: 'max_tokens', raw_stop_reason: 'length', usage_in: 12, usage_out: 7,
+        usage_cache_read: 9, usage_cache_write: 3, usage_reasoning: 2,
+      } }),
+    ];
+    const state = events.reduce(reduceSession, emptySession('s'));
+    expect(state.messages[0].stopReason).toBe('max_tokens');
+    expect(state.messages[0].nativeStopReason).toBe('length');
+    expect(state.messages[0].usage).toEqual({ input: 12, output: 7, cacheRead: 9, cacheWrite: 3, reasoning: 2 });
+    expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
   });
   it('accumulates tool JSON fragments and finalizes them only at block stop', () => {
     const delta = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'm', role: 'assistant', payload });
@@ -122,4 +141,123 @@ it('rejects cross-turn control replies and content arriving after cancellation',
   expect(() => reduceSession(state, { ...envelope(3, { kind: 'control_response', request_id: 'p', control_kind: 'permission', payload: {} }), turn_id: 'other' })).toThrow('pending request');
   state = reduceSession(state, envelope(3, { kind: 'execution', payload: { status: 'cancelled' } }));
   expect(() => reduceSession(state, envelope(4, message('late', 'assistant', [{ type: 'text', text: 'late' }])))).toThrow('execution completion');
+});
+
+it('advances past host history checkpoints without duplicating the observation timeline', () => {
+  let state = reduceSession(emptySession('s'), envelope(1, {
+    kind: 'message', message_id: 'visible', payload: { role: 'assistant', blocks: [{ type: 'text', text: 'visible' }] },
+  }));
+  state = reduceSession(state, envelope(2, { kind: 'history', payload: {
+    scope: 'delegate:child', phase: 'message', index: 0,
+    message: { role: 'user', blocks: [{ type: 'text', text: 'private child prompt' }] },
+  } }));
+  state = reduceSession(state, envelope(3, { kind: 'history', payload: {
+    scope: 'delegate:child', phase: 'commit', count: 1,
+  } }));
+  expect(state.sequence).toBe('3');
+  expect(state.messages.map(message => message.blocks[0].text)).toEqual(['visible']);
+  expect(() => reduceSession(state, envelope(4, { kind: 'history', payload: {
+    scope: '', phase: 'commit', count: 0,
+  } }))).toThrow('Invalid history');
+});
+
+
+it('preserves initial content, opaque thinking state and complete tool inputs during stream replay', () => {
+  const d = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'm', role: 'assistant', payload });
+  const events = [d(1, { type: 'TURN_START' }),
+    d(2, { type: 'BLOCK_START', block_id: 0, kind: 'thinking', text_delta: 'initial', signature_delta: 'sig', redacted_content: 'opaque' }),
+    d(3, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', text_delta: ' thought', signature_delta: 'nature' }),
+    d(4, { type: 'BLOCK_STOP', block_id: 0 }),
+    d(5, { type: 'BLOCK_START', block_id: 1, kind: 'tool_use', tool_id: 'call', name: 'read', namespace: 'files', input: { path: 'a' } }),
+    d(6, { type: 'BLOCK_STOP', block_id: 1 }), d(7, { type: 'TURN_STOP' })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages[0].blocks[0]).toMatchObject({ text: 'initial thought', signature: 'signature', redacted_content: 'opaque' });
+  expect(state.messages[0].blocks[1]).toMatchObject({ namespace: 'files', input: { path: 'a' } });
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  const partial = events.slice(0, 5).reduce(reduceSession, emptySession('s'));
+  expect(() => reduceSession(partial, d(6, { type: 'BLOCK_DELTA', block_id: 1, tool_args_delta: '{}' }))).toThrow('complete initial input');
+});
+
+it('keeps child references separate from parent model history and replays terminal state', () => {
+  const reference = { session_id: 'private-child', turn_id: 'child-run', role: 'review', status: 'running' as const };
+  const events = [envelope(1, { kind: 'child_execution', payload: reference }),
+    envelope(2, { kind: 'child_execution', payload: { ...reference, status: 'completed' } })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages).toEqual([]);
+  expect(state.executions).toEqual({});
+  expect(state.children['private-child:child-run'].status).toBe('completed');
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  expect(() => reduceSession(state, envelope(3, { kind: 'child_execution', payload: reference }))).toThrow(/terminal/);
+  expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'child_execution', payload: { ...reference, session_id: 's' } }))).toThrow(/reference/);
+});
+
+ it('retains opaque decimals identically in message snapshots and completed tool fragments', () => {
+  const argumentsJSON = '{"id":9007199254740993,"ratio":0.12345678901234567890123456789}';
+  const events = [
+    envelope(1, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_START' } }),
+    envelope(2, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_START', block_id: 0, kind: 'tool_use', tool_id: 'call', name: 'read' } }),
+    envelope(3, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_DELTA', block_id: 0, kind: 'tool_use', tool_args_delta: argumentsJSON } }),
+    envelope(4, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_STOP', block_id: 0 } }),
+    envelope(5, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_STOP' } }),
+  ];
+  const live = events.reduce(reduceSession, emptySession('s'));
+  const replay = events.map(event => parseJSON(stringifyJSON(event)!) as Envelope).reduce(reduceSession, emptySession('s'));
+  expect(replay).toEqual(live);
+  expect(stringifyJSON(live.messages[0].blocks[0].input)).toBe(argumentsJSON);
+  const snapshot = reduceSession(emptySession('s'), envelope(1, message('m', 'assistant', [
+    { type: 'tool_use', tool_id: 'call', name: 'read', input: parseJSON(argumentsJSON) },
+  ])));
+  expect(snapshot.messages[0].blocks[0].input).toEqual(live.messages[0].blocks[0].input);
+});
+
+it('retains and validates thinking replay provenance without placing it in visible text', () => {
+ const binding = `ap1:${'a'.repeat(64)}:${'b'.repeat(64)}:${'c'.repeat(64)}`;
+ const event = envelope(1, message('m', 'assistant', [{type:'thinking',text:'reason',signature:'opaque',thinking_binding:binding}]));
+ const state = reduceSession(emptySession('s'), event);
+ expect(state.messages[0].blocks[0].thinking_binding).toBe(binding);
+ for (const bad of [binding+'a', binding.replace('ap1:', 'ap2:')])
+  expect(() => reduceSession(emptySession('s'), envelope(1,message('m','assistant',[{type:'thinking',text:'reason',thinking_binding:bad}])))).toThrow('replay binding');
+});
+
+it('preserves native IDs while deriving distinct results for reused tool cycles', () => {
+  const events = [
+    envelope(1, message('first', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read', input: {} }])),
+    envelope(2, message('result1', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'FIRST' }])),
+    envelope(3, message('second', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read', input: {} }])),
+    envelope(4, message('result2', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'SECOND' }])),
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const original = stringifyJSON(state);
+  const results = toolResults(state);
+  expect(results.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['FIRST']);
+  expect(results.byCall.get(toolBlockKey(state.messages[2], 0))?.map(block => block.content)).toEqual(['SECOND']);
+  expect(results.matched.size).toBe(2);
+  expect(stringifyJSON(state)).toBe(original);
+  expect(state.messages.map(message => message.blocks[0].tool_id)).toEqual(['same', 'same', 'same', 'same']);
+  expect(toolResults(events.map(event => parseJSON(stringifyJSON(event)!) as Envelope).reduce(reduceSession, emptySession('s')))).toEqual(results);
+});
+it('uses execution scope for interleaved native IDs and leaves ambiguous results visible', () => {
+  const events = [
+    { ...envelope(1, message('a', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read' }])), turn_id: 'a' },
+    { ...envelope(2, message('b', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read' }])), turn_id: 'b' },
+    { ...envelope(3, message('unknown', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'AMBIGUOUS' }])), turn_id: 'unknown' },
+    { ...envelope(4, message('rb', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'B' }])), turn_id: 'b' },
+    { ...envelope(5, message('ra', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'A' }])), turn_id: 'a' },
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const result = toolResults(state);
+  expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.[0].content).toBe('A');
+  expect(result.byCall.get(toolBlockKey(state.messages[1], 0))?.[0].content).toBe('B');
+  expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
+});
+it('correlates an external result from the following request without reusing a completed result', () => {
+  const events = [
+    envelope(1, message('a', 'assistant', [{ type: 'tool_use', tool_id: 'native', name: 'read' }])),
+    { ...envelope(2, message('result', 'tool', [{ type: 'tool_result', tool_id: 'native', content: 'CROSS_TURN' }])), turn_id: 'next' },
+    { ...envelope(3, message('orphan', 'tool', [{ type: 'tool_result', tool_id: 'native', content: 'UNMATCHED' }])), turn_id: 'later' },
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const result = toolResults(state);
+  expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['CROSS_TURN']);
+  expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
 });

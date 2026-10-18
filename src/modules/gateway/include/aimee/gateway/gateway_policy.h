@@ -7,9 +7,10 @@
 #ifndef DEC_GATEWAY_POLICY_H
 #define DEC_GATEWAY_POLICY_H 1
 
-#include "agent_protocol.h" /* parsed_response_t — type of the police function's argument */
-
 struct cJSON;
+#include <aimee/ir/aimee_ir.h>
+/* Canonical catalog policing includes namespace children. */
+int gateway_policy_apply_ir(aimee_request_t *request);
 
 /* Apply request-side tool policing to a proxied request, in place. `tools` is read
  * from `req`; entries are matched by tool name regardless of API shape
@@ -65,44 +66,5 @@ int gateway_prevent_subagents_enabled(void);
  * enforce-delegate-only for any provider proxied through the gateway. The provider
  * runs on the gateway hot path and is expected to cache. NULL clears it. */
 void gateway_policy_set_delegates_available_provider(int (*provider)(void));
-
-/* Mutate `p` in place: memmove-compact denied entries out of `p->calls[]` so the
- * surviving `p->calls[0..p->call_count-1]` is a contiguous prefix of the original
- * (no realloc, no flag-and-skip). `p->call_count` is decremented to match.
- * `p->stop_reason` is finalized as follows:
- *   - All-dropped (call_count == 0) → "end_turn" (the wire's tool_use reply
- *     became an end_turn reply).
- *   - Upstream set a reason (stop_reason[0] != '\0', e.g. "max_tokens",
- *     "stop_sequence", "refusal", "tool_use") AND some calls survive →
- *     preserve verbatim. Partial drops must not lose the upstream's
- *     truncation signal by re-deriving from call_count.
- *   - Upstream didn't set a reason AND some calls survive → "tool_use"
- *     (derive from call_count, since the upstream's omission means
- *     "default tool_use").
- * The renderer's `n_calls > 0 ? "tool_use" : "end_turn"` line 435 of
- * anthropic_ingress.c is replaced (in this PR's diff) with
- * `parsed->stop_reason[0] ? parsed->stop_reason : n_calls > 0 ? "tool_use"
- * : "end_turn"` so the post-police struct's stop_reason is wire-consistent
- * with the wire shape. The `stop_reason` value also feeds the
- * pre-existing `agent_record_token_audit` row in `messages_buffered()` (it
- * reads `parsed.stop_reason`), so the audit log matches the wire.
- *
- * Fields the function does NOT touch (by design): `id`, `name`, `is_tool_call`,
- * `content`, `assistant_message`, `prompt_tokens`, `completion_tokens`,
- * `cache_write_tokens`, `cache_read_tokens`, `model`. None of these are
- * call-indexed. The function DOES write `arguments` on dropped entries —
- * `free(src->arguments); src->arguments = NULL;` — so the dropped-entry
- * strings are not leaked. (Without this, `agent_free_parsed_response`'s
- * 0..call_count-1 sweep would miss them: the survivors overwrite the front
- * slots, but the tail slots still hold the dropped strings, and the sweep
- * never reaches the tail.) Bounded by the original `AGENT_MAX_TOOL_CALLS`
- * ceiling.
- *
- * Returns the number of entries dropped (>= 0; never < 0). 0 = policy off / no
- * denied entries / null `p` — no-op in all three cases. Currently discarded
- * at the call site (messages_buffered ignores the return value); the future
- * P2b audit pass will surface the count alongside the request-side
- * `gateway_policy_apply_request` return value. */
-int gateway_policy_police_parsed_response(parsed_response_t *p);
 
 #endif /* DEC_GATEWAY_POLICY_H */

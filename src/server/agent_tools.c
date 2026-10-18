@@ -11,6 +11,7 @@
 #include "worktree_scope.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
+#include <aimee/ir/aimee_ir.h>
 #include "agent_exec.h"
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_provider.h"
@@ -445,63 +446,76 @@ int agent_tools_append_delegate_respond_tool(cJSON *tools)
    return 1;
 }
 
-static char *delegate_respond_message(const char *arguments_json)
+int agent_ir_strip_delegate_respond(aimee_response_t *response)
 {
-   cJSON *root = arguments_json ? cJSON_Parse(arguments_json) : NULL;
-   cJSON *msg = root ? cJSON_GetObjectItemCaseSensitive(root, "message") : NULL;
-   char *out = safe_strdup(cJSON_IsString(msg) ? msg->valuestring : "");
-   cJSON_Delete(root);
-   return out;
-}
-
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
-{
-   if (!parsed || !parsed->is_tool_call || parsed->call_count <= 0)
-      return 0;
-
-   int respond_count = 0;
-   for (int i = 0; i < parsed->call_count; i++)
+   int count = aimee_ir_response_tool_count(response), responds = 0;
+   aimee_block_t *first = NULL;
+   for (int i = 0; i < count; i++)
    {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
-         respond_count++;
-   }
-   if (respond_count == 0)
-      return 0;
-
-   if (respond_count == parsed->call_count)
-   {
-      char *message = delegate_respond_message(parsed->calls[0].arguments);
-      for (int i = 0; i < parsed->call_count; i++)
+      aimee_block_t *tool = aimee_ir_response_tool(response, i);
+      if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+          (!tool->tool_namespace || !tool->tool_namespace[0]))
       {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         if (!first)
+            first = tool;
+         responds++;
       }
-      free(parsed->content);
-      parsed->content = message ? message : safe_strdup("");
-      parsed->call_count = 0;
-      parsed->is_tool_call = 0;
-      return 1;
    }
-
-   int dst = 0;
-   for (int i = 0; i < parsed->call_count; i++)
+   if (!responds)
+      return 0;
+   if (responds != count)
    {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
+      for (int i = count - 1; i >= 0; i--)
       {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         aimee_block_t *tool = aimee_ir_response_tool(response, i);
+         if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+             (!tool->tool_namespace || !tool->tool_namespace[0]))
+            aimee_ir_response_drop_tool(response, i);
+      }
+      return 2;
+   }
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(first->tool_input, "message");
+   char *text = safe_strdup(cJSON_IsString(value) ? value->valuestring : "");
+   if (!text)
+      return -1;
+   /* Preserve reasoning/media while replacing the synthetic respond calls and
+    * their preamble text with the actual final answer. */
+   aimee_context_meta_t context = first->context;
+   int write_index = 0, added = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      aimee_block_t *block = &response->content[i];
+      if (block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TEXT)
+      {
+         int place = block == first;
+         aimee_block_free_contents(block);
+         if (place)
+         {
+            response->content[write_index++] =
+                (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text, .context = context};
+            added = 1;
+         }
          continue;
       }
-      if (dst != i)
+      if (write_index != i)
       {
-         parsed->calls[dst] = parsed->calls[i];
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         response->content[write_index] = *block;
+         memset(block, 0, sizeof(*block));
       }
-      dst++;
+      write_index++;
    }
-   parsed->call_count = dst;
-   parsed->is_tool_call = parsed->call_count > 0;
-   return 2;
+   if (!added)
+      free(text);
+   response->n_content = write_index;
+   if (response->stop_reason == AIMEE_STOP_TOOL_USE)
+   {
+      response->stop_reason = AIMEE_STOP_END_TURN;
+      free(response->raw_stop_reason);
+      response->raw_stop_reason = NULL;
+   }
+   cJSON_Delete(response->raw);
+   response->raw = NULL;
+   return 1;
 }
 
 /* --- Tool execution (Unix only) --- */

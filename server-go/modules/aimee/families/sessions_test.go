@@ -687,7 +687,7 @@ func TestSessionIRRejectsInvalidFramesAndCursors(t *testing.T) {
 		}
 	}
 	for _, fields := range [][]string{{"s", "-1", "1"}, {"s", "0", "129"}, {"s", "not-a-cursor", "1"}, {"s", "0", "0"}} {
-		status, _ := sessCall(t, &sessDB{}, opSessionIRPage, fields)
+		status, _ := sessCall(t, &sessDB{}, opSessionIRPage, append(fields, "actor"))
 		if status != store.StatusInvalid {
 			t.Fatalf("invalid page status %d", status)
 		}
@@ -701,7 +701,7 @@ func TestSessionIRPagePreservesRolesToolsAndExactSequence(t *testing.T) {
 		{int64(9007199254740994), "event-2", "turn-1", "tool-runtime",
 			`{"kind":"message","message_id":"m2","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"opaque:42","content":"done"}]}}`},
 	}}
-	status, cells := sessCall(t, db, opSessionIRPage, []string{"session-1", "9007199254740992", "128"})
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"session-1", "9007199254740992", "128", "actor"})
 	if status != store.StatusOK || len(cells) != 1 {
 		t.Fatalf("page %d %v", status, cells)
 	}
@@ -735,7 +735,7 @@ func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any)
 	d.reads = append(d.reads, sql)
 	switch sql {
 	case sessionIRLockSQL:
-		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"session-1"}}
+		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"actor"}}
 	case sessionIRExistingSQL:
 		return sessRow{db: &sessDB{}, values: d.existing}
 	case sessionIRInsertSQL:
@@ -784,7 +784,7 @@ func TestSessionIRPageBoundsIncludeEncoding(t *testing.T) {
 	for n := 1; n <= 5; n++ {
 		db.rows = append(db.rows, []any{int64(n), fmt.Sprintf("e%d", n), "turn", "actor", payload})
 	}
-	status, cells := sessCall(t, db, opSessionIRPage, []string{"s", "0", "128"})
+	status, cells := sessCall(t, db, opSessionIRPage, []string{"s", "0", "128", "actor"})
 	if status != store.StatusOK || len(cells) != 1 || len(cells[0]) > 3<<20 {
 		t.Fatalf("invalid page: %d cells=%d", status, len(cells))
 	}
@@ -800,5 +800,36 @@ func TestSessionIRPageBoundsIncludeEncoding(t *testing.T) {
 	}
 	if !strings.Contains(string(page[0].Event), "<>&") {
 		t.Fatal("transport unexpectedly HTML-escaped code")
+	}
+}
+
+func TestSessionHarnessMetadata(t *testing.T) {
+	db := newSessDB()
+	db.row = []any{"native-one"}
+	status, cells := sessCall(t, db, opSessionHarnessGet, []string{"s", "claude", "owner"})
+	if status != store.StatusOK || len(cells) != 1 || cells[0] != "native-one" {
+		t.Fatalf("get: %d %v", status, cells)
+	}
+	db = newSessDB()
+	status, _ = sessCall(t, db, opSessionHarnessGet, []string{"s", "claude", "owner"})
+	if status != store.StatusMissing {
+		t.Fatalf("missing became %d", status)
+	}
+	db = newSessDB()
+	db.row = []any{"owner"}
+	status, _ = sessCall(t, db, opSessionHarnessBind, []string{"s", "codex", "native-two", "owner"})
+	if status != store.StatusOK || len(db.executed) != 2 || db.executed[0] != sessionIRLockSQL || db.executed[1] != sessionHarnessBindSQL {
+		t.Fatalf("bind not locked: %d %v", status, db.executed)
+	}
+	for _, f := range [][]string{{"", "codex", "id"}, {"s", "", "id"}, {"s", strings.Repeat("x", 129), "id"}, {"s", "codex", ""}} {
+		status, _ = sessCall(t, newSessDB(), opSessionHarnessBind, append(f, "owner"))
+		if status != store.StatusInvalid {
+			t.Fatalf("accepted bad metadata: %v", f)
+		}
+	}
+	db = newSessDB()
+	db.scanErr = errors.New("store unavailable")
+	if _, _, err := sessionHarnessGet(context.Background(), db, []string{"s", "codex", "owner"}); err == nil {
+		t.Fatal("store failure became missing")
 	}
 }

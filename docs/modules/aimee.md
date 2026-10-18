@@ -16,6 +16,7 @@ store wire; peer delivery, inbox, grant, and channel operations use the versione
 
 - `audit`: records governed peer actions and DB1 domain mutations without storing secret payloads.
 - `config`: supplies bounded server settings and the DB1 connection configuration used at startup.
+- `ir`: supplies the public data-only canonical session/history codec; DB1 retains storage and authorization ownership.
 - `execution-policy`: authorizes action-class peer sends before the module accepts their delivery.
 - `module-runtime`: authenticates the process, principal, stage grants, lifecycle, and readiness.
 

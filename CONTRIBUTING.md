@@ -20,6 +20,26 @@ database connections. Native KB algorithms use its session transport and hold no
 The `aimee` and `aimee-kb` binaries link no SQLite:
 `make -C src check-linking` asserts each binary's boundary and prints what it found.
 
+## Commit and PR identity
+
+Use the operator's Git identity for both author and committer. The `no-coauthor-trailers`
+CI gate rejects assistant identities, attribution trailers and generated-by footers, and AI app
+attribution recorded by GitHub on the opening PR entry (`performed_via_github_app`). Removing
+body text does not remove that metadata. The gate fetches the live issue representation and
+fails if attribution cannot be verified. Ordinary documentation references to a tool are allowed.
+
+Create and edit PRs through the registered `aimee git pr` commands using the operator's GitHub
+credentials. Personally authenticated `gh` is a fallback when the required Aimee operation is
+unavailable. Do not create or modify GitHub state through an assistant connector, and keep automatic
+reviews enabled. After creation, require the live `no-coauthor-trailers` check to pass before treating
+the PR's identity as verified; clean commit messages alone do not establish clean opening metadata.
+
+If an existing PR carries app attribution, preserve the strict gate. With the operator's authorization,
+create a replacement branch from the tested migration head and open its PR through personal
+authentication. Verify the replacement's attribution check, link the original and replacement, then
+close the superseded PR while retaining its review history. Do not delete the original or add a
+PR-specific exemption to make the check pass.
+
 ## Build and test
 
 From `src/`:
@@ -67,7 +87,7 @@ validation; disabling the update requirement without enabling the queue would pe
 Set the queue build concurrency to 1 and maximum merge group size to 1 initially, so unrelated
 changes do not repeatedly invalidate several candidates. Increase these after measuring queue time.
 
-The `CI`, `Release policy`, `core-c-package`, `c-repository-pins`, and `Audit storage regressions` workflows accept
+The `CI`, `Release policy`, `core-c-package`, `Module exports and runtime validation`, and `Audit storage regressions` workflows accept
 `merge_group: checks_requested` for `testing`. They check out GitHub's event SHA, which is the
 queued integration commit. Queue runs always take the full test path, including documentation-only
 changes. PR attribution checks remain admission checks on the original PR; the queue has no PR

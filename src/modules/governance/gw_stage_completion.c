@@ -1,11 +1,9 @@
 /* gw_stage_completion.c -- keep an ordinary client-owned tool loop alive when
  * the model's own final answer proves that it stopped before completing a
  * confirmed, in-scope repair.  This is model/protocol neutral: it operates on
- * the parsed response and on the tools the API client already registered. */
+ * canonical responses and on the tools the API client already registered. */
 #include "gw_stage_completion.h"
 
-#include "aimee.h" /* size macros used by agent_protocol.h */
-#include "agent_protocol.h"
 #include "cJSON.h"
 
 #include <ctype.h>
@@ -43,204 +41,118 @@ static int json_has_text_ci(const cJSON *node, const char *needle)
    return 0;
 }
 
-static const char *tool_name(const cJSON *tool)
-{
-   const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
-   if (cJSON_IsString(name) && name->valuestring && name->valuestring[0])
-      return name->valuestring;
-   const cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-   name = cJSON_IsObject(fn) ? cJSON_GetObjectItemCaseSensitive(fn, "name") : NULL;
-   return cJSON_IsString(name) ? name->valuestring : NULL;
-}
-
 static int name_is_edit(const char *name)
 {
    return text_has_ci(name, "apply_patch") || text_has_ci(name, "edit_file") ||
           text_has_ci(name, "write_file") || text_has_ci(name, "str_replace");
 }
 
-static int arguments_are_edit(const cJSON *call)
+static const char tool_policy[] =
+    "<aimee-tool-policy>Aimee's CLI is the preferred registered repository-intelligence "
+    "surface when a shell tool is available. REQUIRED FIRST STEP: before any repository read, "
+    "search, edit, build, or test, run `aimee index investigate \"<plain-language summary "
+    "of the task>\"`. Do not substitute an ordinary shell discovery command first. If client "
+    "instructions name an exact Aimee executable, use that path; otherwise use `aimee`. If "
+    "the command is unavailable, continue with ordinary tools and report the registration "
+    "failure. Use targeted Aimee index and memory commands before broad shell searches. If "
+    "investigate is unavailable or returns no evidence and the task concerns a repeated code "
+    "shape, use `aimee index ast-grep` for that shape before ordinary shell search. MCP is the "
+    "alternative only when no CLI is registered or a capability is explicitly MCP-only. For "
+    "a requested code repair, scope the work to the defect's root cause, not merely the named "
+    "location: before editing, search for the same defect pattern across production code. Any "
+    "matching production instance you confirm is part of the repair unless the user explicitly "
+    "excluded it. Fix and validate every confirmed matching instance while preserving the "
+    "existing success-path contract; do not defer known matching defects as optional follow-up."
+    "</aimee-tool-policy>";
+
+static const char completion_policy[] =
+    "<aimee-completion-policy>The preceding response confirmed matching production defects "
+    "during an active repair but deferred them. Treat a production instance you independently "
+    "confirmed as the same defect as part of the repair unless the user explicitly excluded it. "
+    "Your next response must use the available tools to complete every such instance and "
+    "validate the full repair before responding. Preserve the existing success-path contract "
+    "and avoid unrelated behavior changes. Do not ask permission and do not present known "
+    "matching defects as optional follow-up.</aimee-completion-policy>";
+
+static char *append_policy(const char *base, const char *policy)
 {
-   const cJSON *fn = cJSON_GetObjectItemCaseSensitive(call, "function");
-   const cJSON *args = cJSON_GetObjectItemCaseSensitive(call, "arguments");
-   if (!args && cJSON_IsObject(fn))
-      args = cJSON_GetObjectItemCaseSensitive(fn, "arguments");
-   if (!args)
-      args = cJSON_GetObjectItemCaseSensitive(call, "input");
-   return json_has_text_ci(args, "apply_patch") || json_has_text_ci(args, "sed -i") ||
-          json_has_text_ci(args, "perl -pi") || json_has_text_ci(args, "cat >") ||
-          json_has_text_ci(args, "tee ");
+   if (!base)
+      base = "";
+   size_t size = strlen(base), added = strlen(policy);
+   char *merged = malloc(size + added + 2);
+   if (!merged)
+      return NULL;
+   memcpy(merged, base, size);
+   if (size)
+      merged[size++] = '\n';
+   memcpy(merged + size, policy, added + 1);
+   return merged;
 }
 
-static int call_is_edit(const cJSON *call)
+static int ir_history_signal(const aimee_request_t *request, int completion)
 {
-   return call && (name_is_edit(tool_name(call)) || arguments_are_edit(call));
-}
-
-static int call_is_completion(const cJSON *call)
-{
-   if (!call)
-      return 0;
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(call, "id");
-   if (!cJSON_IsString(id))
-      id = cJSON_GetObjectItemCaseSensitive(call, "call_id");
-   return cJSON_IsString(id) && id->valuestring &&
-          strncmp(id->valuestring, AIMEE_COMPLETION_CALL_PREFIX,
-                  strlen(AIMEE_COMPLETION_CALL_PREFIX)) == 0;
-}
-
-static int history_has_edit(const cJSON *messages)
-{
-   if (!cJSON_IsArray(messages))
-      return 0;
-   const cJSON *message;
-   cJSON_ArrayForEach(message, messages)
-   {
-      const cJSON *role = cJSON_GetObjectItemCaseSensitive(message, "role");
-      if (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant") != 0)
-         continue;
-
-      const cJSON *calls = cJSON_GetObjectItemCaseSensitive(message, "tool_calls");
-      const cJSON *call;
-      if (cJSON_IsArray(calls))
-         cJSON_ArrayForEach(call, calls) if (call_is_edit(call)) return 1;
-
-      const cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
-      if (cJSON_IsArray(content))
-      {
-         cJSON_ArrayForEach(call, content)
-         {
-            const cJSON *type = cJSON_GetObjectItemCaseSensitive(call, "type");
-            if (cJSON_IsString(type) && strcmp(type->valuestring, "tool_use") == 0 &&
-                call_is_edit(call))
-               return 1;
-         }
-      }
-   }
-   return 0;
-}
-
-static int history_completion_call_count(const cJSON *messages)
-{
-   if (!cJSON_IsArray(messages))
-      return 0;
    int count = 0;
-   const cJSON *message;
-   cJSON_ArrayForEach(message, messages)
+   if (!request)
+      return 0;
+   for (int i = 0; i < request->n_messages; i++)
    {
-      const cJSON *role = cJSON_GetObjectItemCaseSensitive(message, "role");
-      if (!cJSON_IsString(role) || strcmp(role->valuestring, "assistant") != 0)
+      const aimee_message_t *message = &request->messages[i];
+      if (!message->role || strcmp(message->role, "assistant"))
          continue;
-
-      const cJSON *calls = cJSON_GetObjectItemCaseSensitive(message, "tool_calls");
-      const cJSON *call;
-      if (cJSON_IsArray(calls))
-         cJSON_ArrayForEach(call, calls) if (call_is_completion(call)) count++;
-
-      const cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
-      if (cJSON_IsArray(content))
-         cJSON_ArrayForEach(call, content) if (call_is_completion(call)) count++;
+      for (int j = 0; j < message->n_blocks; j++)
+      {
+         const aimee_block_t *block = &message->blocks[j];
+         if (block->type != AIMEE_BLK_TOOL_USE)
+            continue;
+         if (completion)
+            count += block->tool_id && !strncmp(block->tool_id, AIMEE_COMPLETION_CALL_PREFIX,
+                                                strlen(AIMEE_COMPLETION_CALL_PREFIX));
+         else if (name_is_edit(block->tool_name) ||
+                  json_has_text_ci(block->tool_input, "apply_patch") ||
+                  json_has_text_ci(block->tool_input, "sed -i") ||
+                  json_has_text_ci(block->tool_input, "perl -pi") ||
+                  json_has_text_ci(block->tool_input, "cat >") ||
+                  json_has_text_ci(block->tool_input, "tee "))
+            count++;
+      }
    }
    return count;
 }
 
-static int shell_tool(const cJSON *tools, const char **name_out, const char **arg_key_out)
+static int ir_shell_tool(const aimee_request_t *request, const char **name, const char **key)
 {
-   if (!cJSON_IsArray(tools))
+   if (!request)
       return 0;
    static const char *const preferred[] = {"exec_command", "Bash",        "bash",
                                            "shell",        "run_command", NULL};
    for (int p = 0; preferred[p]; p++)
-   {
-      const cJSON *tool;
-      cJSON_ArrayForEach(tool, tools)
+      for (int i = 0; i < request->n_tools; i++)
       {
-         const char *name = tool_name(tool);
-         if (!name || strcmp(name, preferred[p]) != 0)
+         const aimee_tool_t *tool = &request->tools[i];
+         if (!tool->name || strcmp(tool->name, preferred[p]))
             continue;
-         const cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-         const cJSON *params = cJSON_IsObject(fn)
-                                   ? cJSON_GetObjectItemCaseSensitive(fn, "parameters")
-                                   : cJSON_GetObjectItemCaseSensitive(tool, "parameters");
-         const cJSON *props =
-             cJSON_IsObject(params) ? cJSON_GetObjectItemCaseSensitive(params, "properties") : NULL;
-         *name_out = name;
-         *arg_key_out = cJSON_IsObject(props) && cJSON_GetObjectItemCaseSensitive(props, "cmd")
-                            ? "cmd"
-                            : "command";
+         const cJSON *properties = cJSON_GetObjectItemCaseSensitive(tool->schema, "properties");
+         *name = tool->name;
+         *key = cJSON_GetObjectItemCaseSensitive(properties, "cmd") ? "cmd" : "command";
          return 1;
       }
-   }
    return 0;
 }
 
-int gw_response_completion_armed(const cJSON *messages, const cJSON *tools)
+int gw_ir_response_completion_armed(const aimee_request_t *request)
 {
-   const char *name = NULL, *key = NULL;
-   return history_has_edit(messages) && shell_tool(tools, &name, &key) &&
-          history_completion_call_count(messages) < 1;
+   const char *name, *key;
+   return ir_history_signal(request, 0) && !ir_history_signal(request, 1) &&
+          ir_shell_tool(request, &name, &key);
 }
-
-char *gw_request_tool_system_prompt(const cJSON *tools, const char *base_system_prompt)
+char *gw_ir_request_tool_system_prompt(const aimee_request_t *request, const char *base)
 {
-   const char *name = NULL, *key = NULL;
-   if (!shell_tool(tools, &name, &key))
-      return NULL;
-
-   static const char policy[] =
-       "<aimee-tool-policy>Aimee's CLI is the preferred registered repository-intelligence "
-       "surface when a shell tool is available. REQUIRED FIRST STEP: before any repository read, "
-       "search, edit, build, or test, run `aimee index investigate \"<plain-language summary "
-       "of the task>\"`. Do not substitute an ordinary shell discovery command first. If client "
-       "instructions name an exact Aimee executable, use that path; otherwise use `aimee`. If "
-       "the command is unavailable, continue with ordinary tools and report the registration "
-       "failure. Use targeted Aimee index and memory commands before broad shell searches. If "
-       "investigate is unavailable or returns no evidence and the task concerns a repeated code "
-       "shape, use `aimee index ast-grep` for that shape before ordinary shell search. MCP is the "
-       "alternative only when no CLI is registered or a capability is explicitly MCP-only. For "
-       "a requested code repair, scope the work to the defect's root cause, not merely the named "
-       "location: before editing, search for the same defect pattern across production code. Any "
-       "matching production instance you confirm is part of the repair unless the user explicitly "
-       "excluded it. Fix and validate every confirmed matching instance while preserving the "
-       "existing success-path contract; do not defer known matching defects as optional follow-up."
-       "</aimee-tool-policy>";
-   const char *base = base_system_prompt ? base_system_prompt : "";
-   size_t base_len = strlen(base);
-   size_t policy_len = strlen(policy);
-   char *merged = malloc(base_len + policy_len + 2);
-   if (!merged)
-      return NULL;
-   memcpy(merged, base, base_len);
-   if (base_len)
-      merged[base_len++] = '\n';
-   memcpy(merged + base_len, policy, policy_len + 1);
-   return merged;
+   const char *name, *key;
+   return ir_shell_tool(request, &name, &key) ? append_policy(base, tool_policy) : NULL;
 }
-
-char *gw_request_completion_system_prompt(const cJSON *messages, const char *base_system_prompt)
+char *gw_ir_request_completion_system_prompt(const aimee_request_t *request, const char *base)
 {
-   if (history_completion_call_count(messages) == 0)
-      return NULL;
-
-   static const char policy[] =
-       "<aimee-completion-policy>The preceding response confirmed matching production defects "
-       "during an active repair but deferred them. Treat a production instance you independently "
-       "confirmed as the same defect as part of the repair unless the user explicitly excluded it. "
-       "Your next response must use the available tools to complete every such instance and "
-       "validate the full repair before responding. Preserve the existing success-path contract "
-       "and avoid unrelated behavior changes. Do not ask permission and do not present known "
-       "matching defects as optional follow-up.</aimee-completion-policy>";
-   const char *base = base_system_prompt ? base_system_prompt : "";
-   size_t base_len = strlen(base);
-   size_t policy_len = strlen(policy);
-   char *merged = malloc(base_len + policy_len + 2);
-   if (!merged)
-      return NULL;
-   memcpy(merged, base, base_len);
-   if (base_len)
-      merged[base_len++] = '\n';
-   memcpy(merged + base_len, policy, policy_len + 1);
-   return merged;
+   return ir_history_signal(request, 1) ? append_policy(base, completion_policy) : NULL;
 }
 
 static int response_confirms_related_defect(const char *text)
@@ -261,36 +173,46 @@ static int response_defers_repair(const char *text)
           text_has_ci(text, "follow-up") || text_has_ci(text, "follow up");
 }
 
-int gw_response_run_completion(parsed_response_t *parsed, const cJSON *messages, const cJSON *tools,
-                               const char *tool_stop_reason)
+int gw_ir_response_run_completion(aimee_response_t *response, const aimee_request_t *request)
 {
    const char *name = NULL, *key = NULL;
-   if (!parsed || parsed->is_tool_call || parsed->call_count != 0 || !parsed->content ||
-       !response_confirms_related_defect(parsed->content) ||
-       !response_defers_repair(parsed->content) || !gw_response_completion_armed(messages, tools) ||
-       !shell_tool(tools, &name, &key))
+   if (!response || aimee_ir_response_has_tool_use(response) || response->error_message ||
+       response->n_content >= AIMEE_IR_MAX_BLOCKS || !gw_ir_response_completion_armed(request) ||
+       !ir_shell_tool(request, &name, &key))
       return 0;
-
-   static const char command[] = "true";
-   cJSON *args = cJSON_CreateObject();
-   if (!args)
+   char *text = aimee_ir_response_text_alloc(response);
+   if (!text)
+      return -1;
+   int intervene = response_confirms_related_defect(text) && response_defers_repair(text);
+   free(text);
+   if (!intervene)
       return 0;
-   cJSON_AddStringToObject(args, key, command);
-   char *arguments = cJSON_PrintUnformatted(args);
-   cJSON_Delete(args);
-   if (!arguments)
-      return 0;
-
-   parsed_tool_call_t *call = &parsed->calls[0];
-   memset(call, 0, sizeof(*call));
+   aimee_block_t tool = {.type = AIMEE_BLK_TOOL_USE};
+   char id[80];
    unsigned long seq = atomic_fetch_add(&g_completion_call_seq, 1);
-   snprintf(call->id, sizeof(call->id), AIMEE_COMPLETION_CALL_PREFIX "%lu", seq);
-   snprintf(call->name, sizeof(call->name), "%s", name);
-   call->arguments = arguments;
-   parsed->is_tool_call = 1;
-   parsed->call_count = 1;
-   snprintf(parsed->stop_reason, sizeof(parsed->stop_reason), "%s",
-            tool_stop_reason && tool_stop_reason[0] ? tool_stop_reason : "tool_calls");
-   parsed->stop = AIMEE_STOP_TOOL_USE;
+   snprintf(id, sizeof id, AIMEE_COMPLETION_CALL_PREFIX "%lu", seq);
+   tool.tool_id = strdup(id);
+   tool.tool_name = strdup(name);
+   tool.tool_input = cJSON_CreateObject();
+   if (!tool.tool_id || !tool.tool_name || !tool.tool_input ||
+       !cJSON_AddStringToObject(tool.tool_input, key, "true"))
+   {
+      aimee_block_free_contents(&tool);
+      return -1;
+   }
+   aimee_block_t *grown =
+       realloc(response->content, (size_t)(response->n_content + 1) * sizeof *grown);
+   if (!grown)
+   {
+      aimee_block_free_contents(&tool);
+      return -1;
+   }
+   aimee_ir_block_set_context(&tool, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_PUBLIC, 1, NULL, NULL, 0);
+   response->content = grown;
+   response->content[response->n_content++] = tool;
+   response->stop_reason = AIMEE_STOP_TOOL_USE;
+   free(response->raw_stop_reason);
+   response->raw_stop_reason = NULL;
    return 1;
 }

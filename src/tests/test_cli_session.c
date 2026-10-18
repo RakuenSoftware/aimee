@@ -1252,6 +1252,34 @@ static void test_isolated_codex_home(void)
    cli_session_destroy(&cleanup);
    assert(access(home, F_OK) != 0);
 
+   /* Recreating credentials must retain only this execution's native resume
+    * files. A sibling delegate sees a distinct directory, never its history. */
+   char first_home[PATH_MAX], second_home[PATH_MAX], resumed_home[PATH_MAX];
+   cli_session_t first = {0}, second = {0}, resumed = {0};
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-a", first_home,
+                                    sizeof first_home, &first));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", first_home);
+   FILE *history = fopen(path, "w");
+   assert(history);
+   fputs("private native continuation", history);
+   fclose(history);
+   cli_session_destroy(&first);
+   assert(access(first_home, F_OK) != 0);
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-b", second_home,
+                                    sizeof second_home, &second));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", second_home);
+   assert(access(path, F_OK) != 0);
+   cli_session_destroy(&second);
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-a", resumed_home,
+                                    sizeof resumed_home, &resumed));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", resumed_home);
+   char *retained = slurp(path);
+   assert(retained && !strcmp(retained, "private native continuation"));
+   free(retained);
+   unlink(path);
+   cli_session_destroy(&resumed);
+   assert(cli_session_harness_home("codex", ".", "../foreign", home, sizeof home, &cleanup) < 0);
+
    g_codex_vault_oauth[0] = '\0';
    assert(cli_session_isolated_codex_home(home, sizeof(home)) == -1);
    unlink(config);

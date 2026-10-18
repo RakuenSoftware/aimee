@@ -1,5 +1,6 @@
 """Exercise the shipping thin client against an isolated HTTP/mTLS peer."""
 import concurrent.futures
+import errno
 import gzip
 import http.client
 import http.server
@@ -16,11 +17,27 @@ import ssl
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
+from unittest.mock import Mock, patch
 
 
 BINARY = Path(os.environ.get("AIMEE_TEST_PROXY_BINARY",
                              Path(__file__).resolve().parents[2] / "aimee")).resolve()
+
+
+def cleanup_client_directory(directory):
+    # Codex can finish its reply before background Git/cache writes stop. Retry
+    # only concurrent directory creation, and still fail if it does not settle.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            directory.cleanup()
+            return
+        except OSError as error:
+            if error.errno != errno.ENOTEMPTY or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 class Peer(http.server.BaseHTTPRequestHandler):
@@ -140,7 +157,7 @@ class Peer(http.server.BaseHTTPRequestHandler):
 class ThinClientProxyTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aimee-proxy-test-")
-        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(cleanup_client_directory, self.temp)
         self.root = Path(self.temp.name)
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith(("AIMEE_", "OPENAI_", "ANTHROPIC_"))}
@@ -165,6 +182,34 @@ class ThinClientProxyTest(unittest.TestCase):
         self.peer_thread = None
         self.proxy = None
         self.addCleanup(self.cleanup_processes)
+
+    def test_cleanup_retries_a_late_git_write(self):
+        directory = tempfile.TemporaryDirectory(dir=self.root)
+        self.addCleanup(directory.cleanup)
+        git_dir = Path(directory.name) / '.git'
+        git_dir.mkdir()
+        rmdir = os.rmdir
+        writes = []
+        def late_write(path, *args, **kwargs):
+            if Path(path).name == '.git' and not writes:
+                (git_dir / 'late-cache-write').write_text('fixture')
+                writes.append(True)
+            return rmdir(path, *args, **kwargs)
+        with patch.object(os, 'rmdir', side_effect=late_write):
+            cleanup_client_directory(directory)
+        self.assertEqual(writes, [True])
+        self.assertFalse(Path(directory.name).exists())
+
+    def test_cleanup_preserves_unrelated_and_persistent_failures(self):
+        for code in (errno.EACCES, errno.ENOTEMPTY):
+            with self.subTest(errno=code):
+                directory = Mock()
+                error = OSError(code, 'fixture cleanup failure')
+                directory.cleanup.side_effect = error
+                with patch('time.monotonic', side_effect=[0, 6]), self.assertRaises(OSError) as caught:
+                    cleanup_client_directory(directory)
+                self.assertIs(caught.exception, error)
+                directory.cleanup.assert_called_once()
 
     def cleanup_processes(self):
         self.peer.release.set()

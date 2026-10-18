@@ -434,6 +434,13 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
       close(out_pipe[1]);
       if (cfg && cfg->cwd && cfg->cwd[0] && chdir(cfg->cwd) != 0)
          _exit(126);
+      if (cfg && cfg->home && cfg->home[0])
+      {
+         setenv("HOME", cfg->home, 1);
+         unsetenv("CLAUDE_CONFIG_DIR");
+      }
+      if (cfg && cfg->session_id && cfg->session_id[0])
+         setenv("AIMEE_SESSION_ID", cfg->session_id, 1);
       /* A spawned provider-CLI agent is its own session: clear the surrounding
        * Claude Code session's nesting guards so agents that are themselves
        * Claude Code (e.g. the `claude-code-acp` ACP adapter) don't refuse to
@@ -978,6 +985,20 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
                                  const char *cwd, const char *system_prompt,
                                  const char *user_prompt, agent_result_t *out)
 {
+   provider_cli_cfg_t cfg = {
+       .agent = agent, .cwd = cwd, .system_prompt = system_prompt, .user_prompt = user_prompt};
+   return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
+}
+
+int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
+                                     const provider_cli_cfg_t *config, agent_result_t *out)
+{
+   if (!config)
+      return -1;
+   provider_cli_cfg_t cfg = *config;
+   const agent_t *agent = cfg.agent;
+   const char *system_prompt = cfg.system_prompt;
+   const char *user_prompt = cfg.user_prompt;
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -998,18 +1019,6 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
       snprintf(out->error, sizeof(out->error), "empty prompt");
       return -1;
    }
-
-   provider_cli_cfg_t cfg = {
-       .agent = agent,
-       .cwd = cwd,
-       .system_prompt = system_prompt,
-       .user_prompt = user_prompt,
-   };
-
-   /* NB: a thin-client (detached workspace) `claude` agent runs the standard
-    * `claude` CLI over tmux on the client — that is the tmux-cli backend routed
-    * through cli_session over the reverse channel, NOT this provider-cli path
-    * (which would use `claude -p`). So there is no detached special-case here. */
 
    if (adapter->execute)
       return adapter->execute(&cfg, out);

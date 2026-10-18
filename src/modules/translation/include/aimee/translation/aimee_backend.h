@@ -13,6 +13,47 @@
 
 struct cJSON;
 
+/* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
+ * Independent semantic comparison detects edits even when their flag was missed. */
+char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
+/* Completed JSON/SSE entry boundary. Owns parsing and canonical admission; no
+ * fallback to legacy parsers or projection occurs. */
+int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
+                             aimee_response_t *out, char *error, size_t capacity);
+/* Shared Anthropic block entry adapter used by request/response boundaries.
+ * Unknown native types retain UNKNOWN + sidecar; canonical admission rejects
+ * them until an explicit typed mapping exists. */
+void anthropic_ir_parse_block(const struct cJSON *native, aimee_block_t *out);
+
+typedef struct
+{
+   int omitted_reasoning_blocks;
+   int omitted_opaque_state_blocks;
+} aimee_wire_projection_report_t;
+/* Reports wire incompatibility without editing canonical history. */
+void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
+                                     aimee_wire_projection_report_t *report);
+int anthropic_ir_block_replayable(const aimee_block_t *block);
+
+/* A local replay fence from the actual sent Anthropic request. No credentials or
+ * provider state; signatures remain opaque and are still verified upstream. */
+typedef struct aimee_anthropic_replay
+{
+   char prefix[65], chain[65];
+   int valid;
+} aimee_anthropic_replay_t;
+int aimee_anthropic_bind_request(const struct cJSON *native, aimee_request_t *request);
+int aimee_anthropic_replay_prepare(const void *bytes, size_t length,
+                                   aimee_anthropic_replay_t *state);
+int aimee_anthropic_bind_response(const aimee_anthropic_replay_t *request,
+                                  aimee_response_t *response);
+int aimee_anthropic_replay_valid(const aimee_request_t *request, const struct cJSON *native);
+void aimee_anthropic_projection_report(const aimee_request_t *request,
+                                       aimee_wire_projection_report_t *report);
+
+/* Render one admitted block at an explicit Anthropic output boundary. */
+struct cJSON *anthropic_ir_render_block(const aimee_block_t *block);
+
 /* Build an Anthropic Messages API request from the IR. Returns a new cJSON object
  * the caller owns (cJSON_Delete), or NULL on bad args. */
 struct cJSON *anthropic_backend_build(const aimee_request_t *ir);
@@ -38,6 +79,8 @@ int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *
  * `instructions`; messages -> `input` items (message / function_call); tools ->
  * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
+/* Owned native snapshot assembled at the Responses SSE entry boundary. */
+struct cJSON *responses_backend_sse_object(const char *body);
 /* Reasoning text out of a Responses `reasoning` output item, from its `summary`.
  * SHARED by the backend (provider response) and frontend (client request) parsers,
  * which had independently assumed `summary` is a bare string.
@@ -71,5 +114,9 @@ int bedrock_converse_parse(const struct cJSON *resp, aimee_response_t *out, char
  * the non-streaming parse and the ConverseStream delta parser (messageStop) so there
  * is one source of truth. NULL / unrecognized -> AIMEE_STOP_UNKNOWN. */
 aimee_stop_reason_t converse_stop_reason(const char *sr);
+
+/* Explicit output boundary for the typed format; NULL when unset or invalid. */
+struct cJSON *openai_family_output_format_build(const aimee_output_format_t *format,
+                                                int responses_shape);
 
 #endif /* DEC_AIMEE_BACKEND_H */

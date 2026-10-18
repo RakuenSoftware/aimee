@@ -167,6 +167,13 @@
           "event_kind": 6146,
           "durability": "capture",
           "durability_reason": "bounded owner admission and projection RPC; accepted observations persist in the immutable learning application ledger"
+        },
+        {
+          "id": 3,
+          "name": "canonical-execution-observation",
+          "event_kind": 6147,
+          "durability": "capture",
+          "durability_reason": "pure projection of an already persisted canonical terminal; host records the observation in the existing local interaction ledger"
         }
       ]
     },

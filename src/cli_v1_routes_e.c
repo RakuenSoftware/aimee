@@ -95,12 +95,14 @@ char *cli_index_worktree_root(const char *method, const cJSON *req)
       size_t n = strlen(common);
       if (n && common[n - 1] == '\n')
          common[--n] = '\0';
-      /* Only the standard linked-worktree layout establishes this mapping.
-       * Bare repos, submodules and separate git directories keep the ordinary
-       * server fallback. A failed/truncated/multiline response is not a path. */
+      /* Resolve both a main checkout and its linked worktrees. A normal
+       * checkout also needs client-side registration when the remote server
+       * cannot read it. Never infer a repository from a directory basename. */
       if (n > 5 && common[0] == '/' && !strchr(common, '\n') &&
-          strcmp(common + n - 5, "/.git") == 0 && strncmp(output, common, n) == 0 &&
-          strncmp(output + n, "/worktrees/", 10) == 0 && output[n + 10])
+          strcmp(common + n - 5, "/.git") == 0 &&
+          (strcmp(output, common) == 0 ||
+           (strncmp(output, common, n) == 0 && strncmp(output + n, "/worktrees/", 10) == 0 &&
+            output[n + 10])))
       {
          common[n - 5] = '\0';
          root = strdup(common);
@@ -152,10 +154,10 @@ static const char *cli_index_registered_project(const cJSON *projects, const cha
    return best;
 }
 
-void cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response)
+int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response)
 {
    if (!root || cJSON_GetObjectItemCaseSensitive(req, "project"))
-      return;
+      return 1;
    const cJSON *projects = cJSON_GetObjectItemCaseSensitive(response, "projects");
    const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "cwd"));
    int matched = 0;
@@ -164,6 +166,7 @@ void cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON 
       name = cli_index_registered_project(projects, root, &matched);
    if (name)
       cJSON_AddStringToObject(req, "project", name);
+   return matched;
 }
 
 void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,

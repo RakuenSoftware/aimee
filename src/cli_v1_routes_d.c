@@ -1152,7 +1152,8 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
          cJSON *st = cJSON_GetObjectItemCaseSensitive(snap, "status");
          if (cJSON_IsString(st) &&
              (strcmp(st->valuestring, "completed") == 0 || strcmp(st->valuestring, "failed") == 0 ||
-              strcmp(st->valuestring, "cancelled") == 0))
+              strcmp(st->valuestring, "cancelled") == 0 ||
+              strcmp(st->valuestring, "incomplete") == 0))
          {
             int ok = strcmp(st->valuestring, "completed") == 0;
             cJSON *result = cJSON_DetachItemFromObjectCaseSensitive(snap, "result");
@@ -1161,12 +1162,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
                cJSON_Delete(snap);
                return result;
             }
-            /* A failed/cancelled run, or a completed one with no result, used to
-             * become an empty object. Printers then rendered that as a zero-valued
-             * SUCCESS — `aimee kb build` reported "files indexed: 0, chunks added: 0"
-             * with exit status 0 when the run had actually failed, hiding the failure
-             * from humans and scripts alike. Surface it as an error envelope instead,
-             * carrying whatever the run recorded. */
+            /* Failed, cancelled and incomplete runs, and completed operations
+             * with no result, must surface the recorded failure instead of an
+             * empty object that printers would mistake for success. */
             /* A failed run usually carries its reason inside `result` (e.g.
              * {"result":{"error":"rpc produced no response"}}), so look there first. */
             cJSON *env = cli_v1_failed_run_response(result, snap);
@@ -2307,8 +2305,7 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
-   /* Run after either native or server-advertised argspec marshalling, so both
-    * paths carry the same inferred scope. Keep cwd intact for file requests. */
+   /* Infer scope after marshalling; retain cwd for file requests. */
    char *worktree_root = cli_index_worktree_root(disp_method, req);
    if (worktree_root)
    {
@@ -2319,7 +2316,40 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
           list_path ? cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status)
                     : NULL;
       if (list_status >= 200 && list_status < 300)
-         cli_index_apply_worktree_project(req, worktree_root, projects);
+      {
+         int registered = cli_index_apply_worktree_project(req, worktree_root, projects);
+         (void)registered; /* Bootstrap is POSIX-only; scope forwarding is portable. */
+#if defined(AIMEE_POSIX)
+         /* Bootstrap direct CLI discovery through the existing bounded scan,
+          * then resolve its registered name. Never treat a list outage as absence. */
+         if (!registered && remote &&
+             cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(projects, "projects")) &&
+             !cJSON_GetObjectItemCaseSensitive(req, "project"))
+         {
+            cJSON_Delete(projects);
+            projects = NULL;
+            if (cli_ws_ingest_tree(remote, bearer, worktree_root) == 0)
+            {
+               projects =
+                   cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status);
+               if (list_status >= 200 && list_status < 300)
+                  cli_index_apply_worktree_project(req, worktree_root, projects);
+            }
+            if (!cJSON_GetObjectItemCaseSensitive(req, "project"))
+            {
+               fprintf(stderr,
+                       "aimee: could not register the active repository for index discovery: %s\n",
+                       worktree_root);
+               cJSON_Delete(projects);
+               free(worktree_root);
+               cJSON_Delete(req);
+               free(bearer);
+               free(remote);
+               return 1;
+            }
+         }
+#endif
+      }
       cJSON_Delete(projects);
       free(worktree_root);
    }

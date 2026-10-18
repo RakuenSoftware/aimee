@@ -8,12 +8,18 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "agent_protocol.h"
+#include <aimee/ir/aimee_ir.h>
 #include "gw_stage_governance.h"
+#include "cJSON.h"
+#include "agent_response_projection.h"
+#include <aimee/ir/session_event.h>
 
 static int g_provider_calls;
 static int g_policy_active;
 static int g_provider_mode;
+static const char *expected_policy_stop;
+static const char *expected_name;
+static const char *expected_namespace;
 
 static int denied_tool(const char *name)
 {
@@ -21,12 +27,20 @@ static int denied_tool(const char *name)
           strcmp(name, "RemoteTrigger") == 0 || strcmp(name, "Task") == 0;
 }
 
-static int fake_event_bus_provider(int policy_active, const char *const *tool_names,
+static int fake_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                    uint32_t tool_count, const char *stop_reason,
                                    aimee_governance_decision_t *decision)
 {
    g_provider_calls++;
+   if (expected_policy_stop)
+      assert(stop_reason && !strcmp(stop_reason, expected_policy_stop));
    g_policy_active = policy_active;
+   if (expected_name)
+      for (uint32_t i = 0; i < tool_count; i++)
+      {
+         assert(!strcmp(tools[i].name, expected_name));
+         assert(tools[i].namespace_name && !strcmp(tools[i].namespace_name, expected_namespace));
+      }
    if (g_provider_mode == 1)
       return -1;
    memset(decision, 0, sizeof(*decision));
@@ -45,7 +59,7 @@ static int fake_event_bus_provider(int policy_active, const char *const *tool_na
    decision->keep_mask = 0;
    for (uint32_t i = 0; i < tool_count; ++i)
    {
-      if (denied_tool(tool_names[i]))
+      if (denied_tool(tools[i].name))
          decision->drop_count++;
       else
          decision->keep_mask |= 1u << i;
@@ -66,14 +80,99 @@ static char *copy_string(const char *value)
    return copy;
 }
 
-static void seed_call(parsed_response_t *parsed, int index, const char *name)
+static aimee_response_t tool_response(int count, const char *first, const char *other)
 {
-   snprintf(parsed->calls[index].name, sizeof(parsed->calls[index].name), "%s", name);
-   parsed->calls[index].arguments = copy_string("{}");
+   aimee_response_t response = {0};
+   response.n_content = count;
+   response.content = calloc((size_t)count, sizeof *response.content);
+   assert(response.content);
+   for (int i = 0; i < count; i++)
+   {
+      char id[32];
+      snprintf(id, sizeof id, "opaque-%d", i);
+      response.content[i] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = copy_string(i ? other : first),
+                                            .tool_id = copy_string(id),
+                                            .tool_input = cJSON_CreateObject()};
+   }
+   response.stop_reason = AIMEE_STOP_TOOL_USE;
+   return response;
+}
+
+static void test_complete_identity_views(void)
+{
+   char name[1201], namespace_name[801];
+   memset(name, 'n', sizeof name - 1);
+   memset(namespace_name, 's', sizeof namespace_name - 1);
+   name[sizeof name - 1] = 0;
+   namespace_name[sizeof namespace_name - 1] = 0;
+   aimee_response_t response = tool_response(40, name, name);
+   for (int i = 0; i < response.n_content; i++)
+      response.content[i].tool_namespace = copy_string(namespace_name);
+   expected_name = name;
+   expected_namespace = namespace_name;
+   g_provider_mode = 0;
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   int before = g_provider_calls;
+   assert(gw_ir_response_run_governance(&response, 1, 1) == 0);
+   assert(g_provider_calls == before + 3);
+   assert(response.n_content == 40);
+   for (int i = 0; i < response.n_content; i++)
+   {
+      assert(!strcmp(response.content[i].tool_name, name));
+      assert(!strcmp(response.content[i].tool_namespace, namespace_name));
+   }
+   expected_name = expected_namespace = NULL;
+   aimee_response_free(&response);
+}
+
+static void test_native_stop_metadata_survives_policy(void)
+{
+   const aimee_stop_reason_t stops[] = {AIMEE_STOP_TOOL_USE, AIMEE_STOP_MAX_TOKENS,
+                                        AIMEE_STOP_STOP_SEQUENCE, AIMEE_STOP_UNKNOWN};
+   char reason[301];
+   memset(reason, 'r', sizeof reason - 1);
+   memcpy(reason, "native-reason:", 14);
+   reason[sizeof reason - 1] = 0;
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   g_provider_mode = 0;
+   for (size_t i = 0; i < sizeof stops / sizeof stops[0]; i++)
+      for (int partial = 0; partial <= 1; partial++)
+      {
+         aimee_response_t response = tool_response(partial ? 2 : 1, "Agent", "read_file");
+         response.stop_reason = stops[i];
+         expected_policy_stop = aimee_stop_reason_name(stops[i]);
+         response.raw_stop_reason = copy_string(reason);
+         assert(gw_ir_response_run_governance(&response, 1, 1) == 1);
+         if (!partial && stops[i] == AIMEE_STOP_TOOL_USE)
+            assert(response.stop_reason == AIMEE_STOP_END_TURN && !response.raw_stop_reason);
+         else
+            assert(response.stop_reason == stops[i] && response.raw_stop_reason &&
+                   !strcmp(response.raw_stop_reason, reason));
+         aimee_response_free(&response);
+      }
+   expected_policy_stop = NULL;
+}
+
+static int denied_events, reject_event;
+static unsigned denied_ids;
+static int capture_denial(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   assert(event->kind == AIMEE_SESSION_MESSAGE && event->message->n_blocks == 1);
+   const aimee_block_t *block = &event->message->blocks[0];
+   assert(block->type == AIMEE_BLK_TOOL_RESULT && block->tool_is_error);
+   int index = -1;
+   assert(sscanf(block->tool_id, "opaque-%d", &index) == 1 && index >= 0 && index <= 16);
+   denied_ids |= 1u << (unsigned)index;
+   denied_events++;
+   return reject_event ? -1 : 0;
 }
 
 int main(void)
 {
+   test_complete_identity_views();
+   test_native_stop_metadata_survives_policy();
    /* The stage and separately supervised process must share the descriptor's
     * default-OFF posture. Otherwise an unspecified config enables this stage
     * without starting the module, and the fail-closed provider path drops every
@@ -93,101 +192,122 @@ int main(void)
    setenv("AIMEE_STAGE_GOVERNANCE", "nope", 1);
    assert(gw_response_governance_enabled() == 0); /* invalid values do not opt in */
 
-   /* Regression: the exact unspecified/default path used by delegate responses
-    * must bypass governance when no process/provider is present. This is the
-    * production failure that previously became synthetic timeout results. */
+   /* Default/disabled governance does not call an absent owner or mutate IR. */
    unsetenv("AIMEE_STAGE_GOVERNANCE");
    gw_response_governance_register_provider(NULL);
-   {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 1;
-      seed_call(&pr, 0, "read_file");
-      assert(gw_response_run_governance(&pr, gw_response_governance_enabled(), 1) == 0);
-      assert(pr.call_count == 1);
-      assert(strcmp(pr.calls[0].name, "read_file") == 0);
-      free(pr.calls[0].arguments);
-   }
-
+   aimee_response_t plain = tool_response(1, "read_file", "read_file");
+   assert(!gw_ir_response_run_governance(&plain, gw_response_governance_enabled(), 1));
+   assert(aimee_ir_response_tool_count(&plain) == 1);
+   assert(!strcmp(plain.content[0].tool_name, "read_file"));
+   aimee_response_free(&plain);
    gw_response_governance_register_provider(fake_event_bus_provider);
-
-   /* Enabled: the event-bus provider decides; the C seam only applies its mask. */
-   {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 2;
-      seed_call(&pr, 0, "Agent");
-      seed_call(&pr, 1, "read_file");
-      g_provider_calls = g_provider_mode = 0;
-      assert(gw_response_run_governance(&pr, 1, 1) == 1);
-      assert(g_provider_calls == 1 && g_policy_active == 1);
-      assert(pr.call_count == 1);
-      assert(strcmp(pr.calls[0].name, "read_file") == 0);
-      assert(strcmp(pr.stop_reason, "tool_use") == 0);
-      free(pr.calls[0].arguments);
-   }
-
-   /* Policy-off still crosses the module boundary and returns an explicit keep-all decision. */
-   {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 1;
-      seed_call(&pr, 0, "Agent");
-      g_provider_calls = g_provider_mode = 0;
-      assert(gw_response_run_governance(&pr, 1, 0) == 0);
-      assert(g_provider_calls == 1 && g_policy_active == 0);
-      assert(pr.call_count == 1);
-      free(pr.calls[0].arguments);
-   }
-
-   /* Disabled module: no event-bus call and no mutation. */
-   {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 1;
-      seed_call(&pr, 0, "Agent");
-      g_provider_calls = 0;
-      assert(gw_response_run_governance(&pr, 0, 1) == 0);
-      assert(g_provider_calls == 0 && pr.call_count == 1);
-      free(pr.calls[0].arguments);
-   }
-
-   /* An unavailable or malformed module answer fails closed; local policing is never used. */
-   for (g_provider_mode = 1; g_provider_mode <= 2; ++g_provider_mode)
-   {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 1;
-      seed_call(&pr, 0, "read_file");
-      assert(gw_response_run_governance(&pr, 1, 1) == 1);
-      assert(pr.call_count == 0);
-      assert(strcmp(pr.stop_reason, "end_turn") == 0);
-      assert(pr.stop == AIMEE_STOP_END_TURN);
-   }
-
+   for (int enabled = 0; enabled <= 1; enabled++)
+      for (int policy = 0; policy <= 1; policy++)
+      {
+         aimee_response_t response = tool_response(2, "Agent", "read_file");
+         g_provider_calls = g_provider_mode = 0;
+         assert(gw_ir_response_run_governance(&response, enabled, policy) == (enabled && policy));
+         assert(g_provider_calls == enabled);
+         if (enabled)
+            assert(g_policy_active == policy);
+         assert(aimee_ir_response_tool_count(&response) == 2 - (enabled && policy));
+         aimee_response_free(&response);
+      }
+   /* Missing owner fails closed across multiple batches, beyond the old mask width. */
    gw_response_governance_register_provider(NULL);
+   plain = tool_response(40, "read_file", "read_file");
+   assert(gw_ir_response_run_governance(&plain, 1, 1) == 40);
+   assert(!aimee_ir_response_tool_count(&plain) && plain.stop_reason == AIMEE_STOP_END_TURN);
+   aimee_response_free(&plain);
+
+   /* Typed execution uses the same decision owner without flattening reasoning,
+    * media or long IDs. Failed decisions remove tools, preserving other blocks. */
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   for (int failed = 0; failed < 3; failed++)
    {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      pr.call_count = 1;
-      seed_call(&pr, 0, "read_file");
-      assert(gw_response_run_governance(&pr, 1, 1) == 1);
-      assert(pr.call_count == 0);
+      aimee_response_t response = {0};
+      response.n_content = 4;
+      response.content = calloc(4, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                            .text = copy_string("reason"),
+                                            .thinking_signature = copy_string("signature")};
+      response.content[1] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = copy_string("Agent"),
+                                            .tool_id = copy_string("deny")};
+      response.content[2] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                            .media_type = copy_string("image/png"),
+                                            .media_ref = copy_string("AA==")};
+      response.content[3] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = copy_string("read_file"),
+                                            .tool_id = copy_string("keep:opaque")};
+      response.stop_reason = AIMEE_STOP_TOOL_USE;
+      response.raw = cJSON_CreateObject();
+      g_provider_mode = failed;
+      g_provider_calls = 0;
+      assert(gw_ir_response_run_governance(&response, 0, 1) == 0);
+      assert(g_provider_calls == 0 && response.n_content == 4);
+      assert(gw_ir_response_run_governance(&response, 1, 1) == (failed ? 2 : 1));
+      assert(g_provider_calls == 1);
+      assert(response.n_content == (failed ? 2 : 3));
+      assert(!strcmp(response.content[0].thinking_signature, "signature"));
+      assert(response.content[1].type == AIMEE_BLK_IMAGE);
+      assert(response.raw == NULL);
+      assert(response.stop_reason == (failed ? AIMEE_STOP_END_TURN : AIMEE_STOP_TOOL_USE));
+      if (!failed)
+         assert(!strcmp(aimee_ir_response_tool(&response, 0)->tool_id, "keep:opaque"));
+      aimee_response_free(&response);
    }
 
-   /* A corrupt oversized count is bounded before fail-closed cleanup. */
+   /* The old mask width must not limit the canonical response. Each policy
+    * batch decides real tool names; truncation remains visible after policing. */
    {
-      parsed_response_t pr;
-      memset(&pr, 0, sizeof(pr));
-      for (int i = 0; i < AGENT_MAX_TOOL_CALLS; ++i)
-         seed_call(&pr, i, "read_file");
-      pr.call_count = AGENT_MAX_TOOL_CALLS + 1;
-      assert(gw_response_run_governance(&pr, 1, 1) == AGENT_MAX_TOOL_CALLS);
-      assert(pr.call_count == 0);
+      aimee_response_t response = {0};
+      response.n_content = 18;
+      response.content = calloc(18, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                            .text = copy_string("reason"),
+                                            .thinking_signature = copy_string("sig")};
+      for (int i = 0; i < 17; i++)
+      {
+         char id[32];
+         snprintf(id, sizeof id, "opaque-%d", i);
+         response.content[i + 1] =
+             (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                             .tool_name = copy_string(i % 2 ? "read_file" : "Agent"),
+                             .tool_id = copy_string(id)};
+      }
+      response.stop_reason = AIMEE_STOP_MAX_TOKENS;
+      g_provider_calls = g_provider_mode = 0;
+      aimee_ir_session_set_sink(capture_denial, NULL);
+      char first_denied[64] = "";
+      assert(agent_response_govern(&response, 1, 1, first_denied, sizeof first_denied) == 9);
+      assert(denied_events == 9 && denied_ids == 0x15555 && !strcmp(first_denied, "Agent"));
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(g_provider_calls == 2 && aimee_ir_response_tool_count(&response) == 8);
+      assert(response.stop_reason == AIMEE_STOP_MAX_TOKENS);
+      assert(!strcmp(response.content[0].thinking_signature, "sig"));
+      aimee_response_free(&response);
    }
 
+   {
+      aimee_response_t response = {0};
+      response.content = calloc(1, sizeof *response.content);
+      assert(response.content);
+      response.n_content = 1;
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_id = copy_string("opaque-0"),
+                                            .tool_name = copy_string("Agent")};
+      reject_event = 1;
+      aimee_ir_session_set_sink(capture_denial, NULL);
+      assert(agent_response_govern(&response, 1, 1, NULL, 0) < 0);
+      assert(aimee_ir_session_capture_failed());
+      aimee_ir_session_set_sink(NULL, NULL);
+      aimee_response_free(&response);
+   }
    /* NULL-safe. */
-   assert(gw_response_run_governance(NULL, 1, 1) == 0);
+   assert(gw_ir_response_run_governance(NULL, 1, 1) == 0);
 
    printf("ok\n");
    return 0;

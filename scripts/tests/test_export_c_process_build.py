@@ -37,6 +37,12 @@ class CProcessBuildTests(unittest.TestCase):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
+        for module in ("aimee", "memory", "economizer", "delegates", "governance"):
+            with self.subTest(ir_consumer=module):
+                sources = exporter.go_process_shared_sources(module)
+                self.assertIn("server-go/ir/session.go", sources)
+                self.assertIn("server-go/ir/request.go", sources)
+                self.assertNotIn("server-go/ir/contract_test.go", sources)
         self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
         self.assertIn("server-go/modules/audit/action.go", exporter.go_process_shared_sources("memory"))
 
@@ -125,6 +131,22 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertEqual(build.returncode, 0, build.stderr)
             tests = subprocess.run(["go", "test", "./server-go/modules/memory",
                                     "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace|TestEvidenceCoverage|TestEvidenceRequirements|TestEvidenceRecovery|TestEvidenceTemporal|TestEvidenceComparison|TestEvidenceProcedure|TestMR05FrozenCoverage|TestUtilityHorizon", "-count=1"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
+
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_governance_export_builds_with_canonical_identity_contract(self) -> None:
+        contract = exporter.process_contracts.validate()["governance"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "governance", "optional", contract,
+                                   exporter.source_timestamp(),
+                                   exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-governance"
+            build = subprocess.run(["go", "build", "-o", str(module / "governance"), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            tests = subprocess.run(["go", "test", "./server-go/modules/governance", "-count=1"],
                                    cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
 

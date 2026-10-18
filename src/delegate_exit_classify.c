@@ -12,6 +12,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include "cJSON.h"
 
 #include "db1_client/delegate_learning.h"
 
@@ -65,6 +66,24 @@ dl_failure_mode_t dl_string_to_failure_mode(const char *s)
 
 /* ── Classification logic ──────────────────────────────────────────────── */
 
+/* Error text is data. Never interpolate it into JSON or truncate an encoded
+ * object into an apparently valid evidence record. The production error buffer
+ * is 512 bytes; evidence capacity includes its worst-case JSON escaping. */
+static void classify_error_evidence(dl_classification_t *out, const dl_exit_metrics_t *m, int tools,
+                                    int no_writes)
+{
+   cJSON *object = cJSON_CreateObject();
+   int ok = object && cJSON_AddStringToObject(object, "error", m->error ? m->error : "unknown") &&
+            cJSON_AddNumberToObject(object, "turns", m->turns);
+   if (ok && tools)
+      ok = cJSON_AddNumberToObject(object, "tool_calls", m->tool_calls) != NULL;
+   if (ok && no_writes)
+      ok = cJSON_AddNumberToObject(object, "had_writes", 0) != NULL;
+   if (!ok || !cJSON_PrintPreallocated(object, out->evidence, sizeof out->evidence, 0))
+      out->evidence[0] = '\0';
+   cJSON_Delete(object);
+}
+
 void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out)
 {
    memset(out, 0, sizeof(*out));
@@ -81,9 +100,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "editing. On a similar goal, start from a concrete defect hypothesis and "
                   "attempt the smallest justified edit or decisive test before broadening "
                   "exploration.");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0}", m->error,
-                  m->turns, m->tool_calls);
+         classify_error_evidence(out, m, 1, 1);
       }
       else if (m->write_enforce_fired && !m->had_writes)
       {
@@ -148,8 +165,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Delegate drifted from expected state in role '%s'. "
                   "Ground the prompt with current file contents or diff evidence.",
                   m->role ? m->role : "unknown");
-         snprintf(out->evidence, sizeof(out->evidence), "{\"error\":\"%s\",\"turns\":%d}", m->error,
-                  m->turns);
+         classify_error_evidence(out, m, 0, 0);
       }
       else if (m->error && strstr(m->error, "cancel") != NULL)
       {
@@ -159,8 +175,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "Delegate was cancelled in role '%s' after %d turns. "
                   "Ensure the task can complete within the timeout.",
                   m->role ? m->role : "unknown", m->turns);
-         snprintf(out->evidence, sizeof(out->evidence), "{\"error\":\"%s\",\"turns\":%d}", m->error,
-                  m->turns);
+         classify_error_evidence(out, m, 0, 0);
       }
       else
       {
@@ -170,9 +185,7 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
          snprintf(out->lesson, sizeof(out->lesson),
                   "Delegate failed in role '%s' after %d turns: %s", m->role ? m->role : "unknown",
                   m->turns, m->error ? m->error : "unknown error");
-         snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d}",
-                  m->error ? m->error : "unknown", m->turns, m->tool_calls);
+         classify_error_evidence(out, m, 1, 0);
       }
    }
    else

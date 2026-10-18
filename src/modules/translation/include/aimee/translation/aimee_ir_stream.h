@@ -1,7 +1,7 @@
 /* aimee_ir_stream.h -- Slice 4: the neutral IR-DELTA streaming model. A BACKEND SSE
  * parser turns a provider stream into IR delta events; a FRONTEND SSE renderer
  * turns IR deltas into the client's stream. Together they replace the direct
- * provider-SSE -> client-SSE translators (anthropic_stream_feed_openai / xlate_*).
+ * provider-SSE -> client-SSE translators.
  * Pure state machines (no I/O); deltas borrow into the parsed chunk (transient). */
 #ifndef DEC_AIMEE_IR_STREAM_H
 #define DEC_AIMEE_IR_STREAM_H 1
@@ -23,12 +23,16 @@ typedef struct
    int next_block;                         /* next block id to assign */
    int tool_block[AIMEE_STREAM_MAX_TOOLS]; /* openai tool_calls[i].index -> block id (-1 = none) */
    int stopped;                            /* TURN_STOP emitted */
+   int pending_stop, usage_seen;
+   aimee_stop_reason_t pending_stop_reason;
+   long usage_in, usage_out, usage_cache_read, usage_cache_write, usage_reasoning;
 } openai_stream_state_t;
 
 void openai_stream_state_init(openai_stream_state_t *st);
 
 /* Convert one parsed OpenAI-chat SSE chunk into up to `max` IR deltas (updates st).
- * Returns the number written (>=0). Text + reasoning + tool_calls + finish_reason
+ * Returns the number written (>=0), or -1 for malformed input or insufficient capacity.
+ * Text + reasoning + tool_calls + finish_reason
  * handled. Reasoning is read from `delta.reasoning_content` (the DeepSeek / vLLM /
  * llama.cpp spelling) or `delta.reasoning` (the OpenRouter spelling) -- OpenAI's own
  * API exposes no reasoning text on this wire, so a chunk with neither simply yields
@@ -36,6 +40,9 @@ void openai_stream_state_init(openai_stream_state_t *st);
  * its own block, so a consumer never has to separate the two by position. */
 int openai_chunk_to_deltas(const struct cJSON *chunk, openai_stream_state_t *st, aimee_delta_t *out,
                            int max);
+/* Flush a completed stream after [DONE]/EOF when the provider omits usage.
+ * Refuses a stream that never supplied a native finish reason. */
+int openai_stream_finish(openai_stream_state_t *st, aimee_delta_t *out, int max);
 
 /* --- backend: AWS Bedrock ConverseStream event -> IR deltas ---
  * The streaming analogue of bedrock_converse_parse: maps ONE decoded ConverseStream
@@ -81,27 +88,21 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const struct cJSON
  * delta -- Anthropic always sends content_block_start before any delta, so no
  * implicit BLOCK_START is ever synthesised -- so capacity >=1 suffices.
  *
- * KNOWN GAPS, deliberately not papered over here:
- *   - `signature_delta` yields 0 deltas. aimee_delta_t has no signature field, and
- *     giving it one would not help: a delta BORROWS into its event's payload, which
- *     is gone by the time the block closes, so the signature cannot be carried to
- *     the BLOCK_STOP it describes without copying into the state machine. The
- *     NON-streaming path does model it (aimee_block_t.thinking_signature, captured
- *     by anthropic_backend_parse); a stream reassembled through these deltas alone
- *     is therefore not resubmittable.
- *   - the frontend renderer flattens AIMEE_BLK_THINKING to a `text` block, so a
- *     thinking delta parsed here does not round-trip as thinking on egress.
- * Both are safe for OBSERVING a stream (the relay emits provider bytes verbatim);
- * neither is safe for translating one. */
+ * Thinking signatures, redacted content and usage retain their typed fields. */
 typedef struct
 {
    aimee_block_type_t kind[AIMEE_STREAM_MAX_TOOLS]; /* per content-block index, block kind */
    int kind_set[AIMEE_STREAM_MAX_TOOLS];            /* 1 once kind[i] recorded */
-   int started;                                     /* message_start seen */
-   int terminal_emitted;                            /* TURN_STOP emitted */
-   aimee_stop_reason_t pending_stop_reason;         /* from message_delta */
-   long pending_usage_in;                           /* from message_start */
-   long pending_usage_out;                          /* from message_delta */
+   int closed[AIMEE_STREAM_MAX_TOOLS];
+   int stop_seen;
+   char raw_stop_reason[128]; /* native enum; oversized values fail admission */
+   int failed;
+   int started;                             /* message_start seen */
+   int terminal_emitted;                    /* TURN_STOP emitted */
+   aimee_stop_reason_t pending_stop_reason; /* from message_delta */
+   long pending_usage_in;                   /* from message_start */
+   long pending_usage_out;                  /* from message_delta */
+   long pending_cache_read, pending_cache_write, pending_reasoning;
 } anthropic_backend_stream_state_t;
 
 void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st);
@@ -109,7 +110,7 @@ void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st);
 /* Convert one Anthropic SSE event into up to `max` IR deltas (updates st). Returns
  * the number written (>=0, <=max), or -1 on a structurally-malformed KNOWN event
  * (caller drops the stream). An unknown event_type -> 0 (forward-compat ignore), as
- * do `ping` and a not-yet-modelled content_block_delta variant. LIFETIME: like the
+ * does `ping`. Unsupported content variants fail explicitly. LIFETIME: like the
  * other backend parsers, the emitted deltas' const char* fields BORROW into `payload`
  * (or, for an error event with no message, into a string literal); `payload` must
  * outlive the deltas' use. An out-of-range content-block index returns -1, so no

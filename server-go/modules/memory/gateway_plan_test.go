@@ -7,10 +7,30 @@ import (
 	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
+
+func gatewayPolicyFixture(roles, names []string, text string) canonical.PolicyView {
+	view := canonical.PolicyView{Version: 1, View: "gateway_policy", Messages: []canonical.PolicyMessage{}, Tools: []canonical.PolicyTool{}, LastUserText: text}
+	for _, role := range roles {
+		view.Messages = append(view.Messages, canonical.PolicyMessage{Role: role})
+	}
+	for _, name := range names {
+		view.Tools = append(view.Tools, canonical.PolicyTool{Kind: "function", Name: name})
+	}
+	return view
+}
 
 func gatewayPlanForTest(t *testing.T, h bus.ModuleHandler, args map[string]any) []gatewayStep {
 	t.Helper()
+	if roles, exists := args["roles"]; exists {
+		names, _ := args["tools"].([]string)
+		text, _ := args["last_user_text"].(string)
+		args["request"] = gatewayPolicyFixture(roles.([]string), names, text)
+		delete(args, "roles")
+		delete(args, "tools")
+		delete(args, "last_user_text")
+	}
 	args["operation"] = "gateway-plan"
 	encoded, err := json.Marshal(args)
 	if err != nil {

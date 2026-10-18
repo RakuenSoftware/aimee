@@ -2,27 +2,23 @@ package governance
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"github.com/JBailes/aimee/server-go/ir"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
 func policyWire(active bool, names []string, stopReason string) []byte {
-	request := make([]byte, requestLen)
-	binary.LittleEndian.PutUint32(request[0:4], requestMagic)
-	binary.LittleEndian.PutUint32(request[4:8], wireVersion)
-	if active {
-		binary.LittleEndian.PutUint32(request[8:12], 1)
+	tools := make([]ir.ToolIdentity, len(names))
+	for i, name := range names {
+		tools[i] = ir.ToolIdentity{Name: name}
 	}
-	binary.LittleEndian.PutUint32(request[12:16], uint32(len(names)))
-	binary.LittleEndian.PutUint32(request[16:20], uint32(len(stopReason)))
-	for index, name := range names {
-		lengthOffset := requestToolLengthsOff + index*4
-		binary.LittleEndian.PutUint32(request[lengthOffset:lengthOffset+4], uint32(len(name)))
-		nameOffset := requestToolNamesOff + index*toolNameSlot
-		copy(request[nameOffset:nameOffset+toolNameSlot], name)
+	request, err := json.Marshal(policyRequest{Version: wireVersion, Active: &active, Tools: tools, StopReason: stopReason})
+	if err != nil {
+		panic(err)
 	}
-	copy(request[requestStopReasonOff:], stopReason)
 	return request
 }
 
@@ -45,15 +41,15 @@ func TestGovernanceDecisionParity(t *testing.T) {
 		tools                        []string
 		wantMask, wantDrops          uint32
 	}{
-		{"inactive preserves response", "", "", false, []string{"Agent", "read_file"}, 3, 0},
-		{"empty response remains empty", "", "", true, nil, 0, 0},
+		{"inactive preserves response", "unknown", "unknown", false, []string{"Agent", "read_file"}, 3, 0},
+		{"empty response remains empty", "unknown", "unknown", true, nil, 0, 0},
 		{"all denied ends turn", "tool_use", "end_turn", true,
 			[]string{"spawn_agent", "Task"}, 0, 2},
 		{"partial preserves explicit reason", "max_tokens", "max_tokens", true,
 			[]string{"read_file", "RemoteTrigger", "write_file"}, 5, 1},
-		{"partial derives tool use", "", "tool_use", true,
+		{"partial preserves tool use", "tool_use", "tool_use", true,
 			[]string{"Agent", "bash"}, 2, 1},
-		{"none denied preserves reason", "refusal", "refusal", true,
+		{"none denied preserves reason", "content_filter", "content_filter", true,
 			[]string{"agent", "delegate"}, 3, 0},
 	}
 	for _, test := range tests {
@@ -73,48 +69,59 @@ func TestGovernanceDecisionParity(t *testing.T) {
 }
 
 func TestGovernanceRejectsMalformedWire(t *testing.T) {
-	tests := [][]byte{nil}
-	badMagic := policyWire(true, nil, "")
-	badMagic[0] = 0
-	tests = append(tests, badMagic)
-	badVersion := policyWire(true, nil, "")
-	badVersion[4]++
-	tests = append(tests, badVersion)
-	badActive := policyWire(true, nil, "")
-	binary.LittleEndian.PutUint32(badActive[8:12], 2)
-	tests = append(tests, badActive)
-	badCount := policyWire(true, nil, "")
-	binary.LittleEndian.PutUint32(badCount[12:16], toolCountMax+1)
-	tests = append(tests, badCount)
-	badReason := policyWire(true, nil, "")
-	binary.LittleEndian.PutUint32(badReason[16:20], stopReasonMax+1)
-	tests = append(tests, badReason)
-	reserved := policyWire(true, nil, "")
-	reserved[20] = 1
-	tests = append(tests, reserved)
-	unusedLength := policyWire(true, nil, "")
-	binary.LittleEndian.PutUint32(unusedLength[requestToolLengthsOff:requestToolLengthsOff+4], 1)
-	tests = append(tests, unusedLength)
-	padding := policyWire(true, []string{"Task"}, "")
-	padding[requestToolNamesOff+len("Task")] = 1
-	tests = append(tests, padding)
-	embeddedZero := policyWire(true, []string{"Task"}, "")
-	embeddedZero[requestToolNamesOff+1] = 0
-	tests = append(tests, embeddedZero)
-	for index, request := range tests {
-		if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate}, request); status != bus.ModuleStatusInvalidRequest {
-			t.Errorf("malformed request %d status = %d", index, status)
+	valid := string(policyWire(true, []string{"Task"}, "tool_use"))
+	tests := []string{
+		"", "null", strings.Repeat("\x00", 632),
+		strings.Replace(valid, `"version":2`, `"version":1`, 1),
+		strings.Replace(valid, `"policy_active":true,`, ``, 1),
+		strings.Replace(valid, `"policy_active":true`, `"policy_active":null`, 1),
+		strings.Replace(valid, `"policy_active":true`, `"policy_active":1`, 1),
+		strings.Replace(valid, `"Task"`, `""`, 1),
+		strings.Replace(valid, `"Task"`, `"bad\u0000name"`, 1),
+		strings.Replace(valid, `"Task"`, `"bad\ud800"`, 1),
+		strings.Replace(valid, `"Task"`, `"Task","name":"allowed"`, 1),
+		strings.Replace(valid, `"version":2`, `"version":2,"version":2`, 1),
+		strings.Replace(valid, `"tools":[{"name":"Task"}]`, `"tools":null`, 1),
+		strings.Replace(valid, `"tool_use"`, `"vendor-custom"`, 1),
+		strings.Replace(valid, `"name":"Task"`, `"name":"Task","native":true`, 1),
+		valid + ` {}`, valid + ` trailing`,
+		string(policyWire(true, make([]string, 17), "tool_use")),
+	}
+	for i, request := range tests {
+		if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate}, []byte(request)); status != bus.ModuleStatusInvalidRequest {
+			t.Errorf("malformed %d accepted: %s", i, request)
 		}
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate + 1},
-		policyWire(true, nil, "")); status != bus.ModuleStatusInvalidRequest {
-		t.Fatalf("wrong-stage status = %d", status)
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate + 1}, []byte(valid)); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("wrong stage accepted")
+	}
+}
+
+func TestGovernanceCompleteCanonicalIdentity(t *testing.T) {
+	active := true
+	name := "mcp__aimee__" + strings.Repeat("long_", 200) + "工具"
+	namespace := "tenant/" + strings.Repeat("scope/", 100) + "😀"
+	encoded, err := json.Marshal(policyRequest{Version: wireVersion, Active: &active, Tools: []ir.ToolIdentity{{Name: name, Namespace: namespace}, {Name: "Task", Namespace: namespace}}, StopReason: "tool_use"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, ok := decodeRequest(encoded)
+	if !ok || decoded.Tools[0].Name != name || decoded.Tools[0].Namespace != namespace || decoded.Tools[1].Namespace != namespace {
+		t.Fatal("identity lost")
+	}
+	response, status := Handle(bus.ModuleInvocation{StageID: StageEvaluate}, encoded)
+	if status != bus.ModuleStatusOK {
+		t.Fatal(status)
+	}
+	mask, drops, reason := decision(t, response)
+	if mask != 1 || drops != 1 || reason != "tool_use" {
+		t.Fatalf("decision %d/%d/%s", mask, drops, reason)
 	}
 }
 
 func TestGovernanceHonorsCancellationAfterValidation(t *testing.T) {
 	invocation := bus.ModuleInvocation{StageID: StageEvaluate, DeadlineNS: 1}
-	if _, status := Handle(invocation, policyWire(true, []string{"Task"}, "")); status != bus.ModuleStatusCancelled {
+	if _, status := Handle(invocation, policyWire(true, []string{"Task"}, "tool_use")); status != bus.ModuleStatusCancelled {
 		t.Fatalf("expired invocation status = %d", status)
 	}
 	if _, status := Handle(invocation, nil); status != bus.ModuleStatusInvalidRequest {

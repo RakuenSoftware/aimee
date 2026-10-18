@@ -113,17 +113,89 @@ static void test_parse_success(void)
    printf("provider_client: parse success ok\n");
 }
 
+static void test_owned_response_blocks(void)
+{
+   cJSON *root =
+       cJSON_Parse("{\"model\":\"native-model\",\"choices\":[{\"finish_reason\":\"tool_calls\","
+                   "\"message\":{\"role\":\"assistant\",\"reasoning_content\":\"why\",\"content\":["
+                   "{\"type\":\"text\",\"text\":\"before\"},{\"type\":\"image_url\",\"image_url\":{"
+                   "\"url\":\"https://example.test/image\"}},"
+                   "{\"type\":\"text\",\"text\":\"after\"},{\"type\":\"file\",\"file\":{\"file_"
+                   "id\":\"file-stable\"}}],\"tool_calls\":[]}}],"
+                   "\"usage\":{\"prompt_tokens\":42,\"completion_tokens\":9,\"prompt_tokens_"
+                   "details\":{\"cached_tokens\":17},"
+                   "\"completion_tokens_details\":{\"reasoning_tokens\":3}}}");
+   assert(root);
+   cJSON *msg =
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0), "message");
+   cJSON *calls = cJSON_GetObjectItem(msg, "tool_calls");
+   char id[512], payload[8193];
+   memset(id, 'i', sizeof id - 1);
+   id[sizeof id - 1] = 0;
+   memset(payload, 'p', sizeof payload - 1);
+   payload[sizeof payload - 1] = 0;
+   for (int i = 0; i < 17; i++)
+   {
+      id[0] = (char)('a' + i);
+      cJSON *call = cJSON_CreateObject(), *args = cJSON_CreateObject();
+      cJSON_AddStringToObject(call, "id", id);
+      cJSON_AddStringToObject(call, "namespace", "mcp__aimee");
+      cJSON_AddStringToObject(call, "type", "function");
+      cJSON *fn = cJSON_AddObjectToObject(call, "function");
+      cJSON_AddStringToObject(fn, "name", "read");
+      cJSON_AddStringToObject(args, "payload", payload);
+      char *serialized = cJSON_PrintUnformatted(args);
+      assert(serialized);
+      cJSON_AddStringToObject(fn, "arguments", serialized);
+      free(serialized);
+      cJSON_Delete(args);
+      cJSON_AddItemToArray(calls, call);
+   }
+   char *body = cJSON_PrintUnformatted(root);
+   provider_completion_t out;
+   assert(body && !provider_client_parse_openai(body, &out));
+   assert(out.ir.n_content == 22 && !strcmp(out.content, "beforeafter") &&
+          !strcmp(out.reasoning, "why"));
+   assert(out.ir.content[0].type == AIMEE_BLK_THINKING);
+   assert(out.ir.content[1].type == AIMEE_BLK_TEXT && out.ir.content[2].type == AIMEE_BLK_IMAGE);
+   assert(out.ir.content[3].type == AIMEE_BLK_TEXT && out.ir.content[4].type == AIMEE_BLK_DOCUMENT);
+   assert(out.ir.usage_cache_read == 17 && out.ir.usage_reasoning == 3);
+   for (int i = 0; i < 17; i++)
+   {
+      const aimee_block_t *block = &out.ir.content[5 + i];
+      id[0] = (char)('a' + i);
+      assert(block->type == AIMEE_BLK_TOOL_USE && !strcmp(block->tool_id, id));
+      assert(!strcmp(block->tool_namespace, "mcp__aimee"));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(block->tool_input, "payload")),
+                     payload));
+   }
+   provider_completion_free(&out);
+   free(body);
+   cJSON_ReplaceItemInObject(msg, "role", cJSON_CreateString("user"));
+   body = cJSON_PrintUnformatted(root);
+   assert(body && provider_client_parse_openai(body, &out) < 0);
+   provider_completion_free(&out);
+   free(body);
+   cJSON_Delete(root);
+   puts("provider_client: owned ordered media, reasoning and 17 full tool calls ok");
+}
+
 static void test_parse_failures(void)
 {
    provider_completion_t out;
    /* not JSON */
    assert(provider_client_parse_openai("not json", &out) == -1);
+   provider_completion_free(&out);
    /* well-formed but no content */
-   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{}}]}", &out) == -1);
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{}}]}", &out) == -1);
+   provider_completion_free(&out);
    /* empty choices */
    assert(provider_client_parse_openai("{\"choices\":[]}", &out) == -1);
+   provider_completion_free(&out);
    /* NULL body */
    assert(provider_client_parse_openai(NULL, &out) == -1);
+   provider_completion_free(&out);
    /* out zeroed even on failure */
    assert(out.content == NULL && out.prompt_tokens == 0);
    printf("provider_client: parse failures ok\n");
@@ -143,25 +215,30 @@ static void test_parse_reasoning_shapes(void)
    provider_completion_t out;
 
    /* (1) both present: content wins, reasoning is handed back separately. */
-   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":\"the answer\","
-                                       "\"reasoning_content\":\"weighing it up\"}}]}",
-                                       &out) == 0);
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"the answer\","
+              "\"reasoning_content\":\"weighing it up\"}}]}",
+              &out) == 0);
    assert(out.content && strcmp(out.content, "the answer") == 0);
    assert(out.reasoning && strcmp(out.reasoning, "weighing it up") == 0);
+   assert(out.ir.n_content == 2 && out.ir.content[0].type == AIMEE_BLK_THINKING &&
+          out.ir.content[1].type == AIMEE_BLK_TEXT);
    provider_completion_free(&out);
 
    /* (2) content:null with reasoning — the shape that used to fail outright.
     * The reasoning IS the reply here; recovering it is the fix. */
-   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null,"
-                                       "\"reasoning_content\":\"recovered body\"}}]}",
-                                       &out) == 0);
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null,"
+              "\"reasoning_content\":\"recovered body\"}}]}",
+              &out) == 0);
    assert(out.content && strcmp(out.content, "recovered body") == 0);
+   assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_THINKING);
    provider_completion_free(&out);
 
    /* (3) content absent entirely (not an explicit null) behaves the same. */
-   assert(provider_client_parse_openai(
-              "{\"choices\":[{\"message\":{\"reasoning_content\":\"only reasoning\"}}]}", &out) ==
-          0);
+   assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
+                                       "\"reasoning_content\":\"only reasoning\"}}]}",
+                                       &out) == 0);
    assert(out.content && strcmp(out.content, "only reasoning") == 0);
    provider_completion_free(&out);
 
@@ -170,21 +247,23 @@ static void test_parse_reasoning_shapes(void)
     * cJSON_IsString(reasoning) && reasoning->valuestring && ...[0] — belt and
     * braces, so dropping either half alone is still safe; drop both and this case
     * segfaults on strdup(NULL), which is what it is here to catch. */
-   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null,"
-                                       "\"reasoning_content\":{\"nested\":1}}}]}",
-                                       &out) == -1);
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null,"
+              "\"reasoning_content\":{\"nested\":1}}}]}",
+              &out) == -1);
    provider_completion_free(&out);
 
    /* (5) neither: still the honest failure it always was. */
-   assert(provider_client_parse_openai("{\"choices\":[{\"message\":{\"content\":null}}]}", &out) ==
-          -1);
+   assert(provider_client_parse_openai(
+              "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null}}]}",
+              &out) == -1);
    provider_completion_free(&out);
 
    /* (6) a <think> preamble in content is split, not deleted: the answer is the
     * tail and the reasoning is preserved on the side. */
-   assert(provider_client_parse_openai(
-              "{\"choices\":[{\"message\":{\"content\":\"<think>hmm</think>real answer\"}}]}",
-              &out) == 0);
+   assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
+                                       "\"content\":\"<think>hmm</think>real answer\"}}]}",
+                                       &out) == 0);
    assert(out.content && strcmp(out.content, "real answer") == 0);
    provider_completion_free(&out);
 
@@ -252,7 +331,8 @@ static int flaky_handler(const char *url, const char *auth_header, const char *b
       return 503;              /* retryable */
    }
    if (response_buf)
-      *response_buf = strdup("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}");
+      *response_buf =
+          strdup("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"ok\"}}]}");
    return 200;
 }
 
@@ -402,6 +482,7 @@ int main(void)
    test_build_basic();
    test_build_options_and_schema();
    test_parse_success();
+   test_owned_response_blocks();
    test_parse_failures();
    test_parse_reasoning_shapes();
    test_complete_arg_guards();

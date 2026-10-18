@@ -1665,11 +1665,13 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
 
 static int g_policy_session_calls;
 static int g_policy_session_reject;
+static char g_policy_attempt[512], g_policy_arguments[1024];
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len)
 {
    assert(session && tool && arguments);
-   (void)attempt;
+   snprintf(g_policy_attempt, sizeof g_policy_attempt, "%s", attempt ? attempt : "");
+   snprintf(g_policy_arguments, sizeof g_policy_arguments, "%s", arguments);
    g_policy_session_calls++;
    if (g_policy_session_reject)
       snprintf(reason, reason_len, "session policy denied");
@@ -2461,6 +2463,40 @@ static void test_hook_identity_session_binding(void)
    cJSON_Delete(json);
    g_policy_session_reject = 0;
 
+   /* The canonical transport must retain the real policy attempt identity and
+    * use the same authenticated harness/session decision owner. */
+   cJSON *canonical = cJSON_Parse(pre);
+   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "tool_name");
+   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "tool_input");
+   assert(cJSON_AddNumberToObject(canonical, "ir_version", 1));
+   cJSON *intent = cJSON_AddObjectToObject(canonical, "hook");
+   cJSON *call = cJSON_AddObjectToObject(intent, "call");
+   assert(cJSON_AddStringToObject(call, "type", "tool_use"));
+   assert(cJSON_AddStringToObject(call, "name", "Read"));
+   char opaque_id[401];
+   memset(opaque_id, 'x', 400);
+   opaque_id[400] = 0;
+   assert(cJSON_AddStringToObject(call, "tool_id", opaque_id));
+   assert(cJSON_AddItemToObject(call, "input", cJSON_Parse("{\"value\":9007199254740993}")));
+   char *encoded = cJSON_PrintUnformatted(canonical);
+   json = dispatch_json(ctx, conn, encoded, strlen(encoded));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(json, "exit_code")) == 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "hook_identity")), "trusted"));
+   assert(g_policy_session_calls == 3);
+   assert(!strcmp(g_policy_attempt, opaque_id));
+   assert(strstr(g_policy_arguments, "9007199254740993"));
+   cJSON_Delete(json);
+   free(encoded);
+   assert(cJSON_AddStringToObject(call, "namespace", "foreign"));
+   encoded = cJSON_PrintUnformatted(canonical);
+   g_session_state_save_calls = 0;
+   json = dispatch_json(ctx, conn, encoded, strlen(encoded));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(json, "exit_code")) == 2);
+   assert(g_policy_session_calls == 3 && !g_session_state_save_calls);
+   cJSON_Delete(json);
+   free(encoded);
+   cJSON_Delete(canonical);
+
    /* The same secret cannot claim a different harness or session. */
    char mismatch[1024];
    snprintf(mismatch, sizeof(mismatch),
@@ -2473,7 +2509,7 @@ static void test_hook_identity_session_binding(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "untrusted") == 0);
    assert(g_client_non_git_workspace == 0);
-   assert(g_policy_session_calls == 2);
+   assert(g_policy_session_calls == 3);
    cJSON_Delete(json);
 
    hook_session_token_registry_reset();

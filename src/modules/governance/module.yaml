@@ -21,8 +21,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/governance/gw_stage_completion.c",
-    "src/modules/governance/gw_stage_governance.c",
-    "src/modules/governance/module_adapter.c"
+    "src/modules/governance/gw_stage_governance.c"
   ],
   "go_sources": [
     "server-go/modules/governance/governance.go"
@@ -37,7 +36,8 @@
     "src/modules/governance/gw_stage_governance.h"
   ],
   "tests": [
-    "src/tests/test_response_governance_stage.c"
+    "src/tests/test_response_governance_stage.c",
+    "src/tests/test_governance_bus_bridge.c"
   ],
   "docs": [
     "docs/modules/governance.md"
