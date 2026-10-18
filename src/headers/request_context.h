@@ -50,6 +50,9 @@ typedef struct
     * from principal/source headers. Preserved across owned async handoffs. */
    attested_transport_t vault_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
+   /* Host-owned execution intent, never read from transport/model arguments.
+    * A delegated model retains its actor's data access, not human attribution. */
+   int model_execution;
    int trusted;           /* 1 = principal/source headers may be honoured */
    int compress_disabled; /* X-Aimee-Compress: 0 — per-request opt-out of ingress
                            * envelope compression (ingress-compression P1b §1.4/B1).
@@ -99,6 +102,9 @@ void request_context_capture_budget_header(request_context_t *ctx, const char *r
 /* Return the current thread's request context, or NULL if none is set. The
  * pointer is valid until the next set/clear on this thread. */
 const request_context_t *request_context_get(void);
+/* Set only this host intent bit, preserving receipts/limits accumulated inside
+ * the scope. Returns the previous bit, or -1 without creating an absent owner. */
+int request_context_set_model_execution(int active);
 
 /* Retain the first failed required context operation until request clear/set.
  * Returns -1 without an active request; it never creates a detached TLS latch. */

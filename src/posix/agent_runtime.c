@@ -505,13 +505,30 @@ refused:
    return -1;
 }
 
+static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
+                                         const char *role, const char *system_prompt,
+                                         const char *user_prompt, int max_tokens,
+                                         double temperature, cJSON *initial_messages,
+                                         cJSON **updated_messages, agent_result_t *out,
+                                         const aimee_request_t *seed,
+                                         aimee_response_t *canonical_out);
+
 static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
                                              const char *role, const char *system_prompt,
                                              const char *user_prompt, int max_tokens,
                                              double temperature, cJSON *initial_messages,
                                              cJSON **updated_messages, agent_result_t *out,
                                              const aimee_request_t *seed,
-                                             aimee_response_t *canonical_out);
+                                             aimee_response_t *canonical_out)
+{
+   int previous = request_context_set_model_execution(1);
+   int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
+                                          max_tokens, temperature, initial_messages,
+                                          updated_messages, out, seed, canonical_out);
+   if (previous >= 0)
+      (void)request_context_set_model_execution(previous);
+   return rc;
+}
 
 int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
                              const char *system_prompt, const char *user_prompt, int max_tokens,
@@ -644,13 +661,13 @@ int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t
    return rc;
 }
 
-static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
-                                             const char *role, const char *system_prompt,
-                                             const char *user_prompt, int max_tokens,
-                                             double temperature, cJSON *initial_messages,
-                                             cJSON **updated_messages, agent_result_t *out,
-                                             const aimee_request_t *seed,
-                                             aimee_response_t *canonical_out)
+static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
+                                         const char *role, const char *system_prompt,
+                                         const char *user_prompt, int max_tokens,
+                                         double temperature, cJSON *initial_messages,
+                                         cJSON **updated_messages, agent_result_t *out,
+                                         const aimee_request_t *seed,
+                                         aimee_response_t *canonical_out)
 {
    if (updated_messages)
       *updated_messages = NULL;

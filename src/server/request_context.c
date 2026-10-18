@@ -49,6 +49,15 @@ const request_context_t *request_context_get(void)
    return g_req_ctx_set ? &g_req_ctx : NULL;
 }
 
+int request_context_set_model_execution(int active)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   int previous = g_req_ctx.model_execution;
+   g_req_ctx.model_execution = active != 0;
+   return previous;
+}
+
 int request_context_refuse_assembly(const char *kind)
 {
    if (!g_req_ctx_set)

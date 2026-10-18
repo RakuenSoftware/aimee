@@ -1051,3 +1051,17 @@ silently start blank or flatten roles. SDK internal compaction and true Response
 qualification before activation. Claude OAuth custody/refresh, remaining IR consumers/capabilities,
 standalone procedure feedback, independently graded learning and production acceptance remain
 required. `.100` remains intentionally KB-free; no production promotion has occurred.
+
+## Model execution attribution in the continuation
+
+The host request context now carries model-execution intent independently of the
+authenticated principal. Native listener workers always set this intent, and the
+common in-process agent tool loop sets/restores it across all returns. Async
+context snapshots preserve it. A verified person still owns access to their data;
+model-generated memory writes under that identity are classified as model authority
+rather than human feedback. Restoring nested intent preserves receipts accumulated
+inside the execution. No client header can set this host-only field.
+
+Request-context, MCP memory-authority, native-runtime and full agent fixtures pass.
+The first three also pass ASan/UBSan with leak checking. This closes an attribution
+prerequisite; standalone feedback admission and native SDK activation remain open.

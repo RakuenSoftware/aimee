@@ -193,6 +193,7 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
       return NULL;
    runtime->selected = *selected;
    runtime->owner = *owner;
+   runtime->owner.model_execution = 1;
    /* A model/tool capability never carries independent operator authority:
     * human gates, grant/credential administration and cross-user audit views
     * remain with the original authenticated operator transport. */

@@ -4487,7 +4487,7 @@ $(TESTPREFIX)/unit-test-entity-registry: $(OBJDIR)/tests/test_entity_registry.o 
 # Real MCP maintenance transport with a stubbed Go owner and KB, plus mutation grades.
 $(TESTPREFIX)/unit-test-mcp-memory-gate: $(OBJDIR)/tests/test_mcp_memory_gate.o \
                                $(OBJDIR)/server/server_mcp_memory_gate.o \
-                               $(OBJDIR)/server/server_auth.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+                               $(OBJDIR)/server/server_auth.o $(OBJDIR)/server/request_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fact-lifecycle: $(OBJDIR)/tests/test_fact_lifecycle.o \

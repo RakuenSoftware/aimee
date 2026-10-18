@@ -208,8 +208,34 @@ static void test_owned_snapshot_and_absent_restore(void)
    PASS("context: owned actor/proof copy, absence restoration and wipe");
 }
 
+static void test_model_intent_scope(void)
+{
+   request_context_clear();
+   assert(request_context_set_model_execution(1) == -1 && !request_context_get());
+   request_context_t owner = {.trusted = 1};
+   strcpy(owner.principal, "alice");
+   request_context_set(&owner);
+   int previous = request_context_set_model_execution(1);
+   assert(previous == 0 && request_context_get()->model_execution);
+   assert(request_context_set_model_execution(1) == 1);
+   assert(!request_context_set_source_release("source-added-inside-model"));
+   request_context_snapshot_t snapshot;
+   request_context_snapshot(&snapshot);
+   request_context_clear();
+   request_context_restore(&snapshot);
+   assert(request_context_get()->model_execution);
+   assert(request_context_set_model_execution(previous) == 1);
+   assert(!request_context_get()->model_execution);
+   assert(!strcmp(request_context_get()->principal, "alice"));
+   assert(!strcmp(request_context_get()->memory_source_release, "source-added-inside-model"));
+   request_context_snapshot_clear(&snapshot);
+   request_context_clear();
+   PASS("context: model intent nests, survives handoff and preserves accumulated receipts");
+}
+
 int main(void)
 {
+   test_model_intent_scope();
    test_owned_snapshot_and_absent_restore();
    test_memory_receipt_requirement_is_host_state();
    test_assembly_refusal_lifetime();

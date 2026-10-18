@@ -126,6 +126,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(owner && owner->vault_transport == ATTEST_WEBCHAT_TRUSTED);
    assert(!strcmp(identity, owner->vault_principal));
    assert(!strcmp(owner->method, method) && !strcmp(owner->path, path));
+   assert(owner->model_execution);
    assert(!owner->idempotency_key[0]);
    assert(strlen(owner->request_id) == 32);
    pthread_mutex_lock(&ids_mutex);
