@@ -293,7 +293,14 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       return 0;
    }
    else if (strcmp(name, "delegates") == 0)
-      *kind = AIMEE_DELEGATES_EVENT_INVOKE, *principal_ref = 10;
+   {
+      *kind = AIMEE_DELEGATES_EVENT_INVOKE;
+      *principal_ref = 10;
+      served[0] = *kind;
+      served[1] = AIMEE_DELEGATES_EVENT_RESCUE;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "tools") == 0)
       *kind = AIMEE_TOOLS_EVENT_DISPATCH, *principal_ref = 11;
    else if (strcmp(name, "workspace") == 0)
@@ -492,6 +499,44 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                             role, sizeof(role)) == 0);
       assert(strcmp(role, "code") == 0);
+      /* Real C v2 framing -> Go dialect parser -> canonical owned message. */
+      char name_long[201];
+      memset(name_long, 'n', sizeof name_long - 1);
+      name_long[sizeof name_long - 1] = 0;
+      char prose[1024];
+      int prose_length = snprintf(
+          prose, sizeof prose,
+          "<tool_call><name>%s</name><arguments>{\"id\":9007199254740993}</arguments></tool_call>",
+          name_long);
+      assert(prose_length > 0 && (size_t)prose_length < sizeof prose);
+      const char *known[] = {name_long};
+      uint8_t rescue_request[2048];
+      size_t rescue_length = aimee_delegates_rescue_request_encode(
+          prose, (size_t)prose_length, known, 1, 0, AIMEE_DELEGATES_RESCUE_MODE_PARSE,
+          rescue_request, sizeof rescue_request);
+      assert(rescue_length && rescue_request[4] == 2);
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3119, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len && response_len < sizeof response);
+      response[response_len] = 0;
+      cJSON *rescued = cJSON_Parse((const char *)response);
+      assert(rescued);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(rescued, "matched")));
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(rescued, "message");
+      cJSON *blocks = cJSON_GetObjectItemCaseSensitive(message, "blocks");
+      assert(cJSON_GetArraySize(blocks) == 1);
+      const char *name_value = cJSON_GetStringValue(
+          cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "name"));
+      assert(name_value && !strcmp(name_value, name_long));
+      assert(strstr((const char *)response, "9007199254740993"));
+      cJSON_Delete(rescued);
+      rescue_request[4] = 1;
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3120, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "tools") == 0)
    {

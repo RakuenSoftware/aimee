@@ -67,7 +67,7 @@ func validStrict(value string) bool {
 	return value == "" || value == "unset" || value == "null" || value == "true" || value == "false"
 }
 func object(value json.RawMessage) bool {
-	return len(value) > 0 && json.Valid(value) && uniqueJSON(value) && strings.HasPrefix(strings.TrimSpace(string(value)), "{")
+	return len(value) > 0 && ValidJSON(value) && strings.HasPrefix(strings.TrimSpace(string(value)), "{")
 }
 func (t Tool) Valid() bool {
 	if !validStrict(t.Strict) || (t.Schema != nil && !object(t.Schema)) || (t.NativeOptions != nil && !object(t.NativeOptions)) {

@@ -28,6 +28,17 @@ function decimal(token: string): number | ExactJSONNumber {
       decimalKey(token) !== undefined && decimalKey(token) === decimalKey(JSON.stringify(value))) return value;
   return new ExactJSONNumber(token);
 }
+function scalarString(value: string): string {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0 || (code >= 0xdc00 && code <= 0xdfff)) throw new SyntaxError('Invalid canonical JSON string');
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(++i);
+      if (!(low >= 0xdc00 && low <= 0xdfff)) throw new SyntaxError('Invalid canonical JSON string');
+    }
+  }
+  return value;
+}
 export function parseJSON(source: string): unknown {
   let offset = 0;
   const whitespace = () => { while (/[\t\r\n ]/.test(source[offset] ?? '') && offset < source.length) offset++; };
@@ -36,7 +47,7 @@ export function parseJSON(source: string): unknown {
     const start = offset++;
     while (offset < source.length) {
       const char = source[offset++];
-      if (char === '"') return JSON.parse(source.slice(start, offset)) as string;
+      if (char === '"') return scalarString(JSON.parse(source.slice(start, offset)) as string);
       if (char === '\\') offset++; // Native string decoding validates escapes and controls.
     }
     return fail();
@@ -90,6 +101,7 @@ export function stringifyJSON(value: unknown, space = 0): string | undefined {
   const ancestors = new Set<object>();
   function encode(current: unknown, depth: number): string | undefined {
     if (current instanceof ExactJSONNumber) return current.token;
+    if (typeof current === 'string') return JSON.stringify(scalarString(current));
     if (current === null || typeof current !== 'object') return JSON.stringify(current);
     if (ancestors.has(current) || depth > 512) throw new TypeError('Invalid JSON tree');
     ancestors.add(current);
@@ -97,7 +109,7 @@ export function stringifyJSON(value: unknown, space = 0): string | undefined {
     const entries = array ? Array.from(current, child => encode(child, depth + 1) ?? 'null') :
       Object.entries(current).flatMap(([key, child]) => {
         const encoded = encode(child, depth + 1);
-        return encoded === undefined ? [] : [`${JSON.stringify(key)}:${indent ? ' ' : ''}${encoded}`];
+        return encoded === undefined ? [] : [`${JSON.stringify(scalarString(key))}:${indent ? ' ' : ''}${encoded}`];
       });
     ancestors.delete(current);
     const [open, close] = array ? ['[', ']'] : ['{', '}'];

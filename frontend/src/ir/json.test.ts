@@ -24,4 +24,12 @@ describe('canonical opaque JSON', () => {
     expect(parseJSON('9007199254740992')).toBeInstanceOf(ExactJSONNumber);
     expect(stringifyJSON(parseJSON('1e9999999999999999999999999'))).toBe('1e9999999999999999999999999');
   });
+  it('preserves Unicode scalars and refuses NUL or replacement decoding', () => {
+    expect(stringifyJSON(parseJSON('{"x":"\\ud83d\\ude80"}'))).toBe('{"x":"🚀"}');
+    for (const input of ['{"x":"\\ud800"}', '{"x":"\\udc00"}', '{"x":"\\u0000"}', '{"\\u0000":1}'])
+      expect(() => parseJSON(input), input).toThrow();
+    expect(() => stringifyJSON({ x: '\ud800' })).toThrow();
+    expect(() => stringifyJSON({ ['\u0000']: 1 })).toThrow();
+  });
+
 });

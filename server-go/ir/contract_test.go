@@ -91,3 +91,16 @@ func TestCanonicalMessagesContract(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONStringsRetainUnicodeScalars(t *testing.T) {
+	for _, raw := range []string{`{"x":"\ud83d\ude80"}`, `{"🚀":"rocket"}`, `{"x":"literal \\ud800"}`} {
+		if !ValidJSON([]byte(raw)) {
+			t.Fatal("valid Unicode refused", raw)
+		}
+	}
+	for _, raw := range []string{`{"x":"\ud800"}`, `{"x":"\udc00"}`, `{"x":"\ud800x"}`, `{"\u0000":1}`, `{"x":"\u0000"}`} {
+		if ValidJSON([]byte(raw)) {
+			t.Fatal("lossy native string admitted", raw)
+		}
+	}
+}

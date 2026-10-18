@@ -182,7 +182,7 @@ func Decode(encoded []byte, out any) bool {
 	if len(encoded) == 0 || bytes.Equal(bytes.TrimSpace(encoded), []byte("null")) {
 		return false
 	}
-	if !uniqueJSON(encoded) {
+	if !ValidJSON(encoded) {
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
@@ -323,4 +323,75 @@ func uniqueJSON(encoded []byte) bool {
 	}
 	_, err := decoder.Token()
 	return err == io.EOF
+}
+
+// ValidJSON preserves opaque values while refusing spellings that native UTF-8
+// strings cannot represent. In particular, replacement decoding must not turn
+// an unpaired surrogate or embedded NUL into a different tool argument/key.
+func ValidJSON(encoded []byte) bool {
+	return utf8.Valid(encoded) && jsonScalarStrings(encoded) && uniqueJSON(encoded)
+}
+func jsonScalarStrings(encoded []byte) bool {
+	hex := func(at int) (int, bool) {
+		if at+4 > len(encoded) {
+			return 0, false
+		}
+		n := 0
+		for _, c := range encoded[at : at+4] {
+			n *= 16
+			switch {
+			case c >= '0' && c <= '9':
+				n += int(c - '0')
+			case c >= 'a' && c <= 'f':
+				n += int(c-'a') + 10
+			case c >= 'A' && c <= 'F':
+				n += int(c-'A') + 10
+			default:
+				return 0, false
+			}
+		}
+		return n, true
+	}
+	quoted := false
+	for i := 0; i < len(encoded); i++ {
+		c := encoded[i]
+		if c == '"' {
+			quoted = !quoted
+			continue
+		}
+		if !quoted {
+			continue
+		}
+		if c < 0x20 {
+			return false
+		}
+		if c != '\\' {
+			continue
+		}
+		i++
+		if i >= len(encoded) {
+			return false
+		}
+		if encoded[i] != 'u' {
+			continue
+		}
+		code, ok := hex(i + 1)
+		if !ok || code == 0 {
+			return false
+		}
+		i += 4
+		if code >= 0xd800 && code <= 0xdbff {
+			if i+6 >= len(encoded) || encoded[i+1] != '\\' || encoded[i+2] != 'u' {
+				return false
+			}
+			low, ok := hex(i + 3)
+			if !ok || low < 0xdc00 || low > 0xdfff {
+				return false
+			}
+			i += 6
+		} else if code >= 0xdc00 && code <= 0xdfff {
+			return false
+		}
+	}
+	return !quoted
 }

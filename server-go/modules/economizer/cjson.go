@@ -3,6 +3,7 @@ package economizer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/JBailes/aimee/server-go/ir"
 	"io"
 	"math"
 	"strconv"
@@ -59,6 +60,9 @@ const (
 // ParseJSON parses raw into an order-preserving tree, or returns nil if raw is
 // not valid JSON (mirroring cJSON_ParseWithLength returning NULL).
 func ParseJSON(raw string) *JSONValue {
+	if !ir.ValidJSON([]byte(raw)) {
+		return nil
+	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
 	tok, err := dec.Token()

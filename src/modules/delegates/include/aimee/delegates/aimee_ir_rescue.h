@@ -3,7 +3,7 @@
  * Some models emit tool calls as prose (XML <tool_call>, Qwen <function=>, harmony
  * channels, Mistral brackets, bare JSON) instead of using the provider's native
  * tool-call field. That is a MODEL CAPABILITY gap, not a legacy protocol, so the
- * dialect knowledge stays behind delegate_rescue_parse_tool_calls and is reused
+ * dialect knowledge stays behind delegate_rescue_message and is reused
  * here; this module only maps the parser result onto the IR's typed blocks.
  *
  * The structural payoff: the legacy path receives one flat string and must strip
@@ -26,15 +26,14 @@
  * `allow_json` gates prose-JSON rescue only, according to
  * agent_allows_json_content_rescue. XML, Qwen, harmony-channel, and Mistral
  * dialects remain eligible regardless of this argument, matching
- * delegate_rescue_parse_tool_calls.
+ * delegate_rescue_message.
  *
- * On a successful rewrite, malformed or non-object arguments become an empty
- * JSON object, `r->stop_reason` becomes AIMEE_STOP_TOOL_USE, and
+ * On a successful rewrite, `r->stop_reason` becomes AIMEE_STOP_TOOL_USE, and
  * ir_rescue_recoveries is incremented once. The return value is the number of
  * calls rescued. A return value of 0 means no rewrite occurred: the input was null
  * or empty, the response already contained a tool-use block, no eligible call was
- * found, or a pre-commit rewrite allocation failed. In all cases `r` is left
- * unchanged.
+ * found. The return value -1 refuses malformed, overflowing or allocation-failed
+ * recovery. Every refusal leaves `r` unchanged.
  *
  * The caller retains ownership of `r`; successful rewriting replaces its content
  * array and transfers ownership of the resulting blocks to `r`. */

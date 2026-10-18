@@ -265,9 +265,7 @@ static inline void aimee_delegates_handoff_field(const uint8_t *in, size_t at, s
 #define AIMEE_DELEGATES_EVENT_RESCUE          6662u
 #define AIMEE_DELEGATES_STAGE_RESCUE          6u
 #define AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC  0x51535244u /* "DRSQ" */
-#define AIMEE_DELEGATES_RESCUE_RESPONSE_MAGIC 0x52535244u /* "DRSR" */
 #define AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN 16u
-#define AIMEE_DELEGATES_RESCUE_RESP_HEADER_LEN 16u
 #define AIMEE_DELEGATES_RESCUE_TEXT_MAX       (1u << 20)
 #define AIMEE_DELEGATES_RESCUE_KNOWN_MAX      4096u
 #define AIMEE_DELEGATES_RESCUE_MODE_PARSE     0u
@@ -278,9 +276,9 @@ static inline void aimee_delegates_handoff_field(const uint8_t *in, size_t at, s
  * request because whether a rescued name is real is the caller's knowledge,
  * not something the module may go and ask another module for. */
 static inline size_t aimee_delegates_rescue_request_encode(const char *text, size_t text_len,
-                                                           const char *const *names, size_t name_count,
-                                                           int allow_json, unsigned mode,
-                                                           uint8_t *out, size_t cap)
+                                                           const char *const *names,
+                                                           size_t name_count, int allow_json,
+                                                           unsigned mode, uint8_t *out, size_t cap)
 {
    size_t at, i;
    if (!out || text_len > AIMEE_DELEGATES_RESCUE_TEXT_MAX ||
@@ -290,7 +288,7 @@ static inline size_t aimee_delegates_rescue_request_encode(const char *text, siz
 
    memset(out, 0, AIMEE_DELEGATES_RESCUE_REQ_HEADER_LEN);
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_RESCUE_REQUEST_MAGIC);
-   out[4] = 1; /* wire version */
+   out[4] = 2; /* canonical-message response; flat v1 replies are retired */
    out[5] = allow_json ? 1 : 0;
    out[6] = (uint8_t)mode;
    aimee_delegates_put_u32(out + 8, (uint32_t)text_len);
@@ -340,15 +338,15 @@ static inline int aimee_delegates_verify_request_encode(unsigned op, int a, int 
 
 /* --- Delegate-run economics (stage 8) --- */
 
-#define AIMEE_DELEGATES_EVENT_ECONOMICS          6664u
-#define AIMEE_DELEGATES_STAGE_ECONOMICS          8u
-#define AIMEE_DELEGATES_ECON_REQUEST_MAGIC       0x51434544u /* "DECQ" */
-#define AIMEE_DELEGATES_ECON_RESPONSE_MAGIC      0x53434544u /* "DECS" */
-#define AIMEE_DELEGATES_ECON_REQ_HEADER_LEN      16u
-#define AIMEE_DELEGATES_ECON_VERDICT_LEN         32u
-#define AIMEE_DELEGATES_ECON_ADVICE_LEN          256u
-#define AIMEE_DELEGATES_ECON_LABEL_LEN           64u
-#define AIMEE_DELEGATES_ECON_FIELD_COUNT         19u
+#define AIMEE_DELEGATES_EVENT_ECONOMICS     6664u
+#define AIMEE_DELEGATES_STAGE_ECONOMICS     8u
+#define AIMEE_DELEGATES_ECON_REQUEST_MAGIC  0x51434544u /* "DECQ" */
+#define AIMEE_DELEGATES_ECON_RESPONSE_MAGIC 0x53434544u /* "DECS" */
+#define AIMEE_DELEGATES_ECON_REQ_HEADER_LEN 16u
+#define AIMEE_DELEGATES_ECON_VERDICT_LEN    32u
+#define AIMEE_DELEGATES_ECON_ADVICE_LEN     256u
+#define AIMEE_DELEGATES_ECON_LABEL_LEN      64u
+#define AIMEE_DELEGATES_ECON_FIELD_COUNT    19u
 #define AIMEE_DELEGATES_ECON_RESPONSE_LEN                                                          \
    (4u + AIMEE_DELEGATES_ECON_FIELD_COUNT * 4u + AIMEE_DELEGATES_ECON_VERDICT_LEN +                \
     AIMEE_DELEGATES_ECON_ADVICE_LEN + 2u * AIMEE_DELEGATES_ECON_LABEL_LEN)
@@ -360,8 +358,7 @@ static inline size_t aimee_delegates_econ_request_begin(uint32_t task_count, uin
                                                         uint8_t *out, size_t cap)
 {
    if (!out || cap < AIMEE_DELEGATES_ECON_REQ_HEADER_LEN ||
-       task_count > AIMEE_DELEGATES_ECON_MAX_TASKS ||
-       agent_count > AIMEE_DELEGATES_ECON_MAX_AGENTS)
+       task_count > AIMEE_DELEGATES_ECON_MAX_TASKS || agent_count > AIMEE_DELEGATES_ECON_MAX_AGENTS)
       return 0;
    memset(out, 0, AIMEE_DELEGATES_ECON_REQ_HEADER_LEN);
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_ECON_REQUEST_MAGIC);
@@ -574,8 +571,9 @@ static inline size_t aimee_delegates_launch_field(uint8_t *out, size_t cap, size
 
 /* Returns the encoded length, or 0 when it does not fit. The field ORDER is the
  * wire contract and must match the module's decoder exactly. */
-static inline size_t aimee_delegates_launch_request_encode(
-    const aimee_delegates_launch_spec_t *spec, uint8_t *out, size_t cap)
+static inline size_t
+aimee_delegates_launch_request_encode(const aimee_delegates_launch_spec_t *spec, uint8_t *out,
+                                      size_t cap)
 {
    if (!spec || !out || cap < AIMEE_DELEGATES_LAUNCH_HEADER_LEN)
       return 0;
@@ -592,12 +590,18 @@ static inline size_t aimee_delegates_launch_request_encode(
    aimee_delegates_put_u32(out + 8, argc);
 
    size_t at = AIMEE_DELEGATES_LAUNCH_HEADER_LEN;
-   const char *fields[] = {spec->repo_root,           spec->worktree,
-                           spec->gitdir,              spec->parent_socket_host,
-                           spec->parent_socket_target, spec->egress_proxy,
-                           spec->task_id,             spec->image,
-                           spec->workdir,             spec->mount_table,
-                           spec->run_as_user,         spec->scratch_dir,
+   const char *fields[] = {spec->repo_root,
+                           spec->worktree,
+                           spec->gitdir,
+                           spec->parent_socket_host,
+                           spec->parent_socket_target,
+                           spec->egress_proxy,
+                           spec->task_id,
+                           spec->image,
+                           spec->workdir,
+                           spec->mount_table,
+                           spec->run_as_user,
+                           spec->scratch_dir,
                            spec->scratch_target};
    for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
    {
@@ -853,8 +857,7 @@ static inline size_t aimee_delegates_imggc_request_begin(unsigned count, int kee
                                                          long long now, long long max_age_secs,
                                                          uint8_t *out, size_t cap)
 {
-   if (!out || cap < AIMEE_DELEGATES_IMGGC_HEADER_LEN ||
-       count > AIMEE_DELEGATES_IMGGC_MAX_IMAGES)
+   if (!out || cap < AIMEE_DELEGATES_IMGGC_HEADER_LEN || count > AIMEE_DELEGATES_IMGGC_MAX_IMAGES)
       return 0;
    memset(out, 0, AIMEE_DELEGATES_IMGGC_HEADER_LEN);
    aimee_delegates_put_u32(out, AIMEE_DELEGATES_IMGGC_REQUEST_MAGIC);
@@ -1319,8 +1322,8 @@ static inline void aimee_delegates_drift_request_begin(aimee_delegates_wire_t *w
 
 /* Append one named path. `hits` may be NULL when hit_count is 0. */
 static inline void aimee_delegates_drift_request_path(aimee_delegates_wire_t *w, const char *path,
-                                                      unsigned path_flags,
-                                                      const char *const *hits, int hit_count)
+                                                      unsigned path_flags, const char *const *hits,
+                                                      int hit_count)
 {
    aimee_delegates_wire_str(w, path);
    aimee_delegates_wire_u32(w, path_flags);
@@ -1338,8 +1341,7 @@ static inline int aimee_delegates_drift_response_decode(const uint8_t *in, size_
    r.len = len;
    r.at = 0;
    r.bad = 0;
-   if (!in || !severity ||
-       aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC)
+   if (!in || !severity || aimee_delegates_rd_u32(&r) != AIMEE_DELEGATES_DRIFT_RESPONSE_MAGIC)
       return -1;
    *severity = aimee_delegates_rd_u32(&r);
    aimee_delegates_rd_str(&r, message, message_cap);

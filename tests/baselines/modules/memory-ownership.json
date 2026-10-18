@@ -2145,12 +2145,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "b7e404f6c4c8f1799200fbfd5d12787449aa7f4ea99ff351fc2f5ed83bca68ee",
+      "sha256": "01496602fecf357bcd3ddbbd8c908acddfb0d67db6044a7a4f88665b94848ff9",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go.",
+      "boundary_review": "IR #3036: delegate rescue now transports a strict owned canonical message over its existing registered stage, with v2 framing and bounded dynamic content; the five existing memory transport symbols, owner calls, erasure and backend authority are unchanged. This records the source-boundary review and does not assert separate production approval."
     },
     "src/server/server.c": {
       "disposition": "host-transport",

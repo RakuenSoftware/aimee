@@ -39,6 +39,8 @@ IR_SHARED_TYPE = {
     ("src/modules/translation/history_ir.c", "aimee/ir/session_event.h"),
     ("src/modules/delegates/aimee_ir_rescue.c", "aimee/ir/aimee_ir_metrics.h"),
     ("src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h", "aimee/ir/aimee_ir.h"),
+    # Rescue transport returns the public owned message type, replacing a flat host response.
+    ("src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/delegates/include/aimee/delegates/panel_provider.h", "aimee/ir/panel_result.h"),
     ("src/modules/translation/include/aimee/translation/aimee_backend.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_frontend.h", "aimee/ir/aimee_ir.h"),
