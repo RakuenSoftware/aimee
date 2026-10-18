@@ -2115,8 +2115,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "b2784f08f1651d39a4193d00fa54b9f64c9e7bafc6dc68fb344dfee49c051332",
-      "boundary_review": "2026-10-18 PR #3038: selected canonical runs enter the same role-policy, admission, context assembly and Go memory-owner calls. The new branch retains complete ordered input and disables flat KB hint substitution for that input. Existing native memory symbols and Go admission authority are unchanged; no native memory engine or independent production approval is introduced."
+      "sha256": "5078e2d794b86766c42daa0a2fcea87bca7d2150cdac8ffeded4e1ae2cc84b84",
+      "boundary_review": "2026-10-18 PR #3038: selected canonical runs enter the same role-policy, admission, context assembly and Go memory-owner calls. The new branch retains complete ordered input and disables flat KB hint substitution for that input. Existing native memory symbols and Go admission authority are unchanged; no native memory engine or independent production approval is introduced. Long-owner follow-up: the local identity-copy buffer now uses the Vault principal bound, preserving the attested owner suffix in canonical source references. Memory symbols and policy calls are unchanged."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",

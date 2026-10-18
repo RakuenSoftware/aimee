@@ -909,3 +909,31 @@ c60e7f20b corrects it to aimee_response_t*. All three consumers compile and pass
 the replacement CI's ordinary unit shards and two PostgreSQL shards have passed so far.
 Continue checking every named job through Aimee git pr checks, not only the first job-list page.
 The overall migration and standalone learning/production work remain unfinished as listed above.
+
+### 2026-10-18: preserve complete attested session owners
+
+The C server-session DTO allowed only 64 bytes, while private capture/native bindings and the
+control broker allowed 128. The Vault contract permits a 128-byte name plus its namespace.
+Legal authenticated identities could therefore fail history-owner checks, be truncated in
+capture, or fail to open a permission/question scope. These boundaries now use the existing
+VAULT_PRINCIPAL_MAX contract. The C store client already sizes decoded cells from the DTO;
+the SQL schema, wire, authenticated identity factory and Go admission authority are unchanged.
+The external memory boundary disposition records the narrow identity-buffer change.
+
+Native regressions exercise a full-length legal webuser identity through an existing parent,
+private execution, source capture and identity copy. Another identity with the same long prefix
+and a different final byte cannot adopt that parent. Control replies similarly accept only the
+complete original owner and remain consume-once. Five affected fixtures (private log, controls,
+browser capture, HTTP and full agent) pass normally and under ASan/UBSan with leak detection.
+The full agent retains three explicit store-dependent skips. Server/KB builds and all 76 lint
+checks pass. Fresh schema ir_integration_owner_width_3038 passes integration 156/156 with 26
+explicit service-dependent skips.
+
+The earlier c60e7f20b CI reached 56 passing checks but T3 failed at the native asynchronous
+memory gate. Its artifact proves memory arrival/receipts, recovery, refresh and protected folding
+passed; the first failed assertion was the tmux accounting refusal diagnostic. The new canonical
+history-adoption refusal had preceded the existing external-backend accounting fence. Published
+482ce4580 restores that fence's priority without weakening either refusal. Its new full-agent
+regression fails before the repair and passes afterward for both tmux/Claude and provider/ACP;
+the final full-agent sanitizer run also passes. Fresh deployment CI is required to qualify the
+complete T3 journey and all later assertions. Keep the attribution gate and automatic reviews.

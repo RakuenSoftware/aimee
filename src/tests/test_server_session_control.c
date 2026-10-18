@@ -1,4 +1,5 @@
 #include "server_session_control.h"
+#include "vault_principal.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <pthread.h>
@@ -14,8 +15,36 @@ static void *answer(void *arg)
    cJSON_Delete(reply);
    return NULL;
 }
+static void long_owner_reply(void)
+{
+   char owner[VAULT_PRINCIPAL_MAX] = "webuser:";
+   memset(owner + 8, 'a', VAULT_CERT_CN_MAX);
+   owner[8 + VAULT_CERT_CN_MAX] = 0;
+   server_control_scope_t *scope = server_control_scope_open("long-session", "turn", owner);
+   assert(scope);
+   cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
+   cJSON *reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(!server_control_register(scope, "permission", "permission", request));
+   owner[8 + VAULT_CERT_CN_MAX - 1] = 'b';
+   assert(server_control_reply("long-session", "turn:permission", owner, reply) < 0);
+   owner[8 + VAULT_CERT_CN_MAX - 1] = 'a';
+   assert(!server_control_reply("long-session", "turn:permission", owner, reply));
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *decision = NULL;
+   assert(server_control_take(scope, "permission", &id, &kind, &original, &decision) == 1);
+   assert(!strcmp(id, "permission") && cJSON_Compare(decision, reply, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(request);
+   cJSON_Delete(reply);
+   server_control_scope_close(scope);
+}
+
 int main(void)
 {
+   long_owner_reply();
    server_control_scope_t *scope = server_control_scope_open("session", "turn", "alice");
    assert(scope);
    assert(server_control_scope_bind(scope) == NULL && server_control_scope_current() == scope);

@@ -14,7 +14,7 @@
 
 struct server_session_log
 {
-   char session[128], turn[33], principal[128];
+   char session[128], turn[33], principal[VAULT_PRINCIPAL_MAX];
    char parent[128], role[128];
    int announced;
    unsigned long long counter;

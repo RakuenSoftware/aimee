@@ -14,7 +14,7 @@ static _Thread_local int job;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct row
 {
-   char id[128], actor[128];
+   char id[128], actor[VAULT_PRINCIPAL_MAX];
    cJSON *events;
    char *history;
 } rows[16];
@@ -333,6 +333,23 @@ int main(void)
       references++;
    }
    assert(references >= 10); /* Synchronous and independent concurrent workers. */
+   char long_owner[VAULT_PRINCIPAL_MAX] = "webuser:";
+   memset(long_owner + 8, 'a', VAULT_CERT_CN_MAX);
+   long_owner[8 + VAULT_CERT_CN_MAX] = 0;
+   attest("long-parent", long_owner);
+   assert(!db1_server_session_create("long-parent", "test", long_owner));
+   assert(!server_session_log_begin("review", "long owner", &scope));
+   char exact_actor[VAULT_PRINCIPAL_MAX];
+   assert(!server_session_log_identity(native_scope, sizeof native_scope, exact_actor,
+                                       sizeof exact_actor));
+   assert(!strcmp(exact_actor, long_owner));
+   assert(!strcmp(find(native_scope)->actor, long_owner));
+   model_reply();
+   assert(!server_session_log_finish(scope, 1, NULL));
+   long_owner[8 + VAULT_CERT_CN_MAX - 1] = 'b';
+   attest("long-parent", long_owner);
+   assert(server_session_log_begin("review", "different suffix", &scope) < 0 && !scope);
+   aimee_ir_session_set_sink(NULL, NULL);
    for (int i = 0; i < count; i++)
    {
       cJSON_Delete(rows[i].events);

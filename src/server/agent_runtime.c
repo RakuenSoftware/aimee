@@ -284,7 +284,7 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
                      : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
    if (log_scope && capture == 0)
    {
-      char principal[128];
+      char principal[VAULT_PRINCIPAL_MAX];
       if (server_session_log_identity(out->canonical_session_id, sizeof out->canonical_session_id,
                                       principal, sizeof principal))
          rc = AGENT_RC_CAPTURE_FAILED;

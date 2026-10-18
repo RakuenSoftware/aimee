@@ -1,4 +1,5 @@
 #include "server_session_control.h"
+#include "vault_principal.h"
 #include <aimee/ir/session_event.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@ struct pending_control
 };
 struct server_control_scope
 {
-   char session[128], turn[128], principal[128];
+   char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX];
    unsigned count;
    struct pending_control *pending;
    struct server_control_scope *next;
@@ -39,7 +40,7 @@ server_control_scope_t *server_control_scope_open(const char *session, const cha
                                                   const char *principal)
 {
    if (!session || !turn || !principal || !session[0] || !turn[0] || !principal[0] ||
-       strlen(session) >= 128 || strlen(turn) >= 128 || strlen(principal) >= 128)
+       strlen(session) >= 128 || strlen(turn) >= 128 || strlen(principal) >= VAULT_PRINCIPAL_MAX)
       return NULL;
    server_control_scope_t *scope = calloc(1, sizeof *scope);
    if (!scope)

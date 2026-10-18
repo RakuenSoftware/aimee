@@ -438,7 +438,7 @@ static const char *default_exec_instructions =
 
 typedef struct
 {
-   char session[128], principal[128];
+   char session[128], principal[VAULT_PRINCIPAL_MAX];
    const char *vendor;
 } native_harness_binding_t;
 

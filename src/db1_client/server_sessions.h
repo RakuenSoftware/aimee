@@ -10,6 +10,7 @@
 #define DEC_DB1_SERVER_SESSIONS_H 1
 
 #include <stddef.h>
+#include "vault_principal.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -18,7 +19,7 @@ extern "C"
 
 #define DB1_SS_ID_LEN        128
 #define DB1_SS_CLIENT_LEN    32
-#define DB1_SS_PRINCIPAL_LEN 64
+#define DB1_SS_PRINCIPAL_LEN VAULT_PRINCIPAL_MAX
 #define DB1_SS_TITLE_LEN     256
 #define DB1_SS_TS_LEN        32
 #define DB1_SS_CSID_LEN      128
