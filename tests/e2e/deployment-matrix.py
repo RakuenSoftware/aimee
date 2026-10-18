@@ -1240,6 +1240,17 @@ def main():
     parser.add_argument('--topology', choices=('T1', 'T2', 'T3'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true')
+    # Each storage-agnostic gate runs in exactly one CI leg. These two switches
+    # are how a leg declines a gate another leg owns; neither is a fast mode for
+    # a single local run, which should run everything.
+    parser.add_argument('--boot-only', action='store_true',
+                        help='start every role and prove it boots on this storage (the KB '
+                             'also stores a record), then stop: the application gates do not '
+                             'depend on how PostgreSQL storage is backed and run in the '
+                             'plain-storage legs')
+    parser.add_argument('--skip-kb-free-gate', action='store_true',
+                        help='omit the KB-free personal memory gate on the standalone Server; '
+                             'T3 runs that gate against the identical composition')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
@@ -1273,6 +1284,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
+        if kb and not args.boot_only:
             code, preview = kb.kb_request('/v1/actions/memory.hygiene', dict(
                 dry_run=True, scope=dict(type='global', value='_global'), max_rows=16))
             check('Direct KB hygiene accepts its authenticated action envelope',
@@ -1316,10 +1328,12 @@ def main():
             server.start()
             check('Server boots without a KB connection', True)
             check('Server application metadata contains no database or enrollment credential', application_metadata_is_private(server))
+        if args.topology in ('T2', 'T3') and not args.boot_only:
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
-            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
-            check('KB-free personal memory regression gate', True)
+            if not args.skip_kb_free_gate:
+                command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
+                check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and
                 # Vaults. Only the optional KB application joins the API network.

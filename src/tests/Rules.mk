@@ -1025,6 +1025,18 @@ else
 UNIT_TEST_P1_PREREQ := p1-rls-gate-check
 endif
 
+# The thin-client proxy suite is a script test, not a native binary, and it is
+# identical in every shard. CI runs it once, in the `build` job, with the pinned
+# real Codex required; the unit shards set UNIT_TEST_SKIP_PROXY=1 instead of
+# repeating it in every sqlite, Postgres and sanitizer lane. A local
+# `make unit-tests` still runs it.
+UNIT_TEST_SKIP_PROXY ?= 0
+ifeq ($(UNIT_TEST_SKIP_PROXY),1)
+UNIT_TEST_PROXY_PREREQ :=
+else
+UNIT_TEST_PROXY_PREREQ := proxy-tests
+endif
+
 # The verify ledger lives in the git module now, so a suite that exercises the
 # verify gate brings the real module up on a real bus
 # (tests/support/git_module_fixture.c). Build it here and name it in the
@@ -1048,7 +1060,7 @@ endif
 proxy-tests: $(BINARY)
 	AIMEE_TEST_PROXY_BINARY="$(abspath $(BINARY))" python3 ../scripts/tests/test_thin_client_proxy.py -v
 
-unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config \
+unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(UNIT_TEST_PROXY_PREREQ) $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config \
             $(UNIT_TEST_TARGETS) $(UNIT_TEST_AUX_TARGETS) $(OBJDIR)/aimee-providers-fixture $(OBJDIR)/aimee-memory-fixture
 	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
 	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \
