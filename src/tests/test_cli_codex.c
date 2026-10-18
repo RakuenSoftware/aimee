@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "cli_codex.h"
+#include "provider_cli_adapter.h"
 #include "server_session_control.h"
 #include <aimee/ir/session_event.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -322,6 +323,13 @@ static void test_parse_tool_action_skips_other_methods(void)
    assert(cli_codex_parse_tool_action(NULL) == 0);
 }
 
+static int bind_native_fixture(const char *id, void *context)
+{
+   assert(!strcmp(id, "t1"));
+   (*(int *)context)++;
+   return 0;
+}
+
 static void test_agent_execute_cli_codex_uses_requested_cwd(void)
 {
    char root[256];
@@ -342,12 +350,18 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    assert(fp != NULL);
    fputs("#!/bin/sh\n"
          "pwd > \"$AIMEE_TEST_CODEX_CWD_OUT\"\n"
+         "if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then\n"
+         "  printf '%s\\n' \"$HOME\" \"$AIMEE_SESSION_ID\" > \"$AIMEE_TEST_CODEX_RESUME_OUT\"\n"
+         "fi\n"
          "i=0\n"
          "while IFS= read -r line; do\n"
          "  i=$((i + 1))\n"
          "  case \"$i\" in\n"
          "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' "
+         "    2) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
+         "       if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then printf '%s\\n' \"$line\" >> "
+         "\"$AIMEE_TEST_CODEX_RESUME_OUT\"; fi\n"
+         "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
          "    3) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
@@ -394,6 +408,33 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    assert(strstr(req_line, "\"type\":\"text\"") != NULL);
    assert(strstr(req_line, "\"text\":\"user prompt\"") != NULL);
    assert(strstr(req_line, "\"text_elements\":[]") != NULL);
+
+   char resume_marker[512];
+   snprintf(resume_marker, sizeof resume_marker, "%s/resume.txt", root);
+   setenv("AIMEE_TEST_CODEX_RESUME_OUT", resume_marker, 1);
+   int bound = 0;
+   provider_cli_cfg_t cfg = {.agent = &agent,
+                             .cwd = workdir,
+                             .system_prompt = "system",
+                             .user_prompt = "resumed prompt",
+                             .home = workdir,
+                             .session_id = "private-delegate",
+                             .resume_id = "t1",
+                             .bind_session = bind_native_fixture,
+                             .bind_context = &bound};
+   assert(!codex_provider_cli_adapter.execute(&cfg, &out));
+   assert(out.success && bound == 1);
+   free(out.response);
+   fp = fopen(resume_marker, "r");
+   assert(fp && fgets(seen, sizeof seen, fp));
+   seen[strcspn(seen, "\r\n")] = 0;
+   assert(!strcmp(seen, workdir));
+   assert(fgets(seen, sizeof seen, fp) && !strcmp(seen, "private-delegate\n"));
+   assert(fgets(req_line, sizeof req_line, fp));
+   assert(strstr(req_line, "thread/resume") && strstr(req_line, "t1"));
+   fclose(fp);
+   unsetenv("AIMEE_TEST_CODEX_RESUME_OUT");
+   unlink(resume_marker);
 
    unsetenv("AIMEE_TEST_CODEX_CWD_OUT");
    unsetenv("AIMEE_TEST_CODEX_REQUEST_OUT");

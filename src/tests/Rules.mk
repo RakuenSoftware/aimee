@@ -5850,7 +5850,8 @@ $(TESTPREFIX)/unit-test-cli-session: $(OBJDIR)/tests/test_cli_session.o \
                      $(OBJDIR)/util.o \
                      $(OBJDIR)/text.o \
                      $(OBJDIR)/cJSON.o \
-                     $(PLATFORM_BASIC_OBJS)
+                     $(PLATFORM_BASIC_OBJS) \
+                     $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-session-pty: $(OBJDIR)/tests/test_cli_session_pty.o \

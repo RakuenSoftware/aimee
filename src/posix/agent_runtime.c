@@ -15,6 +15,9 @@
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "server_session_log.h"
+#include "server_session_control.h"
+#include "cli_session.h"
+#include "db1_client/primary_sessions.h"
 #include "agent_response_projection.h"
 #include "agent_runtime_messages.h"
 #include "ingress_preinject.h"
@@ -449,9 +452,74 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
+typedef struct
+{
+   char session[128], principal[128];
+   const char *vendor;
+} native_harness_binding_t;
+
+static int native_harness_bind(const char *native_id, void *context)
+{
+   native_harness_binding_t *binding = context;
+   return db1_session_harness_bind(binding->session, binding->vendor, native_id,
+                                   binding->principal);
+}
+
+static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
+                                          const agent_t *agent, const char *system_prompt,
+                                          const char *user_prompt, agent_result_t *out)
+{
+   provider_cli_cfg_t cfg = {.agent = agent,
+                             .cwd = run_cmd_get_cwd(),
+                             .system_prompt = system_prompt,
+                             .user_prompt = user_prompt};
+   if (strcmp(adapter->cli_kind, "claude") && strcmp(adapter->cli_kind, "codex"))
+      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
+   native_harness_binding_t binding = {.vendor = adapter->cli_kind};
+   int identity = server_session_log_identity(binding.session, sizeof binding.session,
+                                              binding.principal, sizeof binding.principal);
+   if (identity > 0)
+   {
+      agent_request_creds_t attestation;
+      agent_request_creds_snapshot(&attestation);
+      snprintf(binding.session, sizeof binding.session, "%s", attestation.session_id);
+      snprintf(binding.principal, sizeof binding.principal, "%s", attestation.vault_principal);
+   }
+   /* Non-session internal fixtures/completions have no durable native handle.
+    * Every attested user execution uses Vault and the private canonical scope. */
+   if (identity > 0 && !binding.session[0])
+      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
+   if (identity < 0 || !binding.principal[0])
+      goto refused;
+   char home[4096] = "", resume[1025] = "", cwd[MAX_PATH_LEN] = "";
+   cli_session_t cleanup = {0};
+   cli_session_resolve_cwd(cfg.cwd, cwd, sizeof cwd);
+   cfg.cwd = cwd;
+   if (db1_session_harness_get(binding.session, binding.vendor, resume, sizeof resume,
+                               binding.principal) < 0 ||
+       cli_session_harness_home(binding.vendor, cfg.cwd, binding.session, home, sizeof home,
+                                &cleanup) != 0)
+      goto refused;
+   cfg.home = home;
+   cfg.resume_id = resume;
+   cfg.session_id = binding.session;
+   cfg.bind_session = native_harness_bind;
+   cfg.bind_context = &binding;
+   int rc = provider_cli_adapter_execute_cfg(adapter, &cfg, out);
+   cli_session_destroy(&cleanup);
+   if (aimee_ir_session_capture_failed())
+   {
+      out->success = 0;
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   return rc;
+refused:
+   memset(out, 0, sizeof *out);
+   snprintf(out->error, sizeof out->error, "could not prepare scoped Vault-backed %s runtime",
+            adapter->display_name);
+   return -1;
+}
 
 static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
                                              const char *role, const char *system_prompt,
@@ -522,19 +590,19 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
    agent_t native_provider_agent;
 
-   /* Dispatch to tmux-CLI backend if configured. The tmux session driver
-    * (cli_session) runs on the client over the reverse channel when the turn's
-    * workspace is detached, so a thin-client `claude` agent runs the standard
-    * `claude` CLI over tmux on the client — no `claude -p` involved. */
+   /* Historical tmux configurations are admitted as headless provider adapters.
+    * There is no terminal-screen producer in the execution engine. */
+   agent_t legacy_provider_agent;
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
    {
-      if (wire_fence_external_backend() != 0)
-      {
-         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
-         return -1;
-      }
-      return agent_execute_cli_session(agent, network, system_prompt, user_prompt, max_tokens,
-                                       temperature, out);
+      legacy_provider_agent = *agent;
+      snprintf(legacy_provider_agent.backend, sizeof legacy_provider_agent.backend, "%s",
+               AGENT_BACKEND_PROVIDER_CLI);
+      const char *kind = agent->cli_kind[0] ? agent->cli_kind : agent->provider;
+      if (!strcmp(kind, "claude-code") || !strcmp(kind, "claude-oauth"))
+         kind = "claude";
+      snprintf(legacy_provider_agent.cli_kind, sizeof legacy_provider_agent.cli_kind, "%s", kind);
+      agent = &legacy_provider_agent;
    }
 
    /* Dispatch to provider-CLI backend. Some legacy provider-CLI configs now
@@ -562,8 +630,7 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
             return -1;
          }
-         return provider_cli_adapter_execute(adapter, agent, run_cmd_get_cwd(), system_prompt,
-                                             user_prompt, out);
+         return agent_execute_provider_session(adapter, agent, system_prompt, user_prompt, out);
       }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "

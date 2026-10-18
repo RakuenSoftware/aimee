@@ -62,6 +62,8 @@ extern "C"
       const char *resume_id;  /* structured primary conversation, optional */
       const char *home;       /* parent-materialized runtime credential HOME */
       const char *session_id; /* host-owned Aimee identity for MCP/hooks */
+      int (*bind_session)(const char *native_id, void *context);
+      void *bind_context;
    } provider_cli_cfg_t;
 
    typedef struct provider_cli_adapter
@@ -108,6 +110,9 @@ extern "C"
    int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const agent_t *agent,
                                     const char *cwd, const char *system_prompt,
                                     const char *user_prompt, agent_result_t *out);
+
+   int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
+                                        const provider_cli_cfg_t *cfg, agent_result_t *out);
 
    int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], int *stdin_fd,
                                int *stdout_fd, pid_t *pid_out);

@@ -1,5 +1,6 @@
 #include <aimee/translation/harness_ir.h>
 #include "agent_config.h"
+#include "agent_exec.h"
 #include "aimee_home.h"
 /* cli_codex.c: see cli_codex.h. Spawns `codex app-server`, drives the
  * JSON-RPC handshake (initialize → thread/start → turn/start), reads
@@ -59,6 +60,7 @@ typedef struct
    int err_fd; /* aimee reads here ← codex stderr (diagnostics) */
    /* incremental line buffer for stdout */
    char *buf;
+   char *line; /* Borrowed by readers until the next read or close. */
    size_t buf_len;
    size_t buf_cap;
    /* tail-buffer of stderr — last STDERR_TAIL_CAP bytes only, drained
@@ -458,6 +460,8 @@ static void cli_codex_close(cli_codex_t *c)
    }
    free(c->buf);
    c->buf = NULL;
+   free(c->line);
+   c->line = NULL;
    aimee_harness_ir_free(&c->ir);
 }
 
@@ -608,9 +612,9 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
       {
          *nl = '\0';
          /* Stash the line bounds; shift buffer afterwards. */
-         static __thread char *line_dup;
-         free(line_dup);
-         line_dup = strdup(c->buf);
+         free(c->line);
+         c->line = strdup(c->buf);
+         char *line_dup = c->line;
          size_t consumed = (size_t)(nl - c->buf) + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
@@ -1860,7 +1864,6 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
       cli_codex_drain_stderr(&c);
       if (cli_codex_handle_server_request(&c, line))
       {
-         free(line);
          continue;
       }
 
@@ -1871,7 +1874,6 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
          if (out)
             snprintf(out->error, sizeof(out->error), "%s", err_text ? err_text : "codex error");
          free(err_text);
-         free(line);
          break;
       }
 
@@ -1884,7 +1886,6 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
          else if (strcmp(method_buf, "turn/completed") == 0)
             saw_compaction = 1;
       }
-      free(line);
    }
 
    cli_codex_close(&c);
@@ -1893,9 +1894,10 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
    return saw_error ? -1 : 0;
 }
 
-int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
-                                   const char *user_prompt, agent_result_t *out)
+static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
+   const agent_t *agent = cfg->agent;
+   const char *cwd = cfg->cwd, *system_prompt = cfg->system_prompt, *user_prompt = cfg->user_prompt;
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
 
@@ -1915,6 +1917,9 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
    c.err_fd = -1;
    c.err_log_fd = -1;
    c.autonomous = agent->autonomous;
+   c.home = cfg->home;
+   c.session_id = cfg->session_id;
+   c.ir.admitted_prompt = user_prompt;
    const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "codex";
    const char *sandbox_config = agent->write_capable ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
                                                      : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
@@ -1943,31 +1948,30 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
       cJSON_Delete(resp);
    }
 
-   /* 2. thread/start */
-   char thread_id[64] = {0};
+   /* Resolve the native handle within this canonical execution scope. */
+   char thread_id[128] = {0};
    {
+      int resume = cfg->resume_id && cfg->resume_id[0];
       cJSON *params = cJSON_CreateObject();
-      if (system_prompt && system_prompt[0])
+      if (resume)
+         cJSON_AddStringToObject(params, "threadId", cfg->resume_id);
+      else if (system_prompt && system_prompt[0])
          cli_codex_add_utf8_string(params, "developerInstructions", system_prompt);
-      cJSON *resp = cli_codex_request(&c, "thread/start", params, 2, &deadline_ms, idle_timeout_ms);
-      if (!resp)
+      cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params, 2,
+                                      &deadline_ms, idle_timeout_ms);
+      int got_id = resp && cli_codex_response_thread_id(resp, thread_id, sizeof thread_id);
+      if (!got_id && resume && resp && cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
-         cli_codex_set_context_error(&c, "codex thread/start failed", c.last_read_status,
-                                     out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
+         snprintf(thread_id, sizeof thread_id, "%s", cfg->resume_id);
+         got_id = 1;
       }
-      cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
-      cJSON *thread = cJSON_GetObjectItemCaseSensitive(result, "thread");
-      cJSON *tid = cJSON_GetObjectItemCaseSensitive(thread, "id");
-      if (cJSON_IsString(tid))
-         snprintf(thread_id, sizeof(thread_id), "%s", tid->valuestring);
       cJSON_Delete(resp);
-      if (!thread_id[0])
+      if (!got_id || (cfg->bind_session && cfg->bind_session(thread_id, cfg->bind_context) != 0))
       {
          cli_codex_close(&c);
-         snprintf(out->error, sizeof(out->error), "codex thread/start: no thread id");
-         return -1;
+         snprintf(out->error, sizeof(out->error), "codex native session could not be bound");
+         aimee_ir_session_fail_capture();
+         return AGENT_RC_CAPTURE_FAILED;
       }
    }
 
@@ -2066,6 +2070,14 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
    return 0;
 }
 
+int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
+                                   const char *user_prompt, agent_result_t *out)
+{
+   provider_cli_cfg_t cfg = {
+       .agent = agent, .cwd = cwd, .system_prompt = system_prompt, .user_prompt = user_prompt};
+   return codex_execute_cfg(&cfg, out);
+}
+
 int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
                             const char *user_prompt, agent_result_t *out)
 {
@@ -2074,9 +2086,7 @@ int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
 
 static int codex_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   return agent_execute_cli_codex_at_cwd(cfg ? cfg->agent : NULL, cfg ? cfg->cwd : NULL,
-                                         cfg ? cfg->system_prompt : NULL,
-                                         cfg ? cfg->user_prompt : NULL, out);
+   return cfg && cfg->agent ? codex_execute_cfg(cfg, out) : -1;
 }
 
 const provider_cli_adapter_t codex_provider_cli_adapter = {

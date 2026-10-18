@@ -95,6 +95,7 @@ static compute_ctx_t context(void)
 {
    compute_ctx_t c = {0};
    c.presence_locked = 1;
+   c.ir_delivery = 1;
    c.conn_alive = 1;
    c.write_mutex = &mutex;
    snprintf(c.vault_principal, sizeof(c.vault_principal), "alice");
@@ -133,6 +134,14 @@ static void response(void)
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   compute_ctx_t legacy = context();
+   legacy.ir_delivery = 0;
+   assert(!server_chat_ir_begin(&legacy, "session-one", "legacy subscriber"));
+   response();
+   assert(!server_chat_ir_finish(&legacy, NULL));
+   assert(cJSON_GetArraySize(log_entries) == 5 && writes == 0);
+   cleanup(&legacy);
+
    compute_ctx_t checkpoint_context = context();
    assert(!server_chat_ir_begin(&checkpoint_context, "session-one", "hello"));
    cJSON_AddItemToArray(log_entries, cJSON_Parse("{\"kind\":\"history\",\"payload\":{\"scope\":"

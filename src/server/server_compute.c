@@ -59,12 +59,6 @@
 #include "cJSON.h"
 #include "dstr.h"
 
-/* Defined in agent_runtime_tmux.c (no shared header). Drives the standard CLI
- * agent over a tmux session, which runs on the client over the reverse channel
- * when the active workspace is detached. */
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
 #include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
@@ -265,15 +259,21 @@ void compute_respond(compute_ctx_t *cctx, cJSON *resp)
                                                                      : "canonical capture failed")
                                           : NULL) == 0)
       {
-         cJSON_Delete(resp);
-         return;
+         if (cctx->ir_delivery)
+         {
+            cJSON_Delete(resp);
+            return;
+         }
       }
-      /* No successful completion after a storage failure. The transport error
-       * is deliberately outside the persisted content protocol. */
-      cJSON_Delete(resp);
-      resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
+      else
+      {
+         /* No successful completion after a storage failure. The transport error
+          * is deliberately outside the persisted content protocol. */
+         cJSON_Delete(resp);
+         resp = cJSON_CreateObject();
+         cJSON_AddStringToObject(resp, "status", "error");
+         cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
+      }
    }
    compute_update_background_job(cctx, resp);
    compute_update_coord_task(cctx, resp);
@@ -981,79 +981,8 @@ void delegate_worker(void *arg)
       via_name = inline_acp_name;
    }
 
-   /* Claude over the standard `claude` CLI/tmux on a DETACHED (thin-client)
-    * workspace: claude runs its own interactive session on the CLIENT (the tmux
-    * driver marshals its commands over the reverse channel) against the client's
-    * tree, doing its own edits — so it bypasses the server-side worktree
-    * isolation / write-guard machinery below (which assumes a local fs), exactly
-    * as the primary chat path does. Gated by the agent's `primary_only` flag. */
-   if (via_name && via_name[0])
-   {
-      agent_t *cag = agent_find(&acfg, via_name);
-      if (cag && agent_is_claude_cli(cag))
-      {
-         int detached_bound = workspace_turn_bind_active(cwd);
-         const workspace_provider_t *wsp = workspace_provider_active();
-         if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
-         {
-            if (cag->primary_only)
-            {
-               workspace_turn_unbind_active();
-               char m[320];
-               snprintf(m, sizeof(m),
-                        "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
-                        "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
-                        "(see DELEGATES.md for the Anthropic account-risk warning)",
-                        cag->name);
-               delegation_compute_error(cctx, m);
-               compute_ctx_free(cctx);
-               return;
-            }
-            if (cwd[0] == '/' && !strstr(cwd, "/.."))
-               run_cmd_set_cwd(cwd);
-            char *tmpl = NULL;
-            const char *sysp = delegate_assemble_system_prompt(system_prompt, role, prompt, cwd,
-                                                               persona_override, cwd, &tmpl);
-            agent_result_t result;
-            memset(&result, 0, sizeof(result));
-            int cli_max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-            int cli_cost_failed = 0;
-            if (max_cost_usd != 0.0)
-            {
-               size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
-               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
-               char cost_err[256] = "";
-               if (max_cost_usd < 0.0 ||
-                   delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
-                                             cost_err, sizeof(cost_err)) != 0)
-               {
-                  snprintf(result.error, sizeof(result.error), "%s",
-                           max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
-                  cli_cost_failed = 1;
-               }
-            }
-            if (!cli_cost_failed && wire_fence_external_backend() != 0)
-            {
-               snprintf(result.error, sizeof(result.error), "%s", wire_fence_last_error());
-               cli_cost_failed = 1;
-            }
-            int rc = cli_cost_failed
-                         ? -1
-                         : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
-                                                     cli_max_tokens, 0.3, &result);
-            run_cmd_set_cwd(NULL);
-            workspace_turn_unbind_active();
-            free(tmpl);
-            cJSON *resp = delegate_build_result_response(deleg_id, rc, &result, &acfg, role, cag,
-                                                         -1, 0, NULL, NULL);
-            free(result.response);
-            compute_respond(cctx, resp);
-            compute_ctx_free(cctx);
-            return;
-         }
-         workspace_turn_unbind_active();
-      }
-   }
+   /* Native CLI delegates follow the same scoped admission, durable capture
+    * and workspace policy as every other delegate. */
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
    /* A delegate packet is bounded unless its caller explicitly says it owns the

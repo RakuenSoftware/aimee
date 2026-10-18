@@ -23,12 +23,6 @@
 #include <aimee/workspace/workspace.h> /* session_isolation_target — per-session worktree redirect */
 #include "modules/workspace/workspace_provider.h"
 
-/* Defined in agent_runtime_tmux.c (no shared header; agent_runtime.c forward-
- * declares it the same way). Drives the standard CLI agent over a tmux session,
- * which runs on the client over the reverse channel for a detached workspace. */
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
 #include "prompts.h"
 #include "persona.h"
 #include "server_http.h"
@@ -221,10 +215,16 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
 {
    if (cctx->ir_enabled)
    {
-      if (event && !strcmp(event, "session") && value && value[0] && cctx->ir_harness[0])
-         return db1_session_harness_bind(cctx->ir_session, cctx->ir_harness, value,
-                                         cctx->vault_principal);
-      return cctx->ir_failed ? -1 : 0;
+      if (event && !strcmp(event, "session") && value && value[0] && cctx->ir_harness[0] &&
+          db1_session_harness_bind(cctx->ir_session, cctx->ir_harness, value,
+                                   cctx->vault_principal) != 0)
+      {
+         cctx->ir_failed = 1;
+         aimee_ir_session_fail_capture();
+         return -1;
+      }
+      if (cctx->ir_delivery || cctx->ir_failed)
+         return cctx->ir_failed ? -1 : 0;
    }
    pthread_mutex_lock(cctx->write_mutex);
 
@@ -485,9 +485,6 @@ static int chat_codex_effort_allowed(const char *effort)
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
 }
 
-static int chat_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
-                             size_t capacity, cli_session_t *cleanup);
-
 static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
                                      const char *thread_id, const char *cwd, const char *model,
                                      const char *effort)
@@ -543,7 +540,8 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
       snprintf(cctx->ir_harness, sizeof(cctx->ir_harness), "codex");
       if (db1_session_harness_get(cctx->ir_session, "codex", resume, sizeof(resume),
                                   cctx->vault_principal) < 0 ||
-          chat_harness_home("codex", cwd, cctx->ir_session, home, sizeof(home), &cleanup) != 0)
+          cli_session_harness_home("codex", cwd, cctx->ir_session, home, sizeof(home), &cleanup) !=
+              0)
       {
          free(system_prompt);
          compute_error(cctx, "could not prepare Vault-backed Codex runtime");
@@ -623,13 +621,11 @@ static int chat_agent_has_provider(const agent_config_t *acfg, const char *provi
    return 0;
 }
 
-/* Register a built-in tmux-CLI agent (claude/codex driven as a persistent TUI
- * over tmux) for an OAuth/CLI provider so webchat can resolve it even when no
- * agent was explicitly configured. `name`==`provider` so it is selectable by
- * either. cli_kind drives the response parser; cli_cmd is the launch command. */
-static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *name,
-                                            const char *cli_kind, const char *cli_cmd,
-                                            const char *model)
+/* Register a structured native harness for an OAuth provider when no explicit
+ * agent record exists. Native handles remain private to the canonical scope. */
+static void chat_agent_add_builtin_provider_cli(agent_config_t *acfg, const char *name,
+                                                const char *cli_kind, const char *cli_cmd,
+                                                const char *model)
 {
    if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, name) ||
        chat_agent_has_provider(acfg, name))
@@ -640,13 +636,10 @@ static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *na
    snprintf(ag->name, sizeof(ag->name), "%s", name);
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
    snprintf(ag->provider, sizeof(ag->provider), "%s", name);
-   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
    snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
-   /* The configured default model; agent_execute_cli_session appends it as
-    * `--model` (claude/codex both accept it). A per-request model_override
-    * replaces this in chat_stream_worker_agent before the turn runs. Without
-    * this, the CLI launched with its own default, silently ignoring config. */
+   /* The selected model is passed at the native harness output boundary. */
    if (model && model[0])
       snprintf(ag->model, sizeof(ag->model), "%s", model);
    ag->cost_tier = 1;
@@ -671,11 +664,11 @@ static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *pr
    if (strcmp(provider, "openai") == 0)
       chat_agent_add_legacy_openai(acfg);
    else if (strcmp(provider, "claude-code") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude", claude_model);
+      chat_agent_add_builtin_provider_cli(acfg, "claude-code", "claude", "claude", claude_model);
    else if (strcmp(provider, "claude") == 0 || strcmp(provider, "claude-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, provider, "claude", "claude", claude_model);
+      chat_agent_add_builtin_provider_cli(acfg, provider, "claude", "claude", claude_model);
    else if (strcmp(provider, "codex-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "codex-oauth", "codex", "codex", codex_model);
+      chat_agent_add_builtin_provider_cli(acfg, "codex-oauth", "codex", "codex", codex_model);
 }
 
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
@@ -767,64 +760,6 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    stream_event(cctx, ev, "name", name ? name : "");
 }
 
-/* Incremental stream sink for tmux CLI turns: cli_session_recv calls this with
- * each newly produced chunk of the clean reply, which we forward as a `text`
- * SSE event so the webchat streams the answer as it is produced (instead of one
- * blob at turn end). `emitted` records that streaming delivered the reply, so
- * the worker skips the trailing full-text emit and avoids duplicating it. */
-typedef struct
-{
-   compute_ctx_t *cctx;
-   int emitted;
-} chat_cli_stream_ctx_t;
-
-static void chat_cli_stream_cb(const char *delta, void *ud)
-{
-   chat_cli_stream_ctx_t *c = (chat_cli_stream_ctx_t *)ud;
-   if (!c || !delta || !delta[0])
-      return;
-   stream_event(c->cctx, "text", "content", delta);
-   c->emitted = 1;
-}
-
-/* Cancel predicate for the tmux CLI driver: reflects this turn's registry cancel
- * flag (set by chat.interrupt / graceful_cancel / session close). Lets
- * cli_session_recv abort a wedged or steered generation promptly without
- * coupling cli_session.c to the turn registry. */
-static int chat_cli_cancel_check(void *ud)
-{
-   (void)ud;
-   return agent_request_cancelled();
-}
-
-/* Credential homes are ephemeral; only native conversation files persist.
- * These are harness runtime state, never the browser's transcript. */
-static int chat_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
-                             size_t capacity, cli_session_t *cleanup)
-{
-   for (const char *p = sid; *p; p++)
-      if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
-         return -1;
-   int claude = !strcmp(vendor, "claude");
-   if ((claude ? cli_session_isolated_claude_home(cwd, home, capacity)
-               : cli_session_isolated_codex_home(home, capacity)) != 0)
-      return -1;
-   cli_session_set_isolated_home(cleanup, home);
-   char history[4096], link[4096];
-   const char *directory = claude ? "projects" : "sessions";
-   if (snprintf(history, sizeof(history), "%s/browser-%s/%s/%s", aimee_home(), vendor, sid,
-                directory) >= (int)sizeof(history) ||
-       platform_mkdir_p(history, 0700) != 0 ||
-       snprintf(link, sizeof(link), "%s/.%s/%s", home, vendor, directory) >= (int)sizeof(link) ||
-       symlink(history, link) != 0)
-   {
-      cli_session_destroy(cleanup);
-      home[0] = '\0';
-      return -1;
-   }
-   return 0;
-}
-
 static int chat_claude_bind_session(const char *native_id, void *context)
 {
    compute_ctx_t *c = context;
@@ -839,7 +774,7 @@ static int chat_claude_print(compute_ctx_t *c, const agent_t *agent, const char 
    char home[4096] = "", resume[1025] = "";
    int rc = -1;
    cli_session_t cleanup = {0};
-   if (chat_harness_home("claude", cwd, c->ir_session, home, sizeof(home), &cleanup) != 0)
+   if (cli_session_harness_home("claude", cwd, c->ir_session, home, sizeof(home), &cleanup) != 0)
    {
       snprintf(out->error, sizeof(out->error), "could not prepare Vault-backed Claude runtime");
       return -1;
@@ -855,7 +790,7 @@ static int chat_claude_print(compute_ctx_t *c, const agent_t *agent, const char 
                              .system_prompt = system,
                              .user_prompt = prompt,
                              .primary = 1,
-                             .control_channel = 1,
+                             .control_channel = c->ir_delivery,
                              .resume_id = resume,
                              .home = home,
                              .session_id = c->ir_session};
@@ -958,27 +893,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    if (drift)
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-   /* Stream a tmux CLI turn's reply incrementally (no-op for non-tmux agents,
-    * whose runtime never drives a cli_session). Save/restore any outer cb so a
-    * nested turn on this thread can't leave a dangling context behind. */
-   chat_cli_stream_ctx_t sctx = {cctx, 0};
-   void *prev_stream_ud = NULL;
-   cli_session_stream_cb_t prev_stream_cb = cli_session_get_stream_cb(&prev_stream_ud);
-   cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
-   /* Let the tmux CLI driver observe this turn's cancel flag so a steer/interrupt
-    * stops the running generation promptly. Save/restore around any outer turn. */
-   void *prev_cancel_ud = NULL;
-   cli_session_cancel_cb_t prev_cancel_cb = cli_session_get_cancel_check(&prev_cancel_ud);
-   cli_session_set_cancel_check(chat_cli_cancel_check, NULL);
-   /* Bound a tmux CLI parked in a provider error/retry state so a concurrent-
-    * collision blip surfaces a clear error fast instead of a multi-minute silent
-    * "Working" spinner. Thread-local, like the stream/cancel callbacks above:
-    * agent_run_with_tools dispatches the tmux agent (-> cli_session_recv)
-    * synchronously on THIS worker thread, so the bound is in force for the turn.
-    * Save/restore around any outer turn on this thread. */
-   int prev_error_grace = cli_session_get_error_grace_ms();
-   cli_session_set_error_grace_ms(CLI_SESSION_DEFAULT_ERROR_GRACE_MS);
-
    /* Primary-as-manager S2 (primary-CLI-ingestor): the Claude primary runs as a
     * per-session tmux CLI TUI whose model call reaches the gateway OUT-OF-BAND, so
     * the router never binds it. Enforce HERE -- on the worker thread, where the
@@ -1010,9 +924,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
                                        AGENT_DEFAULT_MAX_TOKENS, &result);
    agent_routing_set_primary_turn(0);
 
-   cli_session_set_error_grace_ms(prev_error_grace);
-   cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);
-   cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
@@ -1033,8 +944,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
           * steer continuation follows as the next turn). Only when some text was
           * actually streamed — otherwise a cancel before any output would show a
           * stray marker with no content. */
-         if (sctx.emitted)
-            stream_event(cctx, "text", "content", "\n\n_(interrupted)_");
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);
          free(result.response);
@@ -1058,7 +967,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
-   if (!sctx.emitted && result.response && result.response[0])
+   if (result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
@@ -1384,7 +1293,10 @@ void chat_stream_worker(void *arg)
    }
 
    cJSON *ir_version = cJSON_GetObjectItemCaseSensitive(req, "ir_version");
-   if (cJSON_IsNumber(ir_version) && ir_version->valueint == 1)
+   cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
+   /* Capture ownership follows the admitted host turn, independently of the
+    * subscriber's transport version. Legacy consumers retain their projection. */
+   if (cctx->ir_delivery || (cctx->presence_locked && cctx->vault_principal[0] && aimee_sid[0]))
    {
       if (server_chat_ir_begin(cctx, aimee_sid, message) != 0)
       {

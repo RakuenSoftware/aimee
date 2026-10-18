@@ -12,6 +12,8 @@
 
 static int chat_ir_write_envelope(compute_ctx_t *c, const char *json)
 {
+   if (!c->ir_delivery)
+      return 0;
    pthread_mutex_lock(c->write_mutex);
    if (c->conn_alive &&
        (write_all(c->conn_fd, json, strlen(json)) != 0 || write_all(c->conn_fd, "\n", 1) != 0))
@@ -26,7 +28,8 @@ static int chat_ir_write_envelope(compute_ctx_t *c, const char *json)
 static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *sequence)
 {
    unsigned long long target = strtoull(sequence, NULL, 10);
-   if (c->conn_alive && c->ir_sequence[0] && target > strtoull(c->ir_sequence, NULL, 10) + 1)
+   if (c->ir_delivery && c->conn_alive && c->ir_sequence[0] &&
+       target > strtoull(c->ir_sequence, NULL, 10) + 1)
    {
       while (strtoull(c->ir_sequence, NULL, 10) < target)
       {

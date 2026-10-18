@@ -346,3 +346,13 @@ legacy translated-request fallbacks and response projections still remain to be 
 ### Cache guidance and worker reuse follow-up
 
 Host tool/completion guidance is appended as a separate native system block before canonical admission; original client system blocks, cache breakpoints and TTLs survive. A new independent task clears a previous ownerless capture-failure latch, while nested work retains the active owner's failure. IR session, HTTP owner and native Anthropic handler fixtures passed with ASan/UBSan and leak detection. Global migration work remains open.
+
+### Native harness retirement follow-up
+
+The tmux model-execution engine (`agent_runtime_tmux.c`) and detached Claude delegate shortcut are removed. Historical backend spellings normalize to structured provider adapters, including old Claude aliases. Provider registration now creates headless records. Routing no longer gives the retired backend spelling affinity over canonical-history peers. Interactive PTY session support is separate terminal functionality; it does not produce model history.
+
+Server-hosted native CLI executions prepare Vault-backed ephemeral homes using the same helper as browser execution. Conversation directories and owner-checked native handles use the current private canonical execution identity; sibling delegate sessions do not share native history. Claude binds its stream initialization handle; Codex resumes/starts and binds the native thread before sending a turn. Credential teardown preserves conversation files. Codex line storage now belongs to its process instance; the compaction reader no longer frees a borrowed line.
+
+Admitted, attested legacy chat subscribers now capture canonical events too, independently of transport version. Their existing event projection remains available. Unattached/unattested ingress and remaining internal consumers still require the broader audit; this does not declare a global cutover complete.
+
+Validation: full native agent suite (including a real child launched from a legacy tmux record), native CLI/session owner fixtures, provider Go race tests, all 75 lint gates, and disposable server/PostgreSQL primary execution passed. Focused ASan/UBSan checks cover native CLI adapters, private runtime homes and canonical owners. CI at published 34f5be6f3 passed Docker T1 and T3; T2 variants were still running at this checkpoint. The memory replay job failed a PageRank fixture deadline, while its canonical IR session replay step passed. The opening-app attribution failure remains unexempted.

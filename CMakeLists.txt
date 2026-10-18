@@ -254,7 +254,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
@@ -314,7 +313,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c

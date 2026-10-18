@@ -688,6 +688,15 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "cli_kind");
          if (v && cJSON_IsString(v))
             snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", v->valuestring);
+         if (!strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI))
+         {
+            snprintf(ag->backend, sizeof ag->backend, "%s", AGENT_BACKEND_PROVIDER_CLI);
+            if (!ag->cli_kind[0])
+               snprintf(ag->cli_kind, sizeof ag->cli_kind, "%s", ag->provider);
+         }
+         if (!strcmp(ag->backend, AGENT_BACKEND_PROVIDER_CLI) &&
+             (!strcmp(ag->cli_kind, "claude-code") || !strcmp(ag->cli_kind, "claude-oauth")))
+            snprintf(ag->cli_kind, sizeof ag->cli_kind, "claude");
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);

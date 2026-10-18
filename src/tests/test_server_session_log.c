@@ -158,6 +158,12 @@ int main(void)
    assert(server_session_log_begin("review", "private", &scope) == 0);
    assert(parent_events == 0 && count == 2 && !strcmp(rows[1].actor, "alice"));
    assert(strcmp(rows[1].id, "parent"));
+   char native_scope[128], native_principal[128];
+   assert(!server_session_log_identity(native_scope, sizeof native_scope, native_principal,
+                                       sizeof native_principal));
+   assert(!strcmp(native_scope, rows[1].id) && !strcmp(native_principal, "alice"));
+   assert(server_session_log_identity(native_scope, 2, native_principal, sizeof native_principal) <
+          0);
    model_reply();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,

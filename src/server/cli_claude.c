@@ -289,7 +289,8 @@ static int claude_parse_line(const char *line, cli_event_t *event_out)
 
 static int claude_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   return claude_headless_run(cfg, NULL, NULL, out);
+   return claude_headless_run(cfg, cfg ? cfg->bind_session : NULL, cfg ? cfg->bind_context : NULL,
+                              out);
 }
 
 const provider_cli_adapter_t claude_provider_cli_adapter = {

@@ -250,3 +250,16 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
    free(scope);
    return failed ? -1 : 0;
 }
+
+int server_session_log_identity(char *session, size_t capacity, char *principal,
+                                size_t principal_capacity)
+{
+   if (!current)
+      return 1;
+   if (!session || !principal || strlen(current->session) >= capacity ||
+       strlen(current->principal) >= principal_capacity)
+      return -1;
+   snprintf(session, capacity, "%s", current->session);
+   snprintf(principal, principal_capacity, "%s", current->principal);
+   return 0;
+}

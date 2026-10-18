@@ -41,7 +41,7 @@ typedef struct
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
    cJSON *req; /* owned by this context */
-   int ir_enabled, ir_failed, ir_completed;
+   int ir_enabled, ir_delivery, ir_failed, ir_completed;
    unsigned long long ir_counter;
    unsigned long long ir_model_events;
    cJSON *ir_tool_ids;

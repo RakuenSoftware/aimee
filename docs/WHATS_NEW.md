@@ -13,13 +13,14 @@ observation events. Transcript reads no longer have a separate 1 MiB buffer ceil
 Untouched native Anthropic requests preserve client cache breakpoints and TTLs; typed edits
 force rebuilding instead of replaying stale content.
 
-Claude browser turns use `claude -p` with structured streaming instead of tmux capture. Claude,
+Claude primary and delegate turns use `claude -p` with structured streaming instead of tmux capture. Historical `tmux-cli` agent records are migrated to native provider adapters; the router no longer lets that spelling mask HTTP peers. Claude,
 Codex app-server and ACP frames are converted at their native entry adapters. Claude and Codex
 resume handles are stored separately for each Aimee session; their runtime homes receive
 credentials from the Vault. Existing text-only history remains explicitly marked as legacy.
 Browser operators can answer permission and question requests. Replies are bound to the
-authenticated user, session and pending turn, and are recorded before native delivery. Global
-legacy execution removal and live subscription qualification remain migration work.
+authenticated user, session and pending turn, and are recorded before native delivery. Admitted
+legacy subscribers also capture canonical events while retaining their transport projection.
+Remaining consumer cutovers and live subscription qualification remain migration work.
 
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's

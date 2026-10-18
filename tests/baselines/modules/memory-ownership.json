@@ -2201,8 +2201,8 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "7546890821f531a3645ba8aa9372db63db67db037e4254bfcf30491b6678e951",
-      "review": "2026-10-18: adds browser-attested chat control replies; pending session/turn/principal ownership is checked before queuing. Existing memory_stats routing and memory owner calls are unchanged."
+      "sha256": "27a9e3146d8e52cd6b88acfab55e45bb52b8d719199c2f93e03dd1f1ef3bae3c",
+      "review": "2026-10-18: clears ownerless IR capture failure at independent op-run task boundaries. Existing memory_stats route, request fields and Go memory-owner calls are unchanged; no memory execution moves into C."
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",

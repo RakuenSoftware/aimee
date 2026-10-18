@@ -1,4 +1,5 @@
 #include "support/delegate_role_seam_stub.h"
+#include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -1104,6 +1105,60 @@ static void test_request_creds_snapshot_carries_vault_principal(void)
    agent_set_request_vault_principal(NULL);
 }
 
+static int headless_legacy_capture(const aimee_session_event_t *event, void *context)
+{
+   int *messages = context;
+   if (event->kind == AIMEE_SESSION_MESSAGE && event->message &&
+       !strcmp(event->message->role, "assistant"))
+   {
+      assert(event->message->n_blocks == 1);
+      assert(event->message->blocks[0].type == AIMEE_BLK_TEXT);
+      assert(!strcmp(event->message->blocks[0].text, "structured legacy runtime"));
+      (*messages)++;
+   }
+   return 0;
+}
+
+static void test_legacy_tmux_executes_structured_headless(void)
+{
+   char path[512];
+   snprintf(path, sizeof path, "%s/aimee-headless-legacy-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   FILE *f = fdopen(fd, "w");
+   assert(f);
+   fputs("#!/bin/sh\n"
+         "case \" $* \" in *' --output-format stream-json '*) ;; *) exit 91;; esac\n"
+         "cat >/dev/null\n"
+         "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"id\":\"legacy-frame\","
+         "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"structured legacy "
+         "runtime\"}]}}'\n"
+         "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"structured legacy "
+         "runtime\"}'\n",
+         f);
+   fclose(f);
+   assert(!chmod(path, 0700));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "legacy-claude");
+   snprintf(agent.backend, sizeof agent.backend, "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(agent.provider, sizeof agent.provider, "claude");
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", path);
+   agent.timeout_ms = 5000;
+   agent_request_creds_t previous, empty = {0};
+   agent_request_creds_snapshot(&previous);
+   agent_request_creds_restore(&empty);
+   int messages = 0;
+   aimee_ir_session_set_sink(headless_legacy_capture, &messages);
+   agent_result_t out;
+   assert(!agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out));
+   assert(out.success && out.response && !strcmp(out.response, "structured legacy runtime"));
+   assert(messages == 1);
+   free(out.response);
+   aimee_ir_session_set_sink(NULL, NULL);
+   agent_request_creds_restore(&previous);
+   unlink(path);
+}
+
 static void test_agent_config_provider_cli_roundtrip(void)
 {
    const char *cfg_dir = config_default_dir();
@@ -1165,10 +1220,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[0].cli_cmd, "codex") == 0);
    assert(loaded.agents[0].cli_idle_timeout_ms == 1234);
    assert(loaded.agents[0].session_reuse == 1);
-   assert(strcmp(loaded.agents[1].backend, AGENT_BACKEND_TMUX_CLI) == 0);
+   assert(strcmp(loaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[1].provider, "claude") == 0);
    assert(strcmp(loaded.agents[1].auth_type, "none") == 0);
-   assert(loaded.agents[1].cli_kind[0] == '\0');
+   assert(strcmp(loaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(loaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[2].provider, "mistral") == 0);
@@ -1192,8 +1247,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[4].cli_cmd, "mistral") == 0);
    assert(strcmp(loaded.agents[5].name, "claude-code") == 0);
    assert(strcmp(loaded.agents[5].provider, "claude-code") == 0);
-   assert(strcmp(loaded.agents[5].backend, AGENT_BACKEND_TMUX_CLI) == 0);
-   assert(strcmp(loaded.agents[5].cli_kind, "claude-code") == 0);
+   assert(strcmp(loaded.agents[5].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
+   assert(strcmp(loaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(loaded.agents[5].session_reuse == 1);
    /* A claude-CLI agent that is NOT server-hosted (no `is_server_hosted` in its
@@ -1213,10 +1268,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[0].cli_cmd, "codex") == 0);
    assert(reloaded.agents[0].cli_idle_timeout_ms == 1234);
    assert(reloaded.agents[0].session_reuse == 1);
-   assert(strcmp(reloaded.agents[1].backend, AGENT_BACKEND_TMUX_CLI) == 0);
+   assert(strcmp(reloaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[1].provider, "claude") == 0);
    assert(strcmp(reloaded.agents[1].auth_type, "none") == 0);
-   assert(reloaded.agents[1].cli_kind[0] == '\0');
+   assert(strcmp(reloaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(reloaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[2].provider, "mistral") == 0);
@@ -1236,8 +1291,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[4].cli_cmd, "mistral") == 0);
    assert(strcmp(reloaded.agents[5].name, "claude-code") == 0);
    assert(strcmp(reloaded.agents[5].provider, "claude-code") == 0);
-   assert(strcmp(reloaded.agents[5].backend, AGENT_BACKEND_TMUX_CLI) == 0);
-   assert(strcmp(reloaded.agents[5].cli_kind, "claude-code") == 0);
+   assert(strcmp(reloaded.agents[5].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
+   assert(strcmp(reloaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(reloaded.agents[5].session_reuse == 1);
    /* Still excluded after the save/reload roundtrip (see the load-side assert). */
@@ -1305,13 +1360,8 @@ static void test_agent_adapter_registry(void)
    }
 }
 
-/* Regression guard for the codex-tmux misregistration that hid the local synth
- * delegate. agent_route() prefers a tmux-CLI backend over HTTP peers at the
- * cheapest tier (the "has_tmux" filter, mirrored in agent_route_with_caps_inner).
- * When codex was wrongly filed as a tmux-CLI agent at cost_tier 0, that filter
- * excluded the local HTTP synth delegate (gpu-mid) from every default route, so
- * it was never used. Case A reproduces the mask; Case B proves that codex in its
- * correct HTTP (chatgpt) shape leaves the local synth routable. */
+/* Legacy backend spelling cannot mask HTTP peers now that canonical history
+ * owns continuation and every native CLI executes a structured adapter. */
 static void test_local_synth_not_masked_by_tmux_codex(void)
 {
    /* Fake `tmux` and `codex` on PATH so a codex tmux-CLI agent is genuinely
@@ -1319,7 +1369,7 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    char fake_bin[MAX_PATH_LEN];
    snprintf(fake_bin, sizeof(fake_bin), "%s/aimee-test-route-bin-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(fake_bin) != NULL);
-   const char *fakes[] = {"tmux", "codex"};
+   const char *fakes[] = {"codex"};
    for (size_t i = 0; i < sizeof(fakes) / sizeof(fakes[0]); i++)
    {
       char p[MAX_PATH_LEN];
@@ -1370,9 +1420,14 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    snprintf(codex->cli_cmd, sizeof(codex->cli_cmd), "codex");
    assert(agent_is_available_for_routing(synth) == 1);
    assert(agent_is_available_for_routing(codex) == 1); /* tmux + codex on PATH */
-   agent_t *routed_a = agent_route(&cfg, "execute");
-   assert(routed_a == codex); /* synth masked by the tmux peer */
-   assert(routed_a != synth);
+   int legacy_synth = 0, legacy_codex = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      agent_t *picked = agent_route(&cfg, "execute");
+      legacy_synth |= picked == synth;
+      legacy_codex |= picked == codex;
+   }
+   assert(legacy_synth && legacy_codex);
 
    /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
     * at the cheapest tier, so the local synth is ROUTABLE again.
@@ -3900,6 +3955,7 @@ int main(void)
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();
    test_request_creds_snapshot_carries_vault_principal();
+   test_legacy_tmux_executes_structured_headless();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_default_primary_skips_disabled();
