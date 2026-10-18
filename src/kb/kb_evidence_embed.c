@@ -4,7 +4,7 @@
  *
  * Per pending evidence_index_ops row: read the evidence artifact, extract its
  * "content", embed it via the configured embedding_command (or the builtin
- * hash embedder), format the 384-dim result as a pgvector text literal, and
+ * hash embedder), format the configured-width result as a pgvector text literal, and
  * store it through kb_store_evidence_store_vector (which also marks the op 'ok').
  * On any failure the op is marked failed so the queue makes forward progress.
  * KB_STORE only; no DB1 access from this file. */
@@ -12,6 +12,7 @@
 #include "kb_evidence_embed.h"
 
 #include "aimee.h"
+#include "config_database.h"
 #include "cJSON.h"
 #include "modules/kb/c/kb_store.h" /* kb_store_lease_release_idle */
 #include "modules/kb/c/artifacts.h"
@@ -23,10 +24,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* evidence_vectors.embedding is vector(384); MiniLM and the builtin embedder
- * both emit 384 dims. We require an exact match so a misconfigured sidecar
- * cannot poison the column with the wrong dimensionality. */
-#define EVIDENCE_EMBED_DIM 384
+/* Evidence vectors use the instance's configured width. Require an exact
+ * response length so a misconfigured embedder cannot poison the column. */
 
 /* Pull the embeddable text out of an evidence artifact payload. Evidence rows
  * are written as {"source_kind":...,"content":"..."}; fall back to a couple of
@@ -132,21 +131,33 @@ int kb_evidence_embed_one(const char *embed_cmd)
     * drain can't pin a connection past the 300s stuck-lease ceiling (see
     * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
    kb_store_lease_release_idle();
-   float vec[EVIDENCE_EMBED_DIM];
+   const int embed_dim = config_embedder_dims_current();
+   if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
+   {
+      kb_store_evidence_mark_failed(pend.artifact_id, "invalid configured embedding dimension");
+      return 1;
+   }
+   float *vec = malloc((size_t)embed_dim * sizeof(*vec));
+   if (!vec)
+   {
+      kb_store_evidence_mark_failed(pend.artifact_id, "vector allocation failed");
+      return 1;
+   }
    cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
    cJSON_AddStringToObject(embed_0_args, "base_url", model);
    cJSON_AddStringToObject(embed_0_args, "input_type", "document");
    cJSON_AddStringToObject(embed_0_args, "text", content);
-   cJSON_AddNumberToObject(embed_0_args, "max_dim", EVIDENCE_EMBED_DIM);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", embed_dim);
    (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
-   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                            EVIDENCE_EMBED_DIM);
+   cJSON *vector_json = cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector");
+   int dim = jo_float_array(vector_json, vec, embed_dim);
    cJSON_Delete(embed_0_reply);
-   if (dim != EVIDENCE_EMBED_DIM)
+   if (dim != embed_dim)
    {
+      free(vec);
       char err[128];
-      snprintf(err, sizeof(err), "embed dim %d != %d", dim, EVIDENCE_EMBED_DIM);
+      snprintf(err, sizeof(err), "embed dim %d != %d", dim, embed_dim);
       kb_store_evidence_mark_failed(pend.artifact_id, err);
       aimee_log(LOG_WARN, "kb.evidence.embed", "%s for %s (model=%s)", err, pend.artifact_id,
                 model);
@@ -154,6 +165,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    }
 
    char *vec_text = evidence_vec_to_text(vec, dim);
+   free(vec);
    if (!vec_text)
    {
       kb_store_evidence_mark_failed(pend.artifact_id, "vector format failed");
