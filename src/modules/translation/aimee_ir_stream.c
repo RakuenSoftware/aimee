@@ -42,15 +42,7 @@ void openai_stream_state_init(openai_stream_state_t *st)
 
 static int optional_usage(const cJSON *usage, const char *name, long *out)
 {
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(usage, name);
-   if (!value)
-      return 0;
-   if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < 0 ||
-       value->valuedouble > 9007199254740991.0 || value->valuedouble > LONG_MAX ||
-       (double)(long)value->valuedouble != value->valuedouble)
-      return -1;
-   *out = (long)value->valuedouble;
-   return 0;
+   return aimee_ir_read_usage(usage, name, out);
 }
 int openai_stream_finish(openai_stream_state_t *st, aimee_delta_t *out, int max)
 {
@@ -480,18 +472,6 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
    return 0;
 }
 
-/* Read a usage counter LENIENTLY -- matching anthropic_backend_parse's treatment of
- * the same fields on the non-stream path (absent/garbage leaves the counter
- * untouched) rather than the Converse parser's strict validation, so the two
- * Anthropic parsers agree about what a usage block means. */
-static void anthropic_usage(const cJSON *usage, const char *name, long *out)
-{
-   const cJSON *it = usage ? cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name) : NULL;
-   if (cJSON_IsNumber(it) && isfinite(it->valuedouble) && it->valuedouble >= 0 &&
-       it->valuedouble <= (double)LONG_MAX)
-      *out = (long)it->valuedouble;
-}
-
 /* Native block classification; unsupported kinds fail canonical admission. */
 static aimee_block_type_t anthropic_block_kind(const char *type)
 {
@@ -550,13 +530,16 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       if (!cJSON_IsObject(msg) || !role || strcmp(role, "assistant") != 0 || st->started ||
           st->terminal_emitted)
          return -1;
-      anthropic_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "usage"), "input_tokens",
-                      &st->pending_usage_in);
+      if (aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "usage"),
+                              "input_tokens", &st->pending_usage_in) < 0)
+         return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_TURN_START;
       const cJSON *usage = cJSON_GetObjectItemCaseSensitive(msg, "usage");
-      anthropic_usage(usage, "cache_read_input_tokens", &st->pending_cache_read);
-      anthropic_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write);
+      if (aimee_ir_read_usage(usage, "cache_read_input_tokens", &st->pending_cache_read) < 0)
+         return -1;
+      if (aimee_ir_read_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write) < 0)
+         return -1;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_cache_read = st->pending_cache_read;
       out[0].usage_cache_write = st->pending_cache_write;
@@ -679,14 +662,19 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       const char *sr = ostr(delta, "stop_reason");
       if (sr)
          st->pending_stop_reason = aimee_stop_reason_parse(sr);
-      anthropic_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage"), "output_tokens",
-                      &st->pending_usage_out);
+      if (aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage"),
+                              "output_tokens", &st->pending_usage_out) < 0)
+         return -1;
       const cJSON *usage = cJSON_GetObjectItemCaseSensitive(payload, "usage");
-      anthropic_usage(usage, "input_tokens", &st->pending_usage_in);
-      anthropic_usage(usage, "cache_read_input_tokens", &st->pending_cache_read);
-      anthropic_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write);
-      anthropic_usage(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details"),
-                      "thinking_tokens", &st->pending_reasoning);
+      if (aimee_ir_read_usage(usage, "input_tokens", &st->pending_usage_in) < 0)
+         return -1;
+      if (aimee_ir_read_usage(usage, "cache_read_input_tokens", &st->pending_cache_read) < 0)
+         return -1;
+      if (aimee_ir_read_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write) < 0)
+         return -1;
+      if (aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details"),
+                              "thinking_tokens", &st->pending_reasoning) < 0)
+         return -1;
       return 0; /* message_stop emits the single terminal IR delta */
    }
 

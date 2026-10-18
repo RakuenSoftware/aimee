@@ -271,19 +271,6 @@ __attribute__((weak)) void *aimee_ir_build_from_chat(const char *agent_model, co
    return NULL;
 }
 
-/* Slice 3: the OPENAI-WIRE IR response path. The anthropic_http shape/p2c tests
- * #include anthropic_http.c and link minimally; these inert weak stubs resolve the
- * link. aimee_ir_resp_path_enabled()->0 keeps the legacy parse on the test path, so
- * the other three are never actually called. Real objects win when linked. */
-__attribute__((weak)) int aimee_ir_resp_path_enabled(void)
-{
-   return 0;
-}
-__attribute__((weak)) void aimee_ir_response_to_parsed(const void *r, void *out)
-{
-   (void)r;
-   (void)out;
-}
 __attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err,
                                                unsigned long errn)
 {

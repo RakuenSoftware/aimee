@@ -619,21 +619,16 @@ int bedrock_converse_parse(const cJSON *resp, aimee_response_t *out, char *err, 
       }
    }
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (aimee_ir_read_usage(usage, "inputTokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "outputTokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cacheReadInputTokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cacheWriteInputTokens", &out->usage_cache_write))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "inputTokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "outputTokens");
-      const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheReadInputTokens");
-      const cJSON *cw = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheWriteInputTokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      if (cr && cJSON_IsNumber(cr))
-         out->usage_cache_read = (long)cr->valuedouble;
-      if (cw && cJSON_IsNumber(cw))
-         out->usage_cache_write = (long)cw->valuedouble;
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
    if (!out->raw || !out->role || !out->raw_stop_reason)
       goto allocation_failure;

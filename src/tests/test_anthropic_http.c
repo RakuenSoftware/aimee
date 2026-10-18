@@ -16,6 +16,8 @@
 #include "../headers/request_context.h"
 #include "../vendor/headers/cJSON.h"
 
+#include "support/native_response_fixture.h"
+
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
  * minimal link stubs the logger like the other production deps below. */
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -217,7 +219,9 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   *response_buf = g_response_body ? strdup(g_response_body)
+                                   : native_response_fixture(g_driver ? g_driver->name : NULL, "ok",
+                                                             NULL, NULL);
    return g_response_status;
 }
 
@@ -252,48 +256,7 @@ int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, in
 
 static void parsed_responses(cJSON *root, const char *body, parsed_response_t *out)
 {
-   const char *p;
-   char text[512];
-
-   (void)root;
-   memset(out, 0, sizeof(*out));
-   if (!body)
-      return;
-
-   p = strstr(body, "event: response.output_text.delta");
-   if (p)
-   {
-      p = strstr(p, "\"delta\":\"");
-      if (p)
-      {
-         const char *start = p + strlen("\"delta\":\"");
-         const char *end = strchr(start, '"');
-         size_t n = end && end > start ? (size_t)(end - start) : 0;
-         if (n >= sizeof(text))
-            n = sizeof(text) - 1;
-         if (n > 0)
-         {
-            memcpy(text, start, n);
-            text[n] = '\0';
-            out->content = strdup(text);
-         }
-      }
-   }
-
-   p = strstr(body, "event: response.completed");
-   if (p)
-   {
-      const char *usage = strstr(p, "\"usage\":{");
-      if (usage)
-      {
-         const char *it = strstr(usage, "\"input_tokens\":");
-         const char *ot = strstr(usage, "\"output_tokens\":");
-         if (it)
-            out->prompt_tokens = atoi(it + strlen("\"input_tokens\":"));
-         if (ot)
-            out->completion_tokens = atoi(ot + strlen("\"output_tokens\":"));
-      }
-   }
+   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 void agent_free_parsed_response(parsed_response_t *p)
@@ -430,7 +393,7 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 
 /* Sized for the longest relayed sequence a test drives (a full thinking turn is
  * message_start + two content blocks + message_delta/stop = 10 events). */
-#define EMIT_CAP_MAX 16
+#define EMIT_CAP_MAX 96
 
 typedef struct
 {
@@ -444,13 +407,6 @@ static cJSON *parse(const char *json)
    cJSON *j = cJSON_Parse(json);
    assert(j != NULL);
    return j;
-}
-
-static char *json_of(const cJSON *j)
-{
-   char *s = cJSON_PrintUnformatted((cJSON *)j);
-   assert(s != NULL);
-   return s;
 }
 
 static const cJSON *obj(const cJSON *parent, const char *key)
@@ -484,11 +440,7 @@ static void system_prompt_driver_caps(const agent_t *agent, driver_caps_t *caps)
 
 static void parsed_text(cJSON *root, const char *body, parsed_response_t *out)
 {
-   (void)root;
-   (void)body;
-   memset(out, 0, sizeof(*out));
-   out->content = strdup("ok");
-   assert(out->content != NULL);
+   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 static void cap_emit(void *ctx, const char *event, const char *data_json)
@@ -521,46 +473,6 @@ static void test_explicit_unknown_model_is_rejected(void)
    assert(strcmp(g_requested_agent, "missing") == 0);
    reset_capture();
    PASS("explicit_unknown_model_is_rejected");
-}
-
-static void test_translate_request_anthropic_passthrough(void)
-{
-   const delegate_driver_t anthropic = {.name = "anthropic"};
-   cJSON *req = parse("{\"system\":\"SYS\",\"messages\":[{\"role\":\"user\",\"content\":["
-                      "{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\","
-                      "\"content\":\"exact\"}]}],\"tools\":[{\"name\":\"Read\","
-                      "\"input_schema\":{\"type\":\"object\"}}]}");
-   cJSON *orig_messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
-   cJSON *orig_tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
-   cJSON *messages = NULL;
-   cJSON *tools = NULL;
-   char *system_text = NULL;
-   char *orig_messages_s;
-   char *out_messages_s;
-   char *orig_tools_s;
-   char *out_tools_s;
-
-   translate_request(req, &anthropic, NULL, &messages, &tools, &system_text);
-
-   assert(system_text && strcmp(system_text, "SYS") == 0);
-   assert(messages && messages != orig_messages);
-   assert(tools && tools != orig_tools);
-   orig_messages_s = json_of(orig_messages);
-   out_messages_s = json_of(messages);
-   orig_tools_s = json_of(orig_tools);
-   out_tools_s = json_of(tools);
-   assert(strcmp(orig_messages_s, out_messages_s) == 0);
-   assert(strcmp(orig_tools_s, out_tools_s) == 0);
-
-   free(orig_messages_s);
-   free(out_messages_s);
-   free(orig_tools_s);
-   free(out_tools_s);
-   free(system_text);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
-   cJSON_Delete(req);
-   PASS("translate_request_anthropic_passthrough");
 }
 
 static void test_anthropic_relay_round_trip(void)
@@ -786,6 +698,112 @@ static void test_relay_transport_error(void)
    assert(strstr(cap.data[0], "status 599") != NULL);
    assert(relay.emitted == 1);
    PASS("relay_transport_error");
+}
+
+static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_text};
+   reset_capture();
+   g_driver = &driver;
+   cJSON *native = cJSON_Parse("{\"role\":\"assistant\",\"stop_reason\":\"tool_use\","
+                               "\"content\":[{\"type\":\"thinking\",\"thinking\":\"private "
+                               "reasoning\",\"signature\":\"signed-state\"},"
+                               "{\"type\":\"redacted_thinking\",\"data\":\"opaque-state\"},"
+                               "{\"type\":\"text\",\"text\":\"visible answer\"},"
+                               "{\"type\":\"image\",\"source\":{\"type\":\"url\",\"url\":\"https://"
+                               "example.invalid/image.png\"}}],"
+                               "\"usage\":{\"input_tokens\":120,\"output_tokens\":7,\"cache_read_"
+                               "input_tokens\":20,\"cache_creation_input_tokens\":10}}");
+   assert(native);
+   cJSON *blocks = cJSON_GetObjectItemCaseSensitive(native, "content");
+   char ids[17][512], argument[1024];
+   memset(argument, 'x', sizeof argument - 1);
+   argument[sizeof argument - 1] = 0;
+   for (int i = 0; i < 17; i++)
+   {
+      memset(ids[i], 'a' + i, sizeof ids[i] - 1);
+      ids[i][sizeof ids[i] - 1] = 0;
+      cJSON *tool = cJSON_CreateObject();
+      cJSON_AddStringToObject(tool, "type", "tool_use");
+      cJSON_AddStringToObject(tool, "id", ids[i]);
+      cJSON_AddStringToObject(tool, "name", "Read");
+      cJSON *input = cJSON_AddObjectToObject(tool, "input");
+      cJSON_AddStringToObject(input, "path", argument);
+      cJSON_AddItemToArray(blocks, tool);
+   }
+   char *frame = cJSON_PrintUnformatted(native);
+   assert(frame);
+   g_response_body = frame;
+   char reply[65536];
+   assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":["
+                            "{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            reply, sizeof reply) == 200);
+   cJSON *rendered = parse(reply);
+   const cJSON *result = obj(rendered, "content");
+   assert(cJSON_Compare(blocks, result, 1));
+   assert(cJSON_Compare(obj(native, "usage"), obj(rendered, "usage"), 1));
+   cJSON_Delete(rendered);
+   emit_capture_t cap = {0};
+   agent_t agent;
+   assert(!agent_registry_default_primary(&agent));
+   messages_stream_buffered_replay("https://example.invalid/v1/messages", "", "{}", 2, "", &agent,
+                                   &driver, "client-model", "client-id", 0, NULL, cap_emit, &cap);
+   int tools = 0, signatures = 0, redacted = 0, images = 0;
+   for (int i = 0; i < cap.count; i++)
+   {
+      cJSON *event = parse(cap.data[i]);
+      if (!strcmp(cap.events[i], "content_block_start"))
+      {
+         const cJSON *block = obj(event, "content_block");
+         const char *kind = cJSON_GetStringValue(obj(block, "type"));
+         if (!strcmp(kind, "tool_use"))
+         {
+            assert(tools < 17 && !strcmp(cJSON_GetStringValue(obj(block, "id")), ids[tools]));
+            tools++;
+         }
+         if (!strcmp(kind, "redacted_thinking"))
+            redacted += !strcmp(cJSON_GetStringValue(obj(block, "data")), "opaque-state");
+         if (!strcmp(kind, "image"))
+            images++;
+      }
+      if (strstr(cap.data[i], "signed-state"))
+         signatures++;
+      cJSON_Delete(event);
+   }
+   assert(tools == 17 && signatures == 1 && redacted == 1 && images == 1);
+   assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
+   free(frame);
+   cJSON_Delete(native);
+   reset_capture();
+   PASS("typed native response retains 17 long tools, thinking, redaction, media and cache usage");
+}
+
+static void test_invalid_native_response_never_uses_legacy_parser(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_text};
+   const char *frames[] = {
+       "{}",
+       "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"forged\"}]}",
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"forged\","
+       "\"content\":\"forged\"}]}",
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"same\",\"name\":"
+       "\"Read\",\"input\":{}},"
+       "{\"type\":\"tool_use\",\"id\":\"same\",\"name\":\"Read\",\"input\":{}}]}",
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"unknown_future_type\"}]}",
+       "{\"role\":\"assistant\",\"content\":[]} trailing-junk"};
+   for (size_t i = 0; i < sizeof frames / sizeof frames[0]; i++)
+   {
+      reset_capture();
+      g_driver = &driver;
+      g_response_body = frames[i];
+      char reply[1024];
+      assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":["
+                               "{\"role\":\"user\",\"content\":\"hi\"}]}",
+                               reply, sizeof reply) == 502);
+      assert(strstr(reply, "invalid canonical provider response"));
+   }
+   reset_capture();
+   PASS("invalid response framing and forged model blocks fail without a legacy parser");
 }
 
 static void test_messages_buffered_anthropic_preserves_request_shape(void)
@@ -1435,7 +1453,6 @@ static void test_messages_buffered_rejects_missing_messages(void)
 int main(void)
 {
    test_explicit_unknown_model_is_rejected();
-   test_translate_request_anthropic_passthrough();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
    test_anthropic_relay_reasoning_tap();
@@ -1443,6 +1460,8 @@ int main(void)
    test_messages_stream_anthropic_reasoning_metrics();
    test_relay_append_data_growth();
    test_relay_transport_error();
+   test_native_response_retains_all_typed_blocks_and_long_tools();
+   test_invalid_native_response_never_uses_legacy_parser();
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
    test_native_admission_failure_sends_no_provider_request();

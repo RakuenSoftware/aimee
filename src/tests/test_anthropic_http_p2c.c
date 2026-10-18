@@ -20,6 +20,8 @@
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
 
+#include "support/native_response_fixture.h"
+
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
  * minimal link stubs the logger like the other production deps below. */
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -240,7 +242,10 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   *response_buf = g_response_body
+                       ? strdup(g_response_body)
+                       : native_response_fixture(g_driver ? g_driver->name : NULL, NULL,
+                                                 g_tool_uses_json, g_upstream_stop_reason);
    return g_response_status;
 }
 
@@ -425,39 +430,7 @@ static const cJSON *obj(const cJSON *parent, const char *key)
  * call_count to render the wire. */
 static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
 {
-   cJSON *arr;
-   int i;
-   int cap;
-   (void)root;
-   (void)body;
-   memset(out, 0, sizeof(*out));
-   if (g_upstream_stop_reason)
-   {
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
-   }
-   arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
-   if (!cJSON_IsArray(arr))
-   {
-      cJSON_Delete(arr);
-      return;
-   }
-   cap = cJSON_GetArraySize(arr);
-   if (cap > AGENT_MAX_TOOL_CALLS)
-      cap = AGENT_MAX_TOOL_CALLS;
-   for (i = 0; i < cap; i++)
-   {
-      cJSON *t = cJSON_GetArrayItem(arr, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(t, "id");
-      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(t, "arguments");
-      snprintf(out->calls[i].id, sizeof(out->calls[i].id), "%s",
-               cJSON_IsString(id) ? id->valuestring : "");
-      snprintf(out->calls[i].name, sizeof(out->calls[i].name), "%s",
-               cJSON_IsString(name) ? name->valuestring : "");
-      out->calls[i].arguments = cJSON_IsString(args) ? strdup(args->valuestring) : strdup("{}");
-   }
-   out->call_count = cap;
-   cJSON_Delete(arr);
+   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 /* P2c (response-side tool policing, buffered) integration tests. The real
@@ -559,11 +532,7 @@ static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(
  * renders a text reply. Asserts it received the RAW body, not a cJSON tree. */
 static void parsed_text_pong(cJSON *root, const char *body, parsed_response_t *out)
 {
-   memset(out, 0, sizeof(*out));
-   assert(root == NULL);
-   assert(body != NULL && strstr(body, "response.completed") != NULL);
-   out->content = strdup("PONG");
-   snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", "end_turn");
+   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 /* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch, so
@@ -581,7 +550,10 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    reset_capture();
    g_driver = &driver;
    /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
-   g_response_body = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+   g_response_body = "event: response.completed\ndata: "
+                     "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
+                     "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
+                     "\"type\":\"output_text\",\"text\":\"PONG\"}]}]}}\n\n";
 
    assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",

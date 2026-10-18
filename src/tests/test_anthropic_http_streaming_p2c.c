@@ -26,6 +26,8 @@
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
+#include "support/native_response_fixture.h"
+
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
  * minimal link stubs the logger like the other production deps below. */
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -239,7 +241,10 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   *response_buf = g_response_body ? strdup(g_response_body)
+                                   : native_response_fixture(g_driver ? g_driver->name : NULL,
+                                                             g_response_content, g_tool_uses_json,
+                                                             g_upstream_stop_reason);
    return g_response_status;
 }
 
@@ -347,39 +352,7 @@ int agent_http_last_retry_after(void)
  * g_upstream_stop_reason into parsed.stop_reason. */
 static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
 {
-   cJSON *arr;
-   int i;
-   int cap;
-   (void)root;
-   (void)body;
-   memset(out, 0, sizeof(*out));
-   if (g_upstream_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
-   if (g_response_content)
-      out->content = strdup(g_response_content);
-   arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
-   if (!cJSON_IsArray(arr))
-   {
-      cJSON_Delete(arr);
-      return;
-   }
-   cap = cJSON_GetArraySize(arr);
-   if (cap > AGENT_MAX_TOOL_CALLS)
-      cap = AGENT_MAX_TOOL_CALLS;
-   for (i = 0; i < cap; i++)
-   {
-      cJSON *t = cJSON_GetArrayItem(arr, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(t, "id");
-      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(t, "arguments");
-      snprintf(out->calls[i].id, sizeof(out->calls[i].id), "%s",
-               cJSON_IsString(id) ? id->valuestring : "");
-      snprintf(out->calls[i].name, sizeof(out->calls[i].name), "%s",
-               cJSON_IsString(name) ? name->valuestring : "");
-      out->calls[i].arguments = cJSON_IsString(args) ? strdup(args->valuestring) : strdup("{}");
-   }
-   out->call_count = cap;
-   cJSON_Delete(arr);
+   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 /* Accessor stubs mirror this fixture's policy — prevent_subagents
@@ -473,9 +446,11 @@ static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
                    "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                    replay_capture, &cap);
 
-   /* Replay emits message_start, [text_start, text_stop], message_delta,
-    * message_stop (no tool_use blocks survived). */
-   assert(cap.count >= 5);
+   /* No content survived; emit a complete empty turn without inventing a
+    * model-authored text block. */
+   assert(cap.count == 3);
+   assert(!strcmp(cap.events[0], "message_start"));
+   assert(!strcmp(cap.events[2], "message_stop"));
    int seen_tool_use = 0;
    const char *stop_reason = NULL;
    for (int i = 0; i < cap.count; i++)
@@ -507,6 +482,7 @@ static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
    reset_capture();
    g_driver = &driver;
    g_tool_uses_json = "[]";
+   g_response_content = "plain native answer";
    g_upstream_stop_reason = "end_turn";
    g_prevent = 1;
 
@@ -517,7 +493,8 @@ static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
                    replay_capture, &cap);
 
    /* message_start, [text_start, text_stop], message_delta, message_stop. */
-   assert(cap.count >= 4);
+   assert(cap.count == 6);
+   assert(strstr(cap.data[2], "plain native answer"));
    int seen_tool_use = 0;
    const char *stop_reason = NULL;
    for (int i = 0; i < cap.count; i++)

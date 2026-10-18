@@ -448,28 +448,20 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                          : saw_tool  ? AIMEE_STOP_TOOL_USE
                                      : AIMEE_STOP_END_TURN;
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details");
+   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "output_tokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      /* CACHED PROMPT TOKENS. Responses reports them in a sibling object,
-       * usage.input_tokens_details.cached_tokens -- the same shape as Chat's
-       * prompt_tokens_details, under a different name. Reading only the two flat
-       * counters loses them, which is why the Anthropic arm was the only one ever
-       * reporting cache numbers. See the note in aimee_backend_openai.c. */
-      const cJSON *itd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens_details");
-      if (itd && cJSON_IsObject(itd))
-      {
-         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)itd, "cached_tokens");
-         if (cr && cJSON_IsNumber(cr))
-            out->usage_cache_read = (long)cr->valuedouble;
-      }
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
+
    return 0;
 
 oom:

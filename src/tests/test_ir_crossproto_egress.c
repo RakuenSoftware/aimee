@@ -380,8 +380,125 @@ static void test_native_cache_replay_and_unreported_mutation(void)
         "breakpoints OK");
 }
 
+static void test_foreign_reasoning_switch_preserves_canonical_state(void)
+{
+   cJSON *native =
+       cJSON_Parse("{\"model\":\"model-a\",\"input\":["
+                   "{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
+                   "\"text\":\"task\"}]},"
+                   "{\"type\":\"reasoning\",\"id\":\"rs-private\",\"encrypted_content\":\"opaque-"
+                   "native-state\","
+                   "\"summary\":[{\"type\":\"summary_text\",\"text\":\"private reasoning\"}]},"
+                   "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_"
+                   "text\",\"text\":\"answer\"}]}]}");
+   assert(native);
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!responses_frontend_parse(native, &request, error, sizeof error));
+   cJSON *saved = cJSON_CreateArray();
+   for (int i = 0; i < request.n_messages; i++)
+      assert(cJSON_AddItemToArray(saved, aimee_ir_message_json(&request.messages[i])));
+   aimee_wire_projection_report_t report;
+   aimee_backend_projection_report(&request, AIMEE_WIRE_ANTHROPIC, &report);
+   assert(report.omitted_reasoning_blocks == 1 && report.omitted_opaque_state_blocks == 1);
+   cJSON *anthropic = anthropic_backend_build(&request);
+   assert(anthropic);
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(anthropic, "messages");
+   assert(cJSON_GetArraySize(messages) == 2);
+   const cJSON *content =
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 1), "content");
+   assert(cJSON_GetArraySize(content) == 1);
+   assert(!strcmp(cJSON_GetStringValue(
+                      cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(content, 0), "text")),
+                  "answer"));
+   cJSON_Delete(anthropic);
+   cJSON *after = cJSON_CreateArray();
+   for (int i = 0; i < request.n_messages; i++)
+      assert(cJSON_AddItemToArray(after, aimee_ir_message_json(&request.messages[i])));
+   assert(cJSON_Compare(saved, after, 1));
+   cJSON_Delete(after);
+   cJSON *replayed = responses_backend_build(&request);
+   assert(replayed);
+   const cJSON *input = cJSON_GetObjectItemCaseSensitive(replayed, "input");
+   int opaque = 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, input)
+   {
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "type"));
+      if (kind && !strcmp(kind, "reasoning"))
+      {
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "id")),
+                        "rs-private"));
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "encrypted_content")),
+             "opaque-native-state"));
+         opaque++;
+      }
+   }
+   assert(opaque == 1);
+   cJSON_Delete(replayed);
+   cJSON_Delete(saved);
+   aimee_request_free(&request);
+   cJSON_Delete(native);
+   puts("  model A/B/A native projection retains opaque reasoning in canonical history OK");
+}
+
+static void test_completed_response_usage_admission(void)
+{
+   const char *valid[] = {
+       "{\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\","
+       "\"text\":\"ok\"}],\"usage\":{"
+       "\"input_tokens\":3,\"output_tokens\":7}}",
+       "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":"
+       "\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":7,\"completion_tokens_"
+       "details\":{\"reasoning_tokens\":2}}}",
+       "{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\","
+       "\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}],\"usage\":{\"input_tokens\":3,"
+       "\"output_tokens\":7,\"output_tokens_details\":{\"reasoning_tokens\":2}}}"};
+   aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   const char *bad[] = {"-1", "1.5", "1e300", "9007199254740992", "\"seven\""};
+   for (int i = 0; i < 3; i++)
+   {
+      aimee_response_t response;
+      char error[128];
+      assert(!aimee_backend_parse_wire(valid[i], strlen(valid[i]), wires[i], &response, error,
+                                       sizeof error));
+      assert(response.usage_in == 3 && response.usage_out == 7);
+      if (i)
+         assert(response.usage_reasoning == 2);
+      aimee_response_free(&response);
+      cJSON *root = cJSON_Parse(valid[i]);
+      cJSON *owner =
+          i == 1 ? cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0) : root;
+      const char *terminal = i == 0 ? "stop_reason" : i == 1 ? "finish_reason" : "status";
+      assert(cJSON_ReplaceItemInObjectCaseSensitive(
+          owner, terminal, i == 2 ? cJSON_CreateString("in_progress") : cJSON_CreateNull()));
+      char *unfinished = cJSON_PrintUnformatted(root);
+      assert(unfinished && aimee_backend_parse_wire(unfinished, strlen(unfinished), wires[i],
+                                                    &response, error, sizeof error) < 0);
+      free(unfinished);
+      cJSON_Delete(root);
+      root = cJSON_Parse(valid[i]);
+      const char *field = i == 1 ? "completion_tokens" : "output_tokens";
+      for (size_t j = 0; j < sizeof bad / sizeof bad[0]; j++)
+      {
+         cJSON *value = cJSON_Parse(bad[j]);
+         assert(value && cJSON_ReplaceItemInObjectCaseSensitive(
+                             cJSON_GetObjectItemCaseSensitive(root, "usage"), field, value));
+         char *frame = cJSON_PrintUnformatted(root);
+         assert(frame && aimee_backend_parse_wire(frame, strlen(frame), wires[i], &response, error,
+                                                  sizeof error) < 0);
+         free(frame);
+      }
+      cJSON_Delete(root);
+   }
+   puts("  completed usage counters reject invalid values before integer conversion OK");
+}
+
 int main(void)
 {
+   test_completed_response_usage_admission();
+   test_foreign_reasoning_switch_preserves_canonical_state();
    test_history_entry_migration();
    printf("cross-protocol anthropic egress byte-identity:\n");
    test_exact_native_request_bytes();

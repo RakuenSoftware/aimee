@@ -118,3 +118,109 @@ int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, si
    }
    return 0;
 }
+
+int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
+                             aimee_response_t *out, char *error, size_t capacity)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (error && capacity)
+      error[0] = 0;
+   if (!frame || !length || length == SIZE_MAX)
+      return -1;
+   const char *end = NULL;
+   cJSON *root = cJSON_ParseWithLengthOpts(frame, length, &end, 0);
+   if (root && end)
+      while (end < frame + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
+         end++;
+   if (!root && wire == AIMEE_WIRE_RESPONSES)
+   {
+      char *bounded = malloc(length + 1);
+      if (!bounded)
+         return -1;
+      memcpy(bounded, frame, length);
+      bounded[length] = 0;
+      root = responses_backend_sse_object(bounded);
+      free(bounded);
+      end = root ? frame + length : NULL;
+   }
+   int shape = cJSON_IsObject(root);
+   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
+   if (!failure || cJSON_IsNull(failure))
+   {
+      if (wire == AIMEE_WIRE_ANTHROPIC)
+      {
+         const char *stop =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stop_reason"));
+         shape = shape && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root, "content")) &&
+                 stop && stop[0];
+      }
+      else if (wire == AIMEE_WIRE_OPENAI_CHAT)
+      {
+         const cJSON *choices = cJSON_GetObjectItemCaseSensitive(root, "choices");
+         const cJSON *choice = cJSON_GetArrayItem(choices, 0);
+         const char *stop =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(choice, "finish_reason"));
+         shape = shape && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(choice, "message")) &&
+                 stop && stop[0];
+      }
+      else if (wire == AIMEE_WIRE_RESPONSES)
+      {
+         const char *status =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "status"));
+         shape = shape && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root, "output")) &&
+                 status &&
+                 (!strcmp(status, "completed") || !strcmp(status, "incomplete") ||
+                  !strcmp(status, "failed") || !strcmp(status, "cancelled"));
+      }
+   }
+   int rc = -1;
+   if (shape && end == frame + length)
+      rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
+           : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
+           : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)
+                                            : -1;
+   cJSON_Delete(root);
+   if (rc || aimee_ir_response_admit(out))
+   {
+      if (error && capacity && !error[0])
+         snprintf(error, capacity, "invalid native provider response");
+      aimee_response_free(out);
+      return -1;
+   }
+   return 0;
+}
+
+static void report_blocks(const aimee_block_t *blocks, int count, aimee_wire_t wire,
+                          aimee_wire_projection_report_t *report)
+{
+   for (int i = 0; i < count; i++)
+   {
+      const aimee_block_t *block = &blocks[i];
+      if (block->type != AIMEE_BLK_THINKING)
+         continue;
+      int compatible = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_ir_block_replayable(block)
+                       : wire == AIMEE_WIRE_RESPONSES ? block->thinking_id && block->thinking_id[0]
+                                                      : 0;
+      if (!compatible)
+      {
+         report->omitted_reasoning_blocks++;
+         if (block->thinking_encrypted_content || block->thinking_signature ||
+             block->thinking_redacted)
+            report->omitted_opaque_state_blocks++;
+      }
+   }
+}
+void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
+                                     aimee_wire_projection_report_t *report)
+{
+   if (!report)
+      return;
+   memset(report, 0, sizeof *report);
+   if (!request)
+      return;
+   report_blocks(request->system, request->n_system, wire, report);
+   for (int i = 0; i < request->n_messages; i++)
+      report_blocks(request->messages[i].blocks, request->messages[i].n_blocks, wire, report);
+}

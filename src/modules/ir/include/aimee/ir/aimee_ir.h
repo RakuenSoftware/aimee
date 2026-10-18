@@ -342,13 +342,12 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
                                        aimee_context_authority_t from,
                                        aimee_context_authority_t to);
 
-/* Build a canonical assistant response carrying a single TEXT block. This is the
- * bridge for producers that yield only flat text (the tmux/CLI TUI handler, whose
- * screen-scrape recovers one text answer) into the unified message IR: the result
- * is an ordinary aimee_response_t that every IR consumer treats identically to a
- * provider-parsed one. `model` may be NULL/empty. stop_reason is END_TURN. Fills
- * caller-provided `out` (stack-ok); free with aimee_response_free. Returns 0 on
- * success, -1 on allocation failure (out is left freed/zeroed). */
+/* Build a canonical assistant response carrying a single TEXT block for a
+ * genuinely text-only source. Native model/harness adapters retain their typed
+ * blocks instead; terminal screens cannot supply structured model history. `model` may be
+ * NULL/empty. stop_reason is END_TURN. Fills caller-provided `out` (stack-ok); free with
+ * aimee_response_free. Returns 0 on success, -1 on allocation failure (out is left freed/zeroed).
+ */
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
 
 /* ---- accessors used by the core stages / KB ----
@@ -361,6 +360,13 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 /* Remove strictly descending tool indices after validating the entire patch.
  * Returns the number removed, or -1 without mutation for an invalid patch. */
 int aimee_ir_remove_tools(aimee_request_t *request, const struct cJSON *indices);
+
+/* Admit a completed API model response, rejecting forged results/roles, duplicate
+ * tool IDs, malformed blocks and invalid function arguments. Classifies provenance. */
+int aimee_ir_response_admit(aimee_response_t *response);
+/* Optional usage counter: absent is unchanged; malformed/negative/fractional or
+ * inexact/unrepresentable values return -1 before any integer conversion. */
+int aimee_ir_read_usage(const struct cJSON *usage, const char *name, long *out);
 
 /* ---- response-side accessors (delegate/core stages read these) ----
  *

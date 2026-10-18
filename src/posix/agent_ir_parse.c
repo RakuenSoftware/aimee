@@ -82,36 +82,6 @@ static void ir_bridge_common(const aimee_response_t *ir, parsed_response_t *out)
 
 static void ir_observe_reasoning(const aimee_response_t *ir);
 
-static int response_admit(aimee_response_t *response)
-{
-   if (response->n_content < 0 || response->n_content > AIMEE_IR_MAX_BLOCKS)
-      return -1;
-   if (response->role && strcmp(response->role, "assistant"))
-      return -1;
-   if (response->usage_in < 0 || response->usage_out < 0 || response->usage_cache_read < 0 ||
-       response->usage_cache_write < 0 || response->usage_reasoning < 0)
-      return -1;
-   for (int i = 0; i < response->n_content; i++)
-   {
-      const aimee_block_t *block = &response->content[i];
-      if (!aimee_ir_block_valid(block) || block->type == AIMEE_BLK_TOOL_RESULT)
-         return -1;
-      if (block->type == AIMEE_BLK_TOOL_USE && !cJSON_IsObject(block->tool_input))
-         return -1;
-      if (block->type == AIMEE_BLK_TOOL_USE)
-         for (int j = 0; j < i; j++)
-            if (response->content[j].type == AIMEE_BLK_TOOL_USE &&
-                !strcmp(block->tool_id, response->content[j].tool_id))
-               return -1;
-   }
-   aimee_message_t message = {.role = response->role ? response->role : "assistant",
-                              .blocks = response->content,
-                              .n_blocks = response->n_content};
-   aimee_request_t request = {.messages = &message, .n_messages = 1};
-   aimee_ir_classify_context(&request);
-   return 0;
-}
-
 int agent_ir_decode_json_response(const cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
                                   aimee_response_t *out)
 {
@@ -126,7 +96,7 @@ int agent_ir_decode_json_response(const cJSON *root, int anthropic, int rescue_m
    if (rc != 0)
       goto fail;
    int rescued = rescue_mode >= 0 ? aimee_ir_rescue_tool_calls(out, rescue_mode) : 0;
-   if (rescued < 0 || response_admit(out) != 0)
+   if (rescued < 0 || aimee_ir_response_admit(out) != 0)
       goto fail;
    if (n_rescued)
       *n_rescued = rescued;
@@ -288,7 +258,7 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
    if (rc != 0)
       goto fail;
    int rescued = rescue_mode >= 0 ? aimee_ir_rescue_tool_calls(out, rescue_mode) : 0;
-   if (rescued < 0 || response_admit(out) != 0)
+   if (rescued < 0 || aimee_ir_response_admit(out) != 0)
       goto fail;
    if (n_rescued)
       *n_rescued = rescued;

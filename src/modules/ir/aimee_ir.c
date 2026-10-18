@@ -5,6 +5,8 @@
 #include "cJSON.h"
 
 #include <stdlib.h>
+#include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -633,4 +635,50 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
       if (s->fn(ir, s->ud))
          ir->mutated = 1; /* a change means the raw sidecar is stale -> backend rebuilds */
    }
+}
+
+int aimee_ir_response_admit(aimee_response_t *response)
+{
+   if (!response || response->n_content < 0 || response->n_content > AIMEE_IR_MAX_BLOCKS ||
+       (response->n_content && !response->content))
+      return -1;
+   if (response->role && strcmp(response->role, "assistant"))
+      return -1;
+   if (response->usage_in < 0 || response->usage_out < 0 || response->usage_cache_read < 0 ||
+       response->usage_cache_write < 0 || response->usage_reasoning < 0)
+      return -1;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      const aimee_block_t *block = &response->content[i];
+      if (!aimee_ir_block_valid(block) || block->type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+      if (block->type == AIMEE_BLK_TOOL_USE && !cJSON_IsObject(block->tool_input))
+         return -1;
+      if (block->type == AIMEE_BLK_TOOL_USE)
+         for (int j = 0; j < i; j++)
+            if (response->content[j].type == AIMEE_BLK_TOOL_USE &&
+                !strcmp(block->tool_id, response->content[j].tool_id))
+               return -1;
+   }
+   aimee_message_t message = {.role = response->role ? response->role : "assistant",
+                              .blocks = response->content,
+                              .n_blocks = response->n_content};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   aimee_ir_classify_context(&request);
+   return 0;
+}
+
+int aimee_ir_read_usage(const cJSON *usage, const char *name, long *out)
+{
+   if (!out || !name || (usage && !cJSON_IsNull(usage) && !cJSON_IsObject(usage)))
+      return -1;
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(usage, name);
+   if (!value)
+      return 0;
+   if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < 0 ||
+       value->valuedouble > 9007199254740991.0 || value->valuedouble > LONG_MAX ||
+       (double)(long)value->valuedouble != value->valuedouble)
+      return -1;
+   *out = (long)value->valuedouble;
+   return 0;
 }

@@ -347,48 +347,24 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
    for (int i = 0; i < r->n_content; i++)
    {
       const aimee_block_t *b = &r->content[i];
-      cJSON *el = cJSON_CreateObject();
-      if (b->type == AIMEE_BLK_TEXT)
-      {
-         cJSON_AddStringToObject(el, "type", "text");
-         cJSON_AddStringToObject(el, "text", b->text ? b->text : "");
-      }
-      else if (b->type == AIMEE_BLK_THINKING)
-      {
-         if (b->thinking_redacted)
-         {
-            cJSON_AddStringToObject(el, "type", "redacted_thinking");
-            cJSON_AddStringToObject(el, "data", b->thinking_redacted);
-            cJSON_AddItemToArray(content, el);
-            continue;
-         }
-         cJSON_AddStringToObject(el, "type", "thinking");
-         cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
-         /* Without the signature the client cannot echo the block back on the next
-          * turn, so rendering thinking without it produces an unusable turn. Omitted
-          * (not emitted empty) when absent, matching block_to_anthropic. */
-         if (b->thinking_signature)
-            cJSON_AddStringToObject(el, "signature", b->thinking_signature);
-      }
-      else if (b->type == AIMEE_BLK_TOOL_USE)
-      {
-         cJSON_AddStringToObject(el, "type", "tool_use");
-         cJSON_AddStringToObject(el, "id", b->tool_id ? b->tool_id : "");
-         cJSON_AddStringToObject(el, "name", b->tool_name ? b->tool_name : "");
-         cJSON_AddItemToObject(
-             el, "input", b->tool_input ? cJSON_Duplicate(b->tool_input, 1) : cJSON_CreateObject());
-      }
-      else
-      {
-         cJSON_Delete(el); /* drop non-renderable blocks (e.g. UNKNOWN) */
+      if (!anthropic_ir_block_replayable(b))
          continue;
+      cJSON *el = anthropic_ir_render_block(b);
+      if (!el || !cJSON_AddItemToArray(content, el))
+      {
+         cJSON_Delete(el);
+         cJSON_Delete(out);
+         return NULL;
       }
-      cJSON_AddItemToArray(content, el);
    }
    cJSON_AddStringToObject(out, "stop_reason", anthropic_stop(r));
    cJSON_AddNullToObject(out, "stop_sequence");
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);
+   if (r->usage_cache_read)
+      cJSON_AddNumberToObject(usage, "cache_read_input_tokens", (double)r->usage_cache_read);
+   if (r->usage_cache_write)
+      cJSON_AddNumberToObject(usage, "cache_creation_input_tokens", (double)r->usage_cache_write);
    return out;
 }

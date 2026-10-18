@@ -178,14 +178,18 @@ int main(void)
           strcmp(cJSON_GetObjectItem(tblk, "signature")->valuestring, "ErUBCkYIAxgCIkA") == 0);
    cJSON_Delete(trendered);
 
-   /* an unsigned thinking block omits the key rather than emitting an empty one --
-    * an empty signature would be rejected, where an absent one is merely unsigned. */
+   /* An unsigned/foreign thought stays canonical but cannot be replayed as
+    * fabricated Anthropic reasoning with a missing signature. */
    free(tresp.content[0].thinking_signature);
    tresp.content[0].thinking_signature = NULL;
    cJSON *tunsigned = anthropic_frontend_render(&tresp);
    assert(tunsigned);
-   assert(!cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(tunsigned, "content"), 0),
-                               "signature"));
+   const cJSON *unsigned_content = cJSON_GetObjectItem(tunsigned, "content");
+   assert(cJSON_GetArraySize(unsigned_content) == 1);
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(unsigned_content, 0), "text")),
+       "done"));
+   assert(tresp.n_content == 2 && !strcmp(tresp.content[0].text, "let me check"));
    cJSON_Delete(tunsigned);
 
    aimee_response_free(&tresp);

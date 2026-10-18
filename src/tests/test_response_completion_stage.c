@@ -2,6 +2,7 @@
 #include "agent_protocol.h"
 #include "cJSON.h"
 #include "gw_stage_completion.h"
+#include <aimee/ir/session_event.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -165,8 +166,50 @@ static void test_observed_scope_deferral_wording_intervenes(void)
    cJSON_Delete(tools);
 }
 
+static void test_typed_intervention_retains_private_reasoning(void)
+{
+   cJSON *messages = json("[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":"
+                          "\"edit\",\"name\":\"apply_patch\",\"input\":{}}]}]");
+   cJSON *tools = json("[{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\"}}]");
+   aimee_request_t policy = {0};
+   policy.n_messages = 1;
+   policy.messages = calloc(1, sizeof *policy.messages);
+   assert(policy.messages &&
+          !aimee_ir_message_parse(cJSON_GetArrayItem(messages, 0), policy.messages));
+   policy.n_tools = 1;
+   policy.tools = calloc(1, sizeof *policy.tools);
+   assert(policy.tools);
+   policy.tools[0].name = strdup("Bash");
+   policy.tools[0].schema = json("{\"type\":\"object\"}");
+   aimee_response_t response = {0};
+   response.n_content = 2;
+   response.content = calloc(2, sizeof *response.content);
+   assert(response.content);
+   response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                         .text = strdup("private"),
+                                         .thinking_signature = strdup("signed")};
+   response.content[1] = (aimee_block_t){.type = AIMEE_BLK_TEXT,
+                                         .text = strdup("Related findings were not changed.")};
+   assert(gw_ir_response_run_completion(&response, &policy) == 1);
+   assert(response.n_content == 3 && !strcmp(response.content[0].thinking_signature, "signed"));
+   assert(!strcmp(response.content[1].text, "Related findings were not changed."));
+   const aimee_block_t *tool = &response.content[2];
+   assert(tool->type == AIMEE_BLK_TOOL_USE && !strcmp(tool->tool_name, "Bash"));
+   assert(tool->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+          tool->context.authority == AIMEE_CTX_AUTH_POLICY);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool->tool_input, "command")),
+               "true"));
+   assert(gw_ir_response_run_completion(&response, &policy) == 0 && response.n_content == 3);
+   aimee_response_free(&response);
+   aimee_request_free(&policy);
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
+}
+
 int main(void)
 {
+   test_typed_intervention_retains_private_reasoning();
    test_intervenes_on_confirmed_deferred_siblings();
    test_does_not_intervene_without_confirmed_defect_or_edit();
    test_one_marker_caps_intervention();

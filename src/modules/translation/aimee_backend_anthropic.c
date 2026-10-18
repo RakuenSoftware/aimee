@@ -196,11 +196,31 @@ static cJSON *block_to_anthropic(const aimee_block_t *b, int preserve_cache)
    return el;
 }
 
+int anthropic_ir_block_replayable(const aimee_block_t *block)
+{
+   if (!block)
+      return 0;
+   /* Foreign plaintext/Responses opaque reasoning has no Anthropic signature.
+    * It stays canonical, but cannot become a fabricated native thinking block. */
+   return block->type != AIMEE_BLK_THINKING ||
+          (block->thinking_signature && block->thinking_signature[0]) ||
+          (block->thinking_redacted && block->thinking_redacted[0]);
+}
+
+cJSON *anthropic_ir_render_block(const aimee_block_t *block)
+{
+   return anthropic_ir_block_replayable(block) && aimee_ir_block_valid(block)
+              ? block_to_anthropic(block, 0)
+              : NULL;
+}
+
 static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n, int preserve_cache)
 {
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
    {
+      if (!anthropic_ir_block_replayable(&blocks[i]))
+         continue;
       cJSON *el = block_to_anthropic(&blocks[i], preserve_cache);
       if (!el || !cJSON_AddItemToArray(arr, el))
       {
@@ -399,6 +419,12 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
          cJSON_Delete(out);
          return NULL;
       }
+      if (!cJSON_GetArraySize(content) && ir->messages[i].n_blocks > 0)
+      {
+         cJSON_Delete(content);
+         cJSON_Delete(m);
+         continue; /* Only incompatible private reasoning remained. */
+      }
       if (!preserve_cache)
          strip_cache_control(content);
       cJSON_AddItemToObject(m, "content", content);
@@ -518,22 +544,17 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       }
    }
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "output_tokens");
-      const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cache_read_input_tokens");
-      const cJSON *cw =
-          cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cache_creation_input_tokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      if (cr && cJSON_IsNumber(cr))
-         out->usage_cache_read = (long)cr->valuedouble;
-      if (cw && cJSON_IsNumber(cw))
-         out->usage_cache_write = (long)cw->valuedouble;
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
+
    return 0;
 }

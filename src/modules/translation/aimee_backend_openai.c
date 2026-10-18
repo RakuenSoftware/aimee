@@ -534,33 +534,19 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
          }
    }
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
+   if (aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
    {
-      const cJSON *pt = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "prompt_tokens");
-      const cJSON *ct = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "completion_tokens");
-      if (pt && cJSON_IsNumber(pt))
-         out->usage_in = (long)pt->valuedouble;
-      if (ct && cJSON_IsNumber(ct))
-         out->usage_out = (long)ct->valuedouble;
-      /* CACHED PROMPT TOKENS, which this parser ignored while the Anthropic one
-       * read its equivalent. OpenAI reports them in a SIBLING object --
-       * usage.prompt_tokens_details.cached_tokens -- not as a top-level field, so
-       * reading only the two flat counters silently loses them.
-       *
-       * The IR field and every downstream accounting consumer already existed and
-       * worked; nothing was missing but this read. The effect was that cache reads
-       * were billed at the uncached rate in aimee's own cost reporting for EVERY
-       * OpenAI-family model, and measured zero: 158 calls and 3.1M prompt tokens
-       * across a whole day reported cache_read_tokens=0. That reads as "prompt
-       * caching is not working", when it may have been working the entire time. */
-      const cJSON *ptd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "prompt_tokens_details");
-      if (ptd && cJSON_IsObject(ptd))
-      {
-         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)ptd, "cached_tokens");
-         if (cr && cJSON_IsNumber(cr))
-            out->usage_cache_read = (long)cr->valuedouble;
-      }
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
+
    return 0;
 }

@@ -16,10 +16,27 @@ struct cJSON;
 /* Explicit wire boundary; unchanged same-protocol requests retain exact bytes.
  * Independent semantic comparison detects edits even when their flag was missed. */
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire);
+/* Completed JSON/SSE entry boundary. Owns parsing and canonical admission; no
+ * fallback to legacy parsers or projection occurs. */
+int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
+                             aimee_response_t *out, char *error, size_t capacity);
 /* Shared Anthropic block entry adapter used by request/response boundaries.
  * Unknown native types retain UNKNOWN + sidecar; canonical admission rejects
  * them until an explicit typed mapping exists. */
 void anthropic_ir_parse_block(const struct cJSON *native, aimee_block_t *out);
+
+typedef struct
+{
+   int omitted_reasoning_blocks;
+   int omitted_opaque_state_blocks;
+} aimee_wire_projection_report_t;
+/* Reports wire incompatibility without editing canonical history. */
+void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
+                                     aimee_wire_projection_report_t *report);
+int anthropic_ir_block_replayable(const aimee_block_t *block);
+
+/* Render one admitted block at an explicit Anthropic output boundary. */
+struct cJSON *anthropic_ir_render_block(const aimee_block_t *block);
 
 /* Build an Anthropic Messages API request from the IR. Returns a new cJSON object
  * the caller owns (cJSON_Delete), or NULL on bad args. */

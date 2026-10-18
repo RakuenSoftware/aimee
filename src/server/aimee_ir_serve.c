@@ -15,8 +15,7 @@
 #include "server_http_identity.h" /* inbound session identity */
 #include "request_context.h"
 #include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee.h"          /* size macros for agent_types.h */
-#include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
+#include "aimee.h" /* size macros for agent_types.h */
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
@@ -497,73 +496,4 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    else
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
    return prov;
-}
-
-/* aimee_ir_resp_path_enabled -- Slice 3 gate (config-only: AIMEE_IR_RESP_PATH env,
- * DEFAULT-OFF). When on, the OPENAI-WIRE buffered response parse on the /v1/messages
- * ingress runs provider-JSON -> openai_backend_parse -> IR -> aimee_ir_response_to_parsed,
- * replacing driver->parse_response. Per-wire by ruling: anthropic + responses stay on
- * legacy until their response-shadow parity is proven live. Ships dark; flip after the
- * on-box emit diff confirms byte-identity. */
-int aimee_ir_resp_path_enabled(void)
-{
-   const char *v = getenv("AIMEE_IR_RESP_PATH");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
-}
-
-/* TRANSITIONAL (Slice 3, canonical-IR) -- bridge the IR response back to the legacy
- * parsed_response_t so the existing Anthropic emit + gateway policing keep working
- * while the response PARSE moves onto the IR. REMOVE once the emit + police paths are
- * IR-native (proposal: full IR render + IR-coupled police). DO NOT add new callers.
- * Fills every parsed_response_t field the ingress emit/police consume (audited): content,
- * calls[]/call_count, is_tool_call, prompt/completion/cache tokens, stop_reason, model.
- * `out` is zeroed here; caller frees via the usual agent_free_parsed_response. */
-void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *out)
-{
-   if (!out)
-      return;
-   memset(out, 0, sizeof(*out));
-   if (!r)
-      return;
-
-   out->prompt_tokens = (int)r->usage_in;
-   out->completion_tokens = (int)r->usage_out;
-   out->cache_read_tokens = (int)r->usage_cache_read;
-   out->cache_write_tokens = (int)r->usage_cache_write;
-   if (r->model)
-      snprintf(out->model, sizeof(out->model), "%s", r->model);
-   if (r->raw_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", r->raw_stop_reason);
-   out->stop = r->stop_reason;
-
-   /* content = concatenation of all TEXT blocks (parsed_response_t convention: a
-    * single flat string; NULL when there is no text, e.g. a pure tool call). */
-   out->content = aimee_ir_response_text_alloc(r);
-   if (out->content && !out->content[0])
-   {
-      free(out->content);
-      out->content = NULL;
-   }
-
-   /* tool calls: id (opaque) / name / arguments (serialized tool_input JSON). */
-   int nc = 0;
-   for (int i = 0; i < r->n_content && nc < AGENT_MAX_TOOL_CALLS; i++)
-   {
-      const aimee_block_t *b = &r->content[i];
-      if (b->type != AIMEE_BLK_TOOL_USE)
-         continue;
-      parsed_tool_call_t *c = &out->calls[nc++];
-      if (b->tool_id)
-         snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
-      if (b->tool_name)
-         snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
-      /* Carried with the name: a namespaced call is only routable as the pair. */
-      if (b->tool_namespace)
-         snprintf(c->tool_namespace, sizeof(c->tool_namespace), "%s", b->tool_namespace);
-      c->arguments = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
-      if (!c->arguments)
-         c->arguments = strdup("{}");
-   }
-   out->call_count = nc;
-   out->is_tool_call = (nc > 0);
 }

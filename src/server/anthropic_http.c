@@ -32,6 +32,8 @@
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
 #include "gw_stage_completion.h"
+#include "agent_response_projection.h"
+#include <aimee/ir/session_event.h>
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include <aimee/ir/aimee_ir_metrics.h>
@@ -183,77 +185,154 @@ static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
    return driver_is_anthropic(driver) ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
 }
 
-/* Slice 3: parse the provider JSON response into `parsed`. When AIMEE_IR_RESP_PATH is
- * on and the primary is OPENAI-WIRE, route through the canonical IR
- * (openai_backend_parse -> IR -> transitional adapter); legacy driver->parse_response
- * on flag-off, anthropic wire, or any IR-parse failure. `raw` is the original response
- * text handed to the legacy parser. */
-static void ir_or_legacy_parse_response(cJSON *provider_resp, const char *raw,
-                                        const delegate_driver_t *driver, parsed_response_t *parsed)
+/* Native response decoding owns the full typed result until policy and the
+ * explicit client render boundary finish. Invalid frames never use a fallback. */
+static int messages_decode_response(const char *frame, const delegate_driver_t *driver,
+                                    int responses_wire, aimee_response_t *out)
 {
-   if (aimee_ir_resp_path_enabled() && !driver_is_anthropic(driver))
+   char error[160] = "";
+   aimee_wire_t wire = responses_wire ? AIMEE_WIRE_RESPONSES : shadow_provider_wire(driver);
+   if (aimee_backend_parse_wire(frame, frame ? strlen(frame) : 0, wire, out, error, sizeof error))
+      return -1;
+   if (aimee_ir_session_emit_buffered_response(out, NULL))
+      return -1;
+   aimee_message_t message = {
+       .role = "assistant", .blocks = out->content, .n_blocks = out->n_content};
+   aimee_request_t view = {.messages = &message, .n_messages = 1};
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(&view, AIMEE_WIRE_ANTHROPIC, &projection);
+   if (projection.omitted_reasoning_blocks)
+      LOG_INFO(
+          "translation.projection",
+          "wire=anthropic omitted_reasoning=%d omitted_opaque_state=%d canonical_response=retained",
+          projection.omitted_reasoning_blocks, projection.omitted_opaque_state_blocks);
+   return out->error_message ? -1 : 0;
+}
+
+static const char *messages_stop_reason(const aimee_response_t *response)
+{
+   return response->stop_reason == AIMEE_STOP_UNKNOWN && response->raw_stop_reason
+              ? response->raw_stop_reason
+              : aimee_stop_reason_name(response->stop_reason);
+}
+
+static cJSON *messages_render_response(const aimee_response_t *response, const char *id,
+                                       const char *model)
+{
+   aimee_response_t view = *response;
+   view.id = (char *)id;
+   view.model = (char *)model;
+   return anthropic_frontend_render(&view);
+}
+
+static int messages_emit_json(server_http_sse_event_emit emit, void *context, const char *event,
+                              cJSON *payload)
+{
+   char *json = payload ? cJSON_PrintUnformatted(payload) : NULL;
+   cJSON_Delete(payload);
+   if (!json)
+      return -1;
+   if (emit)
+      emit(context, event, json);
+   free(json);
+   return 0;
+}
+
+/* Buffered native output is replayed from typed blocks, without a fixed tool
+ * array, truncated IDs, or flattening signed thinking into answer text. */
+static int messages_emit_response(const aimee_response_t *response, const char *id,
+                                  const char *model, server_http_sse_event_emit emit, void *context)
+{
+   anthropic_stream_state_t state = {0};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START,
+                          .usage_in = response->usage_in,
+                          .usage_cache_read = response->usage_cache_read,
+                          .usage_cache_write = response->usage_cache_write};
+   if (anthropic_delta_emit(&delta, &state, id, model, emit, context) <= 0)
+      return -1;
+   int block_index = 0;
+   for (int i = 0; i < response->n_content; i++)
    {
-      aimee_response_t ir_resp;
-      char ir_err[128];
-      memset(&ir_resp, 0, sizeof(ir_resp));
-      if (openai_backend_parse(provider_resp, &ir_resp, ir_err, sizeof(ir_err)) == 0)
+      const aimee_block_t *block = &response->content[i];
+      if (!anthropic_ir_block_replayable(block))
+         continue;
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                              .block_id = block_index,
+                              .kind = block->type,
+                              .tool_id = block->tool_id,
+                              .tool_name = block->tool_name,
+                              .redacted_content = block->thinking_redacted};
+      if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
       {
-         aimee_ir_response_to_parsed(&ir_resp, parsed);
-         aimee_response_free(&ir_resp);
-         return;
+         cJSON *start = cJSON_CreateObject();
+         cJSON *native = anthropic_ir_render_block(block);
+         if (!start || !native || !cJSON_AddStringToObject(start, "type", "content_block_start") ||
+             !cJSON_AddNumberToObject(start, "index", block_index) ||
+             !cJSON_AddItemToObject(start, "content_block", native))
+         {
+            cJSON_Delete(start);
+            cJSON_Delete(native);
+            return -1;
+         }
+         if (messages_emit_json(emit, context, "content_block_start", start))
+            return -1;
       }
-      aimee_response_free(&ir_resp);
+      else
+      {
+         if (anthropic_delta_emit(&delta, &state, id, model, emit, context) <= 0)
+            return -1;
+         delta.type = AIMEE_DELTA_BLOCK_DELTA;
+         char *arguments = NULL;
+         if (block->type == AIMEE_BLK_TOOL_USE)
+         {
+            arguments = cJSON_PrintUnformatted(block->tool_input);
+            if (!arguments)
+               return -1;
+            delta.tool_args_delta = arguments;
+         }
+         else
+            delta.text_delta = block->text;
+         int failed = !block->thinking_redacted &&
+                      anthropic_delta_emit(&delta, &state, id, model, emit, context) <= 0;
+         free(arguments);
+         if (failed)
+            return -1;
+         if (block->type == AIMEE_BLK_THINKING && block->thinking_signature)
+         {
+            delta.text_delta = NULL;
+            delta.signature_delta = block->thinking_signature;
+            if (anthropic_delta_emit(&delta, &state, id, model, emit, context) <= 0)
+               return -1;
+         }
+      }
+      delta.type = AIMEE_DELTA_BLOCK_STOP;
+      if (anthropic_delta_emit(&delta, &state, id, model, emit, context) <= 0)
+         return -1;
+      block_index++;
    }
-   if (driver && driver->parse_response)
-      driver->parse_response(provider_resp, raw, parsed);
-   else
-      /* No driver: default to the openai wire via the IR (zeroed *parsed on failure). */
-      agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, parsed);
-}
-
-static int driver_consumes_system_prompt(const delegate_driver_t *driver, const agent_t *ag)
-{
-   driver_caps_t caps;
-
-   delegate_get_caps(driver, ag, &caps);
-   return (caps.capability_flags & DRIVER_CAP_SYSTEM_MSG) != 0;
-}
-
-/* Translate an Anthropic request into the selected provider's message/tool
- * shape. Anthropic itself receives the original Messages wire shape; the
- * OpenAI-family providers receive the inverse delegate-driver conversion.
- * *out_system is a malloc'd flattened system prompt (caller frees). */
-static void translate_request(const cJSON *req, const delegate_driver_t *driver, const agent_t *ag,
-                              cJSON **out_messages, cJSON **out_tools, char **out_system)
-{
-   *out_system = anthropic_system_to_text(req);
-   if (driver_is_anthropic(driver))
+   cJSON *last = cJSON_CreateObject(), *stop = last ? cJSON_AddObjectToObject(last, "delta") : NULL;
+   cJSON *usage = last ? cJSON_AddObjectToObject(last, "usage") : NULL;
+   if (!last || !stop || !usage || !cJSON_AddStringToObject(last, "type", "message_delta") ||
+       !cJSON_AddStringToObject(stop, "stop_reason", messages_stop_reason(response)) ||
+       !cJSON_AddNullToObject(stop, "stop_sequence") ||
+       !cJSON_AddNumberToObject(usage, "output_tokens", (double)response->usage_out))
    {
-      const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
-      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
-      *out_messages = cJSON_IsArray(messages) ? cJSON_Duplicate(messages, 1) : NULL;
-      *out_tools = cJSON_IsArray(tools) ? cJSON_Duplicate(tools, 1) : NULL;
-      return;
+      cJSON_Delete(last);
+      return -1;
    }
-   *out_messages =
-       anthropic_messages_to_openai(cJSON_GetObjectItemCaseSensitive(req, "messages"),
-                                    driver_consumes_system_prompt(driver, ag) ? NULL : *out_system);
-   *out_tools = driver && strcmp(driver->name, "chatgpt") == 0
-                    ? anthropic_tools_to_responses(cJSON_GetObjectItemCaseSensitive(req, "tools"))
-                    : anthropic_tools_to_openai(cJSON_GetObjectItemCaseSensitive(req, "tools"));
+   if (messages_emit_json(emit, context, "message_delta", last))
+      return -1;
+   last = cJSON_CreateObject();
+   if (!last || !cJSON_AddStringToObject(last, "type", "message_stop"))
+   {
+      cJSON_Delete(last);
+      return -1;
+   }
+   return messages_emit_json(emit, context, "message_stop", last);
 }
 
-/* ---- Gateway request pipeline (universal-gateway P2a) -------------------------
- * The two inline request transforms (memory/context injection, tool policing) are
- * run as ordered stages over a `gw_request_t` rather than hand-sequenced at each
- * call site, so the seam is one shared, testable pipeline. translate_request stays
- * a TERMINAL render step after the pipeline (it produces the provider shape rather
- * than mutating `raw`). Behavior is identical to the previous inline prelude. */
-
-/* Memory/context pre-injection is now the shared gw_stage_memory (gw_stage_memory.c)
- * with mem_target = GW_MEM_ANTHROPIC_MESSAGES; the `if (!r->parity)` parity gate
- * (only memory injection is parity-gated, so the Anthropic-native passthrough does
- * not perturb Claude Code's cached prefix) lives in that stage's Anthropic arm. */
+/* The remaining raw request-policy catalog runs before canonical assembly.
+ * Native conversion after it belongs exclusively to frontend/backend adapters. */
 
 /* Tool-policing stage: strip subagent-spawning tools etc. Returns the number of
  * tools stripped (already the contract of gateway_policy_apply_request). */
@@ -376,12 +455,48 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
    return body;
 }
 
+/* Approximation consumes canonical messages; it never converts history through
+ * another model protocol. Actual provider usage/count responses take priority. */
+static int messages_estimate_tokens(const aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   cJSON *messages = cJSON_CreateArray();
+   if (!messages)
+      return -1;
+   if (request->n_system)
+   {
+      aimee_message_t system = {
+          .role = "system", .blocks = request->system, .n_blocks = request->n_system};
+      cJSON *message = aimee_ir_message_json(&system);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         cJSON_Delete(messages);
+         return -1;
+      }
+   }
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(&request->messages[i]);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         cJSON_Delete(messages);
+         return -1;
+      }
+   }
+   int tokens = session_compact_estimate_tokens(messages);
+   cJSON_Delete(messages);
+   return tokens;
+}
+
 /* Host guidance is a new system block. Replacing the client's system with a
  * flattened string would erase its cache breakpoints and native extensions. */
-static int messages_add_host_guidance(cJSON *request, const cJSON *messages, const cJSON *tools)
+static int messages_add_host_guidance(cJSON *request, const aimee_request_t *canonical)
 {
-   char *tool = gw_request_tool_system_prompt(tools, NULL);
-   char *completion = gw_request_completion_system_prompt(messages, tool);
+   char *tool = gw_ir_request_tool_system_prompt(canonical, NULL);
+   char *completion = gw_ir_request_completion_system_prompt(canonical, tool);
    const char *policy = completion ? completion : tool;
    if (!policy)
       return 0;
@@ -444,14 +559,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
    agent_t agbuf;
    agent_t *ag;
-   cJSON *messages = NULL, *tools = NULL, *provider_resp = NULL, *out = NULL;
-   char *system_text = NULL, *prov_body = NULL, *response = NULL;
+   cJSON *out = NULL;
+   aimee_request_t policy = {0};
+   char policy_error[128];
+   char *prov_body = NULL, *response = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
    char extra[512];
    char msg_id[48];
    const delegate_driver_t *driver;
-   parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
+   aimee_response_t parsed = {0};
    wire_fence_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
    int status, http_status, rc;
@@ -539,14 +656,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
       free(mut_sys);
    }
 
-   translate_request(req, driver, ag, &messages, &tools, &system_text);
-   if (messages_add_host_guidance(req, messages, tools) != 0)
+   if (anthropic_frontend_parse(req, &policy, policy_error, sizeof policy_error) != 0 ||
+       messages_add_host_guidance(req, &policy) != 0)
    {
-      status = write_error(resp, cap, 500, "api_error", "cannot assemble host guidance", 0);
+      status =
+          write_error(resp, cap, 500, "api_error", "cannot assemble canonical host guidance", 0);
       goto cleanup;
    }
-   free(system_text);
-   system_text = anthropic_system_to_text(req);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
@@ -643,72 +759,33 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
 
-   memset(&parsed, 0, sizeof(parsed));
-   /* Codex/Responses replies with raw SSE (response.output_* / response.completed),
-    * not a JSON body — parse it directly via the driver, the same way the streaming
-    * buffered-replay path does. cJSON_Parse would fail and yield an empty reply. */
-   if (responses_wire)
+   if (messages_decode_response(response, driver, responses_wire, &parsed) ||
+       agent_response_govern(&parsed, anthropic_governance_enabled(),
+                             gateway_prevent_subagents_enabled(), NULL, 0) < 0 ||
+       gw_ir_response_run_completion(&parsed, &policy) < 0)
    {
-      if (driver && driver->parse_response)
-         driver->parse_response(NULL, response, &parsed);
+      status = write_error(resp, cap, 502, "api_error", "invalid canonical provider response", 0);
+      goto cleanup;
    }
-   else
-      provider_resp = cJSON_Parse(response);
-   if (responses_wire || provider_resp)
-   {
-      /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). The
-       * responses-wire reply was already parsed above from raw SSE. */
-      if (!responses_wire)
-         ir_or_legacy_parse_response(provider_resp, response, driver, &parsed);
-
-      /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
-       * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
-       * No-op unless AIMEE_IR_SHADOW; never affects the served reply. Provider wire
-       * is anthropic when the primary is anthropic, else OpenAI chat (codex is SSE,
-       * so provider_resp is NULL here and the compare self-skips). */
-      aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
-
-      /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
-       * the model emitted despite the request-side strip, before the audit row
-       * reads parsed.stop_reason (so the audit log matches the wire) and before
-       * anthropic_response_from_parsed renders the reply. The already-resolved
-       * gateway policy gate is sent to the event-bus governance module; no
-       * in-process decision fallback remains. Drop count is plumbed through to the
-       * same pipeline-runner total the request-side strip already emits; a
-       * future P2b audit pass surfaces both at once. */
-      gw_response_run_governance(&parsed, anthropic_governance_enabled(),
-                                 gateway_prevent_subagents_enabled());
-
-      /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
-       * proxy (no agent_log_call), so record this turn's spend, billed against
-       * the served model and tagged as ingress. */
-      if (agent_ingress_accounting_enabled())
-         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                   parsed.prompt_tokens, parsed.completion_tokens,
-                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                   "anthropic-ingress", NULL);
-
-      if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
-         LOG_INFO("completion.gate", "continued incomplete buffered Anthropic repair");
-   }
+   if (agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, messages_stop_reason(&parsed),
+                                (int)parsed.usage_in, (int)parsed.usage_out,
+                                (int)parsed.usage_cache_write, (int)parsed.usage_cache_read,
+                                "anthropic-ingress", NULL);
 
    mint_msg_id(msg_id, sizeof(msg_id));
-   out = anthropic_response_from_parsed(msg_id, model, &parsed);
+   out = messages_render_response(&parsed, msg_id, model);
    rc = write_json(out, resp, cap);
    status = rc;
 
-   agent_free_parsed_response(&parsed);
-
 cleanup:
+   aimee_response_free(&parsed);
    wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
-   cJSON_Delete(provider_resp);
    free(response);
    free(prov_body);
-   free(system_text);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
+   aimee_request_free(&policy);
    cJSON_Delete(req);
    return status;
 }
@@ -1048,112 +1125,41 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
                                             const char *extra, agent_t *ag,
                                             const delegate_driver_t *driver, const char *model,
                                             const char *msg_id, int responses_wire,
-                                            const cJSON *messages, const cJSON *tools,
+                                            const aimee_request_t *policy,
                                             server_http_sse_event_emit emit, void *ctx)
 {
-   char *buf_resp = NULL;
-   int buf_status;
-   parsed_response_t parsed;
-   int raw_responses = responses_wire;
-   memset(&parsed, 0, sizeof(parsed));
-   wire_fence_route_t wire_route = responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
-                                   : driver && driver->name && !strcmp(driver->name, "anthropic")
-                                       ? WIRE_FENCE_ANTHROPIC_MESSAGES
-                                       : WIRE_FENCE_OPENAI_CHAT;
-   buf_status =
-       wire_fence_post(url, auth, prov_body, prov_body_len, &buf_resp, ag->timeout_ms,
-                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
-   if (buf_status == HTTP_RETRY_ADMISSION_REFUSED)
-   {
+   char *frame = NULL;
+   aimee_response_t response = {0};
+   wire_fence_route_t route = responses_wire                ? WIRE_FENCE_OPENAI_RESPONSES
+                              : driver_is_anthropic(driver) ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                                            : WIRE_FENCE_OPENAI_CHAT;
+   int status =
+       wire_fence_post(url, auth, prov_body, prov_body_len, &frame, ag->timeout_ms,
+                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, route);
+   if (status == HTTP_RETRY_ADMISSION_REFUSED)
       messages_stream_pipeline_error(emit, ctx);
-      free(buf_resp);
-      return;
-   }
-   if (buf_status == 200 && buf_resp)
+   else if (status != 200 || messages_decode_response(frame, driver, responses_wire, &response) ||
+            agent_response_govern(&response, anthropic_governance_enabled(),
+                                  gateway_prevent_subagents_enabled(), NULL, 0) < 0 ||
+            gw_ir_response_run_completion(&response, policy) < 0 ||
+            messages_emit_response(&response, msg_id, model, emit, ctx))
    {
-      if (raw_responses)
-      {
-         if (driver && driver->parse_response)
-            driver->parse_response(NULL, buf_resp, &parsed);
-         else
-         {
-            char err[256];
-            snprintf(err, sizeof(err),
-                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                     "\"message\":\"primary provider parser unavailable\"}}");
-            if (emit)
-               emit(ctx, "error", err);
-            free(buf_resp);
-            return;
-         }
-         gw_response_run_governance(&parsed, anthropic_governance_enabled(),
-                                    gateway_prevent_subagents_enabled());
-         /* Cost accounting (mirror the buffered path). */
-         if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-             agent_ingress_accounting_enabled())
-            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                      parsed.prompt_tokens, parsed.completion_tokens,
-                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                      "anthropic-ingress", NULL);
-         /* The continuation may rewrite `parsed`, so it has to run BEFORE the
-          * reply is serialised to the client -- emitting first would ship the
-          * incomplete answer and then repair a copy nobody sees. */
-         if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
-            LOG_INFO("completion.gate", "continued incomplete streamed Anthropic repair");
-         emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-         agent_free_parsed_response(&parsed);
-      }
-      else
-      {
-         cJSON *provider_resp = cJSON_Parse(buf_resp);
-         if (provider_resp)
-         {
-            /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). */
-            ir_or_legacy_parse_response(provider_resp, buf_resp, driver, &parsed);
-            /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
-             * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
-            aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
-            gw_response_run_governance(&parsed, anthropic_governance_enabled(),
-                                       gateway_prevent_subagents_enabled());
-            /* Cost accounting (mirror the buffered path). */
-            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-                agent_ingress_accounting_enabled())
-               agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                         parsed.prompt_tokens, parsed.completion_tokens,
-                                         parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                         "anthropic-ingress", NULL);
-            /* The continuation may rewrite `parsed`, so it has to run BEFORE the
-             * reply is serialised to the client -- emitting first would ship the
-             * incomplete answer and then repair a copy nobody sees. */
-            if (gw_response_run_completion(&parsed, messages, tools, "tool_use"))
-               LOG_INFO("completion.gate", "continued incomplete streamed Anthropic repair");
-            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-            agent_free_parsed_response(&parsed);
-         }
-         else
-         {
-            char err[256];
-            snprintf(err, sizeof(err),
-                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                     "\"message\":\"primary provider returned an unparseable reply\"}}");
-            if (emit)
-               emit(ctx, "error", err);
-         }
-         cJSON_Delete(provider_resp);
-      }
+      anthropic_stream_state_t state = {0};
+      char reason[128];
+      snprintf(reason, sizeof reason,
+               status == 200 ? "invalid canonical provider response"
+                             : "primary provider call failed with status %d",
+               status);
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR, .error_message = reason};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
    }
-   else
-   {
-      char err[256];
-      snprintf(err, sizeof(err),
-               "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-               "\"message\":\"primary provider call failed with status %d\"}}",
-               buf_status);
-      if (emit)
-         emit(ctx, "error", err);
-   }
-   free(buf_resp);
-   return;
+   else if (agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, messages_stop_reason(&response),
+                                (int)response.usage_in, (int)response.usage_out,
+                                (int)response.usage_cache_write, (int)response.usage_cache_read,
+                                "anthropic-ingress", NULL);
+   aimee_response_free(&response);
+   free(frame);
 }
 
 /* Native Anthropic streaming relay: forward the upstream Anthropic SSE
@@ -1280,8 +1286,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    agent_t agbuf;
    const char *model = req ? jo_cstr(req, "model") : "";
    agent_t *ag = (req && resolve_requested_agent(&agbuf, model) == 0) ? &agbuf : NULL;
-   cJSON *messages = NULL, *tools = NULL;
-   char *system_text = NULL, *prov_body = NULL;
+   aimee_request_t policy = {0};
+   char policy_error[128];
+   char *prov_body = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
    char extra[512];
@@ -1357,17 +1364,16 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       free(mut_sys);
    }
 
-   translate_request(req, driver, ag, &messages, &tools, &system_text);
-   if (messages_add_host_guidance(req, messages, tools) != 0)
+   if (anthropic_frontend_parse(req, &policy, policy_error, sizeof policy_error) != 0 ||
+       messages_add_host_guidance(req, &policy) != 0)
    {
       emit(ctx, "error",
            "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"cannot assemble "
+           "canonical "
            "host guidance\"}}");
       stream_status = 500;
       goto cleanup;
    }
-   free(system_text);
-   system_text = anthropic_system_to_text(req);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;
@@ -1390,7 +1396,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * only armed turns so the bounded completion behavior is independent of the
     * client/provider protocol pairing. Unarmed native Anthropic turns retain the
     * byte-for-byte streaming relay. */
-   int completion_buffered = gw_response_completion_armed(messages, tools);
+   int completion_buffered = gw_ir_response_completion_armed(&policy);
    int buffered_replay =
        gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
@@ -1440,8 +1446,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (buffered_replay)
    {
       messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
-                                      driver, model, msg_id, responses_wire, messages, tools, emit,
-                                      ctx);
+                                      driver, model, msg_id, responses_wire, &policy, emit, ctx);
       goto cleanup;
    }
 
@@ -1452,7 +1457,16 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       goto cleanup;
    }
 
-   input_est = messages ? session_compact_estimate_tokens(messages) : 0;
+   input_est = messages_estimate_tokens(&policy);
+   if (input_est < 0)
+   {
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "cannot estimate canonical request"};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
+      stream_status = 500;
+      goto cleanup;
+   }
 
    stream_status = messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra,
                                             ag, model, msg_id, input_est, emit, ctx);
@@ -1469,9 +1483,7 @@ cleanup:
    wire_fence_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
-   free(system_text);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
+   aimee_request_free(&policy);
    cJSON_Delete(req);
    return 0;
 }
@@ -1537,9 +1549,21 @@ static int count_tokens(const char *body, char *resp, int cap)
       }
    }
 
-   char *system_text = req ? anthropic_system_to_text(req) : NULL;
-   cJSON *messages = anthropic_messages_to_openai(request_messages, system_text);
-   int n = messages ? session_compact_estimate_tokens(messages) : 0;
+   aimee_request_t policy = {0};
+   char error[128];
+   if (anthropic_frontend_parse(req, &policy, error, sizeof error) != 0)
+   {
+      cJSON_Delete(req);
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid canonical count request",
+                         0);
+   }
+   int n = messages_estimate_tokens(&policy);
+   aimee_request_free(&policy);
+   if (n < 0)
+   {
+      cJSON_Delete(req);
+      return write_error(resp, cap, 500, "api_error", "cannot estimate canonical request", 0);
+   }
    cJSON *out = cJSON_CreateObject();
    int status;
 
@@ -1547,8 +1571,6 @@ static int count_tokens(const char *body, char *resp, int cap)
    status = write_json(out, resp, cap);
 
    cJSON_Delete(out);
-   free(system_text);
-   cJSON_Delete(messages);
    cJSON_Delete(req);
    return status;
 }

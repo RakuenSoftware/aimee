@@ -381,6 +381,13 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    }
    aimee_ir_classify_context(&ir);
    ir.mutated = 1;
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(&ir, wire, &projection);
+   if (projection.omitted_reasoning_blocks)
+      LOG_INFO("translation.projection",
+               "wire=%d omitted_reasoning=%d omitted_opaque_state=%d canonical_history=retained",
+               (int)wire, projection.omitted_reasoning_blocks,
+               projection.omitted_opaque_state_blocks);
    rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
               : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
                                              : openai_backend_build(&ir);

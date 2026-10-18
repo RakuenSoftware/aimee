@@ -4,6 +4,7 @@
 
 struct cJSON;
 struct parsed_response;
+#include <aimee/ir/aimee_ir.h>
 
 /* True when the transcript is an active change session, a caller-owned shell
  * tool is available, and this transcript has a bounded completion attempt
@@ -25,6 +26,12 @@ char *gw_request_tool_system_prompt(const struct cJSON *tools, const char *base_
  * Returns 1 when it intervened, 0 otherwise. */
 int gw_response_run_completion(struct parsed_response *parsed, const struct cJSON *messages,
                                const struct cJSON *tools, const char *tool_stop_reason);
+
+/* Typed completion intervention retains every original content block. */
+int gw_ir_response_run_completion(aimee_response_t *response, const aimee_request_t *request);
+int gw_ir_response_completion_armed(const aimee_request_t *request);
+char *gw_ir_request_tool_system_prompt(const aimee_request_t *request, const char *base);
+char *gw_ir_request_completion_system_prompt(const aimee_request_t *request, const char *base);
 
 /* Return an allocated system prompt with the bounded continuation policy
  * appended when messages contain Aimee's structured completion call. Returns

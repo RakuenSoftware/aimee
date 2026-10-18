@@ -190,7 +190,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
 $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/module_stage_adapters.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_responses.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/aimee_home.o $(OBJDIR)/modules/translation/harness_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/claude_headless.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
@@ -1818,7 +1818,7 @@ $(TESTPREFIX)/unit-test-msg-session-key: $(OBJDIR)/tests/test_msg_session_key.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-gateway-mutate: $(OBJDIR)/tests/test_gateway_mutate.o \
-                     $(OBJDIR)/modules/economizer/gateway_mutate.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                     $(OBJDIR)/modules/economizer/gateway_mutate.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/tool_call_args.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lpthread
@@ -1827,7 +1827,7 @@ $(TESTPREFIX)/unit-test-gateway-mutate-wire: $(OBJDIR)/tests/test_gateway_mutate
                      $(OBJDIR)/modules/economizer/gateway_mutate_wire.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/economizer/gateway_mutate.o \
                      $(BUS_TEST_OBJS) \
                      $(OBJDIR)/server/msg_session_key.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
                      $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/token_tracker.o \
                      $(OBJDIR)/harness_memory_common.o \
                      $(TEST_CORE_OBJS)
@@ -2267,7 +2267,7 @@ $(TESTPREFIX)/unit-test-aimee-frontend: $(OBJDIR)/tests/test_aimee_frontend.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
-                                       $(OBJDIR)/text.o $(OBJDIR)/util.o
+                                       $(OBJDIR)/text.o $(OBJDIR)/util.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice 2: backend build/parse adapters (pure — cJSON only).
@@ -3970,7 +3970,7 @@ $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/
                                \
                               \
                              \
-                            $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o \
+                            $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(TEST_CORE_OBJS) $(OBJDIR)/interaction_event_names.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4167,7 +4167,8 @@ $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingres
 $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/aimee_sha256.o \
-    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o
+    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
+    $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c (response-side tool policing) integration test: same source as
@@ -4179,7 +4180,8 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(
 $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/aimee_sha256.o \
-    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o
+    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
+    $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 # P2c streaming integration test: linked against the REAL modules/gateway/gateway_policy.o
@@ -4190,7 +4192,8 @@ $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_
 $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/governance/gw_stage_governance.o $(OBJDIR)/pipeline/gw_response_registry.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/tests/support/ir_ingress_stubs.o $(OBJDIR)/wire_fence.o $(OBJDIR)/modules/translation/aimee_ir_stream.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
     $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
     $(OBJDIR)/core/turn_integrity/turn_integrity.o $(OBJDIR)/aimee_sha256.o \
-    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o
+    $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/text.o $(OBJDIR)/util.o \
+    $(OBJDIR)/server/agent_response_projection.o $(OBJDIR)/modules/ir/session_event.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
@@ -4292,7 +4295,7 @@ $(TESTPREFIX)/unit-test-skill: $(OBJDIR)/tests/test_skill.o \
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/web_search.o $(TEST_CORE_OBJS) \
                                     $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
-                            $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                            $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -4339,7 +4342,7 @@ $(TESTPREFIX)/unit-test-economizer-live-surface: tests/test_economizer_live_surf
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -4352,7 +4355,7 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
 
 $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_compact_focused.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -4365,7 +4368,7 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
 
 $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -4379,7 +4382,7 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
 $(TESTPREFIX)/unit-test-rounds-to-resume: $(OBJDIR)/tests/test_rounds_to_resume.o \
                                           $(OBJDIR)/server/rounds_to_resume.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -4899,7 +4902,7 @@ $(TESTPREFIX)/unit-test-agent-runtime-messages: $(OBJDIR)/tests/test_agent_runti
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-minimax-tool-call-args: $(OBJDIR)/tests/test_minimax_tool_call_args.o \
-                                    $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                    $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                     $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -5683,7 +5686,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                 $(OBJDIR)/modules/delegates/aimee_ir_rescue.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
-                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/modules/delegates/delegate_driver.o \
                                 $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -5702,7 +5705,7 @@ $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_contex
                                 $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                 $(OBJDIR)/modules/delegates/aimee_ir_rescue.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
-                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/modules/delegates/delegate_driver.o \
                                 $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -5746,7 +5749,7 @@ $(TESTPREFIX)/unit-test-mcp-native-dispatch: \
 
 $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surface.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/modules/delegates/delegate_driver.o \
                                 $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -5896,7 +5899,7 @@ $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_b
 
 $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
                      $(OBJDIR)/server/otel.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/http_retry.o \
                      $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/modules/gateway/gateway_policy.o \
@@ -6098,7 +6101,7 @@ $(TESTPREFIX)/unit-test-managed-server-identity: \
 $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/context_engine.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/modules/delegates/delegate_driver.o \
                      $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -7626,7 +7629,7 @@ $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                        $(OBJDIR)/server/model_sampling.o \
                                        $(OBJDIR)/server/anthropic_shape.o \
-                                       $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                                       $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/server/agent_request_shaping.o \
                                        $(OBJDIR)/server/provider_catalog.o \
                                        $(TEST_CORE_OBJS) $(OBJDIR)/platform_random.o $(OBJDIR)/cJSON.o
@@ -7713,7 +7716,7 @@ $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OB
 # on identical codex SSE bytes. Links agent_bridge.o (legacy parser + SSE extractor) with
 # the full IR backend chain and NO weak stubs, so both parsers run for real.
 $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                           $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                           $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                           $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
@@ -7776,7 +7779,7 @@ $(OBJDIR)/tests/retention_probe.o: ../benchmarks/compaction-quality/retention_pr
 $(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
                                           $(OBJDIR)/server/token_tracker.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/modules/delegates/delegate_driver.o \
                                           $(OBJDIR)/modules/delegates/delegate_openai.o \
@@ -7791,7 +7794,7 @@ $(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
 compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe
 
 # Bounded model-neutral completion intervention over the response seam.
-$(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response_completion_stage.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response_completion_stage.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Real Go provider owner behind the native test transport.
