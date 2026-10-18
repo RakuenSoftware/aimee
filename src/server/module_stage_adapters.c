@@ -1060,17 +1060,7 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 {
    if (!in || !out || out_cap == 0)
       return -1;
-   aimee_response_key_input_t module_input = {.principal = in->principal,
-                                              .source = in->source,
-                                              .provider = in->provider,
-                                              .model = in->model,
-                                              .endpoint = in->endpoint,
-                                              .idempotency_key = in->idempotency_key,
-                                              .body = in->body,
-                                              .context = in->context,
-                                              .behavior_flags = in->behavior_flags,
-                                              .stream = in->stream};
-   size_t request_len = aimee_response_request_size(&module_input);
+   size_t request_len = aimee_response_request_size(in);
    if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
       return -1;
    uint8_t *request = malloc(request_len);
@@ -1079,7 +1069,7 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    if (!request)
       return -1;
    int rc =
-       aimee_response_request_encode(&module_input, request, request_len) == 0 &&
+       aimee_response_request_encode(in, request, request_len) == 0 &&
                call_module(AIMEE_RESPONSE_EVENT_COMPOSE, AIMEE_RESPONSE_STAGE_COMPOSE, request,
                            (uint32_t)request_len, response, sizeof(response), &response_len) == 0
            ? aimee_response_response_decode(response, response_len, out, out_cap)

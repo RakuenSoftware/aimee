@@ -1,12 +1,15 @@
 # Aimee core C libraries
 
-This directory is an extraction-ready C package with three separate
-libraries:
+This directory is an extraction-ready C package with shared data contracts and three
+separate libraries:
 
 - `aimee-core-codec` provides portable byte codecs. Base64 callers explicitly choose
   canonical padded standard, canonical unpadded URL, or an existing compatibility
   profile. Authentication uses the canonical URL profile; text framing and Vault
   records retain their separate historical acceptance rules.
+
+- `aimee-core-types` provides data-only panel contracts shared by IR, delegates,
+  and roundtable without peer-service dependencies.
 - `aimee-core-connection` is portable inter-process/inter-machine communication.
   Thin client, server, and KB consume the same endpoint, bearer-token, socket,
   deadline/cancellation, HTTP/1, and TLS/mTLS code.
@@ -24,7 +27,7 @@ cmake --build build/aimee-core
 ```
 
 Public headers are namespaced under `aimee/core/connection`,
-`aimee/core/event_bus`, and `aimee/core/codec`. The event-bus client depends only on
+`aimee/core/event_bus`, `aimee/core/codec`, and `aimee/core/types`. The event-bus client depends only on
 the public attach,
 wire, region, and ring contracts. Its archive does not implement the host-only
 region lifecycle, admission, routing, arena allocator, or capture APIs.

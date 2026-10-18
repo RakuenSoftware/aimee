@@ -2,22 +2,15 @@
 #define AIMEE_KB_STORE_ORG_VAULT_ROTATION_H 1
 
 #include <stddef.h>
+#include "sealed_envelope.h"
 #include <stdint.h>
 
 #define KB_STORE_VAULT_ROTATION_ATTEST_MAX 512
 #define KB_STORE_VAULT_ROTATION_REF_MAX    512
 #define KB_STORE_VAULT_ROTATION_OWNER_MAX  200
-#define KB_STORE_VAULT_ROTATION_SECRET_MAX 4096
+#define KB_STORE_VAULT_ROTATION_SECRET_MAX AIMEE_SEALED_ENVELOPE_CIPHERTEXT_MAX
 
-typedef struct
-{
-   int64_t version;
-   uint8_t wrapped_dek[40];
-   uint8_t nonce[12];
-   uint8_t ciphertext[KB_STORE_VAULT_ROTATION_SECRET_MAX];
-   size_t ciphertext_len;
-   uint8_t tag[16];
-} kb_store_vault_rotation_envelope_t;
+typedef aimee_sealed_envelope_t kb_store_vault_rotation_envelope_t;
 
 typedef struct
 {

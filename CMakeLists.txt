@@ -72,6 +72,8 @@ set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
 set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/codec/include"
+
+    "${AIMEE_SRC_DIR}/core/types/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
 set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/event_bus/include")

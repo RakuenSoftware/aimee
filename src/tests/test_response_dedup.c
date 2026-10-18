@@ -23,22 +23,12 @@ int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocatio
 
 static int module_key_provider(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
 {
-   aimee_response_key_input_t module_input = {.principal = in->principal,
-                                              .source = in->source,
-                                              .provider = in->provider,
-                                              .model = in->model,
-                                              .endpoint = in->endpoint,
-                                              .idempotency_key = in->idempotency_key,
-                                              .body = in->body,
-                                              .context = in->context,
-                                              .behavior_flags = in->behavior_flags,
-                                              .stream = in->stream};
-   size_t request_len = aimee_response_request_size(&module_input);
+   size_t request_len = aimee_response_request_size(in);
    uint8_t *request = malloc(request_len);
    uint8_t response[AIMEE_RESPONSE_KEY_MAX + 4u];
    uint32_t response_len = 0;
    aimee_module_invocation_t invocation = {.stage_id = AIMEE_RESPONSE_STAGE_COMPOSE};
-   if (!request || aimee_response_request_encode(&module_input, request, request_len) != 0)
+   if (!request || aimee_response_request_encode(in, request, request_len) != 0)
    {
       free(request);
       return -1;
